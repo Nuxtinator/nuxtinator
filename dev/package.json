@@ -38,6 +38,7 @@
     "@nuxtinator/oauth": "workspace:*",
     "@nuxtinator/tenancy": "workspace:*",
     "@nuxtinator/videos": "workspace:*",
+    "@nuxtinator/workflows": "workspace:*",
     "kysely": "^0.28.0",
     "kysely-postgres-js": "^2.0.0",
     "nuxt": "^4.4.2",

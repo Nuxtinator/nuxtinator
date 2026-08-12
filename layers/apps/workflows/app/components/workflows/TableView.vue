@@ -1,0 +1,218 @@
+<script setup lang="ts">
+// Table renderer: name + the view's card fields as columns, read-only —
+// clicking a row opens the slideover. Only values the list feed carries
+// render (jsonb-stored kinds, promoted status, timestamps, assigned
+// avatars); other storages show as an em dash, same limitation as CRM's
+// list table. Headers toggle the sort for sortable fields.
+import type { CrmFieldSetting } from '../../../../crm/app/utils/field-kinds'
+import type { WorkflowsBoardItem, WorkflowsViewDetail, WorkflowsViewRecords } from '../../utils/workflows-types'
+
+const props = defineProps<{
+  view: WorkflowsViewDetail
+  records: WorkflowsViewRecords
+  fields: CrmFieldSetting[]
+  sort: string | null
+  dir: 'asc' | 'desc' | null
+  pageSize: number
+  pending?: boolean
+  canCreate: boolean
+}>()
+
+const page = defineModel<number>('page', { default: 1 })
+
+const emit = defineEmits<{
+  toggleSort: [field: string]
+  open: [recordId: string]
+  quickAdd: [name: string]
+}>()
+
+const { byId: usersById, ensureUsers } = useCrmUsers()
+onMounted(() => {
+  ensureUsers().catch(() => {
+    // Avatars fall back silently.
+  })
+})
+const userName = (id: string) => usersById.value.get(id)?.name ?? null
+
+const fieldMap = computed(() => new Map(props.fields.map(f => [f.key, f])))
+
+const JSONB_KINDS = new Set(['text', 'textarea', 'number', 'boolean', 'date', 'datetime', 'key_select'])
+const INTRINSIC_LABELS: Record<string, string> = {
+  status: 'Status',
+  created_at: 'Created',
+  updated_at: 'Updated'
+}
+
+interface TableColumnDef {
+  key: string
+  label: string
+  sortable: boolean
+  field: CrmFieldSetting | null
+}
+
+const columns = computed<TableColumnDef[]>(() => {
+  const chosen = props.view.definition.cardFields ?? ['status', 'updated_at']
+  const out: TableColumnDef[] = []
+  for (const key of chosen) {
+    if (key === 'name') continue
+    if (key === 'created_at' || key === 'updated_at') {
+      out.push({ key, label: INTRINSIC_LABELS[key]!, sortable: true, field: null })
+      continue
+    }
+    const field = fieldMap.value.get(key)
+      ?? (key === 'status' ? props.fields.find(f => f.column === 'status') ?? null : null)
+    if (field) {
+      const storage = workflowsFieldStorage(field)
+      const renderable = !!field.column || JSONB_KINDS.has(field.kind) || storage === 'user_refs'
+      if (!renderable) continue
+      out.push({
+        key: field.key,
+        label: field.label,
+        sortable: !!field.column || storage === 'jsonb',
+        field
+      })
+    } else if (key === 'status') {
+      out.push({ key, label: INTRINSIC_LABELS[key]!, sortable: true, field: null })
+    }
+  }
+  return out
+})
+
+function cellText(item: WorkflowsBoardItem, column: TableColumnDef): string {
+  if (column.key === 'created_at') return formatDate(item.createdAt)
+  if (column.key === 'updated_at') return formatDate(item.updatedAt)
+  const field = column.field
+  if (!field) return item.status ?? '—'
+  if (field.column === 'status') return field ? formatCrmValue(item.status, field) : (item.status ?? '—')
+  const storage = workflowsFieldStorage(field)
+  if (storage === 'jsonb') return formatCrmValue(item.data[field.key], field, { userName })
+  if (storage === 'user_refs') {
+    const names = item.assignedTo.map(id => userName(id) ?? '?')
+    return names.length > 0 ? names.join(', ') : '—'
+  }
+  return '—'
+}
+
+function formatDate(iso: string): string {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString()
+}
+
+function sortIcon(column: TableColumnDef): string {
+  if (props.sort !== column.key) return 'i-lucide-chevrons-up-down'
+  return props.dir === 'asc' ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'
+}
+
+const quickAddName = ref('')
+function submitQuickAdd() {
+  const value = quickAddName.value.trim()
+  if (!value) return
+  emit('quickAdd', value)
+  quickAddName.value = ''
+}
+</script>
+
+<template>
+  <div class="space-y-3">
+    <div class="rounded-lg border border-(--ui-border) bg-(--ui-bg) overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-(--ui-border) text-left">
+            <th class="px-3 py-2 font-medium">
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 hover:text-(--ui-text)"
+                @click="emit('toggleSort', 'name')"
+              >
+                Name
+                <UIcon
+                  :name="sort === 'name' ? (dir === 'asc' ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down') : 'i-lucide-chevrons-up-down'"
+                  class="size-3.5 opacity-60"
+                />
+              </button>
+            </th>
+            <th
+              v-for="column in columns"
+              :key="column.key"
+              class="px-3 py-2 font-medium"
+            >
+              <button
+                v-if="column.sortable"
+                type="button"
+                class="inline-flex items-center gap-1 hover:text-(--ui-text)"
+                @click="emit('toggleSort', column.key)"
+              >
+                {{ column.label }}
+                <UIcon
+                  :name="sortIcon(column)"
+                  class="size-3.5 opacity-60"
+                />
+              </button>
+              <span v-else>{{ column.label }}</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-(--ui-border)">
+          <tr
+            v-for="item in records.items"
+            :key="item.id"
+            class="hover:bg-(--ui-bg-elevated) cursor-pointer"
+            @click="emit('open', item.id)"
+          >
+            <td class="px-3 py-2 font-medium">
+              {{ item.name }}
+            </td>
+            <td
+              v-for="column in columns"
+              :key="column.key"
+              class="px-3 py-2 text-(--ui-text-muted)"
+            >
+              {{ cellText(item, column) }}
+            </td>
+          </tr>
+          <tr v-if="records.items.length === 0 && !pending">
+            <td
+              :colspan="columns.length + 1"
+              class="px-3 py-8 text-center text-(--ui-text-muted)"
+            >
+              No records match this view.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flex items-center justify-between gap-2 flex-wrap">
+      <form
+        v-if="canCreate"
+        class="flex items-center gap-2"
+        @submit.prevent="submitQuickAdd"
+      >
+        <UInput
+          v-model="quickAddName"
+          size="sm"
+          placeholder="New record name…"
+        />
+        <UButton
+          type="submit"
+          size="sm"
+          icon="i-lucide-plus"
+          :disabled="!quickAddName.trim()"
+        >
+          Add
+        </UButton>
+      </form>
+      <span
+        v-else
+        class="text-sm text-(--ui-text-muted)"
+      >
+        {{ records.total }} record{{ records.total === 1 ? '' : 's' }}
+      </span>
+      <UPagination
+        v-model:page="page"
+        :items-per-page="pageSize"
+        :total="records.total"
+      />
+    </div>
+  </div>
+</template>

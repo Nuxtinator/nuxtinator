@@ -21,6 +21,7 @@
     "layers/apps/files",
     "layers/apps/context",
     "layers/apps/crm",
-    "layers/apps/inbox"
+    "layers/apps/inbox",
+    "layers/apps/workflows"
   ]
 }

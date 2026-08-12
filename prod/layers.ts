@@ -43,6 +43,7 @@ export const LAYERS: readonly LayerSpec[] = [
   { id: 'files',         pkg: '@nuxtinator/files',         repo: 'corsacca/nuxtinator', subdir: 'layers/apps/files' },
   { id: 'context',       pkg: '@nuxtinator/context',       repo: 'corsacca/nuxtinator', subdir: 'layers/apps/context' },
   { id: 'crm',           pkg: '@nuxtinator/crm',           repo: 'corsacca/nuxtinator', subdir: 'layers/apps/crm' },
+  { id: 'workflows',     pkg: '@nuxtinator/workflows',     repo: 'corsacca/nuxtinator', subdir: 'layers/apps/workflows' },
   { id: 'dev',           pkg: '@nuxtinator/dev',           repo: 'corsacca/nuxtinator', subdir: 'layers/dev' }
 
   // Pin a first-party layer to auto-take 1.x minors/patches but hold majors:

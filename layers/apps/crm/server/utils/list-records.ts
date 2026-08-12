@@ -34,6 +34,11 @@ export interface CrmListOpts {
    * an object supports { in, contains, gte, lte }, ANDed when combined.
    */
   filters?: Record<string, unknown>
+  /**
+   * Restrict to specific record ids. Visibility and filters still apply —
+   * this is "list these records if I may see them", not raw hydration.
+   */
+  ids?: string[]
   /** Text search over record names and linked channel values. */
   q?: string
   /** Field key — or created_at / updated_at — to sort by. */
@@ -379,6 +384,14 @@ export async function listRecords(
     const def = resolveFieldDef(defsByKey, key)
     if (!def) throw createError({ statusCode: 400, statusMessage: `Unknown filter field: ${key}` })
     preds.push(eb => filterPredicate(eb, def, raw))
+  }
+  if (opts.ids) {
+    if (opts.ids.length === 0) return { items: [], total: 0 }
+    for (const id of opts.ids) {
+      if (!uuidSchema.safeParse(id).success) badFilter('ids', 'expected record uuids')
+    }
+    const ids = opts.ids
+    preds.push(eb => eb('crm_records.id', 'in', ids))
   }
   const q = opts.q?.trim()
   if (q) preds.push(eb => qPredicate(eb, q))

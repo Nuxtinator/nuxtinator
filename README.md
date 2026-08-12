@@ -63,6 +63,8 @@ Dev server: <http://localhost:2080>.
 | [mcp](layers/mcp/) | Optional | MCP server transport. Depends on `oauth`. | — |
 | [apps/messages](layers/apps/messages/) | Optional | Team messaging app (channels, DMs, comments, reactions). | — |
 | [apps/videos](layers/apps/videos/) | Optional | Video recording + playback app. | — |
+| [apps/crm](layers/apps/crm/) | Optional | CRM record kernel: record types, custom fields, channels, consent, sharing. | — |
+| [apps/workflows](layers/apps/workflows/) | Optional | User-created kanban/table views over CRM record types. Depends on `apps/crm`. | — |
 | [dev](layers/dev/) | Optional | UI sandbox at `/kitchen`. Useful in dev, comment out for prod. | — |
 
 ### Layer types
@@ -71,7 +73,7 @@ Dev server: <http://localhost:2080>.
 - **Choice** — pick at most one from a group. Currently the only choice group is **email backend** (`email-mailgun`; `email-smtp` and `email-ses` are planned). Skip the group entirely if your app doesn't send mail — code that imports `#email` will throw a clear error if no backend is loaded.
 - **Optional** — included only if you ask for it.
 
-Dependencies are resolved automatically: asking for `mcp` pulls in `oauth`.
+Dependencies are resolved automatically: asking for `mcp` pulls in `oauth`; asking for `apps/workflows` pulls in `apps/crm`.
 
 ---
 
