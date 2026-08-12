@@ -23,6 +23,10 @@ const props = defineProps<{
   /** Custom board + edit access: rename/remove column, add existing cards. */
   canManage: boolean
   isCustom: boolean
+  /** Manageable and not already the first column of the board. */
+  canMoveLeft: boolean
+  /** Manageable and not already the last column of the board. */
+  canMoveRight: boolean
 }>()
 
 const emit = defineEmits<{
@@ -33,6 +37,8 @@ const emit = defineEmits<{
   quickAdd: [name: string]
   rename: []
   remove: []
+  /** Shift this column one position: -1 left, +1 right. */
+  reorder: [delta: number]
   addExisting: []
   removeCard: [recordId: string]
 }>()
@@ -113,11 +119,23 @@ const badgeColor = computed<CrmBadgeColor>(() => {
   return known.includes(raw as CrmBadgeColor) ? raw as CrmBadgeColor : 'neutral'
 })
 
-const menuItems = computed(() => [[
-  { label: 'Add existing record', icon: 'i-lucide-search', onSelect: () => emit('addExisting') },
-  { label: 'Rename column', icon: 'i-lucide-pencil', onSelect: () => emit('rename') },
-  { label: 'Remove column', icon: 'i-lucide-trash-2', color: 'error' as const, onSelect: () => emit('remove') }
-]])
+const menuItems = computed(() => {
+  const move: Array<Record<string, unknown>> = []
+  if (props.canMoveLeft) {
+    move.push({ label: 'Move left', icon: 'i-lucide-arrow-left', onSelect: () => emit('reorder', -1) })
+  }
+  if (props.canMoveRight) {
+    move.push({ label: 'Move right', icon: 'i-lucide-arrow-right', onSelect: () => emit('reorder', 1) })
+  }
+  return [
+    [
+      { label: 'Add existing record', icon: 'i-lucide-search', onSelect: () => emit('addExisting') },
+      { label: 'Rename column', icon: 'i-lucide-pencil', onSelect: () => emit('rename') }
+    ],
+    ...(move.length > 0 ? [move] : []),
+    [{ label: 'Remove column', icon: 'i-lucide-trash-2', color: 'error' as const, onSelect: () => emit('remove') }]
+  ]
+})
 </script>
 
 <template>

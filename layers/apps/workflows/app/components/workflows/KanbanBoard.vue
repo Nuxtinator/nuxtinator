@@ -209,6 +209,20 @@ function removeColumn(key: string) {
   emit('columnsChange', existing.filter(c => c.key !== key))
 }
 
+// Column order is the definition array's order; shifting one entry is the
+// whole operation. Cards stay put — placements key off the column, not its
+// position.
+function reorderColumn(key: string, delta: number) {
+  const existing = definition.value.columns ?? []
+  const index = existing.findIndex(c => c.key === key)
+  const target = index + delta
+  if (index < 0 || target < 0 || target >= existing.length) return
+  const next = [...existing]
+  const [moved] = next.splice(index, 1)
+  next.splice(target, 0, moved!)
+  emit('columnsChange', next)
+}
+
 const columnModalOpen = computed({
   get: () => columnModal.value !== null,
   set: (v) => {
@@ -220,7 +234,7 @@ const columnModalOpen = computed({
 <template>
   <div class="flex gap-3 items-start h-full overflow-x-auto pb-2">
     <WorkflowsKanbanColumn
-      v-for="column in columns"
+      v-for="(column, index) in columns"
       :key="column.key"
       :column="column"
       :fields="fields"
@@ -229,6 +243,8 @@ const columnModalOpen = computed({
       :can-quick-add="canCreate"
       :can-manage="isCustom && canEditDefinition"
       :is-custom="isCustom"
+      :can-move-left="isCustom && canEditDefinition && index > 0"
+      :can-move-right="isCustom && canEditDefinition && index < columns.length - 1"
       @open="emit('open', $event)"
       @drop="onDrop(column.key, $event)"
       @dragstart="emit('dragstart')"
@@ -237,6 +253,7 @@ const columnModalOpen = computed({
       @add-existing="emit('addExisting', column.key)"
       @rename="openRename(column.key)"
       @remove="removeColumn(column.key)"
+      @reorder="reorderColumn(column.key, $event)"
       @remove-card="emit('removeCard', $event)"
     />
 
