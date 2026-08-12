@@ -100,8 +100,25 @@ function onColumnDragStart(event: DragEvent) {
   emit('columnDragStart', props.column.key)
 }
 
-function onColumnDragEnd() {
+function clearDropState() {
+  dragOver.value = false
+  dropBefore.value = undefined
   columnDropSide.value = null
+}
+
+// A drag can end while the pointer still sits over a column that never gets
+// its dragleave — dropping a card in another column re-renders it out of
+// this one first, taking its dragend with it. The board reports when nothing
+// is in flight any more; that, not the event pairing, is what clears hover.
+watch(
+  () => props.draggingId === null && props.draggingColumnKey === null,
+  (idle) => {
+    if (idle) clearDropState()
+  }
+)
+
+function onColumnDragEnd() {
+  clearDropState()
   emit('columnDragEnd')
 }
 
@@ -157,18 +174,19 @@ function onPlaceholderDragOver(event: DragEvent, cardId: string) {
 function onDropOnPlaceholder(event: DragEvent, cardId: string) {
   event.preventDefault()
   event.stopPropagation()
-  dragOver.value = false
-  dropBefore.value = undefined
+  clearDropState()
   const payload = readPayload(event)
   if (payload) emit('drop', { ...payload, beforeRecordId: cardId })
 }
 
+// dragleave bubbles up from whichever child the pointer was over, so leaving
+// the column is a question about where the pointer went, not about which
+// element fired.
 function onDragLeave(event: DragEvent) {
-  if (event.currentTarget === event.target) {
-    dragOver.value = false
-    dropBefore.value = undefined
-    columnDropSide.value = null
-  }
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  const outside = event.clientX < rect.left || event.clientX >= rect.right
+    || event.clientY < rect.top || event.clientY >= rect.bottom
+  if (outside) clearDropState()
 }
 
 function onDropOnCard(event: DragEvent, card: WorkflowsBoardItem, index: number) {
@@ -176,8 +194,7 @@ function onDropOnCard(event: DragEvent, card: WorkflowsBoardItem, index: number)
   event.preventDefault()
   event.stopPropagation()
   const beforeRecordId = dropTargetFor(event, card, index)
-  dragOver.value = false
-  dropBefore.value = undefined
+  clearDropState()
   const payload = readPayload(event)
   if (payload) emit('drop', { ...payload, beforeRecordId })
 }
@@ -189,19 +206,17 @@ function onDropOnColumn(event: DragEvent) {
     // without a dragover of its own still knows where it landed.
     const after = sideOf(event) === 'right'
     const fromKey = event.dataTransfer?.getData(COLUMN_MIME) ?? ''
-    columnDropSide.value = null
+    clearDropState()
     if (fromKey) emit('columnDrop', { fromKey, toKey: props.column.key, after })
     return
   }
-  dragOver.value = false
-  dropBefore.value = undefined
+  clearDropState()
   const payload = readPayload(event)
   if (payload) emit('drop', { ...payload, beforeRecordId: null })
 }
 
 function onCardDragEnd() {
-  dragOver.value = false
-  dropBefore.value = undefined
+  clearDropState()
   emit('dragend')
 }
 
