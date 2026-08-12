@@ -224,17 +224,24 @@ function removeColumn(key: string) {
   emit('columnsChange', existing.filter(c => c.key !== key))
 }
 
-// Column order is the definition array's order; shifting one entry is the
+// Column order is the definition array's order; moving one entry is the
 // whole operation. Cards stay put — placements key off the column, not its
 // position.
-function reorderColumn(key: string, delta: number) {
+const draggingColumnKey = ref<string | null>(null)
+
+function onColumnDrop({ fromKey, toKey, after }: { fromKey: string, toKey: string, after: boolean }) {
+  draggingColumnKey.value = null
   const existing = definition.value.columns ?? []
-  const index = existing.findIndex(c => c.key === key)
-  const target = index + delta
-  if (index < 0 || target < 0 || target >= existing.length) return
+  if (fromKey === toKey) return
+  const from = existing.findIndex(c => c.key === fromKey)
+  if (from < 0) return
   const next = [...existing]
-  const [moved] = next.splice(index, 1)
-  next.splice(target, 0, moved!)
+  const [moved] = next.splice(from, 1)
+  // The anchor is located after the removal, so its index already accounts
+  // for the gap the dragged column left behind.
+  const anchor = next.findIndex(c => c.key === toKey)
+  if (anchor < 0) return
+  next.splice(after ? anchor + 1 : anchor, 0, moved!)
   emit('columnsChange', next)
 }
 
@@ -249,7 +256,7 @@ const columnModalOpen = computed({
 <template>
   <div class="flex gap-3 items-start h-full overflow-x-auto pb-2">
     <WorkflowsKanbanColumn
-      v-for="(column, index) in columns"
+      v-for="column in columns"
       :key="column.key"
       :column="column"
       :fields="fields"
@@ -258,18 +265,19 @@ const columnModalOpen = computed({
       :can-quick-add="canCreate"
       :can-manage="isCustom && canEditDefinition"
       :is-custom="isCustom"
-      :can-move-left="isCustom && canEditDefinition && index > 0"
-      :can-move-right="isCustom && canEditDefinition && index < columns.length - 1"
       :dragging-id="draggingId"
+      :dragging-column-key="draggingColumnKey"
       @open="emit('open', $event)"
       @drop="onDrop(column.key, $event)"
       @dragstart="onDragStart"
       @dragend="onDragEnd"
+      @column-drag-start="draggingColumnKey = $event"
+      @column-drag-end="draggingColumnKey = null"
+      @column-drop="onColumnDrop"
       @quick-add="emit('quickAdd', { columnKey: column.key, name: $event })"
       @add-existing="emit('addExisting', column.key)"
       @rename="openRename(column.key)"
       @remove="removeColumn(column.key)"
-      @reorder="reorderColumn(column.key, $event)"
       @remove-card="emit('removeCard', $event)"
     />
 

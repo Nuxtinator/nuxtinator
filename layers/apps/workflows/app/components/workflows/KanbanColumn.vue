@@ -6,6 +6,10 @@
 // columnOrder for the move call. A placeholder marks the landing spot for as
 // long as a card hovers the column, computed the same way as the drop, so
 // the card lands where the gap showed.
+//
+// Custom boards also drag the column itself by its header. The two drags
+// share the same drop targets, so they're told apart by the payload type the
+// drag carries — the only thing readable while a drag is in flight.
 import type { CrmFieldSetting, CrmBadgeColor } from '../../../../crm/app/utils/field-kinds'
 import type { WorkflowsBoardItem } from '../../utils/workflows-types'
 
@@ -26,12 +30,10 @@ const props = defineProps<{
   /** Custom board + edit access: rename/remove column, add existing cards. */
   canManage: boolean
   isCustom: boolean
-  /** Manageable and not already the first column of the board. */
-  canMoveLeft: boolean
-  /** Manageable and not already the last column of the board. */
-  canMoveRight: boolean
   /** Record id currently being dragged anywhere on the board, if any. */
   draggingId: string | null
+  /** Key of the column currently being dragged on the board, if any. */
+  draggingColumnKey: string | null
 }>()
 
 const emit = defineEmits<{
@@ -42,16 +44,29 @@ const emit = defineEmits<{
   quickAdd: [name: string]
   rename: []
   remove: []
-  /** Shift this column one position: -1 left, +1 right. */
-  reorder: [delta: number]
+  columnDragStart: [key: string]
+  columnDragEnd: []
+  /** This column was the drop target of a column drag. */
+  columnDrop: [payload: { fromKey: string, toKey: string, after: boolean }]
   addExisting: []
   removeCard: [recordId: string]
 }>()
+
+// Payload type of a column drag. Cards carry 'application/json'; the
+// distinction is what dragover handlers key off, since the values themselves
+// are only readable on drop.
+const COLUMN_MIME = 'application/x-workflows-column'
+
+function isColumnDrag(event: DragEvent): boolean {
+  return event.dataTransfer?.types.includes(COLUMN_MIME) ?? false
+}
 
 const dragOver = ref(false)
 // Where a drop would land right now: the id of the card it would go before,
 // null for the end of the stack, undefined while nothing hovers this column.
 const dropBefore = ref<string | null | undefined>(undefined)
+// Which side of this column a dragged column would be inserted on.
+const columnDropSide = ref<'left' | 'right' | null>(null)
 
 function onCardDragStart(event: DragEvent, card: WorkflowsBoardItem) {
   if (!event.dataTransfer) return
@@ -78,9 +93,32 @@ function readPayload(event: DragEvent): { recordId: string, fromColumn: string |
   }
 }
 
+function onColumnDragStart(event: DragEvent) {
+  if (!event.dataTransfer) return
+  event.dataTransfer.setData(COLUMN_MIME, props.column.key)
+  event.dataTransfer.effectAllowed = 'move'
+  emit('columnDragStart', props.column.key)
+}
+
+function onColumnDragEnd() {
+  columnDropSide.value = null
+  emit('columnDragEnd')
+}
+
+/** Which side of this column the pointer sits on, relative to its middle. */
+function sideOf(event: DragEvent): 'left' | 'right' {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  return event.clientX <= rect.left + rect.width / 2 ? 'left' : 'right'
+}
+
 function onDragOver(event: DragEvent) {
   event.preventDefault()
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  if (isColumnDrag(event)) {
+    // Landing back where it started moves nothing, so nothing is marked.
+    columnDropSide.value = props.draggingColumnKey === props.column.key ? null : sideOf(event)
+    return
+  }
   dragOver.value = true
   dropBefore.value = null
 }
@@ -97,8 +135,10 @@ function dropTargetFor(event: DragEvent, card: WorkflowsBoardItem, index: number
 }
 
 // Stops at the card so the column's own handler can't overwrite the landing
-// spot on the way up.
+// spot on the way up. A column drag passing over a card is none of the
+// card's business — it bubbles on to the column.
 function onCardDragOver(event: DragEvent, card: WorkflowsBoardItem, index: number) {
+  if (isColumnDrag(event)) return
   event.stopPropagation()
   onDragOver(event)
   dropBefore.value = dropTargetFor(event, card, index)
@@ -127,10 +167,12 @@ function onDragLeave(event: DragEvent) {
   if (event.currentTarget === event.target) {
     dragOver.value = false
     dropBefore.value = undefined
+    columnDropSide.value = null
   }
 }
 
 function onDropOnCard(event: DragEvent, card: WorkflowsBoardItem, index: number) {
+  if (isColumnDrag(event)) return
   event.preventDefault()
   event.stopPropagation()
   const beforeRecordId = dropTargetFor(event, card, index)
@@ -142,6 +184,15 @@ function onDropOnCard(event: DragEvent, card: WorkflowsBoardItem, index: number)
 
 function onDropOnColumn(event: DragEvent) {
   event.preventDefault()
+  if (isColumnDrag(event)) {
+    // Read from the event rather than the hover state: a drop that arrives
+    // without a dragover of its own still knows where it landed.
+    const after = sideOf(event) === 'right'
+    const fromKey = event.dataTransfer?.getData(COLUMN_MIME) ?? ''
+    columnDropSide.value = null
+    if (fromKey) emit('columnDrop', { fromKey, toKey: props.column.key, after })
+    return
+  }
   dragOver.value = false
   dropBefore.value = undefined
   const payload = readPayload(event)
@@ -190,34 +241,41 @@ const badgeColor = computed<CrmBadgeColor>(() => {
   return known.includes(raw as CrmBadgeColor) ? raw as CrmBadgeColor : 'neutral'
 })
 
-const menuItems = computed(() => {
-  const move: Array<Record<string, unknown>> = []
-  if (props.canMoveLeft) {
-    move.push({ label: 'Move left', icon: 'i-lucide-arrow-left', onSelect: () => emit('reorder', -1) })
-  }
-  if (props.canMoveRight) {
-    move.push({ label: 'Move right', icon: 'i-lucide-arrow-right', onSelect: () => emit('reorder', 1) })
-  }
-  return [
-    [
-      { label: 'Add existing record', icon: 'i-lucide-search', onSelect: () => emit('addExisting') },
-      { label: 'Rename column', icon: 'i-lucide-pencil', onSelect: () => emit('rename') }
-    ],
-    ...(move.length > 0 ? [move] : []),
-    [{ label: 'Remove column', icon: 'i-lucide-trash-2', color: 'error' as const, onSelect: () => emit('remove') }]
-  ]
-})
+const menuItems = computed(() => [[
+  { label: 'Add existing record', icon: 'i-lucide-search', onSelect: () => emit('addExisting') },
+  { label: 'Rename column', icon: 'i-lucide-pencil', onSelect: () => emit('rename') },
+  { label: 'Remove column', icon: 'i-lucide-trash-2', color: 'error' as const, onSelect: () => emit('remove') }
+]])
 </script>
 
 <template>
   <section
-    class="flex flex-col w-72 shrink-0 max-h-full rounded-xl border bg-(--ui-bg-muted)/50 transition-colors"
+    class="relative flex flex-col w-72 shrink-0 max-h-full rounded-xl border bg-(--ui-bg-muted)/50 transition-colors"
     :class="dragOver ? 'border-(--ui-primary)' : 'border-(--ui-border)'"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
     @drop="onDropOnColumn"
   >
-    <header class="flex items-center gap-2 px-3 py-2">
+    <!-- Insertion line in the gap beside the column a dragged column would
+         land next to. -->
+    <div
+      v-if="columnDropSide"
+      class="absolute inset-y-0 w-1 rounded-full bg-(--ui-primary)"
+      :class="columnDropSide === 'left' ? '-left-2' : '-right-2'"
+    />
+
+    <header
+      class="flex items-center gap-2 px-3 py-2"
+      :class="canManage ? 'cursor-grab active:cursor-grabbing' : ''"
+      :draggable="canManage"
+      @dragstart="onColumnDragStart"
+      @dragend="onColumnDragEnd"
+    >
+      <UIcon
+        v-if="canManage"
+        name="i-lucide-grip-vertical"
+        class="size-4 shrink-0 text-(--ui-text-dimmed)"
+      />
       <UBadge
         :color="badgeColor"
         variant="subtle"
