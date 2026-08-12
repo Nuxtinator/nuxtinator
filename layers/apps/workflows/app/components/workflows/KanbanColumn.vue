@@ -1,8 +1,11 @@
 <script setup lang="ts">
 // One kanban column: header (label, count, management menu on custom
 // boards), the card stack with drop handling, and quick-add. Drop position:
-// dropping on a card inserts before it, dropping on the column body
-// appends — the board turns that into a columnOrder for the move call.
+// over a card, the pointer's half decides whether the card lands before or
+// after it; over the column body it appends — the board turns that into a
+// columnOrder for the move call. A placeholder marks the landing spot for as
+// long as a card hovers the column, computed the same way as the drop, so
+// the card lands where the gap showed.
 import type { CrmFieldSetting, CrmBadgeColor } from '../../../../crm/app/utils/field-kinds'
 import type { WorkflowsBoardItem } from '../../utils/workflows-types'
 
@@ -27,6 +30,8 @@ const props = defineProps<{
   canMoveLeft: boolean
   /** Manageable and not already the last column of the board. */
   canMoveRight: boolean
+  /** Record id currently being dragged anywhere on the board, if any. */
+  draggingId: string | null
 }>()
 
 const emit = defineEmits<{
@@ -44,6 +49,9 @@ const emit = defineEmits<{
 }>()
 
 const dragOver = ref(false)
+// Where a drop would land right now: the id of the card it would go before,
+// null for the end of the stack, undefined while nothing hovers this column.
+const dropBefore = ref<string | null | undefined>(undefined)
 
 function onCardDragStart(event: DragEvent, card: WorkflowsBoardItem) {
   if (!event.dataTransfer) return
@@ -74,26 +82,89 @@ function onDragOver(event: DragEvent) {
   event.preventDefault()
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
   dragOver.value = true
+  dropBefore.value = null
 }
 
-function onDragLeave(event: DragEvent) {
-  if (event.currentTarget === event.target) dragOver.value = false
+/**
+ * The card a drop over `card` would land before — itself when the pointer is
+ * in its top half, the next one when it's in the bottom half (null past the
+ * last card, i.e. append).
+ */
+function dropTargetFor(event: DragEvent, card: WorkflowsBoardItem, index: number): string | null {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  if (event.clientY <= rect.top + rect.height / 2) return card.id
+  return props.column.cards[index + 1]?.id ?? null
 }
 
-function onDropOnCard(event: DragEvent, card: WorkflowsBoardItem) {
+// Stops at the card so the column's own handler can't overwrite the landing
+// spot on the way up.
+function onCardDragOver(event: DragEvent, card: WorkflowsBoardItem, index: number) {
+  event.stopPropagation()
+  onDragOver(event)
+  dropBefore.value = dropTargetFor(event, card, index)
+}
+
+// The placeholder takes the space the pointer was just over, so it has to
+// hold the landing spot itself — otherwise the event would reach the column
+// body, reset the spot to "append", and the placeholder would flicker
+// between the two positions.
+function onPlaceholderDragOver(event: DragEvent, cardId: string) {
+  event.stopPropagation()
+  onDragOver(event)
+  dropBefore.value = cardId
+}
+
+function onDropOnPlaceholder(event: DragEvent, cardId: string) {
   event.preventDefault()
   event.stopPropagation()
   dragOver.value = false
+  dropBefore.value = undefined
   const payload = readPayload(event)
-  if (payload) emit('drop', { ...payload, beforeRecordId: card.id })
+  if (payload) emit('drop', { ...payload, beforeRecordId: cardId })
+}
+
+function onDragLeave(event: DragEvent) {
+  if (event.currentTarget === event.target) {
+    dragOver.value = false
+    dropBefore.value = undefined
+  }
+}
+
+function onDropOnCard(event: DragEvent, card: WorkflowsBoardItem, index: number) {
+  event.preventDefault()
+  event.stopPropagation()
+  const beforeRecordId = dropTargetFor(event, card, index)
+  dragOver.value = false
+  dropBefore.value = undefined
+  const payload = readPayload(event)
+  if (payload) emit('drop', { ...payload, beforeRecordId })
 }
 
 function onDropOnColumn(event: DragEvent) {
   event.preventDefault()
   dragOver.value = false
+  dropBefore.value = undefined
   const payload = readPayload(event)
   if (payload) emit('drop', { ...payload, beforeRecordId: null })
 }
+
+function onCardDragEnd() {
+  dragOver.value = false
+  dropBefore.value = undefined
+  emit('dragend')
+}
+
+// A placeholder only earns its space when the drop would actually move the
+// card — dropping a card immediately before itself changes nothing.
+function showPlaceholderBefore(cardId: string): boolean {
+  return !!props.draggingId && dropBefore.value === cardId && props.draggingId !== cardId
+}
+
+const showPlaceholderAtEnd = computed(() => {
+  if (!props.draggingId || dropBefore.value !== null) return false
+  const last = props.column.cards[props.column.cards.length - 1]
+  return last?.id !== props.draggingId
+})
 
 // --- quick add -------------------------------------------------------------
 
@@ -170,35 +241,52 @@ const menuItems = computed(() => {
       </UDropdownMenu>
     </header>
 
-    <div class="flex-1 overflow-y-auto px-2 pb-2 space-y-2 min-h-16">
-      <div
-        v-for="card in column.cards"
+    <!-- Card spacing is the wrappers' own padding rather than a gap between
+         them, so moving down the stack never crosses a strip that belongs to
+         no card and the placeholder can't flicker to the end. -->
+    <div class="flex-1 overflow-y-auto px-2 pb-2 min-h-16">
+      <template
+        v-for="(card, index) in column.cards"
         :key="card.id"
-        @dragover="onDragOver"
-        @drop="onDropOnCard($event, card)"
       >
-        <div class="group relative">
-          <WorkflowsKanbanCard
-            :item="card"
-            :fields="fields"
-            :card-fields="cardFields"
-            :group-field-key="groupFieldKey"
-            @open="emit('open', $event)"
-            @dragstart="onCardDragStart($event, card)"
-            @dragend="emit('dragend')"
-          />
-          <UButton
-            v-if="isCustom && canManage"
-            icon="i-lucide-x"
-            variant="ghost"
-            color="neutral"
-            size="xs"
-            aria-label="Remove from board"
-            class="absolute top-1 right-1 opacity-0 group-hover:opacity-100"
-            @click.stop="emit('removeCard', card.id)"
-          />
+        <div
+          v-if="showPlaceholderBefore(card.id)"
+          class="h-10 mb-2 rounded-lg border-2 border-dashed border-(--ui-primary) bg-(--ui-primary)/5"
+          @dragover="onPlaceholderDragOver($event, card.id)"
+          @drop="onDropOnPlaceholder($event, card.id)"
+        />
+        <div
+          class="pb-2"
+          @dragover="onCardDragOver($event, card, index)"
+          @drop="onDropOnCard($event, card, index)"
+        >
+          <div class="group relative">
+            <WorkflowsKanbanCard
+              :item="card"
+              :fields="fields"
+              :card-fields="cardFields"
+              :group-field-key="groupFieldKey"
+              @open="emit('open', $event)"
+              @dragstart="onCardDragStart($event, card)"
+              @dragend="onCardDragEnd"
+            />
+            <UButton
+              v-if="isCustom && canManage"
+              icon="i-lucide-x"
+              variant="ghost"
+              color="neutral"
+              size="xs"
+              aria-label="Remove from board"
+              class="absolute top-1 right-1 opacity-0 group-hover:opacity-100"
+              @click.stop="emit('removeCard', card.id)"
+            />
+          </div>
         </div>
-      </div>
+      </template>
+      <div
+        v-if="showPlaceholderAtEnd"
+        class="h-10 rounded-lg border-2 border-dashed border-(--ui-primary) bg-(--ui-primary)/5"
+      />
     </div>
 
     <footer

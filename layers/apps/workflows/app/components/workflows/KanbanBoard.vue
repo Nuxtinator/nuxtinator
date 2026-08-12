@@ -153,7 +153,22 @@ const columns = computed<WorkflowsBoardColumn[]>(() => {
   }))
 })
 
+// The dragged card's id, shared with every column so each can place its drop
+// placeholder — dataTransfer contents are unreadable during dragover.
+const draggingId = ref<string | null>(null)
+
+function onDragStart(payload: { recordId: string }) {
+  draggingId.value = payload.recordId
+  emit('dragstart')
+}
+
+function onDragEnd() {
+  draggingId.value = null
+  emit('dragend')
+}
+
 function onDrop(columnKey: string, payload: { recordId: string, fromColumn: string | null, beforeRecordId: string | null }) {
+  draggingId.value = null
   if (payload.recordId === payload.beforeRecordId) return
   const column = columns.value.find(c => c.key === columnKey)
   if (!column) return
@@ -245,10 +260,11 @@ const columnModalOpen = computed({
       :is-custom="isCustom"
       :can-move-left="isCustom && canEditDefinition && index > 0"
       :can-move-right="isCustom && canEditDefinition && index < columns.length - 1"
+      :dragging-id="draggingId"
       @open="emit('open', $event)"
       @drop="onDrop(column.key, $event)"
-      @dragstart="emit('dragstart')"
-      @dragend="emit('dragend')"
+      @dragstart="onDragStart"
+      @dragend="onDragEnd"
       @quick-add="emit('quickAdd', { columnKey: column.key, name: $event })"
       @add-existing="emit('addExisting', column.key)"
       @rename="openRename(column.key)"
