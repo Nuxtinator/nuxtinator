@@ -39,6 +39,8 @@ export interface WorkflowsViewSummary {
 
 export interface WorkflowsViewDetail extends WorkflowsViewSummary {
   definition: WorkflowsDefinition
+  /** The view reached the caller through a share row of their own. */
+  sharedWithMe: boolean
 }
 
 export interface WorkflowsPlacement {

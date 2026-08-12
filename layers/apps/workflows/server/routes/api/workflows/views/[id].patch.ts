@@ -24,7 +24,7 @@ export default defineEventHandler(async (event) => {
     const body = parsed.data
 
     const needed = body.visibility !== undefined ? 'owner' : 'edit'
-    const { view, access } = await requireWorkflowsView(tx, ctx, viewId, needed)
+    const { view, access, viaShare } = await requireWorkflowsView(tx, ctx, viewId, needed)
 
     const patch: Record<string, unknown> = {}
     if (body.name !== undefined) patch.name = body.name
@@ -54,6 +54,6 @@ export default defineEventHandler(async (event) => {
       .where('id', '=', updated.owner_id)
       .executeTakeFirstOrThrow()
 
-    return toWorkflowsViewDetail(updated, access, owner.display_name)
+    return toWorkflowsViewDetail(updated, access, owner.display_name, viaShare)
   })
 })

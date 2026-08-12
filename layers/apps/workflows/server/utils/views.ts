@@ -129,12 +129,23 @@ export async function sanitizeWorkflowsDefinition(
 // Access
 // ---------------------------------------------------------------------------
 
+export interface WorkflowsViewAccess {
+  level: WorkflowsAccessLevel
+  /**
+   * The caller holds a share row on this view rather than reaching it through
+   * its org visibility — the one case where leaving the view is theirs to do.
+   */
+  viaShare: boolean
+}
+
 export async function getWorkflowsViewAccess(
   tx: Tx,
   ctx: TenantContext,
   view: Pick<WorkflowsViewRow, 'id' | 'owner_id' | 'visibility'>
-): Promise<WorkflowsAccessLevel | null> {
-  if (view.owner_id === ctx.userId || ctx.roles.includes('admin')) return 'owner'
+): Promise<WorkflowsViewAccess | null> {
+  if (view.owner_id === ctx.userId || ctx.roles.includes('admin')) {
+    return { level: 'owner', viaShare: false }
+  }
   if (view.visibility === 'private') return null
   const share = await tx
     .selectFrom('workflows_view_shares')
@@ -142,8 +153,8 @@ export async function getWorkflowsViewAccess(
     .where('view_id', '=', view.id)
     .where('user_id', '=', ctx.userId)
     .executeTakeFirst()
-  if (share) return share.level as WorkflowsShareLevel
-  return view.visibility === 'org' ? 'view' : null
+  if (share) return { level: share.level as WorkflowsShareLevel, viaShare: true }
+  return view.visibility === 'org' ? { level: 'view', viaShare: false } : null
 }
 
 /**
@@ -156,7 +167,7 @@ export async function requireWorkflowsView(
   ctx: TenantContext,
   viewId: string,
   level: WorkflowsAccessLevel
-): Promise<{ view: WorkflowsViewRow, access: WorkflowsAccessLevel }> {
+): Promise<{ view: WorkflowsViewRow, access: WorkflowsAccessLevel, viaShare: boolean }> {
   const view = await tx
     .selectFrom('workflows_views')
     .selectAll()
@@ -165,10 +176,10 @@ export async function requireWorkflowsView(
   if (!view) throw createError({ statusCode: 404, statusMessage: 'View not found' })
   const access = await getWorkflowsViewAccess(tx, ctx, view)
   if (!access) throw createError({ statusCode: 404, statusMessage: 'View not found' })
-  if (LEVEL_RANK[access] < LEVEL_RANK[level]) {
+  if (LEVEL_RANK[access.level] < LEVEL_RANK[level]) {
     throw createError({ statusCode: 403, statusMessage: `View access required: ${level}` })
   }
-  return { view, access }
+  return { view, access: access.level, viaShare: access.viaShare }
 }
 
 // ---------------------------------------------------------------------------
@@ -232,7 +243,13 @@ export async function listWorkflowsViews(tx: Tx, ctx: TenantContext): Promise<Wo
   })
 }
 
-export function toWorkflowsViewDetail(view: WorkflowsViewRow, access: WorkflowsAccessLevel, ownerName: string) {
+export function toWorkflowsViewDetail(
+  view: WorkflowsViewRow,
+  access: WorkflowsAccessLevel,
+  ownerName: string,
+  /** Whether the caller reached the view through a share row of their own. */
+  sharedWithMe = false
+) {
   return {
     id: view.id,
     name: view.name,
@@ -243,6 +260,7 @@ export function toWorkflowsViewDetail(view: WorkflowsViewRow, access: WorkflowsA
     ownerId: view.owner_id,
     ownerName,
     accessLevel: access,
+    sharedWithMe,
     definition: view.definition as WorkflowsViewDefinition,
     createdAt: view.created_at,
     updatedAt: view.updated_at

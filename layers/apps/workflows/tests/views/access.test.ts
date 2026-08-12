@@ -24,6 +24,7 @@ interface ViewDetail {
   name: string
   visibility: string
   accessLevel: 'view' | 'edit' | 'owner'
+  sharedWithMe: boolean
   definition: Record<string, unknown>
 }
 
@@ -140,6 +141,45 @@ describe('view access matrix', () => {
       ...owner
     })
     await expectStatus($fetch(`/api/workflows/views/${view.id}`, inviteeOpts), 404)
+  })
+
+  it('a share recipient is told so, and can leave the view', async () => {
+    const { org, auth } = await createWorkflowsOrgWith(sql, ['admin'])
+    const owner = withOrgHeader(auth, org.slug)
+    const invitee = await addWorkflowsMember(sql, org.id)
+    const inviteeOpts = withOrgHeader(invitee.auth, org.slug)
+
+    const view = await createView(owner, { visibility: 'shared' })
+    await $fetch(`/api/workflows/views/${view.id}/shares`, {
+      method: 'POST',
+      body: { userId: invitee.user.id, level: 'view' },
+      ...owner
+    })
+
+    const shared = await $fetch<ViewDetail>(`/api/workflows/views/${view.id}`, inviteeOpts)
+    expect(shared.sharedWithMe).toBe(true)
+    // The owner holds it outright, not through a share.
+    const owned = await $fetch<ViewDetail>(`/api/workflows/views/${view.id}`, owner)
+    expect(owned.sharedWithMe).toBe(false)
+
+    // Leaving is removing your own share row — allowed at 'view' level.
+    await $fetch(`/api/workflows/views/${view.id}/shares/${invitee.user.id}`, {
+      method: 'DELETE',
+      ...inviteeOpts
+    })
+    await expectStatus($fetch(`/api/workflows/views/${view.id}`, inviteeOpts), 404)
+  })
+
+  it('org-wide reach is not a share', async () => {
+    const { org, auth } = await createWorkflowsOrgWith(sql, ['admin'])
+    const owner = withOrgHeader(auth, org.slug)
+    const member = await addWorkflowsMember(sql, org.id)
+    const memberOpts = withOrgHeader(member.auth, org.slug)
+
+    const view = await createView(owner, { visibility: 'org' })
+    const seen = await $fetch<ViewDetail>(`/api/workflows/views/${view.id}`, memberOpts)
+    expect(seen.accessLevel).toBe('view')
+    expect(seen.sharedWithMe).toBe(false)
   })
 
   it('delete is owner-only, and the org admin role counts as owner', async () => {

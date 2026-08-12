@@ -237,6 +237,27 @@ async function setVisibility(visibility: WorkflowsVisibility) {
   await patchView({ visibility }, 'Failed to change visibility')
 }
 
+// --- leaving a shared view --------------------------------------------------
+
+const { user } = useAuth()
+const myUserId = computed<string | null>(() => (user.value as { id?: string } | null)?.id ?? null)
+const leaveOpen = ref(false)
+const leaving = ref(false)
+
+async function leaveView() {
+  const v = view.value
+  const userId = myUserId.value
+  if (!v || !userId || leaving.value) return
+  leaving.value = true
+  try {
+    await $fetch(`/api/workflows/views/${v.id}/shares/${userId}`, { method: 'DELETE' })
+    await navigateTo(workflowsPath(''))
+  } catch (err) {
+    toast.add({ color: 'error', title: crmErrorMessage(err, 'Failed to leave the view') })
+    leaving.value = false
+  }
+}
+
 async function deleteView() {
   const v = view.value
   if (!v || deleting.value) return
@@ -299,6 +320,15 @@ const menuItems = computed(() => {
       color: 'error',
       onSelect: () => {
         deleteOpen.value = true
+      }
+    }])
+  } else if (view.value?.sharedWithMe) {
+    items.push([{
+      label: 'Leave view',
+      icon: 'i-lucide-log-out',
+      color: 'error',
+      onSelect: () => {
+        leaveOpen.value = true
       }
     }])
   }
@@ -517,6 +547,36 @@ const menuItems = computed(() => {
             </UButton>
           </div>
         </form>
+      </template>
+    </UModal>
+
+    <UModal v-model:open="leaveOpen">
+      <template #content>
+        <div class="p-6 space-y-4">
+          <h2 class="text-lg font-semibold">
+            Leave this view?
+          </h2>
+          <p class="text-sm text-(--ui-text-muted)">
+            "{{ view?.name }}" disappears from your views. Only its owner can
+            share it with you again.
+          </p>
+          <div class="flex gap-2 justify-end">
+            <UButton
+              variant="ghost"
+              :disabled="leaving"
+              @click="leaveOpen = false"
+            >
+              Cancel
+            </UButton>
+            <UButton
+              color="error"
+              :loading="leaving"
+              @click="leaveView"
+            >
+              Leave
+            </UButton>
+          </div>
+        </div>
       </template>
     </UModal>
 
