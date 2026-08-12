@@ -17,6 +17,12 @@ export const WORKFLOWS_DEFAULT_CARD_FIELDS: Record<WorkflowsViewType, string[]> 
   table: ['status', 'updated_at']
 }
 
+/** How records order when a view saves no sort — the list engine's own fallback. */
+export const WORKFLOWS_DEFAULT_SORT: { field: string, dir: 'asc' | 'desc' } = {
+  field: 'updated_at',
+  dir: 'desc'
+}
+
 export interface WorkflowsCardFieldChoice {
   key: string
   label: string
@@ -89,6 +95,28 @@ export function workflowsCardFieldChoices(
       || field.key === opts.groupFieldKey
       || (opts.viewType === 'table' && storage === 'user_refs')
     if (renderable) choices.push({ key: field.key, label: field.label })
+  }
+  return choices
+}
+
+/**
+ * The values a view can order by. The list engine sorts on the record row's
+ * own columns and on jsonb-stored values; the other storages live in side
+ * tables it cannot order by, so they're left out.
+ */
+export function workflowsSortChoices(fields: CrmFieldSetting[]): WorkflowsCardFieldChoice[] {
+  const statusField = fields.find(f => f.column === 'status')
+  const choices: WorkflowsCardFieldChoice[] = [
+    { key: 'name', label: 'Name' },
+    { key: 'status', label: statusField?.label ?? 'Status' },
+    { key: 'created_at', label: 'Created' },
+    { key: 'updated_at', label: 'Updated' }
+  ]
+  for (const field of fields) {
+    if (field.hidden || field.orphan || field.column) continue
+    if (workflowsFieldStorage(field) === 'jsonb') {
+      choices.push({ key: field.key, label: field.label })
+    }
   }
   return choices
 }

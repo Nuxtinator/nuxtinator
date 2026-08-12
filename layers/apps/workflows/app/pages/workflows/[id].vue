@@ -187,6 +187,15 @@ function onCardFieldsChange(cardFields: string[]) {
   )
 }
 
+function onDefinitionSort(sort: { field: string, dir: 'asc' | 'desc' } | null) {
+  const v = view.value
+  if (!v) return
+  const definition = { ...v.definition }
+  if (sort) definition.sort = sort
+  else delete definition.sort
+  patchView({ definition }, 'Failed to save the sort order')
+}
+
 const groupFieldOpen = ref(false)
 // A field-grouped board — the only kind that has a grouping field to change.
 const isFieldGrouped = computed(() =>
@@ -346,6 +355,7 @@ const menuItems = computed(() => {
       :fields="fields"
       :can-edit-definition="canEditDefinition"
       @definition-filters="patchView({ definition: { ...view!.definition, filters: $event } }, 'Failed to save filters')"
+      @definition-sort="onDefinitionSort"
     />
 
     <UAlert
