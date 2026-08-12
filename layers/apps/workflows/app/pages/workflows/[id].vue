@@ -214,17 +214,23 @@ function onGroupFieldChange(groupField: string) {
 
 const renameOpen = ref(false)
 const renameValue = ref('')
+const renameIcon = ref<string | null>(null)
 const deleteOpen = ref(false)
 const deleting = ref(false)
 
 function openRename() {
   renameValue.value = view.value?.name ?? ''
+  renameIcon.value = view.value?.icon ?? null
   renameOpen.value = true
 }
 async function submitRename() {
   const name = renameValue.value.trim()
   if (!name) return
-  if (await patchView({ name }, 'Failed to rename the view')) renameOpen.value = false
+  const saved = await patchView(
+    { name, icon: renameIcon.value },
+    'Failed to rename the view'
+  )
+  if (saved) renameOpen.value = false
 }
 
 async function setVisibility(visibility: WorkflowsVisibility) {
@@ -254,7 +260,7 @@ const menuItems = computed(() => {
   const items: Array<Array<Record<string, unknown>>> = []
   if (canEditDefinition.value) {
     items.push([
-      { label: 'Rename', icon: 'i-lucide-pencil', onSelect: openRename },
+      { label: 'Rename & icon', icon: 'i-lucide-pencil', onSelect: openRename },
       {
         label: view.value?.viewType === 'table' ? 'Table columns' : 'Card fields',
         icon: 'i-lucide-list-checks',
@@ -478,13 +484,24 @@ const menuItems = computed(() => {
           @submit.prevent="submitRename"
         >
           <h2 class="text-lg font-semibold">
-            Rename view
+            Name & icon
           </h2>
-          <UInput
-            v-model="renameValue"
-            autofocus
-            class="w-full"
-          />
+          <UFormField
+            label="Name"
+            required
+          >
+            <UInput
+              v-model="renameValue"
+              autofocus
+              class="w-full"
+            />
+          </UFormField>
+          <UFormField
+            label="Icon"
+            help="Shown in the views list and this view's header. Leave empty for the default."
+          >
+            <IconPicker v-model="renameIcon" />
+          </UFormField>
           <div class="flex gap-2 justify-end">
             <UButton
               variant="ghost"
@@ -496,7 +513,7 @@ const menuItems = computed(() => {
               type="submit"
               :disabled="!renameValue.trim()"
             >
-              Rename
+              Save
             </UButton>
           </div>
         </form>

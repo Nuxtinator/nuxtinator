@@ -21,6 +21,7 @@ const DEFAULT_COLUMNS = [
 ]
 
 const name = ref('')
+const icon = ref<string | null>(null)
 const typeKey = ref<string | undefined>(undefined)
 const viewType = ref<WorkflowsViewType>('kanban')
 const kanbanMode = ref<'field' | 'custom'>('field')
@@ -35,6 +36,7 @@ const fieldsPending = ref(false)
 watch(open, (v) => {
   if (!v) return
   name.value = ''
+  icon.value = null
   typeKey.value = undefined
   viewType.value = 'kanban'
   kanbanMode.value = 'field'
@@ -100,6 +102,7 @@ async function submit() {
     }
     const created = await create({
       name: name.value.trim(),
+      icon: icon.value ?? undefined,
       recordTypeKey: typeKey.value!,
       viewType: viewType.value,
       visibility: visibility.value,
@@ -130,12 +133,21 @@ async function submit() {
           label="Name"
           required
         >
-          <UInput
-            v-model="name"
-            autofocus
-            class="w-full"
-            :disabled="creating"
-          />
+          <div class="flex gap-2">
+            <UInput
+              v-model="name"
+              autofocus
+              class="flex-1"
+              :disabled="creating"
+            />
+            <div class="w-36 shrink-0">
+              <IconPicker
+                v-model="icon"
+                placeholder="Icon…"
+                :disabled="creating"
+              />
+            </div>
+          </div>
         </UFormField>
 
         <UFormField
