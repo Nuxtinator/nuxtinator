@@ -176,6 +176,17 @@ function onColumnsChange(columns: WorkflowsColumnDef[]) {
   )
 }
 
+const cardFieldsOpen = ref(false)
+
+function onCardFieldsChange(cardFields: string[]) {
+  const v = view.value
+  if (!v) return
+  patchView(
+    { definition: { ...v.definition, cardFields } },
+    'Failed to update the fields'
+  )
+}
+
 // --- header menu ------------------------------------------------------------
 
 const renameOpen = ref(false)
@@ -219,7 +230,16 @@ const VISIBILITY_META: Record<WorkflowsVisibility, { label: string, icon: string
 const menuItems = computed(() => {
   const items: Array<Array<Record<string, unknown>>> = []
   if (canEditDefinition.value) {
-    items.push([{ label: 'Rename', icon: 'i-lucide-pencil', onSelect: openRename }])
+    items.push([
+      { label: 'Rename', icon: 'i-lucide-pencil', onSelect: openRename },
+      {
+        label: view.value?.viewType === 'table' ? 'Table columns' : 'Card fields',
+        icon: 'i-lucide-list-checks',
+        onSelect: () => {
+          cardFieldsOpen.value = true
+        }
+      }
+    ])
   }
   if (isOwner.value) {
     items.push([
@@ -393,6 +413,14 @@ const menuItems = computed(() => {
       :view="view"
       :on-board="records ? records.placements.map(p => p.recordId) : []"
       @added="refreshRecords"
+    />
+
+    <WorkflowsCardFieldsModal
+      v-if="view"
+      v-model:open="cardFieldsOpen"
+      :view="view"
+      :fields="fields"
+      @save="onCardFieldsChange"
     />
 
     <UModal v-model:open="renameOpen">

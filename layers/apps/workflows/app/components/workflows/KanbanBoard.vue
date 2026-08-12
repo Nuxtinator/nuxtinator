@@ -58,7 +58,8 @@ onMounted(() => {
   }
 })
 
-const cardFields = computed(() => definition.value.cardFields ?? ['status'])
+const cardFields = computed(() =>
+  definition.value.cardFields ?? WORKFLOWS_DEFAULT_CARD_FIELDS.kanban)
 
 // rank lookup: `${recordId}:${columnKey}` → rank
 const ranks = computed(() => {

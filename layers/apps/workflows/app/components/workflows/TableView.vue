@@ -51,7 +51,7 @@ interface TableColumnDef {
 }
 
 const columns = computed<TableColumnDef[]>(() => {
-  const chosen = props.view.definition.cardFields ?? ['status', 'updated_at']
+  const chosen = props.view.definition.cardFields ?? WORKFLOWS_DEFAULT_CARD_FIELDS.table
   const out: TableColumnDef[] = []
   for (const key of chosen) {
     if (key === 'name') continue
