@@ -5,7 +5,7 @@
 import { storageOf } from '#crm'
 import type { CrmStorage } from '#crm'
 import type { CrmFieldSetting } from '../../../crm/app/utils/field-kinds'
-import type { WorkflowsViewType } from './workflows-types'
+import type { WorkflowsDefinition, WorkflowsViewType } from './workflows-types'
 
 export function workflowsFieldStorage(field: Pick<CrmFieldSetting, 'kind' | 'column'>): CrmStorage {
   return storageOf({ kind: field.kind, column: field.column ?? undefined })
@@ -20,6 +20,41 @@ export const WORKFLOWS_DEFAULT_CARD_FIELDS: Record<WorkflowsViewType, string[]> 
 export interface WorkflowsCardFieldChoice {
   key: string
   label: string
+}
+
+// Record columns addressable without a field definition — the server
+// accepts these keys in a definition whether or not the type declares them.
+const INTRINSIC_KEYS = new Set(['name', 'status', 'created_at', 'updated_at'])
+
+// Kinds a kanban can group by: single/multi selects (columns = their
+// options) and user references (columns = the users present). Mirrors the
+// server's list in server/utils/views.ts.
+const GROUPABLE_KINDS = new Set(['key_select', 'multi_select', 'user_select'])
+
+/** Fields a kanban may group by, in the type's field order. */
+export function workflowsGroupableFields(fields: CrmFieldSetting[]): CrmFieldSetting[] {
+  return fields.filter(f => GROUPABLE_KINDS.has(f.kind) && !f.hidden && !f.orphan)
+}
+
+/**
+ * Drops definition entries pointing at keys the record type no longer has.
+ * The server rejects a definition referencing an unknown key, so a board
+ * whose grouping field was deleted — its card fields or saved filters may
+ * name that field too — could otherwise never be saved back into shape.
+ */
+export function workflowsPruneDefinition(
+  definition: WorkflowsDefinition,
+  fields: CrmFieldSetting[]
+): WorkflowsDefinition {
+  const known = (key: string) => INTRINSIC_KEYS.has(key) || fields.some(f => f.key === key)
+  const next: WorkflowsDefinition = { ...definition }
+  if (next.cardFields) next.cardFields = next.cardFields.filter(known)
+  if (next.filters) {
+    next.filters = Object.fromEntries(
+      Object.entries(next.filters).filter(([key]) => known(key)))
+  }
+  if (next.sort && !known(next.sort.field)) delete next.sort
+  return next
 }
 
 // Intrinsic record values any view can show. `name` is left out — it always

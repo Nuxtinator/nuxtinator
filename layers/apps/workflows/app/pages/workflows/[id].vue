@@ -187,6 +187,20 @@ function onCardFieldsChange(cardFields: string[]) {
   )
 }
 
+const groupFieldOpen = ref(false)
+// A field-grouped board — the only kind that has a grouping field to change.
+const isFieldGrouped = computed(() =>
+  view.value?.viewType === 'kanban' && !isCustom.value)
+
+function onGroupFieldChange(groupField: string) {
+  const v = view.value
+  if (!v) return
+  // Keys of a deleted field can still sit in the rest of the definition and
+  // would fail validation, taking the repair down with them.
+  const definition = workflowsPruneDefinition({ ...v.definition, groupField }, fields.value)
+  patchView({ definition }, 'Failed to change the grouping field')
+}
+
 // --- header menu ------------------------------------------------------------
 
 const renameOpen = ref(false)
@@ -240,6 +254,15 @@ const menuItems = computed(() => {
         }
       }
     ])
+    if (isFieldGrouped.value) {
+      items[items.length - 1]!.push({
+        label: 'Change grouping',
+        icon: 'i-lucide-columns-3',
+        onSelect: () => {
+          groupFieldOpen.value = true
+        }
+      })
+    }
   }
   if (isOwner.value) {
     items.push([
@@ -347,6 +370,13 @@ const menuItems = computed(() => {
             Pick a new grouping field to bring it back.
           </template>
         </p>
+        <UButton
+          v-if="canEditDefinition"
+          icon="i-lucide-columns-3"
+          @click="groupFieldOpen = true"
+        >
+          Choose a grouping field
+        </UButton>
       </div>
     </div>
 
@@ -421,6 +451,14 @@ const menuItems = computed(() => {
       :view="view"
       :fields="fields"
       @save="onCardFieldsChange"
+    />
+
+    <WorkflowsGroupFieldModal
+      v-if="view && isFieldGrouped"
+      v-model:open="groupFieldOpen"
+      :view="view"
+      :fields="fields"
+      @save="onGroupFieldChange"
     />
 
     <UModal v-model:open="renameOpen">

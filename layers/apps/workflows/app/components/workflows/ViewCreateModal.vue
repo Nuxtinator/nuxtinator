@@ -12,8 +12,6 @@ const workflowsPath = useWorkflowsPath()
 const { visibleTypes, ensureTypes, getFields } = useCrmTypes()
 const { create } = useWorkflowsViews()
 
-const GROUPABLE_KINDS = new Set(['key_select', 'multi_select', 'user_select'])
-
 // Fresh boards start with the classic three lanes; edit-level users reshape
 // them later from the board itself.
 const DEFAULT_COLUMNS = [
@@ -67,11 +65,8 @@ watch(typeKey, async (key) => {
 const typeItems = computed(() =>
   visibleTypes.value.map(t => ({ label: t.label, value: t.key })))
 
-const groupableFields = computed(() =>
-  fields.value.filter(f => GROUPABLE_KINDS.has(f.kind) && !f.hidden && !f.orphan))
-
 const groupFieldItems = computed(() =>
-  groupableFields.value.map(f => ({ label: f.label, value: f.key })))
+  workflowsGroupableFields(fields.value).map(f => ({ label: f.label, value: f.key })))
 
 const VIEW_TYPE_ITEMS = [
   { label: 'Kanban board', value: 'kanban' },
