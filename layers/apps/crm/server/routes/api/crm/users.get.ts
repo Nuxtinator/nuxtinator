@@ -1,14 +1,23 @@
-// GET /api/crm/users?q=&limit=
+// GET /api/crm/users?q=&limit=&ids=
 // User directory for user_select pickers and assignment filters. In
 // multi-tenant mode it lists the active org's members; in single mode all
 // users. Returns { items: [{ id, name, email, avatarUrl }] } ordered by
 // name. Permission: crm.access.
+//
+// `ids` (comma-separated) resolves named users instead of listing a page of
+// the directory: a record can reference anyone in the org, so a caller that
+// already holds ids must be able to name them without paging the whole
+// membership. Org scoping still applies — ids outside the org resolve to
+// nothing.
 
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
 
+const MAX_IDS = 100
+
 const Query = z.object({
   q: z.string().optional(),
+  ids: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(50).optional()
 })
 
@@ -20,6 +29,11 @@ export default defineEventHandler(async (event) => {
     }
     const q = parsed.data.q?.trim().toLowerCase() ?? ''
     const limit = parsed.data.limit ?? 20
+    const ids = parsed.data.ids
+      ? [...new Set(parsed.data.ids.split(',').map(id => id.trim()).filter(Boolean))].slice(0, MAX_IDS)
+      : null
+    // An explicit lookup of nothing is an empty answer, not the directory.
+    if (ids && ids.length === 0) return { items: [] }
 
     let qb = tx
       .selectFrom('users')
@@ -36,6 +50,8 @@ export default defineEventHandler(async (event) => {
       ))
     }
 
+    if (ids) qb = qb.where('users.id', 'in', ids)
+
     if (q) {
       qb = qb.where(eb => eb.or([
         eb(eb.fn('lower', ['users.display_name']), 'like', `%${q}%`),
@@ -45,7 +61,7 @@ export default defineEventHandler(async (event) => {
 
     const rows = await qb
       .orderBy('users.display_name', 'asc')
-      .limit(limit)
+      .limit(ids ? ids.length : limit)
       .execute()
 
     return {

@@ -1,9 +1,8 @@
 <script setup lang="ts">
 // Picks which record values a view shows and in what order — the fields on
 // kanban cards, the columns of a table. The record name is always shown, so
-// it isn't offered. Choices are limited to values the record feed carries;
-// a saved key whose field has since disappeared still lists (by its raw key)
-// so it can be removed.
+// it isn't offered. A saved key whose field has since disappeared still
+// lists (by its raw key) so it can be removed.
 import type { CrmFieldSetting } from '../../../../crm/app/utils/field-kinds'
 import type { WorkflowsViewDetail } from '../../utils/workflows-types'
 
@@ -20,10 +19,7 @@ const emit = defineEmits<{
 
 const selected = ref<string[]>([])
 
-const choices = computed(() => workflowsCardFieldChoices(props.fields, {
-  viewType: props.view.viewType,
-  groupFieldKey: props.view.definition.groupField ?? null
-}))
+const choices = computed(() => workflowsCardFieldChoices(props.fields))
 
 const isTable = computed(() => props.view.viewType === 'table')
 

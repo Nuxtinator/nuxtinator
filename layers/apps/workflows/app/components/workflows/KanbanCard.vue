@@ -1,9 +1,9 @@
 <script setup lang="ts">
-// One card: record name plus the view's chosen card fields. Only values the
-// list feed actually carries render — jsonb-stored fields, the promoted
-// status, timestamps, and the grouping field's values; other storages would
-// need per-record hydration and are skipped (same limitation as CRM's list
-// table). Assigned users show as an avatar row when present.
+// One card: record name plus the view's chosen card fields, in the order the
+// view chose. Values come from the record row (status, timestamps, jsonb
+// fields), from the board's grouping values, or from the side-table values
+// the feed attaches for the chosen keys — so any field of the type can be
+// shown. User fields render as each person's avatar beside their name.
 import type { CrmFieldSetting } from '../../../../crm/app/utils/field-kinds'
 import type { WorkflowsBoardItem } from '../../utils/workflows-types'
 
@@ -29,6 +29,13 @@ onMounted(() => {
 })
 const userName = (id: string) => byId.value.get(id)?.name ?? null
 
+// People are named, not just pictured: an image avatar is often missing and
+// initials alone can't tell two same-initial colleagues apart.
+const displayName = (id: string) => byId.value.get(id)?.name ?? 'Unknown user'
+
+// Beyond a handful the names stop fitting; the rest show as a count.
+const USER_CAP = 3
+
 const fieldMap = computed(() => new Map(props.fields.map(f => [f.key, f])))
 
 const INTRINSIC_DEFS: Record<string, Pick<CrmFieldSetting, 'key' | 'kind' | 'label'>> = {
@@ -40,6 +47,13 @@ interface CardValue {
   key: string
   label: string
   text: string
+  /** Set for user fields — rendered as avatars in place of the text. */
+  userIds?: string[]
+}
+
+function userIdsOf(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map(String).filter(Boolean)
+  return typeof raw === 'string' && raw !== '' ? [raw] : []
 }
 
 const values = computed<CardValue[]>(() => {
@@ -60,15 +74,18 @@ const values = computed<CardValue[]>(() => {
     if (field.column === 'status' || key === 'status') raw = props.item.status
     else if (workflowsFieldStorage(field) === 'jsonb') raw = props.item.data[field.key]
     else if (field.key === props.groupFieldKey) raw = props.item.groupValues
-    else continue
+    else raw = props.item.fields?.[field.key] ?? null
+
+    if (field.kind === 'user_select') {
+      const userIds = userIdsOf(raw)
+      if (userIds.length > 0) out.push({ key, label: field.label, text: '', userIds })
+      continue
+    }
     const text = formatCrmValue(raw, field, { userName })
     if (text && text !== '—') out.push({ key, label: field.label, text })
   }
   return out
 })
-
-const assignedUsers = computed(() =>
-  props.item.assignedTo.map(id => byId.value.get(id) ?? null))
 
 function onDragStart(event: DragEvent) {
   emit('dragstart', event)
@@ -94,28 +111,42 @@ function onDragStart(event: DragEvent) {
       <div
         v-for="value in values"
         :key="value.key"
-        class="flex items-baseline gap-1.5 text-xs"
+        class="flex gap-1.5 text-xs"
+        :class="value.userIds ? 'items-start' : 'items-baseline'"
       >
         <dt class="text-(--ui-text-dimmed) shrink-0">
           {{ value.label }}
         </dt>
-        <dd class="text-(--ui-text-muted) truncate">
+        <dd
+          v-if="value.userIds"
+          class="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0"
+        >
+          <span
+            v-for="id in value.userIds.slice(0, USER_CAP)"
+            :key="id"
+            class="inline-flex items-center gap-1 min-w-0"
+          >
+            <UAvatar
+              :src="byId.get(id)?.avatarUrl ?? undefined"
+              :alt="displayName(id)"
+              size="3xs"
+            />
+            <span class="text-(--ui-text-muted) truncate">{{ displayName(id) }}</span>
+          </span>
+          <span
+            v-if="value.userIds.length > USER_CAP"
+            class="text-(--ui-text-dimmed)"
+          >
+            +{{ value.userIds.length - USER_CAP }}
+          </span>
+        </dd>
+        <dd
+          v-else
+          class="text-(--ui-text-muted) truncate"
+        >
           {{ value.text }}
         </dd>
       </div>
     </dl>
-    <div
-      v-if="assignedUsers.length > 0"
-      class="flex -space-x-1.5 pt-0.5"
-    >
-      <UAvatar
-        v-for="(assignee, i) in assignedUsers.slice(0, 5)"
-        :key="i"
-        :src="assignee?.avatarUrl ?? undefined"
-        :alt="assignee?.name ?? 'Unknown user'"
-        size="3xs"
-        class="ring-1 ring-(--ui-bg)"
-      />
-    </div>
   </button>
 </template>

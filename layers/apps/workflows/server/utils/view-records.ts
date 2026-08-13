@@ -2,12 +2,13 @@
 // CRM's listRecords, so record visibility and filter/sort validation are
 // CRM's — this file only merges the view's saved filters with the caller's
 // personal overlay, pages past CRM's per-call limit, and attaches the bits a
-// kanban needs on top (grouping-field values per record, placement/rank rows).
+// kanban needs on top (grouping-field values per record, values for card
+// fields the list rows don't carry, placement/rank rows).
 
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
-import { listRecords } from '#crm/server'
+import { listRecords, hydrateRecords, getRecordTypeFields } from '#crm/server'
 import type { CrmFieldSetting, CrmRecordListItem } from '#crm/server'
 import type { WorkflowsViewDefinition, WorkflowsViewRow } from './views'
 
@@ -38,6 +39,48 @@ export interface WorkflowsPlacement {
 export interface WorkflowsBoardItem extends CrmRecordListItem {
   /** Current values of the grouping field (field-grouped boards only). */
   groupValues?: string[]
+  /**
+   * Values for the view's card fields that a list row cannot carry — the
+   * ones stored in side tables. Present only for those keys; promoted and
+   * jsonb values are already on the row.
+   */
+  fields?: Record<string, unknown>
+}
+
+// A list row carries the record's own columns and its jsonb blob. Everything
+// else — multi-selects, tags, links, user references, connections, channel
+// links — lives in a side table, which is why the list engine leaves it out.
+const SIDE_TABLE_STORAGES = new Set(['entries', 'user_refs', 'connections', 'channels'])
+
+/**
+ * Fills in the side-table values for the card fields a view actually shows.
+ * CRM's hydrator reads one query per storage class over the whole page, so
+ * this costs a handful of queries for the page rather than any per record —
+ * but it is skipped entirely when no card field needs it.
+ */
+async function attachCardFieldValues(
+  tx: Tx,
+  view: WorkflowsViewRow,
+  items: WorkflowsBoardItem[]
+): Promise<void> {
+  const chosen = (view.definition as WorkflowsViewDefinition).cardFields ?? []
+  if (items.length === 0 || chosen.length === 0) return
+
+  const defs = await getRecordTypeFields(tx, view.record_type_key)
+  const keys = defs
+    .filter(d => chosen.includes(d.key) && !d.orphan && SIDE_TABLE_STORAGES.has(d.storage))
+    .map(d => d.key)
+  if (keys.length === 0) return
+
+  const hydrated = await hydrateRecords(tx, view.record_type_key, items)
+  const byId = new Map(hydrated.map(h => [h.id, h.fields]))
+  for (const item of items) {
+    const fields = byId.get(item.id)
+    if (!fields) continue
+    const picked: Record<string, unknown> = {}
+    for (const key of keys) picked[key] = fields[key] ?? null
+    item.fields = picked
+  }
 }
 
 function mergedListOpts(view: WorkflowsViewRow, overlay: WorkflowsRecordsOverlay) {
@@ -154,6 +197,7 @@ export async function getWorkflowsViewRecords(
       limit: overlay.limit,
       offset: overlay.offset
     })
+    await attachCardFieldValues(tx, view, page.items)
     return { items: page.items, total: page.total, truncated: false, placements: [] }
   }
 
@@ -177,6 +221,7 @@ export async function getWorkflowsViewRecords(
       ...opts,
       ids: memberIds
     })
+    await attachCardFieldValues(tx, view, items)
     return { items, total, truncated: items.length < total, placements }
   }
 
@@ -187,6 +232,7 @@ export async function getWorkflowsViewRecords(
     const values = await getWorkflowsGroupValues(tx, groupFieldDef, items)
     for (const item of board) item.groupValues = values.get(item.id) ?? []
   }
+  await attachCardFieldValues(tx, view, board)
 
   return { items: board, total, truncated: items.length < total, placements }
 }

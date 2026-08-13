@@ -39,6 +39,23 @@ watch(() => view.value?.recordTypeKey, async (key) => {
   }
 }, { immediate: true })
 
+// The people this view shows are resolved by id: the shared directory holds
+// one page of the org's members, and a record may reference anyone.
+const { ensureUserIds } = useCrmUsers()
+watch([records, fields], ([recs, defs]) => {
+  if (!recs || defs.length === 0) return
+  const ids = workflowsReferencedUserIds(
+    recs.items,
+    defs,
+    view.value?.definition.groupField ?? null
+  )
+  if (ids.length > 0) {
+    ensureUserIds(ids).catch(() => {
+      // Unresolved ids render as "Unknown user"; the board still works.
+    })
+  }
+})
+
 const typeInfo = computed(() =>
   types.value.find(t => t.key === view.value?.recordTypeKey) ?? null)
 const canCreate = computed(() => typeInfo.value?.canCreate ?? false)

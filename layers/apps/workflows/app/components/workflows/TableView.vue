@@ -1,9 +1,9 @@
 <script setup lang="ts">
 // Table renderer: name + the view's card fields as columns, read-only —
-// clicking a row opens the slideover. Only values the list feed carries
-// render (jsonb-stored kinds, promoted status, timestamps, assigned
-// avatars); other storages show as an em dash, same limitation as CRM's
-// list table. Headers toggle the sort for sortable fields.
+// clicking a row opens the slideover. Values come from the record row
+// (status, timestamps, jsonb fields) or from the side-table values the feed
+// attaches for the chosen keys, so any field of the type can be a column.
+// Headers toggle the sort for the fields the list engine can order on.
 import type { CrmFieldSetting } from '../../../../crm/app/utils/field-kinds'
 import type { WorkflowsBoardItem, WorkflowsViewDetail, WorkflowsViewRecords } from '../../utils/workflows-types'
 
@@ -36,7 +36,6 @@ const userName = (id: string) => usersById.value.get(id)?.name ?? null
 
 const fieldMap = computed(() => new Map(props.fields.map(f => [f.key, f])))
 
-const JSONB_KINDS = new Set(['text', 'textarea', 'number', 'boolean', 'date', 'datetime', 'key_select'])
 const INTRINSIC_LABELS: Record<string, string> = {
   status: 'Status',
   created_at: 'Created',
@@ -63,11 +62,10 @@ const columns = computed<TableColumnDef[]>(() => {
       ?? (key === 'status' ? props.fields.find(f => f.column === 'status') ?? null : null)
     if (field) {
       const storage = workflowsFieldStorage(field)
-      const renderable = !!field.column || JSONB_KINDS.has(field.kind) || storage === 'user_refs'
-      if (!renderable) continue
       out.push({
         key: field.key,
         label: field.label,
+        // Side-table values have no column to ORDER BY.
         sortable: !!field.column || storage === 'jsonb',
         field
       })
@@ -84,13 +82,10 @@ function cellText(item: WorkflowsBoardItem, column: TableColumnDef): string {
   const field = column.field
   if (!field) return item.status ?? '—'
   if (field.column === 'status') return field ? formatCrmValue(item.status, field) : (item.status ?? '—')
-  const storage = workflowsFieldStorage(field)
-  if (storage === 'jsonb') return formatCrmValue(item.data[field.key], field, { userName })
-  if (storage === 'user_refs') {
-    const names = item.assignedTo.map(id => userName(id) ?? '?')
-    return names.length > 0 ? names.join(', ') : '—'
-  }
-  return '—'
+  const raw = workflowsFieldStorage(field) === 'jsonb'
+    ? item.data[field.key]
+    : item.fields?.[field.key] ?? null
+  return formatCrmValue(raw, field, { userName })
 }
 
 function formatDate(iso: string): string {

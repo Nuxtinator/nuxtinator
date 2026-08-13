@@ -61,6 +61,12 @@ export interface WorkflowsBoardItem {
   data: Record<string, unknown>
   /** Current values of the grouping field (field-grouped boards only). */
   groupValues?: string[]
+  /**
+   * Values for card fields stored outside the record row — multi-selects,
+   * tags, links, user references, connections, channels. Carried only for
+   * the keys the view shows.
+   */
+  fields?: Record<string, unknown>
 }
 
 export interface WorkflowsViewRecords {

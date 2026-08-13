@@ -72,16 +72,12 @@ const INTRINSIC_CHOICES: WorkflowsCardFieldChoice[] = [
 ]
 
 /**
- * The values a view can put on its cards / in its table columns: the
- * intrinsics plus every field the record feed actually carries for that
- * renderer — jsonb-stored values everywhere, the grouping field on a board,
- * assigned users in a table. Storages the feed doesn't carry (entries,
- * connections, channels) are omitted: they would render as an em dash.
+ * The values a view can put on its cards / in its table columns: the record
+ * intrinsics plus every field of the type. Values living outside the record
+ * row are fetched for the chosen keys by the view feed, so any field can be
+ * shown.
  */
-export function workflowsCardFieldChoices(
-  fields: CrmFieldSetting[],
-  opts: { viewType: WorkflowsViewType, groupFieldKey?: string | null }
-): WorkflowsCardFieldChoice[] {
+export function workflowsCardFieldChoices(fields: CrmFieldSetting[]): WorkflowsCardFieldChoice[] {
   const statusField = fields.find(f => f.column === 'status')
   const choices = INTRINSIC_CHOICES.map(choice =>
     choice.key === 'status' && statusField
@@ -90,13 +86,36 @@ export function workflowsCardFieldChoices(
   for (const field of fields) {
     // Promoted columns are reachable through the intrinsics above.
     if (field.hidden || field.orphan || field.column) continue
-    const storage = workflowsFieldStorage(field)
-    const renderable = storage === 'jsonb'
-      || field.key === opts.groupFieldKey
-      || (opts.viewType === 'table' && storage === 'user_refs')
-    if (renderable) choices.push({ key: field.key, label: field.label })
+    choices.push({ key: field.key, label: field.label })
   }
   return choices
+}
+
+/**
+ * Every user id a view's feed refers to — values of its user fields, plus
+ * the grouping values when a board is grouped by one (those become its
+ * columns). The names behind these ids come from a directory page that need
+ * not contain them, so the view resolves exactly what it shows.
+ */
+export function workflowsReferencedUserIds(
+  items: Array<{ fields?: Record<string, unknown>, groupValues?: string[] }>,
+  fields: CrmFieldSetting[],
+  groupFieldKey: string | null
+): string[] {
+  const userKeys = fields.filter(f => f.kind === 'user_select').map(f => f.key)
+  const groupIsUser = !!groupFieldKey && userKeys.includes(groupFieldKey)
+  if (userKeys.length === 0) return []
+
+  const ids = new Set<string>()
+  const add = (raw: unknown) => {
+    if (Array.isArray(raw)) raw.forEach(add)
+    else if (typeof raw === 'string' && raw !== '') ids.add(raw)
+  }
+  for (const item of items) {
+    for (const key of userKeys) add(item.fields?.[key])
+    if (groupIsUser) add(item.groupValues)
+  }
+  return [...ids]
 }
 
 /**
