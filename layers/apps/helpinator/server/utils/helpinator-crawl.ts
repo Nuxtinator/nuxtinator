@@ -11,9 +11,6 @@
 // concurrent fetches with a short gap, a per-page timeout and size cap.
 import { createHash, randomUUID } from 'node:crypto'
 import { sql, type Transaction } from 'kysely'
-import { parseHTML } from 'linkedom'
-import { Readability } from '@mozilla/readability'
-import TurndownService from 'turndown'
 import robotsParser from 'robots-parser'
 
 import type { Database } from '#core/server/database/schema'
@@ -22,30 +19,11 @@ import { embed, chunkMarkdown, vectorSql, resolveEmbeddingModel, resolveAiEmbedR
 import type { HelpinatorSourceRow } from './helpinator-libraries'
 import { helpinatorNormalizeUrl } from './helpinator-libraries'
 import { helpinatorSafeFetch } from './helpinator-safe-fetch'
+import { helpinatorExtract, helpinatorParseDom } from './helpinator-extract'
 import { helpinatorScope, type HelpinatorScope } from './helpinator-guards'
 import { helpinatorEmbedRun } from './helpinator-search'
 
 type Tx = Transaction<Database>
-
-// The slice of the DOM the crawler touches. linkedom's parseHTML is typed
-// loosely and the nitro tsconfig has no DOM lib, so the document is cast to
-// this once at each parse site.
-interface DomNode {
-  textContent: string | null
-  innerHTML: string
-  getAttribute(name: string): string | null
-  remove(): void
-  querySelector(sel: string): DomNode | null
-  querySelectorAll(sel: string): Iterable<DomNode>
-  closest(sel: string): DomNode | null
-  cloneNode(deep: boolean): DomNode
-}
-interface DomDocument extends DomNode {
-  body: DomNode | null
-}
-function parseDom(html: string): DomDocument {
-  return (parseHTML(html) as unknown as { document: DomDocument }).document
-}
 
 export const HELPINATOR_CRAWL_USER_AGENT = 'NuxtinatorHelpinator/1.0 (+https://github.com/corsacca/nuxtinator)'
 const FETCH_TIMEOUT_MS = 10_000
@@ -94,7 +72,7 @@ export function helpinatorDiscoverLinks(html: string, start: string, opts: { res
   const seen = new Set<string>([start])
   const normalizedBase = helpinatorNormalizeUrl(baseUrl.toString())
   if (normalizedBase) seen.add(normalizedBase)
-  const document = parseDom(html)
+  const document = helpinatorParseDom(html)
   for (const a of Array.from(document.querySelectorAll('a[href]'))) {
     if (urls.length >= opts.maxPages) break
     const href = a.getAttribute('href') ?? ''
@@ -117,83 +95,7 @@ export function helpinatorDiscoverLinks(html: string, start: string, opts: { res
   return { start, urls }
 }
 
-// --- Extraction ---
-
-export interface HelpinatorExtracted {
-  title: string
-  markdown: string
-}
-
-const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' })
-turndown.remove(['script', 'style', 'noscript', 'iframe', 'svg', 'form', 'button', 'time'] as never)
-
-function cleanMarkdown(md: string): string {
-  return md
-    .replace(/\r\n?/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-}
-
-// Share of an element's text that sits inside links. Menus are near 1.
-function linkDensity(el: DomNode): number {
-  const total = (el.textContent ?? '').replace(/\s+/g, '').length
-  if (!total) return 0
-  let linked = 0
-  for (const a of Array.from(el.querySelectorAll('a'))) linked += (a.textContent ?? '').replace(/\s+/g, '').length
-  return linked / total
-}
-
-// A site menu, as opposed to a listing page's content: mostly links, 5 or
-// more of them, with short labels ("About", "Contact us"). Listing entries
-// read as titles or sentences, so they average more words per link. Anything
-// inside (or wrapping) the page's main content is never a menu.
-const MENU_MIN_LINKS = 5
-const MENU_MAX_WORDS_PER_LINK = 4
-function looksLikeMenu(el: DomNode): boolean {
-  if (el.closest('main, article') || el.querySelector('main, article')) return false
-  const links = Array.from(el.querySelectorAll('a'))
-  if (links.length < MENU_MIN_LINKS || linkDensity(el) <= 0.8) return false
-  const words = links.reduce((n, a) => n + (a.textContent ?? '').trim().split(/\s+/).filter(Boolean).length, 0)
-  return words / links.length <= MENU_MAX_WORDS_PER_LINK
-}
-
-// Readability picks the main article; the fallback is the whole body with
-// chrome elements stripped, for pages readability rejects (short listings).
-// Readability can return just a site menu: on Elementor pages it picks the
-// page-wide wrapper, then drops the content blocks because their class says
-// "widget". A pick that is mostly links is treated as a rejection.
-export function helpinatorExtract(html: string, url: string): HelpinatorExtracted {
-  const document = parseDom(html)
-  const docTitle = (document.querySelector('title')?.textContent ?? '').trim()
-  for (const el of Array.from(document.querySelectorAll('time'))) el.remove()
-
-  let article: { title?: string | null, content?: string | null } | null
-  try {
-    // Readability mutates the document; work on a clone for the fallback.
-    article = new Readability(document.cloneNode(true) as never, { charThreshold: 100 }).parse()
-  } catch {
-    article = null
-  }
-
-  let contentHtml = article?.content ?? ''
-  if (contentHtml.trim() && linkDensity(parseDom(`<html><body>${contentHtml}</body></html>`).body!) > 0.5) contentHtml = ''
-  if (!contentHtml.trim()) {
-    for (const sel of ['nav', 'header', 'footer', 'aside', '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]']) {
-      for (const el of Array.from(document.querySelectorAll(sel))) el.remove()
-    }
-    // Menus not marked up as <nav>: short-label link lists, and the blocks
-    // wrapping them.
-    for (const el of Array.from(document.querySelectorAll('ul, ol, div'))) {
-      if (looksLikeMenu(el)) el.remove()
-    }
-    contentHtml = (document.querySelector('main') ?? document.body)?.innerHTML ?? ''
-  }
-  const markdown = cleanMarkdown(turndown.turndown(contentHtml))
-  const h1 = (document.querySelector('h1')?.textContent ?? '').trim()
-  const title = (article?.title ?? '').trim() || h1 || docTitle || url
-  return { title: title.slice(0, 300), markdown }
-}
+// --- Extraction (see helpinator-extract.ts) ---
 
 export function helpinatorContentHash(title: string, markdown: string): string {
   return createHash('sha256').update(title).update('\n').update(markdown).digest('hex')

@@ -17,7 +17,10 @@ Requires `@nuxtinator/context` and `@nuxtinator/ai`. `@nuxtinator/inbox`
   - **website** — a list of URL entries. Each entry crawls its page plus the
     same-site pages it links to (one hop, optionally only under the entry's
     path, capped per entry), extracts the main content with a readability
-    parser, stores it as markdown and indexes it for search. Per-entry
+    parser, stores it as markdown and indexes it for search. Content React
+    streams in after the shell (Next.js Suspense) is swapped in first, and
+    data tables become one labelled line per row. No JavaScript runs, so
+    client-rendered pages still come back empty. Per-entry
     **Re-crawl**, per-library **Sync all**, a page viewer, and pruning of
     junk pages. Pages are read-only: a re-crawl replaces them (unchanged pages
     are not re-embedded).
