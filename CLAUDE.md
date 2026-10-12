@@ -264,6 +264,8 @@ When [layers/tenancy/](layers/tenancy/) is in `extends:`:
 
 Migration filenames must be globally unique across host + all layers. Convention: `<appId>_NNN_<description>.ts` for regular migrations; `<appId>_T<NNN>_<description>.ts` for per-app tenancy retrofits.
 
+**Committed migrations are immutable. Never squash, edit, rename, renumber or delete a migration file once it has been committed** — not even on an unreleased feature branch, and not to "tidy up before release". Every schema change, fix-up or reversal goes in a **new** migration. Kysely tracks migrations by name only, so any database that already ran the old file (another developer's checkout, a branch deploy, a host pinned to a local layer path) never re-runs it and silently misses whatever the rewrite added — e.g. helpinator `ec05e74` folded `008`–`011` into `001`–`007`, leaving existing DBs without `run_heartbeat_at`. Patch-on-patch migration history is fine; a drifted database is not. The only exception is a migration that has never left your machine (uncommitted) — and if in doubt, ask.
+
 Database is Postgres via Kysely + `kysely-postgres-js`. Schema composed: core tables in [layers/core/server/database/schema.ts](layers/core/server/database/schema.ts); layers extend the `Database` interface via module augmentation in their own `server/database/schema.d.ts`.
 
 ### Other notable bits
@@ -292,3 +294,4 @@ Database is Postgres via Kysely + `kysely-postgres-js`. Schema composed: core ta
 - Layer code that touches the database imports `db` from `#core/server/utils/database`. Only the tenancy layer imports `adminDb` (via `#tenant/admin-db`); doing so from outside that layer is a tenancy contract violation.
 - Server route handlers that need user identity / permissions use `defineTenantHandler` from `#tenant/server`. In single mode it's just `requireAuth` + a transaction; in multi mode it adds the org context.
 - Run dev/build/test commands from `dev/`, not from the repo root.
+- Never squash, edit, rename or delete a committed migration — add a new one (see [Migrations](#migrations)).

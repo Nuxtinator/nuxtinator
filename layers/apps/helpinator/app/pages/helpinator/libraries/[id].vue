@@ -94,7 +94,17 @@ async function remove() {
 
 // ---- URL entries ----------------------------------------------------------
 
-const newSource = reactive({ url: '', restrict_to_path: true, max_pages: 200, max_page_mb: 2 })
+const newSource = reactive({ url: '', restrict_to_path: true, max_pages: 200, max_page_mb: 2, max_depth: 1 })
+
+// How many links the crawl follows from the entry's page (server caps at 5).
+const depthItems = [
+  { label: 'This page only', value: 0 },
+  { label: '1 link deep', value: 1 },
+  { label: '2 links deep', value: 2 },
+  { label: '3 links deep', value: 3 },
+  { label: '4 links deep', value: 4 },
+  { label: '5 links deep', value: 5 }
+]
 const adding = ref(false)
 
 const syncing = computed(() => (saved.value?.sources ?? []).some(s => s.status === 'syncing'))
@@ -127,6 +137,21 @@ async function addSource() {
     toast.add({ title: 'Could not add the URL', description: helpinatorErrorMessage(err), color: 'error' })
   } finally {
     adding.value = false
+  }
+}
+
+// Saved straight away; takes effect on the next crawl.
+async function setDepth(s: HelpinatorSource, depth: number) {
+  if (depth === s.max_depth) return
+  try {
+    await $fetch(`/api/helpinator/libraries/${saved.value!.id}/sources/${s.id}`, {
+      method: 'PUT',
+      body: { max_depth: depth }
+    })
+    await load()
+    toast.add({ title: 'Depth saved', description: 'Re-crawl to apply it now.', color: 'success' })
+  } catch (err) {
+    toast.add({ title: 'Could not change the depth', description: helpinatorErrorMessage(err), color: 'error' })
   }
 }
 
@@ -318,7 +343,7 @@ async function prunePage(p: HelpinatorPageSummary) {
           />
 
           <p v-if="saved.sources.length === 0" class="text-sm text-(--ui-text-muted)">
-            No URLs yet. Each entry crawls its page plus the same-site pages it links to.
+            No URLs yet. Each entry crawls its page plus the same-site pages it links to, as many links deep as you choose.
           </p>
 
           <ul v-else class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-lg">
@@ -334,7 +359,7 @@ async function prunePage(p: HelpinatorPageSummary) {
                     </span>
                   </p>
                   <p class="text-xs text-(--ui-text-muted) flex items-center gap-2 flex-wrap">
-                    <span>{{ s.restrict_to_path ? 'Under this path' : 'Whole site, one hop' }}</span>
+                    <span>{{ s.restrict_to_path ? 'Under this path' : 'Whole site' }}</span>
                     <span>·</span>
                     <span>max {{ s.max_pages }}</span>
                     <span>·</span>
@@ -350,6 +375,15 @@ async function prunePage(p: HelpinatorPageSummary) {
                   </p>
                 </div>
                 <div class="flex items-center gap-1 shrink-0">
+                  <USelect
+                    :model-value="s.max_depth"
+                    :items="depthItems"
+                    :disabled="s.status === 'syncing'"
+                    size="xs"
+                    class="w-36"
+                    aria-label="Crawl depth"
+                    @update:model-value="(v: number) => setDepth(s, v)"
+                  />
                   <UButton size="xs" variant="ghost" color="neutral" :disabled="!s.page_count" @click="showPages(s)">
                     View
                   </UButton>
@@ -380,15 +414,21 @@ async function prunePage(p: HelpinatorPageSummary) {
             <UFormField label="Max page size (MB)">
               <UInput v-model.number="newSource.max_page_mb" type="number" :min="1" :max="10" class="w-28" />
             </UFormField>
+            <UFormField label="Depth">
+              <USelect v-model="newSource.max_depth" :items="depthItems" class="w-36" />
+            </UFormField>
             <UCheckbox v-model="newSource.restrict_to_path" label="Only pages under this path" class="pb-2" />
             <UButton type="submit" icon="i-lucide-plus" :loading="adding" :disabled="!newSource.url.trim()">
               Add and crawl
             </UButton>
           </form>
           <p class="text-xs text-(--ui-text-muted)">
-            The entry's page and every same-site page it links to are fetched (one hop), read with a
-            readability extractor, and indexed for search. Pages are read-only: to correct or add to what
-            a site says, put it in a portfolio library the widget also uses.
+            The entry's page and the same-site pages it links to are fetched — following links as many
+            levels deep as the entry's depth, nearest pages first, up to its max pages — then read with a
+            readability extractor, and indexed for search. Each crawl keeps only the pages it reaches, so
+            raising the depth can swap out pages that no longer fit under max pages; raise max pages too
+            to keep them. Pages are read-only: to correct or add to what a site says, put it in a
+            portfolio library the widget also uses.
           </p>
         </div>
       </UCard>

@@ -26,12 +26,12 @@ export interface HelpinatorDomNode {
   closest(sel: string): HelpinatorDomNode | null
   cloneNode(deep: boolean): HelpinatorDomNode
 }
-interface DomDocument extends HelpinatorDomNode {
+export interface HelpinatorDomDocument extends HelpinatorDomNode {
   body: HelpinatorDomNode | null
   getElementById(id: string): HelpinatorDomNode | null
 }
-export function helpinatorParseDom(html: string): DomDocument {
-  return (parseHTML(html) as unknown as { document: DomDocument }).document
+export function helpinatorParseDom(html: string): HelpinatorDomDocument {
+  return (parseHTML(html) as unknown as { document: HelpinatorDomDocument }).document
 }
 
 export interface HelpinatorExtracted {
@@ -52,7 +52,7 @@ const COMMENT_NODE = 8
 // `<template id="P:n">` instead, replaced as-is. Without JS the page shows
 // only the fallback (a skeleton), and readability skips the hidden div. This
 // does the swap on the parsed document, the way `$RC` / `$RS` do.
-function resolveReactStreaming(document: DomDocument): void {
+function resolveReactStreaming(document: HelpinatorDomDocument): void {
   for (;;) {
     let moved = false
     for (const segment of Array.from(document.querySelectorAll('div[hidden][id^="S:"]'))) {
@@ -175,7 +175,7 @@ function tableToMarkdown(table: HelpinatorDomNode): string {
 
 // Sortable column headers put their label in a <button>, which readability
 // and turndown both drop. Unwrap them so the header keeps its text.
-function unwrapHeaderButtons(document: DomDocument): void {
+function unwrapHeaderButtons(document: HelpinatorDomDocument): void {
   for (const button of Array.from(document.querySelectorAll('th button'))) {
     const parent = button.parentNode
     if (!parent) continue
@@ -199,7 +199,7 @@ function hasContentTable(root: HelpinatorDomNode): boolean {
 // Relative links and image sources are made absolute against the page (or its
 // `<base href>`), so the bot can hand a visitor a link that works. In-page
 // `#` anchors and non-http schemes (mailto:, tel:, javascript:) are left as-is.
-function absolutizeLinks(document: DomDocument, pageUrl: string): void {
+function absolutizeLinks(document: HelpinatorDomDocument, pageUrl: string): void {
   let base: URL
   try {
     base = new URL(pageUrl)
@@ -270,7 +270,12 @@ function looksLikeMenu(el: HelpinatorDomNode): boolean {
 // pick that leaves out the page's data table — readability scores prose, so
 // a leaderboard or price list loses to the blurb above it.
 export function helpinatorExtract(html: string, url: string): HelpinatorExtracted {
-  const document = helpinatorParseDom(html)
+  return helpinatorExtractFrom(helpinatorParseDom(html), url)
+}
+
+// The same, on an already-parsed document (the crawler reads its links from
+// the same parse first). Mutates the document.
+export function helpinatorExtractFrom(document: HelpinatorDomDocument, url: string): HelpinatorExtracted {
   resolveReactStreaming(document)
   absolutizeLinks(document, url)
   unwrapHeaderButtons(document)

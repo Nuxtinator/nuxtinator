@@ -15,18 +15,19 @@ Requires `@nuxtinator/context` and `@nuxtinator/ai`. `@nuxtinator/inbox`
 - **Libraries.** Managed under `/helpinator/libraries`, shared by every widget
   in the org. Two kinds:
   - **website** — a list of URL entries. Each entry crawls its page plus the
-    same-site pages it links to (one hop, optionally only under the entry's
-    path, capped per entry), extracts the main content with a readability
-    parser, stores it as markdown and indexes it for search. Content React
-    streams in after the shell (Next.js Suspense) is swapped in first, and
-    data tables become one labelled line per row. Relative links and images
-    are made absolute, so the bot can hand out links that work. No JavaScript
-    runs, so client-rendered pages still come back empty. Sites laid out with
-    `<table>` (pre-CSS layouts) are not supported: their tables are read as
-    data, so headings and paragraphs inside them flatten into rows. Each
-    entry has a **max page size** (default 2 MB, up to 10). A page over it is
-    not read: the crawl keeps its last copy and the entry's notice names the
-    page, so raise the limit with **Edit**. Per-entry
+    same-site pages it links to, breadth first to a per-entry depth (0–5
+    links, default 1; optionally only under the entry's path, capped per
+    entry), extracts the main content with a readability parser, stores it as
+    markdown and indexes it for search. Content React streams in after the
+    shell (Next.js Suspense) is swapped in first, and data tables become one
+    labelled line per row. Relative links and images are made absolute, so the
+    bot can hand out links that work. No JavaScript runs, so client-rendered
+    pages still come back empty. Sites laid out with `<table>` (pre-CSS
+    layouts) are not supported: their tables are read as data, so headings and
+    paragraphs inside them flatten into rows. Each entry has a **max page
+    size** (default 2 MB, up to 10). A page over it is not read: the crawl
+    keeps its last copy and the entry's notice names the page, so raise the
+    limit with **Edit**. Per-entry
     **Re-crawl**, per-library **Sync all**, a page viewer, and pruning of
     junk pages. Pages are read-only: a re-crawl replaces them (unchanged pages
     are not re-embedded).

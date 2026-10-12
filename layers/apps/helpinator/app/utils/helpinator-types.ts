@@ -39,6 +39,8 @@ export interface HelpinatorSource {
   restrict_to_path: boolean
   max_pages: number
   max_page_mb: number
+  // Links followed from the start page: 0 = the page alone.
+  max_depth: number
   status: HelpinatorSourceStatus
   run_started_at: string | null
   page_count: number

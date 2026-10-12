@@ -33,13 +33,17 @@ const HTTP_URL = z.string().trim().max(2000).refine((v) => {
 
 export const HELPINATOR_MAX_PAGE_MB = 10
 
+// How deep a URL entry's crawl may go. The DB only checks it is >= 0.
+export const HELPINATOR_MAX_DEPTH = 5
+
 export const HelpinatorSourceInput = z.object({
   url: HTTP_URL,
   restrict_to_path: z.boolean().default(true),
   max_pages: z.number().int().min(1).max(1000).default(200),
   // Per-page HTML cap. Linkedom holds the whole page in memory, so it stays
   // bounded; 2 MB covers almost every site.
-  max_page_mb: z.number().int().min(1).max(HELPINATOR_MAX_PAGE_MB).default(2)
+  max_page_mb: z.number().int().min(1).max(HELPINATOR_MAX_PAGE_MB).default(2),
+  max_depth: z.number().int().min(0).max(HELPINATOR_MAX_DEPTH).default(1)
 })
 export type HelpinatorSourceInputValue = z.infer<typeof HelpinatorSourceInput>
 
@@ -184,7 +188,7 @@ export async function helpinatorAddSource(tx: Tx, library: HelpinatorLibraryRow,
   // A concurrent add of the same URL lands on the unique key: same 409.
   const row = await tx
     .insertInto('helpinator_library_sources')
-    .values({ library_id: library.id, url, restrict_to_path: input.restrict_to_path, max_pages: input.max_pages, max_page_mb: input.max_page_mb })
+    .values({ library_id: library.id, url, restrict_to_path: input.restrict_to_path, max_pages: input.max_pages, max_page_mb: input.max_page_mb, max_depth: input.max_depth })
     .onConflict(oc => oc.columns(['library_id', 'url']).doNothing())
     .returningAll()
     .executeTakeFirst()
@@ -192,10 +196,17 @@ export async function helpinatorAddSource(tx: Tx, library: HelpinatorLibraryRow,
   return row
 }
 
-export async function helpinatorUpdateSource(tx: Tx, source: HelpinatorSourceRow, input: Pick<HelpinatorSourceInputValue, 'restrict_to_path' | 'max_pages'> & { max_page_mb?: number }): Promise<HelpinatorSourceRow> {
+// Changes only the fields given.
+export async function helpinatorUpdateSource(tx: Tx, source: HelpinatorSourceRow, input: Partial<Pick<HelpinatorSourceInputValue, 'restrict_to_path' | 'max_pages' | 'max_page_mb' | 'max_depth'>>): Promise<HelpinatorSourceRow> {
+  const patch: Partial<Pick<HelpinatorSourceRow, 'restrict_to_path' | 'max_pages' | 'max_page_mb' | 'max_depth'>> = {}
+  if (input.restrict_to_path !== undefined) patch.restrict_to_path = input.restrict_to_path
+  if (input.max_pages !== undefined) patch.max_pages = input.max_pages
+  if (input.max_page_mb !== undefined) patch.max_page_mb = input.max_page_mb
+  if (input.max_depth !== undefined) patch.max_depth = input.max_depth
+  if (!Object.keys(patch).length) return source
   return await tx
     .updateTable('helpinator_library_sources')
-    .set({ restrict_to_path: input.restrict_to_path, max_pages: input.max_pages, max_page_mb: input.max_page_mb ?? source.max_page_mb })
+    .set(patch)
     .where('id', '=', source.id)
     .returningAll()
     .executeTakeFirstOrThrow()

@@ -49,6 +49,7 @@ export function helpinatorAdminSource(s: HelpinatorSourceRow) {
     restrict_to_path: s.restrict_to_path,
     max_pages: s.max_pages,
     max_page_mb: s.max_page_mb,
+    max_depth: s.max_depth,
     status: s.status,
     run_started_at: s.run_started_at,
     page_count: s.page_count,

@@ -13,6 +13,8 @@ export interface FixturePage {
   redirect?: string
   // Stream `html` repeated until this many bytes, chunked (no content-length).
   streamBytes?: number
+  // Wait this long before answering.
+  delayMs?: number
 }
 
 export interface FixtureSite {
@@ -37,9 +39,11 @@ export function article(title: string, topic: string, extra = ''): string {
 export async function startFixtureSite(): Promise<FixtureSite> {
   const pages = new Map<string, FixturePage>()
   const hits: string[] = []
-  const server: Server = createServer((req, res) => {
+  const server: Server = createServer(async (req, res) => {
     const path = (req.url ?? '/').split('?')[0]!
     hits.push(path)
+    const delayMs = pages.get(path)?.delayMs
+    if (delayMs) await new Promise(resolve => setTimeout(resolve, delayMs))
     if (path === '/robots.txt') {
       res.writeHead(200, { 'content-type': 'text/plain' })
       res.end('User-agent: *\nDisallow: /docs/secret\n')
