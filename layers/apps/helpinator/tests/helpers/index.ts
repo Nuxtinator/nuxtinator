@@ -216,7 +216,7 @@ export interface LibraryDetail {
   id: string
   name: string
   kind: 'website' | 'portfolio'
-  sources: Array<{ id: string, url: string, status: string, page_count: number, last_error: string | null }>
+  sources: Array<{ id: string, url: string, status: string, page_count: number, max_page_mb: number, last_error: string | null }>
   stats: { pages: number, chunks: number, bytes: number, models: string[] }
   index_stale: boolean
 }

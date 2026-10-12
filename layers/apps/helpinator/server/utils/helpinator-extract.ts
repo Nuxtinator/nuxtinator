@@ -18,6 +18,7 @@ export interface HelpinatorDomNode {
   nextSibling: HelpinatorDomNode | null
   parentNode: HelpinatorDomNode | null
   getAttribute(name: string): string | null
+  setAttribute(name: string, value: string): void
   remove(): void
   insertBefore(node: HelpinatorDomNode, ref: HelpinatorDomNode | null): void
   querySelector(sel: string): HelpinatorDomNode | null
@@ -193,6 +194,34 @@ function hasContentTable(root: HelpinatorDomNode): boolean {
   return false
 }
 
+// --- Links ---
+
+// Relative links and image sources are made absolute against the page (or its
+// `<base href>`), so the bot can hand a visitor a link that works. In-page
+// `#` anchors and non-http schemes (mailto:, tel:, javascript:) are left as-is.
+function absolutizeLinks(document: DomDocument, pageUrl: string): void {
+  let base: URL
+  try {
+    base = new URL(pageUrl)
+    const declared = document.querySelector('base[href]')?.getAttribute('href')
+    if (declared) base = new URL(declared, base)
+  } catch {
+    return
+  }
+  for (const [sel, attr] of [['a[href]', 'href'], ['img[src]', 'src']] as const) {
+    for (const el of Array.from(document.querySelectorAll(sel))) {
+      const value = (el.getAttribute(attr) ?? '').trim()
+      if (!value || value.startsWith('#') || /^[a-z][a-z\d+.-]*:/i.test(value)) continue
+      try {
+        const abs = new URL(value, base)
+        if (abs.protocol === 'http:' || abs.protocol === 'https:') el.setAttribute(attr, abs.toString())
+      } catch {
+        // Unparseable: leave it.
+      }
+    }
+  }
+}
+
 // --- Extraction ---
 
 const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' })
@@ -243,6 +272,7 @@ function looksLikeMenu(el: HelpinatorDomNode): boolean {
 export function helpinatorExtract(html: string, url: string): HelpinatorExtracted {
   const document = helpinatorParseDom(html)
   resolveReactStreaming(document)
+  absolutizeLinks(document, url)
   unwrapHeaderButtons(document)
   const docTitle = (document.querySelector('title')?.textContent ?? '').trim()
   for (const el of Array.from(document.querySelectorAll('time'))) el.remove()

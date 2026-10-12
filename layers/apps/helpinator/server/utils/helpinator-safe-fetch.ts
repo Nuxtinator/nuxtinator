@@ -203,6 +203,8 @@ export interface HelpinatorFetched {
   finalUrl: string
   // null when the body was over the cap, or `wantBody` rejected the response.
   body: string | null
+  // The body was wanted but passed `maxBytes`, so it was not read.
+  tooLarge: boolean
 }
 
 // GET `url`, following up to MAX_REDIRECTS redirects, each target checked.
@@ -228,9 +230,10 @@ export async function helpinatorSafeFetch(
     const finalUrl = current.toString()
     if (opts.wantBody && !opts.wantBody(status, contentType)) {
       res.destroy()
-      return { status, contentType, finalUrl, body: null }
+      return { status, contentType, finalUrl, body: null, tooLarge: false }
     }
-    return { status, contentType, finalUrl, body: await readCapped(res, opts.maxBytes) }
+    const body = await readCapped(res, opts.maxBytes)
+    return { status, contentType, finalUrl, body, tooLarge: body === null }
   }
 }
 

@@ -66,12 +66,12 @@ describe('helpinatorExtract — React streaming', () => {
 describe('helpinatorExtract — tables', () => {
   it('falls back to the whole page when readability drops the data table', () => {
     const { markdown } = helpinatorExtract(streamedPage(5), 'https://bench.test/leaderboard')
-    for (let i = 1; i <= 5; i++) expect(markdown).toContain(`Model: [Model ${i}](/models/m${i})`)
+    for (let i = 1; i <= 5; i++) expect(markdown).toContain(`Model: [Model ${i}](https://bench.test/models/m${i})`)
   })
 
   it('writes one labelled line per row, links kept, empty cells and icon links skipped', () => {
     const { markdown } = helpinatorExtract(streamedPage(3), 'https://bench.test/leaderboard')
-    expect(markdown).toContain('- #: 1 · Provider: [P Provider 1](/providers/p1) · Model: [Model 1](/models/m1) · Total Score: 91.5%\n')
+    expect(markdown).toContain('- #: 1 · Provider: [P Provider 1](https://bench.test/providers/p1) · Model: [Model 1](https://bench.test/models/m1) · Total Score: 91.5%\n')
   })
 
   it('labels spanned columns and leaves blank-header values unlabelled', () => {
@@ -96,5 +96,28 @@ describe('helpinatorExtract — tables', () => {
     const { markdown } = helpinatorExtract(html, 'https://bench.test/contact')
     expect(markdown).toContain('- Phone · 555 0100')
     expect(markdown).toContain('- Email · [hi@bench.test](mailto:hi@bench.test)')
+  })
+})
+
+describe('helpinatorExtract — links', () => {
+  const page = (head: string, body: string) => `<html><head>${head}</head><body><main><h1>Docs</h1><p>${PROSE}</p>${body}</main></body></html>`
+
+  it('makes relative links and images absolute against the page URL', () => {
+    const { markdown } = helpinatorExtract(page('', `<p>See <a href="../guide?x=1">the guide</a>, <a href="/faq">the FAQ</a> and <img src="img/a.png" alt="A"></p>`), 'https://bench.test/docs/start')
+    expect(markdown).toContain('[the guide](https://bench.test/guide?x=1)')
+    expect(markdown).toContain('[the FAQ](https://bench.test/faq)')
+    expect(markdown).toContain('![A](https://bench.test/docs/img/a.png)')
+  })
+
+  it('honours <base href>', () => {
+    const { markdown } = helpinatorExtract(page('<base href="https://cdn.bench.test/v2/">', `<p><a href="intro">Intro</a></p>`), 'https://bench.test/docs/')
+    expect(markdown).toContain('[Intro](https://cdn.bench.test/v2/intro)')
+  })
+
+  it('leaves anchors, mailto: and absolute links alone', () => {
+    const { markdown } = helpinatorExtract(page('', `<p><a href="#top">Top</a> <a href="mailto:hi@bench.test">Mail</a> <a href="https://other.test/x">Other</a></p>`), 'https://bench.test/docs/')
+    expect(markdown).toContain('[Top](#top)')
+    expect(markdown).toContain('[Mail](mailto:hi@bench.test)')
+    expect(markdown).toContain('[Other](https://other.test/x)')
   })
 })

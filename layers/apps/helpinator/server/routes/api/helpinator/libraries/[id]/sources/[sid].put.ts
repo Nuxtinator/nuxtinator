@@ -1,13 +1,14 @@
-// PUT /api/helpinator/libraries/:id/sources/:sid — change the path restriction
-// or page cap of a URL entry. Takes effect on the next crawl.
+// PUT /api/helpinator/libraries/:id/sources/:sid — change the path restriction,
+// page cap or page size cap of a URL entry. Takes effect on the next crawl.
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
-import { helpinatorGetLibraryOr404, helpinatorGetSourceOr404, helpinatorUpdateSource } from '../../../../../../utils/helpinator-libraries'
+import { HELPINATOR_MAX_PAGE_MB, helpinatorGetLibraryOr404, helpinatorGetSourceOr404, helpinatorUpdateSource } from '../../../../../../utils/helpinator-libraries'
 import { helpinatorAdminSource } from '../../../../../../utils/helpinator-admin'
 
 const Body = z.object({
   restrict_to_path: z.boolean(),
-  max_pages: z.number().int().min(1).max(1000)
+  max_pages: z.number().int().min(1).max(1000),
+  max_page_mb: z.number().int().min(1).max(HELPINATOR_MAX_PAGE_MB).optional()
 })
 
 export default defineEventHandler(async (event) => {

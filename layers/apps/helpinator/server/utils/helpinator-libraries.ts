@@ -31,10 +31,15 @@ const HTTP_URL = z.string().trim().max(2000).refine((v) => {
   }
 }, 'Enter an http(s) URL').refine(helpinatorUrlLooksPublic, 'That address is not reachable from the internet')
 
+export const HELPINATOR_MAX_PAGE_MB = 10
+
 export const HelpinatorSourceInput = z.object({
   url: HTTP_URL,
   restrict_to_path: z.boolean().default(true),
-  max_pages: z.number().int().min(1).max(1000).default(200)
+  max_pages: z.number().int().min(1).max(1000).default(200),
+  // Per-page HTML cap. Linkedom holds the whole page in memory, so it stays
+  // bounded; 2 MB covers almost every site.
+  max_page_mb: z.number().int().min(1).max(HELPINATOR_MAX_PAGE_MB).default(2)
 })
 export type HelpinatorSourceInputValue = z.infer<typeof HelpinatorSourceInput>
 
@@ -179,7 +184,7 @@ export async function helpinatorAddSource(tx: Tx, library: HelpinatorLibraryRow,
   // A concurrent add of the same URL lands on the unique key: same 409.
   const row = await tx
     .insertInto('helpinator_library_sources')
-    .values({ library_id: library.id, url, restrict_to_path: input.restrict_to_path, max_pages: input.max_pages })
+    .values({ library_id: library.id, url, restrict_to_path: input.restrict_to_path, max_pages: input.max_pages, max_page_mb: input.max_page_mb })
     .onConflict(oc => oc.columns(['library_id', 'url']).doNothing())
     .returningAll()
     .executeTakeFirst()
@@ -187,10 +192,10 @@ export async function helpinatorAddSource(tx: Tx, library: HelpinatorLibraryRow,
   return row
 }
 
-export async function helpinatorUpdateSource(tx: Tx, source: HelpinatorSourceRow, input: Pick<HelpinatorSourceInputValue, 'restrict_to_path' | 'max_pages'>): Promise<HelpinatorSourceRow> {
+export async function helpinatorUpdateSource(tx: Tx, source: HelpinatorSourceRow, input: Pick<HelpinatorSourceInputValue, 'restrict_to_path' | 'max_pages'> & { max_page_mb?: number }): Promise<HelpinatorSourceRow> {
   return await tx
     .updateTable('helpinator_library_sources')
-    .set({ restrict_to_path: input.restrict_to_path, max_pages: input.max_pages })
+    .set({ restrict_to_path: input.restrict_to_path, max_pages: input.max_pages, max_page_mb: input.max_page_mb ?? source.max_page_mb })
     .where('id', '=', source.id)
     .returningAll()
     .executeTakeFirstOrThrow()

@@ -94,7 +94,7 @@ async function remove() {
 
 // ---- URL entries ----------------------------------------------------------
 
-const newSource = reactive({ url: '', restrict_to_path: true, max_pages: 200 })
+const newSource = reactive({ url: '', restrict_to_path: true, max_pages: 200, max_page_mb: 2 })
 const adding = ref(false)
 
 const syncing = computed(() => (saved.value?.sources ?? []).some(s => s.status === 'syncing'))
@@ -119,7 +119,7 @@ onBeforeUnmount(() => {
 async function addSource() {
   adding.value = true
   try {
-    await $fetch(`/api/helpinator/libraries/${saved.value!.id}/sources`, { method: 'POST', body: { ...newSource, max_pages: Number(newSource.max_pages) } })
+    await $fetch(`/api/helpinator/libraries/${saved.value!.id}/sources`, { method: 'POST', body: { ...newSource, max_pages: Number(newSource.max_pages), max_page_mb: Number(newSource.max_page_mb) } })
     newSource.url = ''
     toast.add({ title: 'Crawling…', description: 'The pages appear here as they are fetched.', color: 'success' })
     await poll()
@@ -145,6 +145,31 @@ async function syncAll() {
     await poll()
   } catch (err) {
     toast.add({ title: 'Could not start the crawl', description: helpinatorErrorMessage(err), color: 'error' })
+  }
+}
+
+// Edit an entry's crawl settings; they apply from its next crawl.
+const editingSource = ref<HelpinatorSource | null>(null)
+const editForm = reactive({ restrict_to_path: true, max_pages: 200, max_page_mb: 2 })
+const savingSource = ref(false)
+function editSource(s: HelpinatorSource) {
+  Object.assign(editForm, { restrict_to_path: s.restrict_to_path, max_pages: s.max_pages, max_page_mb: s.max_page_mb })
+  editingSource.value = s
+}
+async function saveSource() {
+  savingSource.value = true
+  try {
+    await $fetch(`/api/helpinator/libraries/${saved.value!.id}/sources/${editingSource.value!.id}`, {
+      method: 'PUT',
+      body: { restrict_to_path: editForm.restrict_to_path, max_pages: Number(editForm.max_pages), max_page_mb: Number(editForm.max_page_mb) }
+    })
+    editingSource.value = null
+    toast.add({ title: 'Saved', description: 'The new settings apply from the next crawl.', color: 'success' })
+    await load()
+  } catch (err) {
+    toast.add({ title: 'Could not save', description: helpinatorErrorMessage(err), color: 'error' })
+  } finally {
+    savingSource.value = false
   }
 }
 
@@ -313,6 +338,8 @@ async function prunePage(p: HelpinatorPageSummary) {
                     <span>·</span>
                     <span>max {{ s.max_pages }}</span>
                     <span>·</span>
+                    <span>{{ s.max_page_mb }} MB/page</span>
+                    <span>·</span>
                     <span>{{ when(s.last_synced_at) }}</span>
                     <span>·</span>
                     <span>{{ helpinatorFormatBytes(s.bytes) }}</span>
@@ -325,6 +352,9 @@ async function prunePage(p: HelpinatorPageSummary) {
                 <div class="flex items-center gap-1 shrink-0">
                   <UButton size="xs" variant="ghost" color="neutral" :disabled="!s.page_count" @click="showPages(s)">
                     View
+                  </UButton>
+                  <UButton size="xs" variant="ghost" color="neutral" @click="editSource(s)">
+                    Edit
                   </UButton>
                   <UButton size="xs" variant="ghost" color="primary" @click="resync(s)">
                     Re-crawl
@@ -346,6 +376,9 @@ async function prunePage(p: HelpinatorPageSummary) {
             </UFormField>
             <UFormField label="Max pages">
               <UInput v-model.number="newSource.max_pages" type="number" :min="1" :max="1000" class="w-28" />
+            </UFormField>
+            <UFormField label="Max page size (MB)">
+              <UInput v-model.number="newSource.max_page_mb" type="number" :min="1" :max="10" class="w-28" />
             </UFormField>
             <UCheckbox v-model="newSource.restrict_to_path" label="Only pages under this path" class="pb-2" />
             <UButton type="submit" icon="i-lucide-plus" :loading="adding" :disabled="!newSource.url.trim()">
@@ -373,6 +406,30 @@ async function prunePage(p: HelpinatorPageSummary) {
             </UButton>
             <UButton color="error" @click="remove">
               Delete library
+            </UButton>
+          </div>
+        </template>
+      </UModal>
+
+      <UModal :open="editingSource !== null" title="Edit URL entry" :description="editingSource?.url" @update:open="(v: boolean) => { if (!v) editingSource = null }">
+        <template #body>
+          <form id="edit-source" class="space-y-4" @submit.prevent="saveSource">
+            <UFormField label="Max pages">
+              <UInput v-model.number="editForm.max_pages" type="number" :min="1" :max="1000" class="w-28" />
+            </UFormField>
+            <UFormField label="Max page size (MB)" help="Pages over this are skipped and their last copy kept. Raise it for very large pages (up to 10 MB).">
+              <UInput v-model.number="editForm.max_page_mb" type="number" :min="1" :max="10" class="w-28" />
+            </UFormField>
+            <UCheckbox v-model="editForm.restrict_to_path" label="Only pages under this path" />
+          </form>
+        </template>
+        <template #footer>
+          <div class="flex justify-end gap-2 w-full">
+            <UButton variant="ghost" color="neutral" @click="editingSource = null">
+              Cancel
+            </UButton>
+            <UButton type="submit" form="edit-source" :loading="savingSource">
+              Save
             </UButton>
           </div>
         </template>

@@ -27,7 +27,7 @@ type Tx = Transaction<Database>
 
 export const HELPINATOR_CRAWL_USER_AGENT = 'NuxtinatorHelpinator/1.0 (+https://github.com/corsacca/nuxtinator)'
 const FETCH_TIMEOUT_MS = 10_000
-const MAX_HTML_BYTES = 2 * 1024 * 1024
+const MB = 1024 * 1024
 const MAX_ROBOTS_BYTES = 512 * 1024
 const CONCURRENCY = 3
 const GAP_MS = 250
@@ -103,14 +103,15 @@ export function helpinatorContentHash(title: string, markdown: string): string {
 
 // --- Fetching ---
 
-async function fetchHtml(url: string): Promise<{ status: number, html: string | null, finalUrl: string }> {
+// `maxMb` is the entry's per-page cap (`max_page_mb`).
+async function fetchHtml(url: string, maxMb: number): Promise<{ status: number, html: string | null, finalUrl: string, tooLarge: boolean }> {
   const res = await helpinatorSafeFetch(url, {
     headers: { 'user-agent': HELPINATOR_CRAWL_USER_AGENT, 'accept': 'text/html,application/xhtml+xml' },
     timeoutMs: FETCH_TIMEOUT_MS,
-    maxBytes: MAX_HTML_BYTES,
+    maxBytes: maxMb * MB,
     wantBody: (status, type) => status >= 200 && status < 300 && /text\/html|application\/xhtml/i.test(type)
   })
-  return { status: res.status, html: res.body, finalUrl: res.finalUrl }
+  return { status: res.status, html: res.body, finalUrl: res.finalUrl, tooLarge: res.tooLarge }
 }
 
 async function robotsFor(start: URL): Promise<{ isAllowed: (url: string) => boolean }> {
@@ -175,6 +176,8 @@ interface RunCounters {
   bytes: number
   skipped: number
   failed: string[]
+  // Pages over the entry's size cap: not read, their stored copy kept.
+  tooLarge: string[]
   // URLs that failed transiently this run: their stored pages are kept.
   keep: Set<string>
 }
@@ -187,7 +190,7 @@ interface RunCounters {
 async function processUrl(orgId: string | null, source: HelpinatorSourceRow, token: string, url: string, startedAt: Date, embedRun: AiEmbeddingRun | null, counters: RunCounters): Promise<void> {
   let fetched: Awaited<ReturnType<typeof fetchHtml>>
   try {
-    fetched = await fetchHtml(url)
+    fetched = await fetchHtml(url, source.max_page_mb)
   } catch (err) {
     // Timeouts and network errors are transient: keep the stored copy.
     counters.failed.push(`${url}: ${(err as Error)?.message ?? 'fetch failed'}`)
@@ -199,11 +202,18 @@ async function processUrl(orgId: string | null, source: HelpinatorSourceRow, tok
     counters.keep.add(url)
     return
   }
+  if (fetched.tooLarge) {
+    console.warn(`[helpinator] ${url} is over the ${source.max_page_mb} MB page limit; kept its last copy`)
+    counters.tooLarge.push(url)
+    counters.keep.add(url)
+    return
+  }
   if (!fetched.html) {
     counters.skipped++
     return
   }
-  const extracted = helpinatorExtract(fetched.html, url)
+  // Links resolve against where the fetch ended up, after redirects.
+  const extracted = helpinatorExtract(fetched.html, fetched.finalUrl)
   if (!extracted.markdown) {
     counters.skipped++
     return
@@ -323,7 +333,7 @@ async function finish(orgId: string | null, sourceId: string, token: string, pat
 
 async function runSource(orgId: string | null, source: HelpinatorSourceRow, token: string): Promise<void> {
   const startedAt = new Date()
-  const counters: RunCounters = { pages: 0, bytes: 0, skipped: 0, failed: [], keep: new Set() }
+  const counters: RunCounters = { pages: 0, bytes: 0, skipped: 0, failed: [], tooLarge: [], keep: new Set() }
   try {
     const startUrl = new URL(source.url)
     const robots = await robotsFor(startUrl)
@@ -331,7 +341,11 @@ async function runSource(orgId: string | null, source: HelpinatorSourceRow, toke
       await finish(orgId, source.id, token, { status: 'error', last_error: 'robots.txt disallows this URL' })
       return
     }
-    const first = await fetchHtml(source.url)
+    const first = await fetchHtml(source.url, source.max_page_mb)
+    if (first.tooLarge) {
+      await finish(orgId, source.id, token, { status: 'error', last_error: `Start page is over the ${source.max_page_mb} MB page limit. Raise "Max page size" on this entry.` })
+      return
+    }
     if (!first.html) {
       await finish(orgId, source.id, token, { status: 'error', last_error: `Start page returned ${first.status}${first.html === null ? ' or was not HTML' : ''}` })
       return
@@ -382,7 +396,12 @@ async function runSource(orgId: string | null, source: HelpinatorSourceRow, toke
       await q.execute()
     })
 
-    const errorNote = counters.failed.length ? `${counters.failed.length} page(s) failed: ${counters.failed.slice(0, 3).join('; ')}` : null
+    const notes: string[] = []
+    if (counters.tooLarge.length) {
+      notes.push(`${counters.tooLarge.length} page(s) over the ${source.max_page_mb} MB page limit, last copy kept (raise "Max page size"): ${counters.tooLarge.slice(0, 3).join('; ')}`)
+    }
+    if (counters.failed.length) notes.push(`${counters.failed.length} page(s) failed: ${counters.failed.slice(0, 3).join('; ')}`)
+    const errorNote = notes.length ? notes.join(' · ') : null
     await finish(orgId, source.id, token, { status: 'done', page_count: counters.pages, bytes: counters.bytes, last_error: errorNote })
   } catch (err) {
     if (err instanceof Superseded) return

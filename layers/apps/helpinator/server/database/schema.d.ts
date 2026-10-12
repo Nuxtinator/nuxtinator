@@ -31,6 +31,7 @@ export interface HelpinatorLibrarySourcesTable {
   url: string
   restrict_to_path: Generated<boolean>
   max_pages: Generated<number>
+  max_page_mb: Generated<number>
   status: Generated<HelpinatorSourceStatus>
   run_token: string | null
   run_started_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>

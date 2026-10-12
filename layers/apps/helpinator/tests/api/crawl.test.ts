@@ -124,6 +124,49 @@ describe('website crawl', () => {
     expect(orphan[0]!.n).toBe(0)
   })
 
+  it('a page over the entry\'s size cap keeps its last copy and is named in the notice; raising the cap reads it', async () => {
+    const { opts } = await createHelpinatorOrgWith(sql)
+    const lib = await createWebsiteLibrary(opts)
+    const source = await addSource(opts, lib.id, `${site.origin}/docs`, { restrict_to_path: true, max_pages: 10, max_page_mb: 1 })
+    await waitForSync(opts, lib.id)
+
+    // Anvils grows past 1 MB.
+    const padding = `<p>${'big anvil table row '.repeat(60_000)}</p>`
+    site.pages.set('/docs/anvils', { html: article('Anvils', 'anvil forging', `<p>GREW-PAST-CAP</p>${padding}`) })
+    await $fetch(`/api/helpinator/libraries/${lib.id}/sources/${source.id}/sync`, { method: 'POST', ...opts })
+    let done = await waitForSync(opts, lib.id)
+    let s = done.sources[0]!
+    expect(s.status).toBe('done')
+    expect(s.max_page_mb).toBe(1)
+    expect(s.last_error).toContain('1 page(s) over the 1 MB page limit')
+    expect(s.last_error).toContain(`${site.origin}/docs/anvils`)
+    let anvils = (await pagesOf(lib.id)).find(p => p.url.endsWith('/docs/anvils'))!
+    expect(anvils.content).toContain('anvil forging paragraph 1')
+    expect(anvils.content).not.toContain('GREW-PAST-CAP')
+
+    // Raise the cap: the next crawl reads it and the notice clears. A PUT
+    // without max_page_mb keeps the raised value.
+    await $fetch(`/api/helpinator/libraries/${lib.id}/sources/${source.id}`, { method: 'PUT', body: { restrict_to_path: true, max_pages: 10, max_page_mb: 3 }, ...opts })
+    await $fetch(`/api/helpinator/libraries/${lib.id}/sources/${source.id}`, { method: 'PUT', body: { restrict_to_path: true, max_pages: 10 }, ...opts })
+    await $fetch(`/api/helpinator/libraries/${lib.id}/sources/${source.id}/sync`, { method: 'POST', ...opts })
+    done = await waitForSync(opts, lib.id)
+    s = done.sources[0]!
+    expect(s.max_page_mb).toBe(3)
+    expect(s.last_error).toBeNull()
+    anvils = (await pagesOf(lib.id)).find(p => p.url.endsWith('/docs/anvils'))!
+    expect(anvils.content).toContain('GREW-PAST-CAP')
+  })
+
+  it('reports a start page over the size cap as an error', async () => {
+    site.pages.set('/huge', { html: article('Huge', 'huge page', `<p>${'x'.repeat(1_200_000)}</p>`) })
+    const { opts } = await createHelpinatorOrgWith(sql)
+    const lib = await createWebsiteLibrary(opts)
+    await addSource(opts, lib.id, `${site.origin}/huge`, { max_pages: 1, max_page_mb: 1 })
+    const s = (await waitForSync(opts, lib.id)).sources[0]!
+    expect(s.status).toBe('error')
+    expect(s.last_error).toContain('Start page is over the 1 MB page limit')
+  })
+
   it('a URL reached from two sources of one library belongs to the first, and pruning removes a page', async () => {
     const { opts } = await createHelpinatorOrgWith(sql)
     const lib = await createWebsiteLibrary(opts)
