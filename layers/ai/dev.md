@@ -31,14 +31,17 @@ This is the shared AI backend built for Phase 10a of the inbox plan
   `generate` resolve both themselves ([server/utils/ai-settings.ts](server/utils/ai-settings.ts)).
   The only way to run on the host's key is "this org has none" — no call path
   can spend the host's budget by forgetting an argument.
-- **Per-org keys, host key as fallback.** An org stores its own OpenRouter key
-  on `/@<slug>/settings/ai` (encrypted with core's secret-crypto, verified
-  against OpenRouter's `/auth/key` before storing, never returned to the
-  browser). Orgs without one use the env `OPENROUTER_API_KEY`. There is no host
-  key UI — the env var is the host key.
-- **Whose key decides the allowed set.** On the host's key an org may only pick
-  from the host-enabled set (the host controls what its budget runs). On its
-  own key it may pick any tool-capable model OpenRouter lists.
+- **Per-provider keys, org key over host key.** An org stores its own key per
+  provider on `/@<slug>/settings/ai` (encrypted with core's secret-crypto,
+  verified against the provider before storing, never returned to the
+  browser). Orgs without one use the host's key for that provider: the env var
+  when set, else one stored on `/admin/ai`. A provider whose env key is set
+  can't have a host key stored (409) — the env always wins.
+- **Whose key decides the allowed set, per provider.** On the host's key an org
+  may only pick that provider's host-enabled models (the host controls what
+  its budget runs). On its own key it picks from the models it enabled for that
+  provider (org-scope `enabled_models`), so apps can offer the org's own
+  shortlist.
 - **Nothing model-specific in code.** The live OpenRouter list
   ([server/utils/ai-model-list.ts](server/utils/ai-model-list.ts), public
   `GET /models`, cached an hour, stale-while-revalidate, tool-capable only) is
@@ -48,8 +51,9 @@ This is the shared AI backend built for Phase 10a of the inbox plan
   enabled until an operator picks. Model ids in code go stale fast.
 - **Two settings scopes that stack.** Host (`core_host_settings`, edited on
   `/admin/ai`): `enabled_models`, `default_model`, `feature_models`. Org
-  (`core_settings`, RLS-scoped, edited on the org page): `api_key`,
-  `default_model`, `feature_models`. One `registerSetting` per key serves both
+  (`core_settings`, RLS-scoped, edited on the org page): `<provider>_api_key`,
+  `enabled_models`, `default_model`, `feature_models`. Host keys live in
+  `core_host_settings` under the same `<provider>_api_key` names. One `registerSetting` per key serves both
   tables. Resolution for a feature: org choice → org default → host choice →
   host default, skipping anything the org may not use right now. Stored choices
   are never deleted on fallback; the pickers mark them unavailable.
@@ -65,17 +69,29 @@ This is the shared AI backend built for Phase 10a of the inbox plan
   org-prefixed, so its requests carry no X-Active-Org and `withOrgContext` would
   404 there. Its "effective" values are therefore the host chain only.
 
-- **Tinfoil as a second provider.** Model ids
-  `tinfoil/<modelName>` route to Tinfoil; everything else is OpenRouter
-  ([server/utils/ai-provider.ts](server/utils/ai-provider.ts)). Requests go
+- **Provider routing by id prefix.** Model ids `tinfoil/…`, `openai-api/…`
+  and `anthropic-api/…` route to those providers; everything else is
+  OpenRouter ([server/utils/ai-provider.ts](server/utils/ai-provider.ts)). The
+  direct prefixes are deliberately not `openai/`/`anthropic/`, which are
+  OpenRouter vendor slugs.
+- **Tinfoil.** Requests go
   through the SDK's attested, body-encrypting `SecureClient.fetch`
-  ([server/utils/tinfoil-client.ts](server/utils/tinfoil-client.ts)); host key
-  only. The catalog is the JSON Tinfoil's pricing page reads
+  ([server/utils/tinfoil-client.ts](server/utils/tinfoil-client.ts)), with the
+  org's or host's key per request. The catalog is the JSON Tinfoil's pricing page reads
   (`api.tinfoil.sh/api/config/models`, undocumented) parsed by
   [server/utils/tinfoil-models.ts](server/utils/tinfoil-models.ts): tool-capable
   chat models plus file-upload transcription models, with prices, image
   support and the per-model request fragments that switch reasoning on/off.
   Embeddings stay on OpenRouter.
+- **OpenAI and Anthropic direct, no SDKs.** OpenAI is OpenAI-compatible
+  (`max_completion_tokens`, `reasoning_effort`, no `cache_control`). Anthropic
+  goes through a translation layer
+  ([server/utils/anthropic-messages.ts](server/utils/anthropic-messages.ts),
+  pure, unit-tested) over the Messages API; the tool loop carries Anthropic's
+  raw content blocks (`native`) on assistant turns so thinking blocks go back
+  unchanged. Catalogs need a key, so they load with whichever org or host key
+  is in hand ([server/utils/direct-models.ts](server/utils/direct-models.ts));
+  both lean on OpenRouter's catalog for prices.
 - **Model kinds.** Models are `chat` or `transcription`; features declare a
   `kind` (default chat, or `embedding` for a vector index). Transcription
   features resolve org choice → host choice only (the default model is a chat
@@ -140,6 +156,8 @@ This is the shared AI backend built for Phase 10a of the inbox plan
   · settings + resolution [server/utils/ai-settings.ts](server/utils/ai-settings.ts)
   · feature registry [server/utils/ai-feature-registry.ts](server/utils/ai-feature-registry.ts)
   · provider routing [server/utils/ai-provider.ts](server/utils/ai-provider.ts)
+  · Anthropic translation [server/utils/anthropic-messages.ts](server/utils/anthropic-messages.ts) (pure, unit-tested)
+  · OpenAI/Anthropic catalog parsers [server/utils/direct-models.ts](server/utils/direct-models.ts) (pure, unit-tested)
   · Tinfoil transport [server/utils/tinfoil-client.ts](server/utils/tinfoil-client.ts)
   + catalog parser [server/utils/tinfoil-models.ts](server/utils/tinfoil-models.ts) (pure, unit-tested).
 - Barrel: [server/exports/index.ts](server/exports/index.ts) (`#ai/server`) ·
@@ -148,11 +166,14 @@ This is the shared AI backend built for Phase 10a of the inbox plan
   admin section, org settings section).
 - Endpoints: [server/routes/api/ai/models.get.ts](server/routes/api/ai/models.get.ts)
   · [server/routes/api/ai/admin/config.{get,put}.ts](server/routes/api/ai/admin/)
+  · [server/routes/api/ai/admin/key.{put,delete}.ts](server/routes/api/ai/admin/)
   · [server/routes/api/ai/org/config.{get,put}.ts](server/routes/api/ai/org/)
   · [server/routes/api/ai/org/key.{put,delete}.ts](server/routes/api/ai/org/)
   · [server/routes/api/ai/status.get.ts](server/routes/api/ai/status.get.ts).
 - UI: [app/components/AiModelSelect.vue](app/components/AiModelSelect.vue)
-  (searchable picker) · [app/utils/ai-model-meta.ts](app/utils/ai-model-meta.ts)
+  (searchable picker) · [app/components/AiProviderKey.vue](app/components/AiProviderKey.vue)
+  (one provider's key) · [app/components/AiModelList.vue](app/components/AiModelList.vue)
+  · [app/utils/ai-model-meta.ts](app/utils/ai-model-meta.ts)
   · host page [app/pages/admin/ai/index.vue](app/pages/admin/ai/index.vue)
   · org page [app/pages/@[orgSlug]/settings/ai.vue](app/pages/@[orgSlug]/settings/ai.vue).
 - Tests: [tests/unit/ai-model-list.test.ts](tests/unit/ai-model-list.test.ts) (parser)

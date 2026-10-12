@@ -16,6 +16,9 @@ export interface ProviderTurn {
   text: string
   finishReason: string
   toolCalls: ProviderToolCall[]
+  // The provider's own content blocks for this turn, when it needs them sent
+  // back unchanged on the next round (Anthropic's thinking blocks).
+  native?: unknown[]
 }
 
 // One provider round trip: the full message list so far, the tool definitions
@@ -93,7 +96,8 @@ export async function runCompletionLoop(
         id: tc.id,
         type: 'function',
         function: { name: tc.name, arguments: tc.arguments || '{}' }
-      }))
+      })),
+      ...(turn.native ? { native: turn.native } : {})
     })
 
     for (const tc of turn.toolCalls) {

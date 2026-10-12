@@ -6,12 +6,13 @@ import {
   AI_SETTING_ENABLED_MODELS,
   AI_SETTING_DEFAULT_MODEL,
   AI_SETTING_FEATURE_MODELS,
-  AI_SETTING_API_KEY,
   AI_SETTING_EMBEDDING_MODEL,
+  apiKeySetting,
   sanitizeModelIdList,
   sanitizeModelId,
   sanitizeFeatureModels
 } from '../utils/ai-settings'
+import { AI_PROVIDERS, AI_PROVIDER_LABELS } from '../utils/ai-provider'
 
 // Single owner of the AI layer's boot registrations: the settings (one
 // registration per key serves both the host and org scopes — see
@@ -48,13 +49,15 @@ export default defineNitroPlugin(() => {
   })
 
   // Ciphertext from core's secret-crypto; '' means no key stored.
-  registerSetting<string>({
-    namespace: AI_SETTINGS_NAMESPACE,
-    key: AI_SETTING_API_KEY,
-    default: '',
-    parse: v => (typeof v === 'string' ? v : ''),
-    label: 'OpenRouter API key'
-  })
+  for (const provider of AI_PROVIDERS) {
+    registerSetting<string>({
+      namespace: AI_SETTINGS_NAMESPACE,
+      key: apiKeySetting(provider),
+      default: '',
+      parse: v => (typeof v === 'string' ? v : ''),
+      label: `${AI_PROVIDER_LABELS[provider]} API key`
+    })
+  }
 
   // The model every vector index in a scope is built with (org overrides host).
   registerSetting<string>({

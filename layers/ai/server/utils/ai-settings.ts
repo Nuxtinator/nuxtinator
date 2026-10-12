@@ -1,32 +1,35 @@
 import { createError } from 'h3'
-import { getSetting, setSetting, getHostSetting } from '#core/server/utils/settings-store'
+import { getSetting, setSetting, getHostSetting, setHostSetting } from '#core/server/utils/settings-store'
 import { encryptSecret, decryptSecret } from '#core/server/utils/secret-crypto'
 import type { AiDbClient } from '#core/ai-fallback/types'
 import type { AiFeatureKind, AiProvider, AiProviderModelInfo } from '../../types/ai-ext'
-import { getHostApiKey, getTinfoilConfig } from './ai-config'
-import { getAllModels, getModelInfo, isKnownModel } from './ai-model-list'
+import { getEnvApiKey } from './ai-config'
+import { getAllModels, getModelInfo, isKnownModel, type CatalogKeys } from './ai-model-list'
 import { getEmbeddingModelList, isKnownEmbeddingModel } from './ai-embedding-model-list'
 import { getAiFeatureKind } from './ai-feature-registry'
-import { providerOf } from './ai-provider'
+import { AI_PROVIDERS, AI_PROVIDER_LABELS, providerOf } from './ai-provider'
 
 // The DB-backed half of the AI layer's config, in two scopes that stack:
 //
 //   host (`core_host_settings`, deployment-global; edited on /admin/ai):
-//     enabled_models — the models the host's own key may spend on
-//     default_model  — fallback for any feature without a host choice
-//     feature_models — `{ [featureKey]: modelId }`
+//     <provider>_api_key — the host's key for a provider, encrypted at rest;
+//                          only used when the provider's env key is unset
+//     enabled_models     — the models the host's keys may spend on
+//     default_model      — fallback for any feature without a host choice
+//     feature_models     — `{ [featureKey]: modelId }`
 //
 //   org (`core_settings`, RLS-scoped to the active org; edited on the org's
 //   settings page):
-//     api_key        — the org's own OpenRouter key, encrypted at rest
-//     default_model  — the org's fallback, overriding the host's
-//     feature_models — the org's per-feature choices, overriding the host's
+//     <provider>_api_key — the org's own key for a provider, encrypted at rest
+//     enabled_models     — the models the org's own keys may spend on
+//     default_model      — the org's fallback, overriding the host's
+//     feature_models     — the org's per-feature choices, overriding the host's
 //
 // Resolution for a feature walks org choice → org default → host choice →
 // host default, skipping any model the org may not use right now. What an org
-// may use depends on whose key pays: on the host's key only the host-enabled
-// set; on its own key any model OpenRouter lists plus the host-enabled Tinfoil
-// models (Tinfoil always runs on the host's key).
+// may use is decided per provider by whose key pays: with its own key for a
+// provider, the models it enabled for that provider; without one, the models
+// the host enabled for it, as long as the host has a key for it.
 //
 // Features have a kind. Chat features walk the full chain above; transcription
 // features walk only the feature choices (org, then host), since the default
@@ -40,8 +43,12 @@ export const AI_SETTINGS_NAMESPACE = 'ai'
 export const AI_SETTING_ENABLED_MODELS = 'enabled_models'
 export const AI_SETTING_DEFAULT_MODEL = 'default_model'
 export const AI_SETTING_FEATURE_MODELS = 'feature_models'
-export const AI_SETTING_API_KEY = 'api_key'
 export const AI_SETTING_EMBEDDING_MODEL = 'embedding_model'
+
+// The setting that holds a provider's stored key, in either scope.
+export function apiKeySetting(provider: AiProvider): string {
+  return `${provider}_api_key`
+}
 
 // Turn a raw (possibly bad) stored value into a clean string[] of ids.
 export function sanitizeModelIdList(value: unknown): string[] {
@@ -74,22 +81,20 @@ export function sanitizeFeatureModels(value: unknown): Record<string, string> {
   return out
 }
 
-// --- Org API key ---
+// --- API keys ---
 
-export type AiOrgKeyStatus = 'none' | 'ok' | 'undecryptable'
+export type AiKeyStatus = 'none' | 'ok' | 'undecryptable'
 
-export interface AiOrgKey {
-  status: AiOrgKeyStatus
+export interface AiStoredKey {
+  status: AiKeyStatus
   // Plaintext key when status is 'ok'; otherwise ''.
   key: string
   last4: string
 }
 
-// The active org's stored key. 'undecryptable' means a row exists but the
-// deployment's secret-encryption key no longer opens it (rotated); the org
-// must remove and re-enter it.
-export async function getOrgApiKey(tx: AiDbClient): Promise<AiOrgKey> {
-  const stored = await getSetting<string>(tx, AI_SETTINGS_NAMESPACE, AI_SETTING_API_KEY)
+// 'undecryptable' means a row exists but the deployment's secret-encryption
+// key no longer opens it (rotated); it must be removed and entered again.
+function openStoredKey(stored: string): AiStoredKey {
   if (!stored) return { status: 'none', key: '', last4: '' }
   try {
     const key = decryptSecret(stored)
@@ -99,45 +104,82 @@ export async function getOrgApiKey(tx: AiDbClient): Promise<AiOrgKey> {
   }
 }
 
-// Store (encrypted) or clear ('' ) the active org's key.
-export async function setOrgApiKey(tx: AiDbClient, key: string): Promise<void> {
-  let stored = ''
-  if (key) {
-    try {
-      stored = encryptSecret(key)
-    } catch (err) {
-      throw createError({
-        statusCode: 500,
-        statusMessage: `Cannot store the key: ${(err as Error)?.message ?? 'encryption failed'}`
-      })
-    }
+function sealKey(key: string): string {
+  if (!key) return ''
+  try {
+    return encryptSecret(key)
+  } catch (err) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: `Cannot store the key: ${(err as Error)?.message ?? 'encryption failed'}`
+    })
   }
-  await setSetting(tx, AI_SETTINGS_NAMESPACE, AI_SETTING_API_KEY, stored)
 }
 
-export async function hasOrgApiKey(tx: AiDbClient): Promise<boolean> {
-  return (await getOrgApiKey(tx)).status === 'ok'
+// The active org's stored key for `provider`.
+export async function getOrgApiKey(tx: AiDbClient, provider: AiProvider): Promise<AiStoredKey> {
+  return openStoredKey(await getSetting<string>(tx, AI_SETTINGS_NAMESPACE, apiKeySetting(provider)))
 }
 
-// The key generation runs with: the org's own when set, else the host's env
-// key. A stored key that no longer decrypts is an error, not a silent fallback
-// onto the host's budget.
-export async function getEffectiveApiKey(tx: AiDbClient): Promise<string> {
-  const org = await getOrgApiKey(tx)
+// Store (encrypted) or clear ('') the active org's key for `provider`.
+export async function setOrgApiKey(tx: AiDbClient, provider: AiProvider, key: string): Promise<void> {
+  await setSetting(tx, AI_SETTINGS_NAMESPACE, apiKeySetting(provider), sealKey(key))
+}
+
+// The host's key for `provider` stored on /admin/ai (not the env key).
+export async function getHostStoredApiKey(tx: AiDbClient, provider: AiProvider): Promise<AiStoredKey> {
+  return openStoredKey(await getHostSetting<string>(tx, AI_SETTINGS_NAMESPACE, apiKeySetting(provider)))
+}
+
+export async function setHostApiKey(tx: AiDbClient, provider: AiProvider, key: string): Promise<void> {
+  await setHostSetting(tx, AI_SETTINGS_NAMESPACE, apiKeySetting(provider), sealKey(key))
+}
+
+// The host's key for `provider`: the env key when set, else the stored one,
+// else ''. A stored key that no longer decrypts counts as none.
+export async function getHostApiKey(tx: AiDbClient, provider: AiProvider): Promise<string> {
+  const env = getEnvApiKey(provider)
+  if (env) return env
+  const stored = await getHostStoredApiKey(tx, provider)
+  return stored.status === 'ok' ? stored.key : ''
+}
+
+// Whether the host can pay for `provider`'s models. Always true under VITEST,
+// where calls never leave the process.
+async function hostCanRun(tx: AiDbClient, provider: AiProvider): Promise<boolean> {
+  if (process.env.VITEST) return true
+  return !!(await getHostApiKey(tx, provider))
+}
+
+// The key a call to `provider` runs with: the org's own when set, else the
+// host's. An org key that no longer decrypts is an error, not a silent
+// fallback onto the host's budget.
+export async function getProviderApiKey(tx: AiDbClient, provider: AiProvider): Promise<string> {
+  const org = await getOrgApiKey(tx, provider)
   if (org.status === 'ok') return org.key
   if (org.status === 'undecryptable') {
     throw createError({
       statusCode: 500,
-      statusMessage: 'This organization\'s stored AI key can no longer be decrypted. Remove it and enter it again.'
+      statusMessage: `This organization's stored ${AI_PROVIDER_LABELS[provider]} key can no longer be decrypted. Remove it and enter it again.`
     })
   }
-  return getHostApiKey()
+  return await getHostApiKey(tx, provider)
 }
 
-// The key a call to `provider` runs with. Tinfoil has only the host's key.
-export async function getProviderApiKey(tx: AiDbClient, provider: AiProvider): Promise<string> {
-  if (provider === 'tinfoil') return getTinfoilConfig().apiKey
-  return await getEffectiveApiKey(tx)
+// A key per provider for loading the catalogs: the org's own, else the host's.
+export async function getCatalogKeys(tx: AiDbClient): Promise<CatalogKeys> {
+  const keys: CatalogKeys = {}
+  await Promise.all(AI_PROVIDERS.map(async (provider) => {
+    const org = await getOrgApiKey(tx, provider)
+    const key = org.status === 'ok' ? org.key : await getHostApiKey(tx, provider)
+    if (key) keys[provider] = key
+  }))
+  return keys
+}
+
+// The live model list with every catalog the org or host has a key for.
+export async function loadModelList(tx: AiDbClient): Promise<AiProviderModelInfo[]> {
+  return await getAllModels(await getCatalogKeys(tx))
 }
 
 // --- Model resolution ---
@@ -169,20 +211,38 @@ export function modelFitsKind(id: string, kind: AiFeatureKind): boolean {
 
 // The host-enabled set, narrowed to models their provider still lists.
 export async function getHostEnabledModelIds(tx: AiDbClient): Promise<string[]> {
-  await getAllModels()
+  await loadModelList(tx)
   const enabled = await getHostSetting<string[]>(tx, AI_SETTINGS_NAMESPACE, AI_SETTING_ENABLED_MODELS)
   return enabled.filter(isKnownModel)
 }
 
-// The ids the active org may run: on its own key every OpenRouter model plus
-// the host-enabled Tinfoil models; on the host's key the host-enabled set.
+// The org-enabled set, narrowed to models their provider still lists.
+export async function getOrgEnabledModelIds(tx: AiDbClient): Promise<string[]> {
+  await loadModelList(tx)
+  const enabled = await getSetting<string[]>(tx, AI_SETTINGS_NAMESPACE, AI_SETTING_ENABLED_MODELS)
+  return enabled.filter(isKnownModel)
+}
+
+// The ids the active org may run, provider by provider: on its own key the
+// models it enabled; on the host's key the models the host enabled; nothing
+// when neither has a usable key.
 export async function getAllowedModelIds(tx: AiDbClient): Promise<string[]> {
-  if (await hasOrgApiKey(tx)) {
-    const openrouter = (await getAllModels()).filter(m => m.provider === 'openrouter').map(m => m.id)
-    const hostTinfoil = (await getHostEnabledModelIds(tx)).filter(id => providerOf(id) === 'tinfoil')
-    return [...openrouter, ...hostTinfoil]
-  }
-  return await getHostEnabledModelIds(tx)
+  await loadModelList(tx)
+  const [hostStored, orgStored] = await Promise.all([
+    getHostSetting<string[]>(tx, AI_SETTINGS_NAMESPACE, AI_SETTING_ENABLED_MODELS),
+    getSetting<string[]>(tx, AI_SETTINGS_NAMESPACE, AI_SETTING_ENABLED_MODELS)
+  ])
+  const hostEnabled = hostStored.filter(isKnownModel)
+  const orgEnabled = orgStored.filter(isKnownModel)
+  const perProvider = await Promise.all(AI_PROVIDERS.map(async (provider) => {
+    const org = await getOrgApiKey(tx, provider)
+    if (org.status === 'ok') return orgEnabled.filter(id => providerOf(id) === provider)
+    if (org.status === 'none' && await hostCanRun(tx, provider)) {
+      return hostEnabled.filter(id => providerOf(id) === provider)
+    }
+    return []
+  }))
+  return perProvider.flat()
 }
 
 export async function getAllowedModels(tx: AiDbClient): Promise<AiProviderModelInfo[]> {

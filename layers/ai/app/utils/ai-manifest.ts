@@ -53,11 +53,41 @@ export interface AiFeatureConfig {
   effectiveModel: string
 }
 
+export type AiKeyStatus = 'none' | 'ok' | 'undecryptable'
+
+export interface AiKeyState {
+  status: AiKeyStatus
+  last4: string
+}
+
+// A provider as the host page shows it. `keySource` says where the host's key
+// comes from: the environment (`envVar`, not editable on the page), a key
+// stored on the page, or nowhere.
+export interface AiHostProvider {
+  provider: AiProvider
+  label: string
+  envVar: string
+  keySource: 'env' | 'stored' | 'none'
+  storedKey: AiKeyState
+  catalogAvailable: boolean
+}
+
+// A provider as the org page shows it: the org's own key, and whether the
+// host's key would cover it otherwise.
+export interface AiOrgProvider {
+  provider: AiProvider
+  label: string
+  ownKey: AiKeyState
+  hostKey: boolean
+  catalogAvailable: boolean
+}
+
 // Full payload of GET /api/ai/admin/config.
 export interface AiAdminConfig {
-  hostKeyConfigured: boolean
-  tinfoilConfigured: boolean
+  providers: AiHostProvider[]
   modelListAvailable: boolean
+  // Every listed model of the providers the host has a key for.
+  catalog: AiModelInfo[]
   enabled: AiEnabledModel[]
   defaultModel: string
   features: AiFeatureConfig[]
@@ -68,15 +98,16 @@ export interface AiAdminConfig {
   staleScopes: AiStaleScope[]
 }
 
-export type AiOrgKeyStatus = 'none' | 'ok' | 'undecryptable'
-
 // Full payload of GET /api/ai/org/config.
 export interface AiOrgConfig {
-  key: { status: AiOrgKeyStatus, last4: string }
-  hostKeyConfigured: boolean
-  tinfoilConfigured: boolean
-  usingOwnKey: boolean
+  providers: AiOrgProvider[]
   modelListAvailable: boolean
+  // Every listed model of the providers the org has its own key for.
+  catalog: AiModelInfo[]
+  // The models the org enabled for its own keys.
+  enabled: AiEnabledModel[]
+  // The models the host enabled, shown under providers the org runs on the host's key.
+  hostEnabled: AiModelInfo[]
   allowedModels: AiModelInfo[]
   defaultModel: string
   effectiveDefaultModel: string

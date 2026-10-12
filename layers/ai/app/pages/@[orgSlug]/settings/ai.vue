@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import type { AiOrgConfig, AiModelInfo, AiModelKind, AiEmbeddingModelInfo, AiReindexStatus } from '#ai'
+import type { AiOrgConfig, AiOrgProvider, AiModelInfo, AiModelKind, AiProvider, AiEmbeddingModelInfo, AiReindexStatus } from '#ai'
 
 // Org-level AI settings, rendered inside the tenancy layer's settings shell
 // (registered via core's org-settings-section registry). Lets an org bring its
-// own OpenRouter key and choose its default and per-feature models; anything
-// left unset falls through to the host's choices.
+// own key per provider and enable that provider's models, and choose its
+// default and per-feature models; anything left unset falls through to the
+// host's choices.
 
 definePageMeta({
   middleware: 'auth'
@@ -18,11 +19,11 @@ const { data, pending, refresh } = await useFetch<AiOrgConfig>('/api/ai/org/conf
   watch: [orgSlug],
   key: () => `org-ai-config-${orgSlug.value}`,
   default: (): AiOrgConfig => ({
-    key: { status: 'none', last4: '' },
-    hostKeyConfigured: false,
-    tinfoilConfigured: false,
-    usingOwnKey: false,
+    providers: [],
     modelListAvailable: false,
+    catalog: [],
+    enabled: [],
+    hostEnabled: [],
     allowedModels: [],
     defaultModel: '',
     effectiveDefaultModel: '',
@@ -42,11 +43,32 @@ function allowedOfKind(kind: AiModelKind) {
   return allowed.value.filter((m: AiModelInfo) => m.kind === kind)
 }
 const features = computed(() => data.value?.features ?? [])
-const keyStatus = computed(() => data.value?.key.status ?? 'none')
+const providers = computed(() => data.value?.providers ?? [])
+const enabled = computed(() => data.value?.enabled ?? [])
+const enabledIds = computed(() => enabled.value.map(m => m.id))
+
+function ownKey(p: AiOrgProvider): boolean {
+  return p.ownKey.status === 'ok'
+}
+function enabledOf(provider: AiProvider) {
+  return enabled.value.filter(m => m.provider === provider)
+}
+function hostEnabledOf(provider: AiProvider) {
+  return (data.value?.hostEnabled ?? []).filter((m: AiModelInfo) => m.provider === provider)
+}
+function addableOf(provider: AiProvider) {
+  return (data.value?.catalog ?? []).filter((m: AiModelInfo) => m.provider === provider && !enabledIds.value.includes(m.id))
+}
+
+const activeProvider = ref<AiProvider>('openrouter')
+const providerTabs = computed(() => providers.value.map(p => ({
+  label: p.label,
+  value: p.provider,
+  icon: ownKey(p) ? 'i-lucide-key-round' : undefined
+})))
 
 const saving = ref(false)
-const editingKey = ref(false)
-const keyInput = ref('')
+const pendingAdd = ref('')
 
 function fail(err: unknown, title: string) {
   toast.add({
@@ -56,28 +78,25 @@ function fail(err: unknown, title: string) {
   })
 }
 
-async function saveKey() {
-  const key = keyInput.value.trim()
-  if (!key) return
+async function saveKey(provider: AiProvider, key: string): Promise<boolean> {
   saving.value = true
   try {
-    await $fetch('/api/ai/org/key', { method: 'PUT', body: { key } })
-    keyInput.value = ''
-    editingKey.value = false
+    await $fetch('/api/ai/org/key', { method: 'PUT', body: { provider, key } })
     await refresh()
     toast.add({ title: 'API key saved', color: 'success' })
+    return true
   } catch (err: unknown) {
     fail(err, 'Key not saved')
+    return false
   } finally {
     saving.value = false
   }
 }
 
-async function removeKey() {
+async function removeKey(provider: AiProvider) {
   saving.value = true
   try {
-    await $fetch('/api/ai/org/key', { method: 'DELETE' })
-    editingKey.value = false
+    await $fetch('/api/ai/org/key', { method: 'DELETE', query: { provider } })
     await refresh()
     toast.add({ title: 'API key removed', color: 'success' })
   } catch (err: unknown) {
@@ -98,6 +117,30 @@ async function put(body: Record<string, unknown>): Promise<boolean> {
     return false
   } finally {
     saving.value = false
+  }
+}
+
+async function addModel(id: string) {
+  pendingAdd.value = ''
+  if (!id || enabledIds.value.includes(id)) return
+  if (await put({ enabled_models: [...enabledIds.value, id] })) {
+    toast.add({ title: 'Model enabled', color: 'success' })
+  }
+}
+
+async function removeModel(model: { id: string, name: string }) {
+  // Drop the default and any feature choice that pointed at it.
+  const featureMap: Record<string, string> = {}
+  for (const f of features.value) {
+    if (f.model && f.model !== model.id) featureMap[f.key] = f.model
+  }
+  const body: Record<string, unknown> = {
+    enabled_models: enabledIds.value.filter(id => id !== model.id),
+    feature_models: featureMap
+  }
+  if (data.value?.defaultModel === model.id) body.default_model = ''
+  if (await put(body)) {
+    toast.add({ title: `Disabled ${model.name}`, color: 'success' })
   }
 }
 
@@ -191,7 +234,7 @@ onBeforeUnmount(() => {
           AI
         </h1>
         <p class="text-sm text-(--ui-text-muted) mt-1">
-          Bring your own OpenRouter key and choose which models power this
+          Bring your own provider keys and choose which models power this
           organization's AI features.
         </p>
       </div>
@@ -205,122 +248,88 @@ onBeforeUnmount(() => {
 
       <template v-else>
         <section class="space-y-3">
-          <h2 class="text-lg font-semibold">
-            API key
-          </h2>
-
-          <UAlert
-            v-if="keyStatus === 'undecryptable'"
-            color="error"
-            variant="subtle"
-            icon="i-lucide-key-round"
-            title="Stored key can't be read"
-            description="The key saved for this organization can no longer be decrypted. Remove it and enter it again. AI features are off until then."
-          />
-
-          <div class="border border-(--ui-border) rounded-md p-4 space-y-3">
-            <div class="flex items-start justify-between gap-3 flex-wrap">
-              <div class="min-w-0">
-                <template v-if="keyStatus === 'ok'">
-                  <div class="font-medium flex items-center gap-2">
-                    <UIcon
-                      name="i-lucide-key-round"
-                      class="size-4"
-                    />
-                    Your key, ending in <span class="font-mono">{{ data?.key.last4 }}</span>
-                  </div>
-                  <div class="text-sm text-(--ui-text-muted)">
-                    AI usage is billed to this key. Any OpenRouter model can be chosen below.
-                  </div>
-                </template>
-                <template v-else-if="keyStatus === 'none' && data?.hostKeyConfigured">
-                  <div class="font-medium">
-                    Using the host's key
-                  </div>
-                  <div class="text-sm text-(--ui-text-muted)">
-                    Model choices are limited to the ones the host has enabled. Add your own key to pick any OpenRouter model.
-                  </div>
-                </template>
-                <template v-else-if="keyStatus === 'none'">
-                  <div class="font-medium">
-                    No key available
-                  </div>
-                  <div class="text-sm text-(--ui-text-muted)">
-                    The host has no API key configured. Add your own OpenRouter key to enable AI features.
-                  </div>
-                </template>
-              </div>
-
-              <div class="flex items-center gap-2 shrink-0">
-                <UButton
-                  v-if="keyStatus !== 'ok' && !editingKey"
-                  icon="i-lucide-plus"
-                  :disabled="saving"
-                  @click="editingKey = true"
-                >
-                  Add key
-                </UButton>
-                <UButton
-                  v-if="keyStatus === 'ok' && !editingKey"
-                  variant="outline"
-                  color="neutral"
-                  :disabled="saving"
-                  @click="editingKey = true"
-                >
-                  Replace
-                </UButton>
-                <UButton
-                  v-if="keyStatus !== 'none'"
-                  variant="ghost"
-                  color="error"
-                  :disabled="saving"
-                  @click="removeKey"
-                >
-                  Remove
-                </UButton>
-              </div>
-            </div>
-
-            <p
-              v-if="data?.tinfoilConfigured"
-              class="text-xs text-(--ui-text-muted)"
-            >
-              Tinfoil models (confidential, end-to-end encrypted inference) always run on the host's Tinfoil key; your own key is only used for OpenRouter models.
+          <div>
+            <h2 class="text-lg font-semibold">
+              Providers
+            </h2>
+            <p class="text-sm text-(--ui-text-muted)">
+              With your own key, you pick the provider's models and pay for them.
+              Without one, you use the host's.
             </p>
-
-            <form
-              v-if="editingKey"
-              class="flex items-start gap-2 flex-wrap"
-              @submit.prevent="saveKey"
-            >
-              <UInput
-                v-model="keyInput"
-                type="password"
-                placeholder="sk-or-…"
-                autocomplete="off"
-                class="flex-1 min-w-64 font-mono"
-                :disabled="saving"
-              />
-              <UButton
-                type="submit"
-                :loading="saving"
-                :disabled="!keyInput.trim()"
-              >
-                Verify and save
-              </UButton>
-              <UButton
-                variant="ghost"
-                color="neutral"
-                :disabled="saving"
-                @click="editingKey = false; keyInput = ''"
-              >
-                Cancel
-              </UButton>
-              <p class="basis-full text-xs text-(--ui-text-muted)">
-                The key is checked against OpenRouter before it's stored, encrypted at rest, and never shown again.
-              </p>
-            </form>
           </div>
+
+          <UTabs
+            v-model="activeProvider"
+            :items="providerTabs"
+            variant="link"
+            class="w-full"
+            :ui="{ list: 'overflow-x-auto' }"
+          >
+            <template #content="{ item }">
+              <div
+                v-for="p in providers.filter(x => x.provider === item.value)"
+                :key="p.provider"
+                class="space-y-3 pt-2"
+              >
+                <AiProviderKey
+                  :provider="p.provider"
+                  :label="p.label"
+                  :status="p.ownKey.status"
+                  :last4="p.ownKey.last4"
+                  :disabled="saving"
+                  :empty-hint="p.hostKey ? 'Using the host\'s key and models.' : 'Add one to use these models.'"
+                  :save="(key: string) => saveKey(p.provider, key)"
+                  @remove="removeKey(p.provider)"
+                />
+
+                <template v-if="ownKey(p)">
+                  <UAlert
+                    v-if="!p.catalogAvailable"
+                    color="warning"
+                    variant="subtle"
+                    icon="i-lucide-cloud-off"
+                    title="Model list unavailable"
+                    description="Existing choices still work."
+                  />
+                  <AiModelList
+                    v-if="enabledOf(p.provider).length"
+                    :models="enabledOf(p.provider)"
+                    removable
+                    :disabled="saving"
+                    @remove="removeModel"
+                  />
+                  <p
+                    v-else
+                    class="text-sm text-(--ui-text-muted)"
+                  >
+                    No {{ p.label }} models enabled.
+                  </p>
+                  <div class="max-w-md">
+                    <AiModelSelect
+                      :model-value="pendingAdd"
+                      :items="addableOf(p.provider)"
+                      placeholder="Add a model…"
+                      :disabled="saving || !addableOf(p.provider).length"
+                      @update:model-value="addModel"
+                    />
+                  </div>
+                </template>
+
+                <template v-else-if="p.hostKey && p.ownKey.status === 'none'">
+                  <AiModelList
+                    v-if="hostEnabledOf(p.provider).length"
+                    :models="hostEnabledOf(p.provider)"
+                  />
+                  <p
+                    v-else
+                    class="text-sm text-(--ui-text-muted)"
+                  >
+                    The host hasn't enabled any {{ p.label }} models.
+                  </p>
+                </template>
+              </div>
+            </template>
+          </UTabs>
         </section>
 
         <section class="space-y-3">
@@ -345,7 +354,7 @@ onBeforeUnmount(() => {
             variant="subtle"
             icon="i-lucide-cloud-off"
             title="Model list unavailable"
-            description="OpenRouter's model list could not be loaded. Existing choices still work."
+            description="Existing choices still work."
           />
 
           <div class="max-w-md">

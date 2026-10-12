@@ -1,4 +1,4 @@
-import type { AiProviderModelInfo } from '../../types/ai-ext'
+import type { AiProvider, AiProviderModelInfo } from '../../types/ai-ext'
 
 // One-line price + context summary for a model, shared by the pickers and the
 // enabled-models list: "$3 in · $15 out /M · 200K ctx", or "$0.01 / request"
@@ -22,4 +22,13 @@ export function modelMeta(m: AiProviderModelInfo): string {
   const ctx = context(m.contextLength)
   if (ctx) parts.push(ctx)
   return parts.join(' · ')
+}
+
+// Badge text marking a model called directly on a provider's own API, so
+// `openai-api/gpt-5` and OpenRouter's `openai/gpt-5` read apart in a mixed list.
+// OpenRouter models carry no badge; Tinfoil's has its own.
+export function directProviderBadge(provider: AiProvider): string {
+  if (provider === 'openai') return 'OpenAI'
+  if (provider === 'anthropic') return 'Anthropic'
+  return ''
 }

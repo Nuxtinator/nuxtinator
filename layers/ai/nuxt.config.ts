@@ -1,6 +1,7 @@
 // AI layer — a shared, optional AI backend any layer can consume, backed by
-// OpenRouter's OpenAI-compatible chat-completions API (many models, one API)
-// and Tinfoil's attested, end-to-end encrypted inference (chat + transcription).
+// OpenRouter's OpenAI-compatible chat-completions API (many models, one API),
+// Tinfoil's attested, end-to-end encrypted inference (chat + transcription),
+// and OpenAI's and Anthropic's own APIs.
 //
 // Aliases (registered unconditionally by modules/ai-alias.ts so they win over
 // core's fallback):
@@ -11,23 +12,28 @@
 //
 // Core ships a throwing `#ai/server` fallback so consumers can import
 // unconditionally and gate on `isAiConfigured(tx)` when the layer or key is
-// absent. OpenRouter is called with plain fetch (OpenAI-compatible) — no SDK,
-// so none of the `@anthropic-ai/sdk` bundling caveats apply.
+// absent. Providers are called with plain fetch — no SDKs, so none of the
+// `@anthropic-ai/sdk` bundling caveats apply.
 //
-// Keys: each org may store its own OpenRouter key (encrypted with core's
-// NUXT_SECRET_ENCRYPTION_KEY) on its settings page; the env key below is the
-// host-wide fallback for orgs without one.
+// Keys, per provider: each org may store its own (encrypted with core's
+// NUXT_SECRET_ENCRYPTION_KEY) on its settings page; the host's key is the
+// fallback for orgs without one. A host key set in the env wins; otherwise it
+// can be stored on Admin → AI.
 //
-// Host fallback key (optional — orgs with their own key never use it):
+// Host keys (all optional):
 //   OPENROUTER_API_KEY
+//   TINFOIL_API_KEY
+//   OPENAI_API_KEY
+//   ANTHROPIC_API_KEY
 // Optional:
 //   OPENROUTER_BASE_URL  (default https://openrouter.ai/api/v1)
 //   AI_HTTP_REFERER      (OpenRouter attribution header)
 //   AI_APP_TITLE         (OpenRouter attribution header)
+//   OPENAI_BASE_URL      (default https://api.openai.com/v1)
+//   ANTHROPIC_BASE_URL   (default https://api.anthropic.com/v1)
 //
-// Tinfoil (confidential inference in attested enclaves; host key only, no
-// per-org keys). Its models are listed only when the key is set:
-//   TINFOIL_API_KEY
+// Tinfoil (confidential inference in attested enclaves). Its models are
+// listed once a Tinfoil key exists:
 //   TINFOIL_CATALOG_URL        (default https://api.tinfoil.sh/api/config/models)
 //   TINFOIL_USER_CACHE_SECRET  (optional; scopes Tinfoil's prompt cache —
 //                               random per process when unset)
@@ -53,6 +59,10 @@ export default defineNuxtConfig({
     aiHttpReferer: process.env.AI_HTTP_REFERER || '',
     aiAppTitle: process.env.AI_APP_TITLE || '',
     tinfoilApiKey: process.env.TINFOIL_API_KEY || '',
-    tinfoilCatalogUrl: process.env.TINFOIL_CATALOG_URL || ''
+    tinfoilCatalogUrl: process.env.TINFOIL_CATALOG_URL || '',
+    openaiApiKey: process.env.OPENAI_API_KEY || '',
+    openaiBaseUrl: process.env.OPENAI_BASE_URL || '',
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
+    anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL || ''
   }
 })

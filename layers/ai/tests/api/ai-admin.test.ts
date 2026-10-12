@@ -13,8 +13,9 @@ interface AiEnabled {
   supportsCaching: boolean
 }
 interface AiConfig {
-  hostKeyConfigured: boolean
+  providers: { provider: string, envVar: string, keySource: 'env' | 'stored' | 'none', storedKey: { status: string, last4: string } }[]
   modelListAvailable: boolean
+  catalog: { id: string, provider: string }[]
   enabled: AiEnabled[]
   defaultModel: string
   features: { key: string, label: string, kind: string, model: string, effectiveModel: string }[]
@@ -136,6 +137,41 @@ describe('ai admin config', () => {
     const chat = features.find(f => f.kind === 'chat')
     if (!chat) return
     await expect(putConfig(opts, { feature_models: { [chat.key]: WHISPER } })).rejects.toMatchObject({ statusCode: 400 })
+  })
+
+  it('lists every provider with where its host key comes from', async () => {
+    const { opts } = await createAiOrg(sql)
+    const config = await getConfig(opts)
+    expect(config.providers.map(p => p.provider)).toEqual(['openrouter', 'tinfoil', 'openai', 'anthropic'])
+    expect(config.providers.find(p => p.provider === 'anthropic')!.envVar).toBe('ANTHROPIC_API_KEY')
+    expect(config.catalog.map(m => m.id)).toEqual(expect.arrayContaining([ALPHA, 'anthropic-api/test-sigma']))
+  })
+
+  it('stores a host key only for providers without an env key, masked, and removes it', async () => {
+    const { auth } = await createAiOrg(sql)
+    const member = await createAiOrg(sql, { admin: false })
+    await expect($fetch('/api/ai/admin/key', { method: 'PUT', body: { provider: 'openai', key: 'sk-x' }, ...member.opts }))
+      .rejects.toMatchObject({ statusCode: 403 })
+
+    for (const p of (await getConfig(auth)).providers) {
+      const put = $fetch<{ last4: string }>('/api/ai/admin/key', { method: 'PUT', body: { provider: p.provider, key: 'sk-test-host-9876' }, ...auth })
+      if (p.keySource === 'env') {
+        await expect(put).rejects.toMatchObject({ statusCode: 409 })
+        continue
+      }
+      expect((await put).last4).toBe('9876')
+      let state = (await getConfig(auth)).providers.find(x => x.provider === p.provider)!
+      expect(state).toMatchObject({ keySource: 'stored', storedKey: { status: 'ok', last4: '9876' } })
+
+      await $fetch('/api/ai/admin/key', { method: 'DELETE', query: { provider: p.provider }, ...auth })
+      state = (await getConfig(auth)).providers.find(x => x.provider === p.provider)!
+      expect(state.keySource).toBe('none')
+    }
+
+    await expect($fetch('/api/ai/admin/key', { method: 'PUT', body: { provider: 'openai', key: 'invalid' }, ...auth }))
+      .rejects.toMatchObject({ statusCode: expect.any(Number) })
+    const [row] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM core_host_settings WHERE namespace = 'ai' AND value::text LIKE '%sk-test-host%'`
+    expect(row!.n).toBe(0)
   })
 
   it('shares one config across orgs (host-level)', async () => {

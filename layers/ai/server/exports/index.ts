@@ -1,4 +1,4 @@
-// The `#ai/server` alias surface. Re-exports the OpenRouter/Tinfoil client, the
+// The `#ai/server` alias surface. Re-exports the multi-provider client, the
 // live model list, org/host model + key resolution, and the feature registry
 // for consumer layers. A superset of core's `#ai/server` fallback
 // (ai-fallback/ai.ts): the shared names behave the same whether or not this
@@ -47,9 +47,20 @@ export {
 } from '../utils/ai-reindex-registry'
 export type { AiIndexStaleness, AiReindexStatus, AiReindexScopeStatus } from '../utils/ai-reindex-registry'
 
-export { getHostApiKey, isTinfoilConfigured } from '../utils/ai-config'
+export { getEnvApiKey } from '../utils/ai-config'
 
-export { providerOf, wireModelId, TINFOIL_MODEL_PREFIX } from '../utils/ai-provider'
+export {
+  AI_PROVIDERS,
+  AI_PROVIDER_LABELS,
+  AI_PROVIDER_ENV_VARS,
+  isAiProvider,
+  providerOf,
+  wireModelId,
+  modelIdFor,
+  TINFOIL_MODEL_PREFIX,
+  OPENAI_MODEL_PREFIX,
+  ANTHROPIC_MODEL_PREFIX
+} from '../utils/ai-provider'
 
 export {
   getAllModels,
@@ -57,9 +68,11 @@ export {
   getTranscriptionModels,
   getModelInfo,
   isKnownModel,
+  isCatalogLoaded,
   supportsTemperature,
   supportsCaching
 } from '../utils/ai-model-list'
+export type { CatalogKeys } from '../utils/ai-model-list'
 
 export {
   registerAiFeature,
@@ -72,23 +85,27 @@ export {
   AI_SETTING_ENABLED_MODELS,
   AI_SETTING_DEFAULT_MODEL,
   AI_SETTING_FEATURE_MODELS,
-  AI_SETTING_API_KEY,
   AI_SETTING_EMBEDDING_MODEL,
+  apiKeySetting,
   sanitizeModelIdList,
   sanitizeModelId,
   sanitizeFeatureModels,
   getOrgApiKey,
   setOrgApiKey,
-  hasOrgApiKey,
-  getEffectiveApiKey,
+  getHostStoredApiKey,
+  setHostApiKey,
+  getHostApiKey,
   getProviderApiKey,
+  getCatalogKeys,
+  loadModelList,
   modelInfoOrPlaceholder,
   modelFitsKind,
   getHostEnabledModelIds,
+  getOrgEnabledModelIds,
   getAllowedModelIds,
   getAllowedModels,
   resolveDefaultModel,
   resolveFeatureModel,
   resolveEmbeddingModel
 } from '../utils/ai-settings'
-export type { AiOrgKey, AiOrgKeyStatus } from '../utils/ai-settings'
+export type { AiStoredKey, AiKeyStatus } from '../utils/ai-settings'

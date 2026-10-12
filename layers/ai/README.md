@@ -1,10 +1,11 @@
 # @nuxtinator/ai
 
-An optional, shared AI backend any layer can consume. Backed by
-[OpenRouter](https://openrouter.ai) — one OpenAI-compatible chat-completions API,
-many models. The host admin chooses which models the host's key may run and
-which model powers each AI feature; each organization can bring its own
-OpenRouter key and override those choices.
+An optional, shared AI backend any layer can consume. Four providers:
+[OpenRouter](https://openrouter.ai) (one OpenAI-compatible API, many models),
+Tinfoil (confidential inference), and OpenAI's and Anthropic's own APIs. The
+host admin adds a key per provider, chooses which models the host's keys may
+run and which model powers each AI feature; each organization can bring its
+own key per provider, pick that provider's models, and override those choices.
 
 ## What you get
 
@@ -26,16 +27,18 @@ OpenRouter key and override those choices.
     feature runs on for this org, and the models this org may pick.
   - `registerAiFeature({ key, label })` — declare a capability so it appears in
     the model pickers.
-- **Admin → AI** page (`/admin/ai`, operator-admin) — enable models from a
-  searchable OpenRouter list, pick the host default and the model per feature.
+- **Admin → AI** page (`/admin/ai`, operator-admin) — a tab per provider with
+  its host key (read-only when set in the env) and the models enabled for it;
+  the host default and the model per feature.
 - **Org settings → AI** page (`/@<slug>/settings/ai`, `org.settings.write`) —
-  bring your own OpenRouter key, pick the org's default and per-feature models.
+  the same tabs with the org's own keys and models, plus the org's default and
+  per-feature models.
   Registered into the tenancy settings shell through core's
   org-settings-section registry; absent in single-tenant deployments.
 - **`GET /api/ai/status`** — org-aware readiness probe (`configured`,
   `hasEnabledModel`, `featureAvailable`) for consumer client UIs.
-- **`GET /api/ai/models`** — the live, tool-capable OpenRouter model list
-  (cached an hour) for pickers.
+- **`GET /api/ai/models`** — the live, tool-capable model list from every
+  catalog loaded so far (cached an hour).
 
 Core ships a throwing `#ai/server` fallback, so a consumer layer can import
 `#ai/server` unconditionally and simply gate on `isAiConfigured(tx)` — the app
@@ -73,28 +76,30 @@ vector` when their role may; otherwise a superuser runs it once beforehand.
 2. Set the env:
 
    ```bash
-   NUXT_SECRET_ENCRYPTION_KEY=<64 hex chars>   # core; encrypts stored org keys
-   # optional — the host-wide fallback key for orgs without their own:
+   NUXT_SECRET_ENCRYPTION_KEY=<64 hex chars>   # core; encrypts stored keys
+   # optional — host keys, the fallback for orgs without their own. Each can
+   # instead be stored on Admin → AI; one set here wins and is read-only there.
    OPENROUTER_API_KEY=sk-or-...
+   OPENAI_API_KEY=sk-...
+   ANTHROPIC_API_KEY=sk-ant-...
    OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
    AI_HTTP_REFERER=https://your-app.example    # OpenRouter attribution
    AI_APP_TITLE=Your App
    ```
 
-3. Open **Admin → AI**, enable at least one model and choose a default. Nothing
+3. Open **Admin → AI**, add a key for a provider if none is in the env, enable
+   at least one model and choose a default. Nothing
    is enabled on a fresh deployment — the code carries no model ids, so AI
    features stay off until an admin picks.
 
 ## Tinfoil (confidential inference)
 
-Set `TINFOIL_API_KEY` and Tinfoil's models join the pickers, prefixed
-`tinfoil/` (e.g. `tinfoil/glm-5-3-flash`). Every Tinfoil request goes through
+Once a Tinfoil key exists (env, Admin → AI, or an org's own), Tinfoil's models
+join the pickers, prefixed `tinfoil/` (e.g. `tinfoil/glm-5-3-flash`). Every Tinfoil request goes through
 the SDK's `SecureClient`: the enclave's attestation is verified first and each
 request body is encrypted to the attested key, so prompts, images and audio
 are readable only inside the verified enclave. A failed verification refuses
-the request. Tinfoil always runs on the host's key — orgs can't store their
-own — and an org with its own OpenRouter key may still pick the Tinfoil models
-the host enabled.
+the request.
 
 Tinfoil also brings speech-to-text: features registered with
 `kind: 'transcription'` pick from its transcription models and call
@@ -107,12 +112,31 @@ TINFOIL_CATALOG_URL=https://api.tinfoil.sh/api/config/models
 TINFOIL_USER_CACHE_SECRET=<random>   # scopes Tinfoil's prompt cache; random per process when unset
 ```
 
+## OpenAI and Anthropic
+
+Models called on the providers' own APIs are stored as `openai-api/<id>` and
+`anthropic-api/<id>`, so they never collide with OpenRouter's `openai/…` and
+`anthropic/…` slugs. Their lists come from each provider's `GET /models` (which
+needs a key): OpenAI ids are kept when OpenRouter describes the same model,
+borrowing its prices and capabilities; Anthropic models carry their own context
+window and capabilities, with prices from OpenRouter's matching entry.
+
+Anthropic runs on the Messages API, translated to and from the
+OpenAI-compatible shape the rest of the client uses: prompt caching
+(`cache: true`) carries over, thinking blocks are sent back unchanged between
+tool rounds, and `generate()`'s forced tool call is sent as `auto` with an
+instruction, since newer Claude models reject forced `tool_choice`.
+`reasoning` maps to `output_config.effort`; models that think by default get
+at least 16k `max_tokens`, since thinking shares that budget.
+
 ## Whose key, whose models
 
-| Org has its own key? | Key used | Models the org may pick |
+Decided per provider:
+
+| Org has its own key for the provider? | Key used | That provider's models the org may pick |
 |---|---|---|
-| No | host `OPENROUTER_API_KEY` | the host-enabled set |
-| Yes | the org's key | any tool-capable model OpenRouter lists |
+| No | the host's (env, else stored on Admin → AI) | the host-enabled ones |
+| Yes | the org's key | the ones the org enabled on its page |
 
 A feature resolves to the first usable model in: the org's choice for the
 feature → the org's default → the host's choice for the feature → the host's
@@ -189,10 +213,10 @@ then discard it, which exercises a consumer's `onTextDiscard`.
   ids an admin or org chose. Host choices live in `core_host_settings`
   (deployment-global), org choices and the org key in `core_settings`
   (RLS-scoped per org), both under namespace `ai`.
-- **Org keys are encrypted at rest** with core's secret-crypto and never
+- **Stored keys are encrypted at rest** with core's secret-crypto and never
   returned to the browser (only the last four characters). Rotating
-  `NUXT_SECRET_ENCRYPTION_KEY` makes every stored org key unreadable; the org
-  page then asks for it to be removed and re-entered.
+  `NUXT_SECRET_ENCRYPTION_KEY` makes every stored key unreadable; the pages
+  then ask for it to be removed and re-entered.
 - **Sampling params are guarded per model.** Some models reject `temperature`;
   the client only sends it to models OpenRouter reports as accepting it.
 - **Prompt caching** rides through via `cache_control` to models OpenRouter

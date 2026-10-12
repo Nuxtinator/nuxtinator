@@ -22,20 +22,23 @@ import type {
   AiTranscribeOptions,
   AiTranscribeResult
 } from '../../types/ai-ext'
-import { getOpenRouterConfig, getHostApiKey, isTinfoilConfigured } from './ai-config'
-import { getAllModels, getModelInfo, supportsTemperature } from './ai-model-list'
-import { getOrgApiKey, getEffectiveApiKey, getProviderApiKey, resolveFeatureModel, resolveEmbeddingModel } from './ai-settings'
+import { getAnthropicConfig, getOpenAiConfig, getOpenRouterConfig } from './ai-config'
+import { ANTHROPIC_VERSION, getAllModels, getModelInfo, supportsTemperature } from './ai-model-list'
+import { getOrgApiKey, getHostApiKey, getProviderApiKey, loadModelList, resolveFeatureModel, resolveEmbeddingModel } from './ai-settings'
 import { getAiFeatureKind } from './ai-feature-registry'
-import { providerOf, reasoningParams, wireModelId } from './ai-provider'
+import { AI_PROVIDERS, AI_PROVIDER_LABELS, providerOf, reasoningParams, wireModelId } from './ai-provider'
 import { tinfoilFetch } from './tinfoil-client'
 import { runCompletionLoop, type ProviderCall, type ProviderToolCall, type ProviderTurn } from './ai-tool-loop'
 import { readCompletionStream, type StreamedTurn } from './ai-stream'
+import { fromAnthropicResponse, readAnthropicStream, toAnthropicBody } from './anthropic-messages'
 import { aiFakeComplete, aiFakeGenerate, aiFakeEmbed, aiFakeTranscribe } from './ai-test-fake'
 import { withAiRetries } from './ai-retry'
 
-// Chat and transcription client for two OpenAI-compatible providers, picked by
-// the resolved model id: OpenRouter (plain fetch to `${baseUrl}/…`) and Tinfoil
-// (the attested, body-encrypting fetch in tinfoil-client.ts). No OpenAI SDK,
+// Chat and transcription client for four providers, picked by the resolved
+// model id: OpenRouter and OpenAI (plain fetch to their OpenAI-compatible
+// APIs), Tinfoil (the attested, body-encrypting fetch in tinfoil-client.ts)
+// and Anthropic (plain fetch to the Messages API, translated to and from the
+// OpenAI-compatible shape in anthropic-messages.ts). No provider SDKs,
 // sidestepping the `@anthropic-ai/sdk` bundling caveats. `complete()` returns
 // assistant text, resolving any tool calls the model makes through the
 // caller's handler (see ai-tool-loop.ts);
@@ -60,15 +63,17 @@ import { withAiRetries } from './ai-retry'
 const AI_TEST_FALLBACK_MODEL = 'test/alpha'
 const AI_TEST_FALLBACK_TRANSCRIPTION_MODEL = 'test/whisper'
 
-// Whether live generation is possible for the active org: its own key, or one
-// of the host's env keys when it has none. Under VITEST it's always
+// Whether live generation is possible for the active org: for some provider,
+// its own key, or the host's when it has none. Under VITEST it's always
 // "configured" so suites run without a key — the network boundary is stubbed below.
 export async function isAiConfigured(tx: AiDbClient): Promise<boolean> {
   if (process.env.VITEST) return true
-  const org = await getOrgApiKey(tx)
-  if (org.status === 'ok') return true
-  if (org.status === 'undecryptable') return false
-  return !!getHostApiKey() || isTinfoilConfigured()
+  for (const provider of AI_PROVIDERS) {
+    const org = await getOrgApiKey(tx, provider)
+    if (org.status === 'ok') return true
+    if (org.status === 'none' && await getHostApiKey(tx, provider)) return true
+  }
+  return false
 }
 
 // Resolve the key and model for `feature` through the caller's tx. Pass the
@@ -76,7 +81,7 @@ export async function isAiConfigured(tx: AiDbClient): Promise<boolean> {
 // provider call after the transaction has committed.
 export async function resolveAiRun(tx: AiDbClient, feature: string): Promise<AiCompletionRun> {
   // Warm the list so the synchronous capability lookups in buildBody see it.
-  await getAllModels()
+  await loadModelList(tx)
   const model = await resolveFeatureModel(tx, feature)
   if (process.env.VITEST) {
     const fallback = getAiFeatureKind(feature) === 'transcription' ? AI_TEST_FALLBACK_TRANSCRIPTION_MODEL : AI_TEST_FALLBACK_MODEL
@@ -90,9 +95,7 @@ export async function resolveAiRun(tx: AiDbClient, feature: string): Promise<AiC
   if (!apiKey) {
     throw createError({
       statusCode: 503,
-      statusMessage: provider === 'tinfoil'
-        ? 'AI is not configured (no Tinfoil API key on the host).'
-        : 'AI is not configured (no API key for this organization or the host).'
+      statusMessage: `AI is not configured (no ${AI_PROVIDER_LABELS[provider]} API key for this organization or the host).`
     })
   }
   return { kind: 'completion', apiKey, model }
@@ -110,7 +113,7 @@ async function completionRun(opts: { tx?: AiDbClient, run?: AiCompletionRun, fea
   let run = opts.run
   if (run) {
     // The run was resolved earlier; the model list may have gone cold since.
-    await getAllModels()
+    await getAllModels({ [providerOf(run.model)]: run.apiKey })
   } else {
     if (!opts.tx) throw new Error('AI call needs `tx` or `run`')
     run = await resolveAiRun(opts.tx, opts.feature)
@@ -120,32 +123,51 @@ async function completionRun(opts: { tx?: AiDbClient, run?: AiCompletionRun, fea
 
 export interface AiKeyCheck {
   ok: boolean
-  // OpenRouter's label for the key, when it reports one.
+  // The provider's label for the key, when it reports one.
   label: string
   // Human-readable reason when not ok.
   message: string
 }
 
-// Verify a key against OpenRouter's key-info endpoint before storing it.
-// Under VITEST any non-empty key other than the literal 'invalid' passes.
-export async function validateApiKey(key: string): Promise<AiKeyCheck> {
+// One authenticated read that proves a key works: OpenRouter's key-info
+// endpoint, or the provider's model list.
+async function keyCheckRequest(provider: AiProvider, key: string): Promise<Response> {
+  const signal = AbortSignal.timeout(15_000)
+  switch (provider) {
+    case 'openrouter':
+      return await fetch(`${getOpenRouterConfig().baseUrl}/auth/key`, { headers: { Authorization: `Bearer ${key}` }, signal })
+    case 'openai':
+      return await fetch(`${getOpenAiConfig().baseUrl}/models`, { headers: { Authorization: `Bearer ${key}` }, signal })
+    case 'anthropic':
+      return await fetch(`${getAnthropicConfig().baseUrl}/models?limit=1`, {
+        headers: { 'x-api-key': key, 'anthropic-version': ANTHROPIC_VERSION },
+        signal
+      })
+    case 'tinfoil':
+      return await tinfoilFetch(key, '/v1/models', { method: 'GET', signal })
+  }
+}
+
+// Verify a key against its provider before storing it. Under VITEST any
+// non-empty key other than the literal 'invalid' passes.
+export async function validateApiKey(key: string, provider: AiProvider = 'openrouter'): Promise<AiKeyCheck> {
+  const name = AI_PROVIDER_LABELS[provider]
   if (process.env.VITEST) {
     return key && key !== 'invalid'
       ? { ok: true, label: 'test', message: '' }
-      : { ok: false, label: '', message: 'OpenRouter rejected this key.' }
+      : { ok: false, label: '', message: `${name} rejected this key.` }
   }
-  const cfg = getOpenRouterConfig()
   let res: Response
   try {
-    res = await fetch(`${cfg.baseUrl}/auth/key`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000) })
+    res = await keyCheckRequest(provider, key)
   } catch {
-    return { ok: false, label: '', message: 'Could not reach OpenRouter to verify the key. Try again in a moment.' }
+    return { ok: false, label: '', message: `Could not reach ${name} to verify the key. Try again in a moment.` }
   }
   if (res.status === 401 || res.status === 403) {
-    return { ok: false, label: '', message: 'OpenRouter rejected this key.' }
+    return { ok: false, label: '', message: `${name} rejected this key.` }
   }
   if (!res.ok) {
-    return { ok: false, label: '', message: `OpenRouter answered ${res.status} while verifying the key. Try again in a moment.` }
+    return { ok: false, label: '', message: `${name} answered ${res.status} while verifying the key. Try again in a moment.` }
   }
   const data = await res.json().catch(() => ({})) as { data?: { label?: unknown } }
   return { ok: true, label: typeof data?.data?.label === 'string' ? data.data.label : '', message: '' }
@@ -153,8 +175,9 @@ export async function validateApiKey(key: string): Promise<AiKeyCheck> {
 
 // Our content model → OpenAI-compatible content. A parts array becomes the
 // content-parts form: images as data-URL `image_url` parts, and (OpenRouter
-// only) Anthropic `cache_control` on text parts flagged cacheable — a no-op on
-// non-caching models, and a field Tinfoil's servers don't accept.
+// and Anthropic only) `cache_control` on text parts flagged cacheable — a
+// no-op on non-caching models, and a field Tinfoil's and OpenAI's servers
+// don't accept.
 function toApiContent(content: AiContent | AiRichContent, provider: AiProvider): unknown {
   if (typeof content === 'string') return content
   return (content as AiContentPart[]).map((p) => {
@@ -165,7 +188,7 @@ function toApiContent(content: AiContent | AiRichContent, provider: AiProvider):
     return {
       type: 'text',
       text: text.text,
-      ...(text.cache && provider === 'openrouter' ? { cache_control: { type: 'ephemeral' } } : {})
+      ...(text.cache && (provider === 'openrouter' || provider === 'anthropic') ? { cache_control: { type: 'ephemeral' } } : {})
     }
   })
 }
@@ -195,7 +218,12 @@ function buildBody(
   const body: Record<string, unknown> = {
     model: wireModelId(run.model),
     messages: apiMessages,
-    max_tokens: maxTokens
+    // OpenAI's reasoning models reject `max_tokens`. Anthropic models that
+    // think by default spend thinking from the same budget, so it gets
+    // headroom; it stays a ceiling, not a target.
+    ...(run.provider === 'openai'
+      ? { max_completion_tokens: maxTokens }
+      : { max_tokens: run.provider === 'anthropic' && run.info?.reasoning ? Math.max(maxTokens, ANTHROPIC_THINKING_MAX_TOKENS) : maxTokens })
   }
   // Only send sampling params to models that accept them — some models 400 on
   // an unrecognised `temperature`.
@@ -205,11 +233,34 @@ function buildBody(
   return { ...body, ...reasoningParams(run.info?.reasoning, reasoning), ...extra }
 }
 
-const PROVIDER_LABEL: Record<AiProvider, string> = { openrouter: 'OpenRouter', tinfoil: 'Tinfoil' }
+const ANTHROPIC_THINKING_MAX_TOKENS = 16_000
 
 // Upper bound on one provider request, body included (a stream that stalls
 // mid-reply is cut off too). Generous: long replies stream for a while.
 const REQUEST_TIMEOUT_MS = { 'chat/completions': 120_000, 'audio/transcriptions': 120_000, 'embeddings': 60_000 } as Record<string, number>
+
+// URL and auth headers for a plain-fetch provider. Anthropic's chat endpoint
+// is `messages`; the body is already in its shape (see chatRequest).
+function directEndpoint(run: ResolvedRun, endpoint: string): { url: string, headers: Record<string, string> } {
+  if (run.provider === 'anthropic') {
+    return {
+      url: `${getAnthropicConfig().baseUrl}/${endpoint === 'chat/completions' ? 'messages' : endpoint}`,
+      headers: { 'x-api-key': run.apiKey, 'anthropic-version': ANTHROPIC_VERSION }
+    }
+  }
+  if (run.provider === 'openai') {
+    return { url: `${getOpenAiConfig().baseUrl}/${endpoint}`, headers: { Authorization: `Bearer ${run.apiKey}` } }
+  }
+  const cfg = getOpenRouterConfig()
+  return {
+    url: `${cfg.baseUrl}/${endpoint}`,
+    headers: {
+      Authorization: `Bearer ${run.apiKey}`,
+      ...(cfg.referer ? { 'HTTP-Referer': cfg.referer } : {}),
+      ...(cfg.title ? { 'X-Title': cfg.title } : {})
+    }
+  }
+}
 
 // One POST to `endpoint` (relative to the provider's API root, e.g.
 // 'chat/completions'), with non-2xx statuses mapped onto the error contract.
@@ -224,17 +275,12 @@ async function providerRequest(run: ResolvedRun, endpoint: string, body: BodyIni
       body
     })
   } else {
-    const cfg = getOpenRouterConfig()
+    const { url, headers } = directEndpoint(run, endpoint)
     try {
-      res = await fetch(`${cfg.baseUrl}/${endpoint}`, {
+      res = await fetch(url, {
         method: 'POST',
         signal,
-        headers: {
-          Authorization: `Bearer ${run.apiKey}`,
-          ...(contentType ? { 'Content-Type': contentType } : {}),
-          ...(cfg.referer ? { 'HTTP-Referer': cfg.referer } : {}),
-          ...(cfg.title ? { 'X-Title': cfg.title } : {})
-        },
+        headers: { ...headers, ...(contentType ? { 'Content-Type': contentType } : {}) },
         body
       })
     } catch {
@@ -254,7 +300,7 @@ async function providerRequest(run: ResolvedRun, endpoint: string, body: BodyIni
       // ignore — the status alone drives the mapping
     }
     if (!process.env.VITEST) {
-      console.error(`[ai] ${PROVIDER_LABEL[run.provider]} ${res.status}: ${detail}`)
+      console.error(`[ai] ${AI_PROVIDER_LABELS[run.provider]} ${res.status}: ${detail}`)
     }
     if (res.status === 429 || res.status >= 500) {
       throw createError({ statusCode: 502, statusMessage: 'The AI provider is busy. Try again in a moment.' })
@@ -269,7 +315,8 @@ async function providerRequest(run: ResolvedRun, endpoint: string, body: BodyIni
 }
 
 function chatRequest(run: ResolvedRun, body: Record<string, unknown>): Promise<Response> {
-  return providerRequest(run, 'chat/completions', JSON.stringify(body), 'application/json')
+  const wire = run.provider === 'anthropic' ? toAnthropicBody(body) : body
+  return providerRequest(run, 'chat/completions', JSON.stringify(wire), 'application/json')
 }
 
 // One whole non-streaming round trip, retried on transient failure. A
@@ -278,10 +325,11 @@ function chatRequest(run: ResolvedRun, body: Record<string, unknown>): Promise<R
 async function callChat(run: ResolvedRun, body: Record<string, unknown>): Promise<any> {
   return await withAiRetries(async () => {
     const res = await chatRequest(run, body)
-    const data = await res.json()
+    const raw = await res.json()
+    const data = run.provider === 'anthropic' && !raw?.error ? fromAnthropicResponse(raw) : raw
     if (data?.error) {
       if (!process.env.VITEST) {
-        console.error(`[ai] ${PROVIDER_LABEL[run.provider]} upstream error (HTTP ${res.status}): ${JSON.stringify(data.error).slice(0, 500)}`)
+        console.error(`[ai] ${AI_PROVIDER_LABELS[run.provider]} upstream error (HTTP ${res.status}): ${JSON.stringify(data.error).slice(0, 500)}`)
       }
       throw createError({ statusCode: 502, statusMessage: 'The AI provider reported an upstream error. Try again in a moment.' })
     }
@@ -296,14 +344,20 @@ async function streamChat(
   run: ResolvedRun,
   body: Record<string, unknown>,
   onTextDelta: (delta: string) => void
-): Promise<StreamedTurn> {
-  const res = await chatRequest(run, { ...body, stream: true })
+): Promise<StreamedTurn & { native?: unknown[] }> {
+  const res = await chatRequest(run, {
+    ...body,
+    stream: true,
+    ...(run.provider === 'openai' ? { stream_options: { include_usage: true } } : {})
+  })
   if (!res.body) {
     throw createError({ statusCode: 502, statusMessage: 'The AI provider returned an empty stream. Try again.' })
   }
-  let turn: StreamedTurn
+  let turn: StreamedTurn & { native?: unknown[] }
   try {
-    turn = await readCompletionStream(textChunks(res.body), onTextDelta)
+    turn = run.provider === 'anthropic'
+      ? await readAnthropicStream(textChunks(res.body), onTextDelta)
+      : await readCompletionStream(textChunks(res.body), onTextDelta)
   } catch (err) {
     // The request timeout aborts a stalled body mid-read.
     if ((err as Error)?.name === 'TimeoutError' || (err as Error)?.name === 'AbortError') {
@@ -343,11 +397,11 @@ function logUsage(model: string, usage: any): void {
 
 // A `length` finish means the answer was cut off; both transports map it to
 // the same retryable error.
-function finishTurn(text: string, finishReason: string, toolCalls: ProviderToolCall[]): ProviderTurn {
+function finishTurn(text: string, finishReason: string, toolCalls: ProviderToolCall[], native?: unknown[]): ProviderTurn {
   if (finishReason === 'length') {
     throw createError({ statusCode: 502, statusMessage: 'The AI response was cut off. Try again.' })
   }
-  return { text: text.trim(), finishReason, toolCalls }
+  return { text: text.trim(), finishReason, toolCalls, ...(native ? { native } : {}) }
 }
 
 // One chat-completions round trip in the shape the tool loop consumes,
@@ -366,7 +420,7 @@ function providerCall(
     })
     if (onTextDelta) {
       const turn = await streamChat(run, body, onTextDelta)
-      return finishTurn(turn.text, turn.finishReason, turn.toolCalls)
+      return finishTurn(turn.text, turn.finishReason, turn.toolCalls, turn.native)
     }
     const data = await callChat(run, body)
     const choice = data.choices?.[0]
@@ -378,7 +432,8 @@ function providerCall(
         id: String(tc.id ?? ''),
         name: String(tc.function?.name ?? ''),
         arguments: String(tc.function?.arguments ?? '')
-      }))
+      })),
+      Array.isArray(choice?.message?.native) ? choice.message.native : undefined
     )
   }
 }
@@ -571,9 +626,9 @@ async function embedBatch(apiKey: string, model: string, input: string[]): Promi
 export async function resolveAiEmbedRun(tx: AiDbClient): Promise<AiEmbeddingRun> {
   const model = await resolveEmbeddingModel(tx)
   if (process.env.VITEST) return { kind: 'embedding', apiKey: 'test', model: model || AI_TEST_FALLBACK_EMBED_MODEL }
-  const apiKey = await getEffectiveApiKey(tx)
+  const apiKey = await getProviderApiKey(tx, 'openrouter')
   if (!apiKey) {
-    throw createError({ statusCode: 503, statusMessage: 'AI is not configured (no API key for this organization or the host).' })
+    throw createError({ statusCode: 503, statusMessage: 'AI is not configured (no OpenRouter API key for this organization or the host).' })
   }
   if (!model) {
     throw createError({ statusCode: 503, statusMessage: 'No embedding model is configured.' })

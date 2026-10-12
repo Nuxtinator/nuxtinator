@@ -14,7 +14,7 @@ import type {
   AiTextPart
 } from '#core/ai-fallback/types'
 
-export type AiProvider = 'openrouter' | 'tinfoil'
+export type AiProvider = 'openrouter' | 'tinfoil' | 'openai' | 'anthropic'
 
 // What a model is used for: chat completions (complete/generate) or
 // speech-to-text (transcribe).

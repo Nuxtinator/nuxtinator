@@ -20,7 +20,7 @@ import {
   AI_SETTING_DEFAULT_MODEL,
   AI_SETTING_FEATURE_MODELS,
   AI_SETTING_EMBEDDING_MODEL,
-  getAllModels,
+  loadModelList,
   getEmbeddingModelList,
   getAiFeatureKind,
   isKnownModel,
@@ -37,7 +37,7 @@ export default defineEventHandler(async (event) => {
   const { userId } = await requireOperatorAdmin(event)
   const body = (await readBody(event)) ?? {}
 
-  await getAllModels()
+  await loadModelList(db)
 
   // Probe outside the transaction: a network call must not hold a DB tx open.
   let embeddingModel: string | undefined
@@ -47,7 +47,7 @@ export default defineEventHandler(async (event) => {
     if (embeddingModel && !isKnownEmbeddingModel(embeddingModel)) {
       throw createError({ statusCode: 400, statusMessage: 'That embedding model is not available on OpenRouter.' })
     }
-    const hostKey = getHostApiKey()
+    const hostKey = await getHostApiKey(db, 'openrouter')
     if (embeddingModel && hostKey) await probeEmbeddingModel(hostKey, embeddingModel)
   }
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AiModelInfo } from '#ai'
-import { modelMeta } from '../utils/ai-model-meta'
+import { directProviderBadge, modelMeta } from '../utils/ai-model-meta'
 
 // Searchable model picker over a caller-supplied list (the host-enabled set,
 // the org's allowed set, or the whole model list). Each entry shows the
@@ -30,6 +30,7 @@ interface Option {
   name: string
   meta: string
   tinfoil?: boolean
+  direct?: string
   transcription?: boolean
   unavailable?: boolean
 }
@@ -46,6 +47,7 @@ const options = computed<Option[]>(() => {
     name: m.name,
     meta: modelMeta(m),
     tinfoil: m.provider === 'tinfoil',
+    direct: directProviderBadge(m.provider),
     transcription: m.kind === 'transcription'
   }))
   if (props.modelValue && !props.items.some(m => m.id === props.modelValue)) {
@@ -98,6 +100,14 @@ function onUpdate(value: unknown) {
             icon="i-lucide-shield-check"
           >
             Tinfoil
+          </UBadge>
+          <UBadge
+            v-if="item.direct"
+            color="neutral"
+            variant="subtle"
+            size="sm"
+          >
+            {{ item.direct }}
           </UBadge>
           <UBadge
             v-if="item.transcription"

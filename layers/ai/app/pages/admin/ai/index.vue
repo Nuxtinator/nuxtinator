@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import type { AiAdminConfig, AiEnabledModel, AiModelInfo, AiModelKind, AiEmbeddingModelInfo, AiReindexStatus, AiStaleScope } from '#ai'
-import { modelMeta } from '../../../utils/ai-model-meta'
+import type { AiAdminConfig, AiEnabledModel, AiHostProvider, AiModelInfo, AiModelKind, AiProvider, AiEmbeddingModelInfo, AiReindexStatus, AiStaleScope } from '#ai'
 
 definePageMeta({
   layout: 'admin',
@@ -10,13 +9,10 @@ definePageMeta({
 const toast = useToast()
 
 const { data, pending, refresh } = await useFetch<AiAdminConfig>('/api/ai/admin/config', {
-  default: () => ({
-    hostKeyConfigured: false, tinfoilConfigured: false, modelListAvailable: false, enabled: [], defaultModel: '', features: [],
+  default: (): AiAdminConfig => ({
+    providers: [], modelListAvailable: false, catalog: [], enabled: [], defaultModel: '', features: [],
     embeddingAvailable: false, embeddingModelListAvailable: false, embeddingModel: '', staleScopes: []
   })
-})
-const { data: list } = await useFetch<{ models: AiModelInfo[] }>('/api/ai/models', {
-  default: () => ({ models: [] })
 })
 const { data: embeddingList } = await useFetch<{ models: AiEmbeddingModelInfo[] }>('/api/ai/embedding-models', {
   default: () => ({ models: [] })
@@ -25,18 +21,68 @@ const { data: embeddingList } = await useFetch<{ models: AiEmbeddingModelInfo[] 
 const enabled = computed(() => data.value?.enabled ?? [])
 const features = computed(() => data.value?.features ?? [])
 const enabledIds = computed(() => enabled.value.map(m => m.id))
+const providers = computed(() => data.value?.providers ?? [])
 
-function enabledOfKind(kind: AiModelKind) {
-  return enabled.value.filter((m: AiEnabledModel) => m.kind === kind)
+function hasKey(p: AiHostProvider): boolean {
+  return p.keySource === 'env' || p.storedKey.status === 'ok'
 }
 
-// Models still addable: everything the providers list that isn't enabled yet.
-const addable = computed(() =>
-  (list.value?.models ?? []).filter(m => !enabledIds.value.includes(m.id))
-)
+// Default and feature pickers offer only models a host key can pay for.
+const keyedProviders = computed(() => new Set(providers.value.filter(hasKey).map(p => p.provider)))
+function enabledOfKind(kind: AiModelKind) {
+  return enabled.value.filter((m: AiEnabledModel) => m.kind === kind && keyedProviders.value.has(m.provider))
+}
+
+function enabledOf(provider: AiProvider) {
+  return enabled.value.filter((m: AiEnabledModel) => m.provider === provider)
+}
+
+// A provider's models still addable: everything it lists that isn't enabled yet.
+function addableOf(provider: AiProvider) {
+  return (data.value?.catalog ?? []).filter((m: AiModelInfo) => m.provider === provider && !enabledIds.value.includes(m.id))
+}
+
+const activeProvider = ref<AiProvider>('openrouter')
+const providerTabs = computed(() => providers.value.map(p => ({
+  label: p.label,
+  value: p.provider,
+  icon: hasKey(p) ? 'i-lucide-key-round' : undefined
+})))
 
 const saving = ref(false)
 const pendingAdd = ref('')
+
+function errorMessage(err: unknown): string | undefined {
+  return (err as { data?: { statusMessage?: string } } | null)?.data?.statusMessage
+}
+
+async function saveHostKey(provider: AiProvider, key: string): Promise<boolean> {
+  saving.value = true
+  try {
+    await $fetch('/api/ai/admin/key', { method: 'PUT', body: { provider, key } })
+    await refresh()
+    toast.add({ title: 'API key saved', color: 'success' })
+    return true
+  } catch (err: unknown) {
+    toast.add({ title: 'Key not saved', description: errorMessage(err), color: 'error' })
+    return false
+  } finally {
+    saving.value = false
+  }
+}
+
+async function removeHostKey(provider: AiProvider) {
+  saving.value = true
+  try {
+    await $fetch('/api/ai/admin/key', { method: 'DELETE', query: { provider } })
+    await refresh()
+    toast.add({ title: 'API key removed', color: 'success' })
+  } catch (err: unknown) {
+    toast.add({ title: 'Key not removed', description: errorMessage(err), color: 'error' })
+  } finally {
+    saving.value = false
+  }
+}
 
 async function put(body: Record<string, unknown>): Promise<boolean> {
   saving.value = true
@@ -64,7 +110,7 @@ async function addModel(id: string) {
   }
 }
 
-async function removeModel(model: AiEnabledModel) {
+async function removeModel(model: { id: string, name: string }) {
   const next = enabledIds.value.filter(id => id !== model.id)
   // Drop the default and any feature choice that pointed at it.
   const featureMap: Record<string, string> = {}
@@ -168,130 +214,108 @@ onBeforeUnmount(() => {
         AI
       </h1>
       <p class="text-sm text-(--ui-text-muted)">
-        Choose which models the host's keys may run (OpenRouter, and Tinfoil
-        when its key is set), the default model, and the model behind each AI
-        feature. Organizations inherit these choices and can override them in
-        their own settings.
+        Models the host's keys can run, the default, and the model for each
+        feature. Organizations inherit these and can override them.
       </p>
     </header>
 
     <UAlert
-      v-if="!data?.hostKeyConfigured && !data?.tinfoilConfigured"
+      v-if="providers.length && !keyedProviders.size"
       color="warning"
       variant="subtle"
       icon="i-lucide-triangle-alert"
       title="No host API key"
-      description="Set OPENROUTER_API_KEY and/or TINFOIL_API_KEY in the environment to give organizations without their own key a fallback. Model choices are saved regardless."
-    />
-
-    <UAlert
-      v-if="!data?.modelListAvailable"
-      color="warning"
-      variant="subtle"
-      icon="i-lucide-cloud-off"
-      title="Model list unavailable"
-      description="The providers' model lists could not be loaded. Existing choices still work; adding models will be possible once they load."
+      description="Add a key below so organizations without their own have a fallback."
     />
 
     <section class="space-y-3">
       <div>
         <h2 class="text-lg font-semibold">
-          Enabled models
+          Providers
         </h2>
         <p class="text-sm text-(--ui-text-muted)">
-          The models the host keys may spend on. Organizations using the host
-          key pick from this set; organizations with their own OpenRouter key
-          may pick any OpenRouter model, plus the Tinfoil models enabled here
-          (Tinfoil always runs on the host's key).
+          Add a provider's key, then enable the models it may run.
         </p>
       </div>
 
-      <ul
-        v-if="enabled.length"
-        class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md"
+      <UTabs
+        v-model="activeProvider"
+        :items="providerTabs"
+        variant="link"
+        class="w-full"
+        :ui="{ list: 'overflow-x-auto' }"
       >
-        <li
-          v-for="model in enabled"
-          :key="model.id"
-          class="flex items-center justify-between gap-3 p-4"
-        >
-          <div class="min-w-0">
-            <div class="font-medium flex items-center gap-2 flex-wrap">
-              {{ model.name }}
-              <UBadge
-                v-if="!model.available"
+        <template #content="{ item }">
+          <div
+            v-for="p in providers.filter(x => x.provider === item.value)"
+            :key="p.provider"
+            class="space-y-3 pt-2"
+          >
+            <AiProviderKey
+              :provider="p.provider"
+              :label="p.label"
+              :status="p.storedKey.status"
+              :last4="p.storedKey.last4"
+              :env-var="p.keySource === 'env' ? p.envVar : ''"
+              :disabled="saving"
+              :empty-hint="`Add one, or set ${p.envVar}.`"
+              :save="(key: string) => saveHostKey(p.provider, key)"
+              @remove="removeHostKey(p.provider)"
+            />
+
+            <template v-if="hasKey(p) || enabledOf(p.provider).length">
+              <p
+                v-if="!hasKey(p)"
+                class="text-sm text-(--ui-text-muted)"
+              >
+                These models won't run until a key is added.
+              </p>
+              <UAlert
+                v-else-if="!p.catalogAvailable"
                 color="warning"
                 variant="subtle"
-                size="sm"
+                icon="i-lucide-cloud-off"
+                title="Model list unavailable"
+                description="Existing choices still work. You can add models once the list loads."
+              />
+
+              <AiModelList
+                v-if="enabledOf(p.provider).length"
+                :models="enabledOf(p.provider)"
+                removable
+                :disabled="saving"
+                @remove="removeModel"
+              />
+              <p
+                v-else-if="!pending"
+                class="text-sm text-(--ui-text-muted)"
               >
-                No longer available
-              </UBadge>
-              <UBadge
-                v-if="model.supportsCaching"
-                color="info"
-                variant="subtle"
-                size="sm"
-                icon="i-lucide-database"
+                No {{ p.label }} models enabled.
+              </p>
+
+              <div
+                v-if="hasKey(p)"
+                class="max-w-md"
               >
-                Prompt caching
-              </UBadge>
-              <UBadge
-                v-if="model.provider === 'tinfoil'"
-                color="success"
-                variant="subtle"
-                size="sm"
-                icon="i-lucide-shield-check"
-              >
-                Tinfoil
-              </UBadge>
-              <UBadge
-                v-if="model.kind === 'transcription'"
-                color="info"
-                variant="subtle"
-                size="sm"
-                icon="i-lucide-audio-lines"
-              >
-                Transcription
-              </UBadge>
-            </div>
-            <div class="text-xs text-(--ui-text-muted) font-mono">
-              {{ model.id }}
-            </div>
-            <div
-              v-if="model.available"
-              class="text-xs text-(--ui-text-muted)"
-            >
-              {{ modelMeta(model) }}
-            </div>
+                <AiModelSelect
+                  :model-value="pendingAdd"
+                  :items="addableOf(p.provider)"
+                  placeholder="Add a model…"
+                  :disabled="saving || !addableOf(p.provider).length"
+                  @update:model-value="addModel"
+                />
+              </div>
+            </template>
           </div>
-          <UButton
-            icon="i-lucide-trash-2"
-            color="error"
-            variant="ghost"
-            size="sm"
-            :disabled="saving"
-            aria-label="Disable model"
-            @click="removeModel(model)"
-          />
-        </li>
-      </ul>
-      <div
-        v-else-if="!pending"
+        </template>
+      </UTabs>
+
+      <p
+        v-if="!enabled.length && !pending"
         class="text-sm text-(--ui-text-muted)"
       >
-        No models are enabled yet. AI features stay off until at least one
-        model is enabled and a default is chosen.
-      </div>
-
-      <div class="max-w-md">
-        <AiModelSelect
-          :model-value="pendingAdd"
-          :items="addable"
-          placeholder="Add a model…"
-          :disabled="saving || !addable.length"
-          @update:model-value="addModel"
-        />
-      </div>
+        AI stays off until a model is enabled and set as default.
+      </p>
     </section>
 
     <section class="space-y-3">
@@ -300,8 +324,7 @@ onBeforeUnmount(() => {
           Default model
         </h2>
         <p class="text-sm text-(--ui-text-muted)">
-          Used by any chat feature without its own choice. Transcription
-          features need their own choice below.
+          Used by chat features without their own model.
         </p>
       </div>
       <div class="max-w-md">
@@ -325,7 +348,7 @@ onBeforeUnmount(() => {
           Feature models
         </h2>
         <p class="text-sm text-(--ui-text-muted)">
-          Pick which enabled model powers each AI feature, or leave it on the default.
+          Override the model for a specific feature.
         </p>
       </div>
 
@@ -372,8 +395,7 @@ onBeforeUnmount(() => {
       v-else-if="!pending"
       class="text-sm text-(--ui-text-muted)"
     >
-      No AI features are registered yet. Feature layers (like the inbox) register
-      the models they need here once loaded.
+      No AI features are registered yet.
     </div>
 
     <section
@@ -385,8 +407,7 @@ onBeforeUnmount(() => {
           Embedding model
         </h2>
         <p class="text-sm text-(--ui-text-muted)">
-          Builds the search indexes (help libraries, portfolio sections). Every
-          organization uses this unless it picks its own on its AI settings page.
+          Builds the search indexes. Organizations can pick their own.
         </p>
       </div>
 
@@ -396,7 +417,7 @@ onBeforeUnmount(() => {
         variant="subtle"
         icon="i-lucide-cloud-off"
         title="Embedding model list unavailable"
-        description="OpenRouter's embedding model list could not be loaded. The current choice still works."
+        description="The current choice still works."
       />
 
       <div class="max-w-md">
@@ -411,14 +432,6 @@ onBeforeUnmount(() => {
       </div>
 
       <UAlert
-        color="warning"
-        variant="subtle"
-        icon="i-lucide-triangle-alert"
-        title="Changing this makes the existing search indexes unusable until they are rebuilt"
-        description="Vectors from different models cannot be compared. After a change, every index built with the old model must be re-embedded — the button below does that for every organization affected."
-      />
-
-      <UAlert
         v-if="staleScopes.length && !reindexing"
         color="error"
         variant="subtle"
@@ -427,7 +440,7 @@ onBeforeUnmount(() => {
       >
         <template #description>
           <p class="mb-2">
-            Search returns nothing useful for these until they are rebuilt.
+            Search won't work for these until they're rebuilt.
           </p>
           <UButton
             size="sm"
@@ -487,7 +500,7 @@ onBeforeUnmount(() => {
     >
       <template #body>
         <p class="text-sm">
-          Every search index built with the current model stops matching until it is re-embedded.
+          Existing search indexes stop working until they're re-embedded.
           You can start the rebuild right after saving.
         </p>
       </template>

@@ -1,15 +1,24 @@
 import type { AiModelInfo } from '#core/ai-fallback/types'
 import type { AiProvider, AiProviderModelInfo } from '../../types/ai-ext'
-import { getOpenRouterConfig, getTinfoilConfig, isTinfoilConfigured } from './ai-config'
-import { providerOf } from './ai-provider'
+import { getAnthropicConfig, getOpenAiConfig, getOpenRouterConfig, getTinfoilConfig } from './ai-config'
+import { AI_PROVIDERS, providerOf } from './ai-provider'
 import { parseTinfoilModels } from './tinfoil-models'
+import { openAiModelsFrom, parseAnthropicModels, parseProviderModelIds } from './direct-models'
 
-// The live model list, merged from two catalogs: OpenRouter's public
-// `GET /models` and Tinfoil's model catalog (listed only when a Tinfoil key is
-// configured). The catalogs are the only source of which models exist, what
-// they're called, what they cost, and which parameters they accept — nothing
-// model-specific lives in code. Only tool-capable chat models and file-upload
-// transcription models are kept.
+// The live model list, merged from four catalogs: OpenRouter's public
+// `GET /models`, Tinfoil's public model catalog, and the `GET /models` lists of
+// OpenAI and Anthropic (see direct-models.ts). The catalogs are the only source
+// of which models exist, what they're called, what they cost, and which
+// parameters they accept — nothing model-specific lives in code. Only
+// tool-capable chat models and file-upload transcription models are kept.
+//
+// OpenAI and Anthropic list models only to a caller with a key, so their
+// catalogs load once some key for them is passed in (`CatalogKeys`) and
+// refresh with the latest key seen. Tinfoil's catalog is public but is only
+// fetched once a Tinfoil key exists somewhere, so deployments that don't use
+// it never call it. Both lean on OpenRouter's entries for
+// prices and capability flags, so they are rebuilt whenever OpenRouter's
+// catalog refreshes.
 //
 // Each catalog is cached in-process for an hour and served stale while a
 // refresh runs, so pickers and generation keep working through a provider
@@ -25,9 +34,20 @@ const RETRY_AFTER_MS = 60 * 1000
 
 interface SourceState {
   models: AiProviderModelInfo[]
+  // The provider's raw `GET /models` payload (keyed providers only), kept so
+  // the models can be rebuilt against a newer OpenRouter catalog.
+  payload: unknown
+  // The key the catalog is fetched with ('' = no key seen yet). OpenRouter's
+  // catalog needs none.
+  key: string
   nextAttemptAt: number
   inflight: Promise<void> | null
 }
+
+// A key per provider to fetch the keyed catalogs with.
+export type CatalogKeys = Partial<Record<AiProvider, string>>
+
+const KEYED_PROVIDERS: AiProvider[] = ['tinfoil', 'openai', 'anthropic']
 
 interface ModelListState {
   sources: Record<AiProvider, SourceState>
@@ -57,23 +77,31 @@ export const AI_TEST_MODELS: AiProviderModelInfo[] = [
   testModel({ id: 'test/alpha', name: 'Test Alpha', promptPrice: 3, completionPrice: 15, contextLength: 200_000, supportsTemperature: true, supportsCaching: true, supportsImages: true }),
   testModel({ id: 'test/beta', name: 'Test Beta', promptPrice: 0.5, completionPrice: 2, contextLength: 128_000, supportsTemperature: true }),
   testModel({ id: 'test/gamma', name: 'Test Gamma' }),
-  testModel({ id: 'test/whisper', name: 'Test Whisper', kind: 'transcription', requestPrice: 0.01 })
+  testModel({ id: 'test/whisper', name: 'Test Whisper', kind: 'transcription', requestPrice: 0.01 }),
+  testModel({ id: 'tinfoil/test-tau', name: 'Test Tau', provider: 'tinfoil' }),
+  testModel({ id: 'openai-api/test-omega', name: 'Test Omega', provider: 'openai', supportsTemperature: true }),
+  testModel({ id: 'anthropic-api/test-sigma', name: 'Test Sigma', provider: 'anthropic', supportsCaching: true, supportsImages: true })
 ]
 
 function emptySource(): SourceState {
-  return { models: [], nextAttemptAt: 0, inflight: null }
+  return { models: [], payload: null, key: '', nextAttemptAt: 0, inflight: null }
 }
 
 function getState(): ModelListState {
   const g = globalThis as Record<symbol, unknown>
   if (!g[STATE_KEY]) {
     const state: ModelListState = {
-      sources: { openrouter: emptySource(), tinfoil: emptySource() },
+      sources: { openrouter: emptySource(), tinfoil: emptySource(), openai: emptySource(), anthropic: emptySource() },
       byId: new Map()
     }
     if (process.env.VITEST) {
-      state.sources.openrouter = { models: AI_TEST_MODELS, nextAttemptAt: Number.POSITIVE_INFINITY, inflight: null }
-      state.sources.tinfoil.nextAttemptAt = Number.POSITIVE_INFINITY
+      for (const provider of AI_PROVIDERS) {
+        state.sources[provider] = {
+          ...emptySource(),
+          models: AI_TEST_MODELS.filter(m => m.provider === provider),
+          nextAttemptAt: Number.POSITIVE_INFINITY
+        }
+      }
       state.byId = new Map(AI_TEST_MODELS.map(m => [m.id, m]))
     }
     g[STATE_KEY] = state
@@ -142,41 +170,74 @@ export function parseOpenRouterModels(payload: unknown): AiProviderModelInfo[] {
   return out
 }
 
-async function fetchCatalog(provider: AiProvider): Promise<AiProviderModelInfo[]> {
-  if (provider === 'tinfoil') {
-    const res = await fetch(getTinfoilConfig().catalogUrl, { signal: AbortSignal.timeout(15_000) })
-    if (!res.ok) throw new Error(`Tinfoil catalog ${res.status}`)
-    const models = parseTinfoilModels(await res.json())
-    if (models.length === 0) throw new Error('Tinfoil returned no usable models')
-    return models
+async function fetchCatalog(provider: AiProvider, key: string): Promise<unknown> {
+  let url: string
+  let headers: Record<string, string> = {}
+  switch (provider) {
+    case 'tinfoil':
+      url = getTinfoilConfig().catalogUrl
+      break
+    case 'openrouter':
+      url = `${getOpenRouterConfig().baseUrl}/models`
+      break
+    case 'openai':
+      url = `${getOpenAiConfig().baseUrl}/models`
+      headers = { Authorization: `Bearer ${key}` }
+      break
+    case 'anthropic':
+      url = `${getAnthropicConfig().baseUrl}/models?limit=1000`
+      headers = { 'x-api-key': key, 'anthropic-version': ANTHROPIC_VERSION }
+      break
   }
-  const res = await fetch(`${getOpenRouterConfig().baseUrl}/models`, { signal: AbortSignal.timeout(15_000) })
-  if (!res.ok) throw new Error(`OpenRouter ${res.status}`)
-  const models = parseOpenRouterModels(await res.json())
-  if (models.length === 0) throw new Error('OpenRouter returned no tool-capable models')
-  return models
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) })
+  if (!res.ok) throw new Error(`${provider} catalog ${res.status}`)
+  return await res.json()
+}
+
+export const ANTHROPIC_VERSION = '2023-06-01'
+
+// A fetched payload → the provider's models. Keyed providers are built
+// against OpenRouter's current catalog.
+function buildModels(state: ModelListState, provider: AiProvider, payload: unknown): AiProviderModelInfo[] {
+  const openrouter = state.sources.openrouter.models
+  switch (provider) {
+    case 'openrouter': return parseOpenRouterModels(payload)
+    case 'tinfoil': return parseTinfoilModels(payload)
+    case 'openai': return openAiModelsFrom(parseProviderModelIds(payload), openrouter)
+    case 'anthropic': return parseAnthropicModels(payload, openrouter)
+  }
 }
 
 function rebuildIndex(state: ModelListState): void {
-  state.byId = new Map(
-    [...state.sources.openrouter.models, ...state.sources.tinfoil.models].map(m => [m.id, m])
-  )
+  state.byId = new Map(AI_PROVIDERS.flatMap(p => state.sources[p].models).map(m => [m.id, m]))
 }
 
 async function refresh(state: ModelListState, provider: AiProvider): Promise<void> {
   const source = state.sources[provider]
   try {
-    source.models = await fetchCatalog(provider)
+    const payload = await fetchCatalog(provider, source.key)
+    const models = buildModels(state, provider, payload)
+    // An empty list keeps whatever loaded before and retries soon. OpenAI's
+    // list stays empty until OpenRouter's has loaded; keeping its payload lets
+    // the OpenRouter refresh below rebuild it.
+    if (models.length === 0) {
+      if (provider === 'openai') source.payload = payload
+      throw new Error('no usable models')
+    }
+    source.payload = payload
+    source.models = models
     source.nextAttemptAt = Date.now() + CACHE_TTL_MS
+    if (provider === 'openrouter') {
+      for (const keyed of ['openai', 'anthropic'] as AiProvider[]) {
+        const s = state.sources[keyed]
+        if (s.payload) s.models = buildModels(state, keyed, s.payload)
+      }
+    }
     rebuildIndex(state)
   } catch (err) {
     console.error(`[ai] ${provider} model list refresh failed:`, (err as Error)?.message ?? err)
     source.nextAttemptAt = Date.now() + RETRY_AFTER_MS
   }
-}
-
-function activeProviders(): AiProvider[] {
-  return isTinfoilConfigured() ? ['openrouter', 'tinfoil'] : ['openrouter']
 }
 
 async function ensureSource(state: ModelListState, provider: AiProvider): Promise<void> {
@@ -196,14 +257,26 @@ async function ensureSource(state: ModelListState, provider: AiProvider): Promis
 }
 
 // Every model this deployment can list (chat and transcription), refreshing
-// catalogs older than an hour.
-export async function getAllModels(): Promise<AiProviderModelInfo[]> {
+// catalogs older than an hour. `keys` lets the Tinfoil, OpenAI and Anthropic
+// catalogs load; without a key for them they serve whatever was last loaded.
+export async function getAllModels(keys: CatalogKeys = {}): Promise<AiProviderModelInfo[]> {
   const state = getState()
-  const providers = process.env.VITEST ? [] : activeProviders()
-  await Promise.all(providers.map(p => ensureSource(state, p)))
-  const models = [...state.sources.openrouter.models]
-  if (process.env.VITEST || isTinfoilConfigured()) models.push(...state.sources.tinfoil.models)
-  return models.sort((a, b) => a.name.localeCompare(b.name))
+  if (!process.env.VITEST) {
+    await ensureSource(state, 'openrouter')
+    const providers: AiProvider[] = []
+    for (const provider of KEYED_PROVIDERS) {
+      const key = keys[provider]
+      if (key) state.sources[provider].key = key
+      if (state.sources[provider].key) providers.push(provider)
+    }
+    await Promise.all(providers.map(p => ensureSource(state, p)))
+  }
+  return AI_PROVIDERS.flatMap(p => state.sources[p].models).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+// Whether a provider's catalog has loaded.
+export function isCatalogLoaded(provider: AiProvider): boolean {
+  return getState().sources[provider].models.length > 0
 }
 
 // The cached tool-capable chat model list. An empty result means no catalog
@@ -223,14 +296,12 @@ export function getModelInfo(id: string): AiProviderModelInfo | undefined {
   return getState().byId.get(id)
 }
 
-// Whether a stored id still exists in its provider's catalog. Tinfoil ids are
-// unknown while no Tinfoil key is configured. With the provider's catalog not
-// loaded there is nothing to check against, so the id passes rather than
-// every id failing.
+// Whether a stored id still exists in its provider's catalog. With the
+// provider's catalog not loaded there is nothing to check against, so the id
+// passes rather than every id failing.
 export function isKnownModel(id: string): boolean {
   const state = getState()
   const provider = providerOf(id)
-  if (provider === 'tinfoil' && !process.env.VITEST && !isTinfoilConfigured()) return false
   if (state.sources[provider].models.length === 0) return true
   return state.byId.has(id)
 }
