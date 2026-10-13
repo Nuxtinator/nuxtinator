@@ -78,6 +78,10 @@ export default defineEventHandler(async (event) => {
         .execute()
     })
 
+    // A reset means the old password may be known to someone else; sign out
+    // every device that used it.
+    await revokeUserSessions(resetRequest.user_id)
+
     // Log the password reset
     const userAgent = getHeader(event, 'user-agent') || undefined
     logPasswordReset(resetRequest.user_id, userAgent)

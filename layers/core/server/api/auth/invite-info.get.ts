@@ -1,6 +1,9 @@
 import { getQuery } from 'h3'
 import { db } from '../../utils/database'
+import { findInviteByToken, getInviteOrgs, inviteState } from '../../utils/invites'
 
+// Public: what an invite link is for, so the accept page can show it. `email`
+// is null for shareable link invites.
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
   const token = typeof query.token === 'string' ? query.token : ''
@@ -9,40 +12,30 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Token is required' })
   }
 
-  const user = await db
-    .selectFrom('users')
-    .select(['id', 'email', 'display_name', 'token_expires_at', 'password', 'verified'])
-    .where('token_key', '=', token)
-    .executeTakeFirst()
-
-  // An invite is "still pending" iff no password has been set yet. `verified`
-  // is a separate, admin-controlled axis and must not gate acceptance.
-  if (!user || user.password !== null) {
+  const invite = await findInviteByToken(db, token)
+  if (!invite) {
     throw createError({ statusCode: 404, statusMessage: 'Invitation not found' })
   }
 
-  const expires = user.token_expires_at ? new Date(user.token_expires_at) : null
-  if (!expires || expires.getTime() <= Date.now()) {
+  const state = inviteState(invite)
+  if (state === 'accepted') {
+    throw createError({ statusCode: 404, statusMessage: 'Invitation not found' })
+  }
+  if (state === 'expired') {
     throw createError({ statusCode: 410, statusMessage: 'Invitation has expired' })
   }
 
-  // Show the invitee what orgs they're being added to. Memberships are joined
-  // off the user id (not the token); they were already created at invite time.
-  // Orgs are a multi-tenant concept — the orgs/memberships tables only exist
-  // when the tenancy layer is loaded, so single-tenant invites carry no orgs.
-  let orgs: Array<{ slug: string, name: string }> = []
-  if (useRuntimeConfig(event).public.tenancy === true) {
-    orgs = await (db as any)
-      .selectFrom('memberships')
-      .innerJoin('orgs', 'orgs.id', 'memberships.org_id')
-      .select(['orgs.slug as slug', 'orgs.name as name'])
-      .where('memberships.user_id', '=', user.id)
-      .execute()
-  }
+  const inviter = invite.invited_by
+    ? await db.selectFrom('users').select('display_name').where('id', '=', invite.invited_by).executeTakeFirst()
+    : null
+
+  const orgs = (await getInviteOrgs(db, [invite.id])).get(invite.id) ?? []
 
   return {
-    email: user.email,
-    display_name: user.display_name,
-    orgs
+    kind: invite.email ? 'email' : 'link',
+    email: invite.email,
+    display_name: invite.display_name ?? '',
+    inviter_name: inviter?.display_name ?? null,
+    orgs: orgs.map(o => ({ slug: o.slug, name: o.name }))
   }
 })

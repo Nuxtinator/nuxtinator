@@ -24,8 +24,12 @@ const resetError = ref('')
 const resetSuccess = ref(false)
 const sentToEmail = ref('')
 
+const redirectTarget = computed(() => typeof route.query.redirect === 'string' ? route.query.redirect : undefined)
+
 // Check for verification status in query params
 onMounted(() => {
+  error.value = authErrorMessage(route.query.auth_error)
+
   const verified = route.query.verified as string
   if (verified === 'success') {
     successMessage.value = 'Email verified successfully! You can now sign in.'
@@ -136,6 +140,12 @@ function switchToReset() {
           :title="error"
           :close-button="{ icon: 'i-lucide-x', color: 'gray', variant: 'ghost' }"
           @close="error = ''"
+        />
+
+        <AuthProviderButtons
+          intent="login"
+          :redirect="redirectTarget"
+          separator="or"
         />
 
         <!-- Email Input -->

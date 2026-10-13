@@ -80,6 +80,7 @@ export function withOrgHeader(auth: AuthHeaders, slug: string): { headers: { coo
 // Cleanup: delete tenancy-prefixed orgs (cascades wipe memberships, org_apps,
 // org_role_overrides) and tenancy-prefixed users.
 export async function cleanupTenancyTestData(sql: ReturnType<typeof postgres>): Promise<void> {
+  await sql`DELETE FROM invites WHERE email LIKE 'test-tenancy-%@example.com' OR display_name LIKE 'test-tenancy-%'`
   await sql`DELETE FROM orgs WHERE slug LIKE 'test-tenancy-%'`
   await sql`DELETE FROM users WHERE email LIKE 'test-tenancy-%@example.com'`
 }

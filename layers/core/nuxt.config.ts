@@ -51,7 +51,7 @@ export default defineNuxtConfig({
       // Show correct color on first paint before nuxt loads 
       style: [
         {
-          innerHTML: ':root{background-color:#fff}:root.dark{background-color:#0f172a}'
+          innerHTML: ':root{background-color:#fff}:root.dark{background-color:#171717}'
         }
       ]
     }

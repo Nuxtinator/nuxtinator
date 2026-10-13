@@ -14,6 +14,8 @@ const SYSTEM_PREFIXES = [
   '/register',
   '/reset-password',
   '/accept-invite',
+  // Social-auth layer's "what should we call you?" sign-up step.
+  '/social-auth',
   '/orgs',
   '/dashboard',
   '/kitchen',

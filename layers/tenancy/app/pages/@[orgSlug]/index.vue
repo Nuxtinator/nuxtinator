@@ -102,7 +102,7 @@ const isSuspended = computed(() => (error.value as { statusCode?: number } | nul
             v-for="app in apps"
             :key="app.id"
             :to="app.path"
-            class="flex flex-col items-start rounded-md border border-(--ui-border) p-4 hover:bg-(--ui-bg-elevated) transition-colors"
+            class="flex flex-col items-start rounded-md border border-(--ui-border) dark:border-(--ui-border-accented) p-4 bg-(--ui-bg-elevated)/50 hover:bg-(--ui-bg-elevated) transition-colors"
           >
             <AppIcon
               :name="app.icon"

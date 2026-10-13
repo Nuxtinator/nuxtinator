@@ -1,0 +1,26 @@
+{
+  "name": "@nuxtinator/social-auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Sign in with Google and Sign in with Apple, for web and native apps",
+  "exports": {
+    ".": "./nuxt.config.ts"
+  },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10"
+  },
+  "optionalDependencies": {
+    "@nuxtinator/core": "*"
+  },
+  "peerDependencies": {
+    "@nuxt/ui": "^4.0.0",
+    "h3": "^1.0.0",
+    "kysely": "^0.28.0",
+    "nuxt": "^4.0.0",
+    "vue": "^3.0.0"
+  }
+}

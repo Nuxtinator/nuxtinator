@@ -7,7 +7,7 @@ definePageMeta({
   middleware: 'auth'
 })
 
-type MemberStatus = 'active' | 'not_verified' | 'pending_invite' | 'expired_invite'
+type MemberStatus = 'active' | 'not_verified'
 
 interface MemberRow {
   membership_id: string
@@ -35,9 +35,7 @@ interface OrgInfo {
 
 const STATUS_META: Record<MemberStatus, { label: string, color: 'success' | 'warning' | 'info' | 'error', icon: string }> = {
   active: { label: 'Active', color: 'success', icon: 'i-lucide-badge-check' },
-  not_verified: { label: 'Not verified', color: 'warning', icon: 'i-lucide-mail-warning' },
-  pending_invite: { label: 'Pending invite', color: 'info', icon: 'i-lucide-mail' },
-  expired_invite: { label: 'Expired invite', color: 'error', icon: 'i-lucide-mail-x' }
+  not_verified: { label: 'Not verified', color: 'warning', icon: 'i-lucide-mail-warning' }
 }
 
 const route = useRoute()
@@ -300,39 +298,78 @@ const handleSaveRoles = async () => {
   }
 }
 
-// ---------- resend invite ----------
-const resendingInvite = ref(false)
+// ---------- pending invites ----------
+interface PendingInvite {
+  id: string
+  kind: 'email' | 'link'
+  email: string | null
+  display_name: string | null
+  inviter_name: string | null
+  roles: string[]
+  created_at: string
+  expires_at: string
+  status: 'valid' | 'expired'
+}
 
-const handleResendInvite = async () => {
-  if (!selectedMember.value) return
-  resendingInvite.value = true
+const { data: invitesData, refresh: refreshInvites } = await useFetch<{ invites: PendingInvite[] }>(
+  () => `/api/o/${orgSlug.value}/invites`,
+  {
+    watch: [orgSlug],
+    default: () => ({ invites: [] })
+  }
+)
+const pendingInvites = computed(() => invitesData.value?.invites ?? [])
+const inviteBusy = ref<string | null>(null)
+
+const copyLink = async (url: string) => {
   try {
-    const userId = selectedMember.value.user_id
-    await $fetch(`/api/o/${orgSlug.value}/members/${userId}/resend-invite`, { method: 'POST' })
-    toast.add({ title: 'Invite resent', color: 'success' })
-    if (selectedMember.value.status === 'expired_invite') {
-      const updated = { ...selectedMember.value, status: 'pending_invite' as MemberStatus }
-      selectedMember.value = updated
-      if (data.value) {
-        data.value = {
-          ...data.value,
-          rows: data.value.rows.map(r => r.user_id === updated.user_id ? updated : r)
-        }
-      }
+    await navigator.clipboard.writeText(url)
+    toast.add({ title: 'Link copied', color: 'success' })
+  } catch {
+    toast.add({ title: 'Copy failed — select the link and copy it', color: 'warning' })
+  }
+}
+
+// Email invites are re-sent; link invites get a new link (shown in the invite
+// modal), since only the token's hash is stored.
+const resendInvite = async (inv: PendingInvite) => {
+  inviteBusy.value = inv.id
+  try {
+    const res = await $fetch<{ url?: string }>(`/api/o/${orgSlug.value}/invites/${inv.id}/resend`, { method: 'POST' })
+    await refreshInvites()
+    if (res.url) {
+      inviteMode.value = 'link'
+      createdLink.value = res.url
+      inviteModalOpen.value = true
+    } else {
+      toast.add({ title: 'Invite re-sent', color: 'success' })
     }
   } catch (err: unknown) {
-    toast.add({
-      title: 'Resend failed',
-      description: (err as { data?: { statusMessage?: string }, message?: string })?.data?.statusMessage || (err as { message?: string })?.message || 'Failed to resend invite',
-      color: 'error'
-    })
+    toast.add({ title: (err as { data?: { statusMessage?: string } })?.data?.statusMessage || 'Failed to resend invite', color: 'error' })
   } finally {
-    resendingInvite.value = false
+    inviteBusy.value = null
+  }
+}
+
+const revokeInvite = async (inv: PendingInvite) => {
+  inviteBusy.value = inv.id
+  try {
+    await $fetch(`/api/o/${orgSlug.value}/invites/${inv.id}`, { method: 'DELETE' })
+    await refreshInvites()
+    toast.add({ title: 'Invite revoked', color: 'success' })
+  } catch (err: unknown) {
+    toast.add({ title: (err as { data?: { statusMessage?: string } })?.data?.statusMessage || 'Failed to revoke invite', color: 'error' })
+  } finally {
+    inviteBusy.value = null
   }
 }
 
 // ---------- invite modal ----------
 const inviteModalOpen = ref(false)
+// 'email' sends the invite to an address; 'link' creates a single-use link
+// the inviter shares themselves.
+const inviteMode = ref<'email' | 'link'>('email')
+const createdLink = ref('')
 const inviting = ref(false)
 const inviteForm = reactive({
   email: '',
@@ -342,6 +379,8 @@ const inviteForm = reactive({
 const inviteError = ref('')
 
 const openInviteModal = () => {
+  inviteMode.value = 'email'
+  createdLink.value = ''
   inviteForm.email = ''
   inviteForm.display_name = ''
   inviteForm.roles = ['member']
@@ -357,8 +396,7 @@ const toggleInviteRole = (key: string) => {
 }
 
 const inviteValid = computed(() =>
-  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteForm.email.trim())
-  && inviteForm.display_name.trim().length >= 2
+  inviteMode.value === 'link' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteForm.email.trim())
 )
 
 const handleInvite = async () => {
@@ -366,17 +404,27 @@ const handleInvite = async () => {
   inviteError.value = ''
   inviting.value = true
   try {
-    await $fetch(`/api/o/${orgSlug.value}/invite`, {
+    const res = await $fetch<{ status: string, invite?: { url?: string } }>(`/api/o/${orgSlug.value}/invite`, {
       method: 'POST',
       body: {
-        email: inviteForm.email.trim().toLowerCase(),
-        display_name: inviteForm.display_name.trim(),
+        ...(inviteMode.value === 'link'
+          ? { link: true }
+          : { email: inviteForm.email.trim().toLowerCase() }),
+        display_name: inviteForm.display_name.trim() || undefined,
         roles: inviteForm.roles
       }
     })
-    toast.add({ title: 'Invite sent', description: inviteForm.email.trim().toLowerCase(), color: 'success' })
+    await Promise.all([refresh(), refreshInvites()])
+    if (inviteMode.value === 'link' && res.invite?.url) {
+      createdLink.value = res.invite.url
+      return
+    }
+    toast.add({
+      title: res.status === 'attached' ? 'Member added' : 'Invite sent',
+      description: inviteForm.email.trim().toLowerCase(),
+      color: 'success'
+    })
     inviteModalOpen.value = false
-    await refresh()
   } catch (err: unknown) {
     inviteError.value = (err as { data?: { statusMessage?: string }, message?: string })?.data?.statusMessage || (err as { message?: string })?.message || 'Failed to send invite'
   } finally {
@@ -475,6 +523,65 @@ const handleRemove = async () => {
       />
     </div>
 
+    <section
+      v-if="pendingInvites.length"
+      class="mt-8"
+    >
+      <h2 class="text-lg font-semibold mb-3">
+        Pending invites
+      </h2>
+      <ul class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-lg bg-(--ui-bg-elevated)">
+        <li
+          v-for="inv in pendingInvites"
+          :key="inv.id"
+          class="p-3 flex items-center justify-between gap-3"
+        >
+          <div class="min-w-0">
+            <div class="font-medium truncate">
+              {{ inv.email || 'Invite link' }}
+              <UBadge
+                v-if="inv.status === 'expired'"
+                color="error"
+                variant="subtle"
+                size="sm"
+                class="ml-1"
+              >
+                Expired
+              </UBadge>
+            </div>
+            <div class="text-xs text-(--ui-text-muted) truncate">
+              {{ inv.roles.map(roleLabel).join(', ') }}
+              <span v-if="inv.inviter_name"> · by {{ inv.inviter_name }}</span>
+              · expires {{ formatDate(inv.expires_at) }}
+            </div>
+          </div>
+          <div
+            v-if="canInvite"
+            class="flex gap-2 shrink-0"
+          >
+            <UButton
+              size="sm"
+              variant="outline"
+              color="neutral"
+              :loading="inviteBusy === inv.id"
+              @click="resendInvite(inv)"
+            >
+              {{ inv.kind === 'email' ? 'Resend' : 'New link' }}
+            </UButton>
+            <UButton
+              size="sm"
+              variant="ghost"
+              color="error"
+              :disabled="inviteBusy === inv.id"
+              @click="revokeInvite(inv)"
+            >
+              Revoke
+            </UButton>
+          </div>
+        </li>
+      </ul>
+    </section>
+
     <USlideover
       v-model:open="slideoverOpen"
       side="right"
@@ -549,18 +656,6 @@ const handleRemove = async () => {
                   />
                   {{ STATUS_META[selectedMember.status].label }}
                 </UBadge>
-                <template v-if="(selectedMember.status === 'pending_invite' || selectedMember.status === 'expired_invite') && canInvite">
-                  <UButton
-                    size="xs"
-                    variant="soft"
-                    color="primary"
-                    icon="i-lucide-mail"
-                    :loading="resendingInvite"
-                    @click="handleResendInvite"
-                  >
-                    Resend invite
-                  </UButton>
-                </template>
               </div>
             </div>
           </section>
@@ -675,7 +770,42 @@ const handleRemove = async () => {
       :dismissible="!inviting"
     >
       <template #content>
+        <div
+          v-if="createdLink"
+          class="p-6 space-y-5"
+        >
+          <h3 class="text-lg font-semibold">
+            Invite link
+          </h3>
+          <p class="text-sm text-(--ui-text-muted)">
+            Share this link with the person you're inviting. It works once and
+            expires in 7 days; anyone who opens it first can join.
+          </p>
+          <UInput
+            :model-value="createdLink"
+            readonly
+            size="lg"
+            class="w-full"
+            @focus="($event.target as HTMLInputElement).select()"
+          />
+          <div class="flex items-center justify-end gap-3">
+            <UButton
+              variant="ghost"
+              color="neutral"
+              @click="inviteModalOpen = false"
+            >
+              Done
+            </UButton>
+            <UButton
+              icon="i-lucide-copy"
+              @click="copyLink(createdLink)"
+            >
+              Copy link
+            </UButton>
+          </div>
+        </div>
         <form
+          v-else
           class="p-6 space-y-5"
           @submit.prevent="handleInvite"
         >
@@ -691,7 +821,7 @@ const handleRemove = async () => {
                 Invite member
               </h3>
               <p class="text-sm text-(--ui-text-muted) mt-1">
-                If this email is already a user, they're attached to this org silently. Otherwise they'll get an invite email with a 7-day link to set a password.
+                If this email is already a user, they're attached to this org silently. Otherwise they'll get an invite email with a 7-day link. Or create a single-use link to share yourself.
               </p>
             </div>
           </div>
@@ -705,7 +835,15 @@ const handleRemove = async () => {
             @close="inviteError = ''"
           />
 
+          <URadioGroup
+            v-model="inviteMode"
+            orientation="horizontal"
+            :items="[{ label: 'Send by email', value: 'email' }, { label: 'Create a link', value: 'link' }]"
+            :disabled="inviting"
+          />
+
           <UFormField
+            v-if="inviteMode === 'email'"
             label="Email"
             required
           >
@@ -722,8 +860,7 @@ const handleRemove = async () => {
 
           <UFormField
             label="Display name"
-            help="Used only for new users; ignored if the email is already a user."
-            required
+            help="Optional. Prefills a new user's name; ignored if the email is already a user."
           >
             <UInput
               v-model="inviteForm.display_name"
@@ -806,7 +943,7 @@ const handleRemove = async () => {
               :loading="inviting"
               :disabled="!inviteValid || inviting"
             >
-              Send invite
+              {{ inviteMode === 'link' ? 'Create link' : 'Send invite' }}
             </UButton>
           </div>
         </form>

@@ -25,6 +25,7 @@
         "@nuxtinator/mcp": "workspace:*",
         "@nuxtinator/messages": "workspace:*",
         "@nuxtinator/oauth": "workspace:*",
+        "@nuxtinator/social-auth": "workspace:*",
         "@nuxtinator/tenancy": "workspace:*",
         "@nuxtinator/videos": "workspace:*",
         "kysely": "^0.28.17",
@@ -337,6 +338,26 @@
     "layers/oauth": {
       "name": "@nuxtinator/oauth",
       "version": "1.1.4",
+      "optionalDependencies": {
+        "@nuxtinator/core": "*",
+      },
+      "peerDependencies": {
+        "@nuxt/ui": "^4.0.0",
+        "h3": "^1.0.0",
+        "kysely": "^0.28.0",
+        "nuxt": "^4.0.0",
+        "vue": "^3.0.0",
+      },
+    },
+    "layers/social-auth": {
+      "name": "@nuxtinator/social-auth",
+      "version": "0.1.0",
+      "dependencies": {
+        "jsonwebtoken": "^9.0.2",
+      },
+      "devDependencies": {
+        "@types/jsonwebtoken": "^9.0.10",
+      },
       "optionalDependencies": {
         "@nuxtinator/core": "*",
       },
@@ -740,6 +761,8 @@
     "@nuxtinator/messages": ["@nuxtinator/messages@workspace:layers/apps/messages"],
 
     "@nuxtinator/oauth": ["@nuxtinator/oauth@workspace:layers/oauth"],
+
+    "@nuxtinator/social-auth": ["@nuxtinator/social-auth@workspace:layers/social-auth"],
 
     "@nuxtinator/tenancy": ["@nuxtinator/tenancy@workspace:layers/tenancy"],
 

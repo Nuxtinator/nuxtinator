@@ -7,7 +7,7 @@ definePageMeta({
   middleware: ['auth', 'admin']
 })
 
-type UserStatus = 'active' | 'not_verified' | 'pending_invite' | 'expired_invite'
+type UserStatus = 'active' | 'not_verified'
 
 interface AdminUserRow {
   id: string
@@ -23,9 +23,7 @@ interface AdminUserRow {
 
 const STATUS_META: Record<UserStatus, { label: string, color: 'success' | 'warning' | 'info' | 'error', icon: string }> = {
   active: { label: 'Active', color: 'success', icon: 'i-lucide-badge-check' },
-  not_verified: { label: 'Not verified', color: 'warning', icon: 'i-lucide-mail-warning' },
-  pending_invite: { label: 'Pending invite', color: 'info', icon: 'i-lucide-mail' },
-  expired_invite: { label: 'Expired invite', color: 'error', icon: 'i-lucide-mail-x' }
+  not_verified: { label: 'Not verified', color: 'warning', icon: 'i-lucide-mail-warning' }
 }
 
 interface UsersResponse {
@@ -110,6 +108,10 @@ interface AttachmentDraft {
   roles: string
 }
 const inviteOpen = ref(false)
+// 'email' sends the invite to an address; 'link' creates a single-use link
+// the admin shares themselves.
+const inviteMode = ref<'email' | 'link'>('email')
+const createdLink = ref('')
 const inviteEmail = ref('')
 const inviteDisplayName = ref('')
 const inviteAttachments = ref<AttachmentDraft[]>([])
@@ -117,6 +119,8 @@ const inviting = ref(false)
 const inviteError = ref('')
 
 const openInvite = () => {
+  inviteMode.value = 'email'
+  createdLink.value = ''
   inviteEmail.value = ''
   inviteDisplayName.value = ''
   inviteAttachments.value = []
@@ -143,7 +147,7 @@ const rolesFor = (orgId: string) =>
 
 const canSubmitInvite = computed(() => {
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteEmail.value.trim())
-  if (!emailOk) return false
+  if (inviteMode.value === 'email' && !emailOk) return false
   // Org attachments only required when tenancy is loaded.
   if (!tenancyEnabled.value) return true
   return inviteAttachments.value.length > 0
@@ -154,10 +158,12 @@ const submitInvite = async () => {
   inviteError.value = ''
   inviting.value = true
   try {
-    await $fetch('/api/admin/users/invite', {
+    const res = await $fetch<{ invite?: { url?: string } }>('/api/admin/users/invite', {
       method: 'POST',
       body: {
-        email: inviteEmail.value.trim().toLowerCase(),
+        ...(inviteMode.value === 'link'
+          ? { link: true }
+          : { email: inviteEmail.value.trim().toLowerCase() }),
         display_name: inviteDisplayName.value.trim() || undefined,
         attachments: inviteAttachments.value.map(a => ({
           orgId: a.orgId,
@@ -165,15 +171,80 @@ const submitInvite = async () => {
         }))
       }
     })
+    await Promise.all([refresh(), refreshInvites()])
+    if (inviteMode.value === 'link' && res.invite?.url) {
+      createdLink.value = res.invite.url
+      return
+    }
     inviteOpen.value = false
-    toast.add({ title: 'Invitation sent', color: 'success' })
-    await refresh()
+    toast.add({ title: res.invite ? 'Invitation sent' : 'User added', color: 'success' })
   } catch (err: unknown) {
     inviteError.value = (err as { data?: { statusMessage?: string }, message?: string } | null)?.data?.statusMessage
       || (err as { message?: string } | null)?.message
       || 'Failed to invite'
   } finally {
     inviting.value = false
+  }
+}
+
+interface PendingInvite {
+  id: string
+  kind: 'email' | 'link'
+  email: string | null
+  display_name: string | null
+  inviter_name: string | null
+  created_at: string
+  expires_at: string
+  status: 'valid' | 'expired'
+  orgs: { id: string, slug: string, name: string, roles: string[] }[]
+}
+
+const { data: invitesData, refresh: refreshInvites } = await useFetch<{ invites: PendingInvite[] }>('/api/admin/invites', {
+  default: () => ({ invites: [] })
+})
+const pendingInvites = computed(() => invitesData.value?.invites ?? [])
+const inviteBusy = ref<string | null>(null)
+
+const copyLink = async (url: string) => {
+  try {
+    await navigator.clipboard.writeText(url)
+    toast.add({ title: 'Link copied', color: 'success' })
+  } catch {
+    toast.add({ title: 'Copy failed — select the link and copy it', color: 'warning' })
+  }
+}
+
+// Email invites are re-sent; link invites get a new link (shown in the invite
+// modal), since only the token's hash is stored.
+const resendInvite = async (inv: PendingInvite) => {
+  inviteBusy.value = inv.id
+  try {
+    const res = await $fetch<{ url?: string }>(`/api/admin/invites/${inv.id}/resend`, { method: 'POST' })
+    await refreshInvites()
+    if (res.url) {
+      inviteMode.value = 'link'
+      createdLink.value = res.url
+      inviteOpen.value = true
+    } else {
+      toast.add({ title: 'Invitation re-sent', color: 'success' })
+    }
+  } catch (err: unknown) {
+    toast.add({ title: (err as { data?: { statusMessage?: string } } | null)?.data?.statusMessage || 'Failed to resend', color: 'error' })
+  } finally {
+    inviteBusy.value = null
+  }
+}
+
+const revokeInvite = async (inv: PendingInvite) => {
+  inviteBusy.value = inv.id
+  try {
+    await $fetch(`/api/admin/invites/${inv.id}`, { method: 'DELETE' })
+    await refreshInvites()
+    toast.add({ title: 'Invitation revoked', color: 'success' })
+  } catch (err: unknown) {
+    toast.add({ title: (err as { data?: { statusMessage?: string } } | null)?.data?.statusMessage || 'Failed to revoke', color: 'error' })
+  } finally {
+    inviteBusy.value = null
   }
 }
 
@@ -334,7 +405,6 @@ const handleSave = async () => {
 
 const markingVerified = ref(false)
 const sendingVerification = ref(false)
-const resendingInvite = ref(false)
 const sendingPasswordReset = ref(false)
 
 const handleMarkVerified = async () => {
@@ -382,35 +452,6 @@ const handleSendVerification = async () => {
     })
   } finally {
     sendingVerification.value = false
-  }
-}
-
-const handleResendInvite = async () => {
-  if (!selectedUser.value) return
-  resendingInvite.value = true
-  try {
-    const userId = selectedUser.value.id
-    await $fetch(`/api/admin/users/${userId}/resend-invite`, { method: 'POST' })
-    toast.add({ title: 'Invite resent', color: 'success' })
-
-    if (selectedUser.value.status === 'expired_invite') {
-      const updated = { ...selectedUser.value, status: 'pending_invite' as UserStatus }
-      selectedUser.value = updated
-      if (data.value) {
-        data.value = {
-          ...data.value,
-          rows: data.value.rows.map(r => r.id === updated.id ? updated : r)
-        }
-      }
-    }
-  } catch (err: unknown) {
-    toast.add({
-      title: 'Resend failed',
-      description: (err as { data?: { statusMessage?: string }, message?: string } | null)?.data?.statusMessage || (err as { message?: string } | null)?.message || 'Failed to resend invite',
-      color: 'error'
-    })
-  } finally {
-    resendingInvite.value = false
   }
 }
 
@@ -651,6 +692,62 @@ const handleDelete = async () => {
       />
     </div>
 
+    <section
+      v-if="pendingInvites.length"
+      class="space-y-2"
+    >
+      <h2 class="text-lg font-semibold">
+        Pending invitations
+      </h2>
+      <ul class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md">
+        <li
+          v-for="inv in pendingInvites"
+          :key="inv.id"
+          class="p-3 flex items-center justify-between gap-3"
+        >
+          <div class="min-w-0">
+            <div class="font-medium truncate">
+              {{ inv.email || 'Invite link' }}
+              <UBadge
+                v-if="inv.status === 'expired'"
+                color="error"
+                variant="subtle"
+                size="sm"
+                class="ml-1"
+              >
+                Expired
+              </UBadge>
+            </div>
+            <div class="text-xs text-(--ui-text-muted) truncate">
+              <span v-if="inv.orgs.length">{{ inv.orgs.map(o => o.name).join(', ') }} · </span>
+              <span v-if="inv.inviter_name">by {{ inv.inviter_name }} · </span>
+              expires {{ formatDate(inv.expires_at) }}
+            </div>
+          </div>
+          <div class="flex gap-2 shrink-0">
+            <UButton
+              size="sm"
+              variant="outline"
+              color="neutral"
+              :loading="inviteBusy === inv.id"
+              @click="resendInvite(inv)"
+            >
+              {{ inv.kind === 'email' ? 'Resend' : 'New link' }}
+            </UButton>
+            <UButton
+              size="sm"
+              variant="ghost"
+              color="error"
+              :disabled="inviteBusy === inv.id"
+              @click="revokeInvite(inv)"
+            >
+              Revoke
+            </UButton>
+          </div>
+        </li>
+      </ul>
+    </section>
+
     <USlideover
       v-model:open="slideoverOpen"
       side="right"
@@ -725,15 +822,6 @@ const handleDelete = async () => {
                 Resend verification email
               </UButton>
               <UButton
-                v-if="selectedUser.status === 'pending_invite' || selectedUser.status === 'expired_invite'"
-                variant="outline"
-                :loading="resendingInvite"
-                @click="handleResendInvite"
-              >
-                Resend invite
-              </UButton>
-              <UButton
-                v-if="selectedUser.status === 'active' || selectedUser.status === 'not_verified'"
                 variant="outline"
                 color="neutral"
                 :loading="sendingPasswordReset"
@@ -924,19 +1012,63 @@ const handleDelete = async () => {
 
     <UModal v-model:open="inviteOpen">
       <template #content>
+        <div
+          v-if="createdLink"
+          class="p-6 space-y-4"
+        >
+          <h2 class="text-lg font-semibold">
+            Invite link
+          </h2>
+          <p class="text-sm text-(--ui-text-muted)">
+            Share this link with the person you're inviting. It works once and
+            expires in 7 days; anyone who opens it first can join.
+          </p>
+          <UInput
+            :model-value="createdLink"
+            readonly
+            class="w-full"
+            @focus="($event.target as HTMLInputElement).select()"
+          />
+          <div class="flex gap-2 justify-end">
+            <UButton
+              variant="ghost"
+              @click="inviteOpen = false"
+            >
+              Done
+            </UButton>
+            <UButton
+              icon="i-lucide-copy"
+              @click="copyLink(createdLink)"
+            >
+              Copy link
+            </UButton>
+          </div>
+        </div>
         <form
+          v-else
           class="p-6 space-y-4"
           @submit.prevent="submitInvite"
         >
           <h2 class="text-lg font-semibold">
             Invite a user
           </h2>
+
           <p class="text-sm text-(--ui-text-muted)">
             New users get one email; existing users are silently attached to the
             chosen organizations. Host admin can grant any role.
           </p>
 
-          <UFormField label="Email">
+          <URadioGroup
+            v-model="inviteMode"
+            orientation="horizontal"
+            :items="[{ label: 'Send by email', value: 'email' }, { label: 'Create a link', value: 'link' }]"
+            :disabled="inviting"
+          />
+
+          <UFormField
+            v-if="inviteMode === 'email'"
+            label="Email"
+          >
             <UInput
               v-model="inviteEmail"
               type="email"
@@ -947,7 +1079,7 @@ const handleDelete = async () => {
 
           <UFormField
             label="Display name"
-            hint="Used only when this email isn't already a user."
+            :hint="inviteMode === 'link' ? 'Optional — prefills their name.' : 'Used only when this email isn\'t already a user.'"
           >
             <UInput
               v-model="inviteDisplayName"
@@ -1024,7 +1156,7 @@ const handleDelete = async () => {
               :loading="inviting"
               :disabled="!canSubmitInvite"
             >
-              Send invite
+              {{ inviteMode === 'link' ? 'Create link' : 'Send invite' }}
             </UButton>
           </div>
         </form>

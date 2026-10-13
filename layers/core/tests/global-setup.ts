@@ -13,7 +13,7 @@ import {
 } from './helpers'
 
 // Resolve dev/ relative to this file: layers/core/tests/global-setup.ts → ../../host
-const HOST_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../../host')
+const HOST_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../../dev')
 
 // NODE_ENV must be 'development' both at build time (Vite inlines
 // `process.env.NODE_ENV` into the bundle, so the email layer's

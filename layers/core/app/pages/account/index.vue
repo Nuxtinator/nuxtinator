@@ -3,7 +3,12 @@ definePageMeta({
   middleware: 'auth'
 })
 
-const { user, logout, deleteAccount } = useAuth()
+const { user, logout, deleteAccount, checkAuth } = useAuth()
+const { withReauth } = useReauth()
+
+// Provider-only accounts have no password: password fields are hidden and
+// sensitive actions confirm through `withReauth` instead.
+const hasPassword = computed(() => user.value?.has_password !== false)
 const { theme, toggleTheme } = useTheme()
 const route = useRoute()
 
@@ -52,7 +57,7 @@ const emailSuccess = ref('')
 
 const canSubmitEmail = computed(() => {
   return emailState.new_email.trim()
-    && emailState.current_password
+    && (emailState.current_password || !hasPassword.value)
     && !emailLoading.value
     && emailState.new_email !== user.value?.email
 })
@@ -99,7 +104,7 @@ const passwordStrength = computed(() => {
 })
 
 const canSubmitPassword = computed(() => {
-  return passwordState.current_password
+  return (passwordState.current_password || !hasPassword.value)
     && passwordState.new_password.length >= 8
     && passwordMatch.value
     && !passwordLoading.value
@@ -157,13 +162,13 @@ async function handleEmailChange() {
   emailLoading.value = true
 
   try {
-    await $fetch('/api/profile/email', {
+    await withReauth(() => $fetch('/api/profile/email', {
       method: 'POST',
       body: {
         new_email: emailState.new_email.trim(),
-        current_password: emailState.current_password
+        ...(hasPassword.value ? { current_password: emailState.current_password } : {})
       }
-    })
+    }))
 
     emailSuccess.value = 'Verification email sent! Please check your new email address to confirm the change.'
 
@@ -189,15 +194,16 @@ async function handlePasswordChange() {
   passwordLoading.value = true
 
   try {
-    await $fetch('/api/profile/password', {
+    await withReauth(() => $fetch('/api/profile/password', {
       method: 'PATCH',
       body: {
-        current_password: passwordState.current_password,
+        ...(hasPassword.value ? { current_password: passwordState.current_password } : {}),
         new_password: passwordState.new_password
       }
-    })
+    }))
 
-    passwordSuccess.value = 'Password changed successfully'
+    passwordSuccess.value = hasPassword.value ? 'Password changed successfully' : 'Password set'
+    await checkAuth()
 
     // Reset form
     passwordState.current_password = ''
@@ -214,14 +220,16 @@ async function handlePasswordChange() {
 async function handleDeleteAccount() {
   deleteError.value = ''
 
-  if (!deleteState.password || !deleteState.confirmDelete) {
+  if ((hasPassword.value && !deleteState.password) || !deleteState.confirmDelete) {
     return
   }
 
   deleteLoading.value = true
 
   try {
-    const result = await deleteAccount(deleteState.password)
+    const result = hasPassword.value
+      ? await deleteAccount(deleteState.password)
+      : await withReauth(() => deleteAccount())
 
     if (!result.success) {
       deleteError.value = result.message || 'Failed to delete account'
@@ -362,7 +370,10 @@ watch(() => deleteState.password, () => {
             autocomplete="email"
           />
         </UFormField>
-        <UFormField label="Current Password">
+        <UFormField
+          v-if="hasPassword"
+          label="Current Password"
+        >
           <UInput
             v-model="emailState.current_password"
             type="password"
@@ -397,14 +408,23 @@ watch(() => deleteState.password, () => {
     <UCard>
       <template #header>
         <h2 class="text-xl font-semibold">
-          Change Password
+          {{ hasPassword ? 'Change Password' : 'Set a Password' }}
         </h2>
       </template>
       <form
         class="space-y-4"
         @submit.prevent="handlePasswordChange"
       >
-        <UFormField label="Current Password">
+        <p
+          v-if="!hasPassword"
+          class="text-sm text-(--ui-text-muted)"
+        >
+          Add a password so you can also sign in with your email address.
+        </p>
+        <UFormField
+          v-if="hasPassword"
+          label="Current Password"
+        >
           <UInput
             v-model="passwordState.current_password"
             type="password"
@@ -493,10 +513,14 @@ watch(() => deleteState.password, () => {
           :loading="passwordLoading"
           :disabled="!canSubmitPassword"
         >
-          Change Password
+          {{ hasPassword ? 'Change Password' : 'Set Password' }}
         </UButton>
       </form>
     </UCard>
+
+    <AccountSignInMethods />
+
+    <AccountSessions />
 
     <!-- Layer-injected sections (e.g. OAuth Connected apps) -->
     <component
@@ -540,7 +564,10 @@ watch(() => deleteState.password, () => {
           title="Warning: This action is permanent"
           description="Deleting your account will permanently remove all your data. This action cannot be undone."
         />
-        <UFormField label="Enter your password to confirm">
+        <UFormField
+          v-if="hasPassword"
+          label="Enter your password to confirm"
+        >
           <UInput
             v-model="deleteState.password"
             type="password"
@@ -553,7 +580,7 @@ watch(() => deleteState.password, () => {
         <div class="flex items-center gap-2">
           <UCheckbox
             v-model="deleteState.confirmDelete"
-            :disabled="!deleteState.password || deleteLoading"
+            :disabled="(hasPassword && !deleteState.password) || deleteLoading"
           />
           <span class="text-sm">I understand this action is permanent and cannot be undone</span>
         </div>
@@ -566,12 +593,14 @@ watch(() => deleteState.password, () => {
           color="error"
           size="lg"
           :loading="deleteLoading"
-          :disabled="!deleteState.password || !deleteState.confirmDelete || deleteLoading"
+          :disabled="(hasPassword && !deleteState.password) || !deleteState.confirmDelete || deleteLoading"
           @click="handleDeleteAccount"
         >
           Delete My Account
         </UButton>
       </div>
     </UCard>
+
+    <ReauthModal />
   </div>
 </template>

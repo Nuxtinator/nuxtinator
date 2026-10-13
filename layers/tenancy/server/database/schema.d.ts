@@ -47,9 +47,17 @@ export interface OrgRoleOverridesTable {
   updated_at: ColumnType<Date, string | undefined, string>
 }
 
+// The orgs an invite grants on acceptance, with the roles in each.
+export interface InviteOrgsTable {
+  invite_id: string
+  org_id: string
+  roles: Generated<string[]>
+}
+
 declare global {
   interface NuxtinatorDatabaseTables {
     orgs: OrgsTable
+    invite_orgs: InviteOrgsTable
     memberships: MembershipsTable
     org_apps: OrgAppsTable
     org_role_overrides: OrgRoleOverridesTable
