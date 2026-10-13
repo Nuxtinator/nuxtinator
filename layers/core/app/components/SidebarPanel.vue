@@ -19,7 +19,7 @@ defineProps<{
 
 <template>
   <aside
-    class="flex flex-col h-full bg-(--ui-bg-elevated)"
+    class="flex flex-col h-full bg-(--chrome-bg)"
     :class="variant === 'floating'
       ? 'border border-(--ui-border) rounded-lg'
       : 'border-r border-(--ui-border)'"

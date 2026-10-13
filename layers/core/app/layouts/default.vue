@@ -25,7 +25,7 @@ watch(() => route.path, () => {
     <!-- Authenticated chrome -->
     <template v-if="user">
       <!-- Mobile top bar -->
-      <header class="lg:hidden sticky top-0 z-40 bg-(--ui-bg-elevated) border-b border-(--ui-border) py-2 px-3 flex items-center justify-between gap-2">
+      <header class="lg:hidden sticky top-0 z-40 bg-(--chrome-bg) border-b border-(--ui-border) py-2 px-3 flex items-center justify-between gap-2">
         <div class="flex items-center gap-2 min-w-0">
           <UButton
             class="sm:hidden"
@@ -58,6 +58,7 @@ watch(() => route.path, () => {
         </div>
         <div class="flex items-center gap-1 shrink-0">
           <NotificationBell :active-app-id="activeApp?.id" />
+          <ThemeToggle size="sm" />
           <UButton
             to="/account"
             icon="i-lucide-user"
@@ -73,7 +74,7 @@ watch(() => route.path, () => {
       <!-- Desktop top bar -->
       <!-- OrgSwitcher lives in the left group so it sits visually above the
            AppRail (which starts at `w-14` directly below the header). -->
-      <header class="hidden lg:flex sticky top-0 z-40 bg-(--ui-bg-elevated) border-b border-(--ui-border) py-3 px-4 items-center justify-between gap-4">
+      <header class="hidden lg:flex sticky top-0 z-40 bg-(--chrome-bg) border-b border-(--ui-border) py-3 px-4 items-center justify-between gap-4">
         <div class="flex items-center gap-3 min-w-0">
           <component
             :is="orgSwitcher"
@@ -88,6 +89,7 @@ watch(() => route.path, () => {
         </div>
         <div class="flex items-center gap-3">
           <NotificationBell :active-app-id="activeApp?.id" />
+          <ThemeToggle size="sm" />
           <UButton
             to="/account"
             icon="i-lucide-user"
@@ -148,7 +150,7 @@ watch(() => route.path, () => {
 
     <!-- Unauthenticated -->
     <template v-else>
-      <header class="bg-(--ui-bg-elevated) border-b border-(--ui-border) py-4 sticky top-0 z-50">
+      <header class="bg-(--chrome-bg) border-b border-(--ui-border) py-4 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 flex justify-between items-center">
           <NuxtLink
             to="/"

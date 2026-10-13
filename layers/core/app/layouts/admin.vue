@@ -39,7 +39,7 @@ watch(() => route.path, () => {
 
 <template>
   <div class="min-h-screen bg-(--ui-bg) text-(--ui-text)">
-    <header class="h-14 bg-(--ui-bg-elevated) border-b border-(--ui-border) px-4 sticky top-0 z-40 flex items-center justify-between gap-3">
+    <header class="h-14 bg-(--chrome-bg) border-b border-(--ui-border) px-4 sticky top-0 z-40 flex items-center justify-between gap-3">
       <div class="flex items-center gap-3">
         <UButton
           class="sm:hidden"
