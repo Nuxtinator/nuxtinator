@@ -13,7 +13,8 @@ Each provider turns on when its credentials are set. With none set, the layer lo
 | The email matches a user who never verified their address | Refused (`auth_error=unverified_account`). Linking would hand the account to whoever registered the address first. That user signs in with their password (or resets it), then links the provider from `/account`. |
 | The provider hasn't verified the email | Refused (`auth_error=email_unverified`). |
 | No matching user | Creates a verified account with no password. If the provider sent no usable name (Apple sends it only on the first authorization, and not at all if the user declines), the browser goes to `/social-auth/complete` to ask for one. |
-| No matching user, self-registration is off (**Admin → Settings**) and no valid invite | Refused (`auth_error=registration_closed`). |
+| No matching user, self-registration is off (**Admin → Settings**) and no invite | Refused (`auth_error=registration_closed`). |
+| No matching user, self-registration is off, and the invite is expired or already used | Refused (`auth_error=invite_invalid`). |
 
 The first account on a deployment becomes host admin, the same as with `/register`.
 
@@ -79,6 +80,7 @@ The response carries `accessToken`, `refreshToken` and `expiresIn`. Send the acc
 - `422` with `data.needsDisplayName`: a new account needs a name. Ask the user, then call again with `displayName`.
 - `409` with `data.code`: `unverified_account`, `email_unverified`, `already_linked` or `one_per_provider`.
 - `403` with `data.code` `registration_closed`: no account matches and self-registration is off. Pass an `invite` to create one.
+- `410` with `data.code` `invite_invalid`: as above, but the `invite` passed is expired or already used.
 - `inviteNeedsConfirmation: true`: an existing account opened an invite. Confirm with `POST /api/auth/accept-invite { token }`.
 
 Google ID tokens are accepted for the native client IDs and the web client ID; Android apps request tokens for the web client ID. Apple ID tokens are accepted for the bundle IDs.

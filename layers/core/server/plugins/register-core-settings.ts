@@ -7,7 +7,8 @@ export default defineNitroPlugin(() => {
     namespace: REGISTRATION_SETTINGS_NAMESPACE,
     key: SETTING_SELF_REGISTRATION,
     default: true,
-    parse: v => (typeof v === 'boolean' ? v : true),
+    // A malformed stored value closes registration rather than opening it.
+    parse: v => v === true,
     label: 'Allow self-registration'
   })
 })

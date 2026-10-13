@@ -6,6 +6,7 @@ definePageMeta({
 
 interface HostSettings {
   selfRegistration: boolean
+  labels: { selfRegistration: string }
 }
 
 const toast = useToast()
@@ -41,7 +42,7 @@ async function onSetSelfRegistration(selfRegistration: boolean) {
       <div class="flex items-start justify-between gap-4">
         <div>
           <h2 class="font-medium">
-            Allow self-registration
+            {{ data.labels.selfRegistration }}
           </h2>
           <p class="text-sm text-(--ui-text-muted)">
             Let anyone create an account from the sign-up page or by signing in with a provider.

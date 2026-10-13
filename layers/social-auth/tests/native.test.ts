@@ -137,11 +137,18 @@ describe('POST /api/social-auth/native', () => {
   it('creates accounts only through an invite while self-registration is off', async () => {
     const existing = await createTestUser(sql, { email: socialEmail() })
     const invite = await createPendingInvite(sql, { email: null, display_name: 'test-social-link' })
-    await sql`INSERT INTO core_host_settings (namespace, key, value) VALUES ('core', 'self_registration', 'false'::jsonb)`
+    const expiredInvite = await createPendingInvite(sql, { email: null, display_name: 'test-social-link', expiresInMs: -1000 })
+    await sql`
+      INSERT INTO core_host_settings (namespace, key, value) VALUES ('core', 'self_registration', 'false'::jsonb)
+      ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`
     try {
       const err = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email: socialEmail(), name: 'Uninvited' }) }).catch(e => e)
       expect(err.statusCode).toBe(403)
       expect(err.data?.data?.code).toBe('registration_closed')
+
+      const expired = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email: socialEmail(), name: 'Late' }), invite: expiredInvite.token }).catch(e => e)
+      expect(expired.statusCode).toBe(410)
+      expect(expired.data?.data?.code).toBe('invite_invalid')
 
       const signedIn = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email: existing.email }) })
       expect(signedIn.created).toBe(false)

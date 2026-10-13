@@ -16,12 +16,14 @@ const ERROR_MESSAGES: Record<SignInErrorCode, string> = {
   already_linked: 'This provider account is linked to a different user',
   one_per_provider: 'An account from this provider is already linked',
   registration_closed: 'Registration is closed; an invitation is required to create an account',
+  invite_invalid: 'The invitation is no longer valid',
   failed: 'Sign-in failed'
 }
 
 const ERROR_STATUS: Partial<Record<SignInErrorCode, number>> = {
   failed: 401,
-  registration_closed: 403
+  registration_closed: 403,
+  invite_invalid: 410
 }
 
 // Sign-in from a native app that already holds an ID token from the

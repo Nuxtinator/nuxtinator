@@ -11,7 +11,7 @@ import type { SocialIntent } from './social-flow'
 // What happens when a provider vouches for someone. Shared by the web
 // callback, the native token endpoint and the display-name step.
 
-export type SignInErrorCode = 'email_unverified' | 'unverified_account' | 'already_linked' | 'one_per_provider' | 'registration_closed' | 'failed'
+export type SignInErrorCode = 'email_unverified' | 'unverified_account' | 'already_linked' | 'one_per_provider' | 'registration_closed' | 'invite_invalid' | 'failed'
 
 export type SignInOutcome
   = { kind: 'signed_in', userId: string, created: boolean, inviteAccepted: boolean }
@@ -149,23 +149,36 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
 
   const invite = input.invite ? await findInviteByToken(db, input.invite) : null
   const usableInvite = invite && inviteState(invite) === 'valid' ? invite : null
-  if (!usableInvite && !(await isSelfRegistrationOpen(db))) return { kind: 'error', code: 'registration_closed' }
+  if (!usableInvite && !(await isSelfRegistrationOpen(db))) {
+    return { kind: 'error', code: input.invite ? 'invite_invalid' : 'registration_closed' }
+  }
 
   const displayName = (input.displayName ?? profile.name ?? '').trim()
   if (displayName.length < 2) return { kind: 'needs_name' }
 
-  const { account, memberships } = await db.transaction().execute(async (trx) => {
-    const account = await createUserAccount(trx, {
-      email: profile.email!,
-      display_name: displayName,
-      passwordHash: null,
-      verified: true,
-      selfSignup: !usableInvite
-    }, input.userAgent)
-    await trx.insertInto('user_identities').values(identityRow(account.userId, input)).execute()
-    const memberships = usableInvite ? await acceptInvite(trx, usableInvite.id, account.userId) : []
-    return { account, memberships }
-  })
+  // createUserAccount re-checks the setting under its lock, so registration can
+  // still close between the check above and the insert.
+  let created
+  try {
+    created = await db.transaction().execute(async (trx) => {
+      const account = await createUserAccount(trx, {
+        email: profile.email!,
+        display_name: displayName,
+        passwordHash: null,
+        verified: true,
+        selfSignup: !usableInvite
+      }, input.userAgent)
+      await trx.insertInto('user_identities').values(identityRow(account.userId, input)).execute()
+      const memberships = usableInvite ? await acceptInvite(trx, usableInvite.id, account.userId) : []
+      return { account, memberships }
+    })
+  } catch (err) {
+    if ((err as { data?: { code?: string } }).data?.code === 'registration_closed') {
+      return { kind: 'error', code: 'registration_closed' }
+    }
+    throw err
+  }
+  const { account, memberships } = created
 
   try {
     await useNitroApp().hooks.callHook('user.created', { userId: account.userId, email: profile.email, viaInvite: !!usableInvite })

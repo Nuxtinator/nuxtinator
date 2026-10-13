@@ -1,6 +1,6 @@
 import { db } from '#core/server/utils/database'
 import { requireOperatorAdmin } from '#tenant/server'
-import { logEvent } from '../../../utils/activity-logger'
+import { logUpdate } from '../../../utils/activity-logger'
 import { clearHostSetting, setHostSetting } from '../../../utils/settings-store'
 import { REGISTRATION_SETTINGS_NAMESPACE, SETTING_SELF_REGISTRATION } from '../../../utils/registration'
 
@@ -20,11 +20,7 @@ export default defineEventHandler(async (event) => {
     await setHostSetting(db, REGISTRATION_SETTINGS_NAMESPACE, SETTING_SELF_REGISTRATION, false)
   }
 
-  logEvent({
-    eventType: 'admin_setting_changed',
-    userId,
-    metadata: { setting: SETTING_SELF_REGISTRATION, value: selfRegistration }
-  }).catch(() => {})
+  logUpdate('core_host_settings', `${REGISTRATION_SETTINGS_NAMESPACE}:${SETTING_SELF_REGISTRATION}`, userId, { value: selfRegistration })
 
   return { selfRegistration }
 })

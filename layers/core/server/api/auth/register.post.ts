@@ -22,7 +22,7 @@ export default defineEventHandler(async (event) => {
   }
 
   if (!(await isSelfRegistrationOpen(db))) {
-    throw createError({ statusCode: 403, statusMessage: 'Registration is closed' })
+    throw createError({ statusCode: 403, statusMessage: 'Registration is closed', data: { code: 'registration_closed' } })
   }
 
   // Check rate limit by IP

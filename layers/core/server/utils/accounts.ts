@@ -55,7 +55,7 @@ export async function createUserAccount(
   const isFirstUser = Number(countRow?.count ?? 0) === 0
 
   if (account.selfSignup && !isFirstUser && !(await isSelfRegistrationEnabled(trx))) {
-    throw createError({ statusCode: 403, statusMessage: 'Registration is closed' })
+    throw createError({ statusCode: 403, statusMessage: 'Registration is closed', data: { code: 'registration_closed' } })
   }
 
   const userId = randomUUID()

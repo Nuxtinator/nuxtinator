@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const { user, authReady } = useAuth()
 const config = useRuntimeConfig()
-const registrationOpen = await useRegistrationOpen()
+const registrationOpen = await useRegistrationOpen({ lazy: true })
 
 // Multi-tenant mode bounces an authed user into their last-active org (or the
 // org picker). Single-tenant mode has no orgs, so home is right here — show the
