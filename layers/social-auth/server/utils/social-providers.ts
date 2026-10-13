@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, randomBytes, type JsonWebKey, type KeyObject } from 'node:crypto'
+import { createHash, createPublicKey, randomBytes, type KeyObject, type webcrypto } from 'node:crypto'
 import jwt from 'jsonwebtoken'
 import { getSiteUrl } from '#core/server/utils/site-url'
 
@@ -182,7 +182,7 @@ export async function revokeAppleToken(clientId: string, refreshToken: string): 
     token: refreshToken,
     token_type_hint: 'refresh_token'
   })
-  await $fetch<unknown, string>('https://appleid.apple.com/auth/revoke', {
+  await $fetch<void, string>('https://appleid.apple.com/auth/revoke', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: body.toString()
@@ -197,7 +197,7 @@ const jwksCache = new Map<string, { at: number, keys: Map<string, KeyObject> }>(
 async function loadJwks(url: string, force = false): Promise<Map<string, KeyObject>> {
   const cached = jwksCache.get(url)
   if (cached && !force && Date.now() - cached.at < JWKS_TTL_MS) return cached.keys
-  const res = await $fetch<{ keys: Array<JsonWebKey & { kid?: string }> }, string>(url)
+  const res = await $fetch<{ keys: Array<webcrypto.JsonWebKey & { kid?: string }> }, string>(url)
   const keys = new Map<string, KeyObject>()
   for (const jwk of res.keys ?? []) {
     if (jwk.kid) keys.set(jwk.kid, createPublicKey({ key: jwk, format: 'jwk' }))
