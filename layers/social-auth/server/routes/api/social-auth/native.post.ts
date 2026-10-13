@@ -15,7 +15,13 @@ const ERROR_MESSAGES: Record<SignInErrorCode, string> = {
   unverified_account: 'An unverified account already uses this email address',
   already_linked: 'This provider account is linked to a different user',
   one_per_provider: 'An account from this provider is already linked',
+  registration_closed: 'Registration is closed; an invitation is required to create an account',
   failed: 'Sign-in failed'
+}
+
+const ERROR_STATUS: Partial<Record<SignInErrorCode, number>> = {
+  failed: 401,
+  registration_closed: 403
 }
 
 // Sign-in from a native app that already holds an ID token from the
@@ -82,7 +88,7 @@ export default defineEventHandler(async (event) => {
 
   switch (outcome.kind) {
     case 'error':
-      throw createError({ statusCode: outcome.code === 'failed' ? 401 : 409, statusMessage: ERROR_MESSAGES[outcome.code], data: { code: outcome.code } })
+      throw createError({ statusCode: ERROR_STATUS[outcome.code] ?? 409, statusMessage: ERROR_MESSAGES[outcome.code], data: { code: outcome.code } })
     case 'needs_name':
       throw createError({ statusCode: 422, statusMessage: 'Display name required', data: { needsDisplayName: true } })
     case 'linked':

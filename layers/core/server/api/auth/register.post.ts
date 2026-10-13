@@ -6,6 +6,7 @@ import { checkRateLimit, logRateLimitExceeded } from '../../utils/rate-limit'
 import { readBody, getHeader, setResponseHeader } from 'h3'
 import { getSiteUrl } from '../../utils/site-url'
 import { createUserAccount } from '../../utils/accounts'
+import { isSelfRegistrationOpen } from '../../utils/registration'
 import { startSession, nativeTokenFields } from '../../utils/sessions'
 import { useRuntimeConfig, createError } from '#imports'
 
@@ -18,6 +19,10 @@ export default defineEventHandler(async (event) => {
 
   if (display_name.length < 2) {
     throw createError({ statusCode: 400, statusMessage: 'Display name must be at least 2 characters long' })
+  }
+
+  if (!(await isSelfRegistrationOpen(db))) {
+    throw createError({ statusCode: 403, statusMessage: 'Registration is closed' })
   }
 
   // Check rate limit by IP
@@ -45,7 +50,7 @@ export default defineEventHandler(async (event) => {
   // transaction so the "who got the admin role" audit row commits with the
   // user row.
   const { userId, tokenKey, isFirstUser } = await db.transaction().execute(trx =>
-    createUserAccount(trx, { email, display_name, passwordHash: hashedPassword, verified: false }, userAgent)
+    createUserAccount(trx, { email, display_name, passwordHash: hashedPassword, verified: false, selfSignup: true }, userAgent)
   )
 
   // First user gets auto-logged-in — no verification email, session started directly.

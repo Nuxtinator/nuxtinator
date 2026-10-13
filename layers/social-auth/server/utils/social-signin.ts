@@ -1,5 +1,6 @@
 import { db, sql } from '#core/server/utils/database'
 import { createUserAccount } from '#core/server/utils/accounts'
+import { isSelfRegistrationOpen } from '#core/server/utils/registration'
 import { acceptInvite, emitAcceptedMemberships, findInviteByToken, inviteState } from '#core/server/utils/invites'
 import { encryptSecret } from '#core/server/utils/secret-crypto'
 import { isPublicStorageConfigured, uploadToS3 } from '#core/server/utils/storage'
@@ -10,7 +11,7 @@ import type { SocialIntent } from './social-flow'
 // What happens when a provider vouches for someone. Shared by the web
 // callback, the native token endpoint and the display-name step.
 
-export type SignInErrorCode = 'email_unverified' | 'unverified_account' | 'already_linked' | 'one_per_provider' | 'failed'
+export type SignInErrorCode = 'email_unverified' | 'unverified_account' | 'already_linked' | 'one_per_provider' | 'registration_closed' | 'failed'
 
 export type SignInOutcome
   = { kind: 'signed_in', userId: string, created: boolean, inviteAccepted: boolean }
@@ -146,18 +147,20 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
     return { kind: 'signed_in', userId: existing.id, created: false, inviteAccepted: false }
   }
 
-  const displayName = (input.displayName ?? profile.name ?? '').trim()
-  if (displayName.length < 2) return { kind: 'needs_name' }
-
   const invite = input.invite ? await findInviteByToken(db, input.invite) : null
   const usableInvite = invite && inviteState(invite) === 'valid' ? invite : null
+  if (!usableInvite && !(await isSelfRegistrationOpen(db))) return { kind: 'error', code: 'registration_closed' }
+
+  const displayName = (input.displayName ?? profile.name ?? '').trim()
+  if (displayName.length < 2) return { kind: 'needs_name' }
 
   const { account, memberships } = await db.transaction().execute(async (trx) => {
     const account = await createUserAccount(trx, {
       email: profile.email!,
       display_name: displayName,
       passwordHash: null,
-      verified: true
+      verified: true,
+      selfSignup: !usableInvite
     }, input.userAgent)
     await trx.insertInto('user_identities').values(identityRow(account.userId, input)).execute()
     const memberships = usableInvite ? await acceptInvite(trx, usableInvite.id, account.userId) : []

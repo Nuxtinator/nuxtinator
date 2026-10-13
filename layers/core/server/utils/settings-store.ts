@@ -99,6 +99,21 @@ export async function setHostSetting(
   await writeSetting(tx, 'core_host_settings', namespace, key, value)
 }
 
+// Drops the deployment-global override so reads fall back to the declared
+// default.
+export async function clearHostSetting(
+  tx: DbClient,
+  namespace: string,
+  key: string
+): Promise<void> {
+  requireSetting(namespace, key)
+  await tx
+    .deleteFrom('core_host_settings')
+    .where('namespace', '=', namespace)
+    .where('key', '=', key)
+    .execute()
+}
+
 // The two tables share one row shape; the scope helpers above differ only in
 // which one they hit.
 type SettingsTable = 'core_settings' | 'core_host_settings'

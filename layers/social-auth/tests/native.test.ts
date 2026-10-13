@@ -134,6 +134,25 @@ describe('POST /api/social-auth/native', () => {
     expect(res.inviteNeedsConfirmation).toBe(true)
   })
 
+  it('creates accounts only through an invite while self-registration is off', async () => {
+    const existing = await createTestUser(sql, { email: socialEmail() })
+    const invite = await createPendingInvite(sql, { email: null, display_name: 'test-social-link' })
+    await sql`INSERT INTO core_host_settings (namespace, key, value) VALUES ('core', 'self_registration', 'false'::jsonb)`
+    try {
+      const err = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email: socialEmail(), name: 'Uninvited' }) }).catch(e => e)
+      expect(err.statusCode).toBe(403)
+      expect(err.data?.data?.code).toBe('registration_closed')
+
+      const signedIn = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email: existing.email }) })
+      expect(signedIn.created).toBe(false)
+
+      const invited = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email: socialEmail(), name: 'Invited' }), invite: invite.token })
+      expect(invited.created).toBe(true)
+    } finally {
+      await sql`DELETE FROM core_host_settings WHERE namespace = 'core' AND key = 'self_registration'`
+    }
+  })
+
   it('links a second provider to the signed-in account, and refuses one owned by someone else', async () => {
     const email = socialEmail()
     const first = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email, name: 'Linker' }) })

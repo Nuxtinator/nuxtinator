@@ -47,4 +47,12 @@ export default defineNitroPlugin(() => {
     icon: 'i-lucide-history',
     order: 30
   })
+
+  registerAdminSection({
+    appId: 'host',
+    title: 'Settings',
+    path: '/admin/settings',
+    icon: 'i-lucide-settings',
+    order: 40
+  })
 })

@@ -84,7 +84,7 @@ export default defineEventHandler(async (event) => {
   const passwordHash = await bcrypt.hash(password, 12)
 
   const { account, memberships } = await db.transaction().execute(async (trx) => {
-    const account = await createUserAccount(trx, { email, display_name, passwordHash, verified }, userAgent)
+    const account = await createUserAccount(trx, { email, display_name, passwordHash, verified, selfSignup: false }, userAgent)
     const memberships = await acceptInvite(trx, invite.id, account.userId)
     return { account, memberships }
   })
