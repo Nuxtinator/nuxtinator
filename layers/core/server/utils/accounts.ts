@@ -3,6 +3,7 @@ import type { H3Event } from 'h3'
 import type { Transaction } from 'kysely'
 import { db, sql } from './database'
 import { logEvent } from './activity-logger'
+import { isSelfRegistrationEnabled } from './registration'
 import type { Database } from '#core/server/database/schema'
 
 // Advisory-lock key used to serialize concurrent account creation so the
@@ -16,6 +17,9 @@ export interface NewAccount {
   passwordHash: string | null
   verified: boolean
   avatar?: string
+  // True when no invite backs this account, so the self-registration setting
+  // applies.
+  selfSignup: boolean
 }
 
 export interface CreatedAccount {
@@ -25,8 +29,9 @@ export interface CreatedAccount {
 }
 
 // Creates a user row. The very first account on a deployment becomes host
-// admin and is marked verified. Must run inside a transaction; the advisory
-// lock it takes is released when that transaction ends.
+// admin and is marked verified, and is allowed even when self-registration is
+// off. Must run inside a transaction; the advisory lock it takes is released
+// when that transaction ends.
 export async function createUserAccount(
   trx: Transaction<Database>,
   account: NewAccount,
@@ -48,6 +53,10 @@ export async function createUserAccount(
     .select(eb => eb.fn.count<string>('id').as('count'))
     .executeTakeFirst()
   const isFirstUser = Number(countRow?.count ?? 0) === 0
+
+  if (account.selfSignup && !isFirstUser && !(await isSelfRegistrationEnabled(trx))) {
+    throw createError({ statusCode: 403, statusMessage: 'Registration is closed', data: { code: 'registration_closed' } })
+  }
 
   const userId = randomUUID()
   const tokenKey = randomUUID()

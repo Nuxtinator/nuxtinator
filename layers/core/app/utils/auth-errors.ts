@@ -7,7 +7,8 @@ const MESSAGES: Record<string, string> = {
   unverified_account: 'An account with this email exists but hasn\'t been verified. Sign in with your password (or reset it), then link this sign-in method from Account Settings.',
   already_linked: 'That account is already linked to a different user.',
   one_per_provider: 'An account from that provider is already linked. Unlink it first.',
-  invite_invalid: 'That invitation is no longer valid.'
+  invite_invalid: 'That invitation is no longer valid.',
+  registration_closed: 'There is no account for that sign-in, and new accounts need an invitation.'
 }
 
 export function authErrorMessage(code: unknown): string {

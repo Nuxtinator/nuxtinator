@@ -32,6 +32,12 @@ export default defineEventHandler(async (event) => {
   })
   clearPendingSignup(event)
 
+  if (outcome.kind === 'error' && outcome.code === 'registration_closed') {
+    throw createError({ statusCode: 403, statusMessage: 'Registration is closed. New accounts need an invitation.', data: { code: outcome.code } })
+  }
+  if (outcome.kind === 'error' && outcome.code === 'invite_invalid') {
+    throw createError({ statusCode: 410, statusMessage: 'That invitation is no longer valid.', data: { code: outcome.code } })
+  }
   if (outcome.kind !== 'signed_in') {
     throw createError({ statusCode: 409, statusMessage: 'Could not finish signing up. Please start again.' })
   }
