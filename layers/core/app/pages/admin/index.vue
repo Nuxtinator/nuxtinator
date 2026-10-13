@@ -18,7 +18,7 @@ const links = computed(() => sections.value.filter(s => s.path !== '/admin'))
         v-for="section in links"
         :key="section.path"
         :to="section.path"
-        class="flex flex-col items-start rounded-md border border-(--ui-border) p-4 bg-(--ui-bg-elevated)/50 hover:bg-(--ui-bg-elevated) transition-colors"
+        class="flex flex-col items-start rounded-md border border-(--ui-border) dark:border-(--ui-border-accented) p-4 bg-(--ui-bg-elevated)/50 hover:bg-(--ui-bg-elevated) transition-colors"
       >
         <UIcon
           :name="section.icon ?? 'i-lucide-circle'"
