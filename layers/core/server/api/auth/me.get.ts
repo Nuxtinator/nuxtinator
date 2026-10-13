@@ -14,7 +14,7 @@ export default defineEventHandler(async (event) => {
 
   const user = await db
     .selectFrom('users')
-    .select(['id', 'email', 'display_name', 'avatar', 'verified', 'is_admin', 'created', 'updated'])
+    .select(['id', 'email', 'display_name', 'avatar', 'verified', 'is_admin', 'created', 'updated', 'password'])
     .where('id', '=', authUser.userId)
     .executeTakeFirst()
 
@@ -22,10 +22,12 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'User not found' })
   }
 
+  const { password, ...rest } = user
   return {
     user: {
-      ...user,
+      ...rest,
       avatar: user.avatar || null,
+      has_password: password !== null,
       permissions: []
     }
   }

@@ -49,7 +49,7 @@ describe('POST /api/o/[orgSlug]/invite', () => {
     expect(err.statusCode).toBe(400)
   })
 
-  it('admin invites a new email → user (password null) + membership + email sent', async () => {
+  it('admin invites a new email → an invite for this org + email sent; no user row', async () => {
     const { org, auth } = await createOrgWithAdmin(sql)
     const email = `test-tenancy-orginvite-${randomUUID().slice(0, 8)}@example.com`
 
@@ -60,19 +60,42 @@ describe('POST /api/o/[orgSlug]/invite', () => {
     })
     expect(res.status).toBe('pending')
 
-    const userRows = await sql<{ id: string, password: string | null, token_key: string }[]>`
-      SELECT id, password, token_key FROM users WHERE email = ${email}
-    `
-    expect(userRows[0]!.password).toBeNull()
+    const users = await sql`SELECT 1 FROM users WHERE email = ${email}`
+    expect(users.length).toBe(0)
 
-    const memberships = await sql<{ c: number }[]>`
-      SELECT count(*)::int as c FROM memberships WHERE user_id = ${userRows[0]!.id} AND org_id = ${org.id}
-    `
-    expect(memberships[0]!.c).toBe(1)
+    const orgs = await sql<{ roles: string[] }[]>`SELECT roles FROM invite_orgs WHERE invite_id = ${res.invite.id} AND org_id = ${org.id}`
+    expect(orgs[0]!.roles).toEqual(['member'])
 
     const msg = await waitForMailTo(email)
     const token = extractTokenFromBody(msg.body, 'token')
-    expect(token).toBe(userRows[0]!.token_key)
+    const info = await $fetch(`/api/auth/invite-info?token=${token}`)
+    expect(info.orgs[0].slug).toBe(org.slug)
+  })
+
+  it('returns 409 when an invite is already pending for that email in this org', async () => {
+    const { org, auth } = await createOrgWithAdmin(sql)
+    const email = `test-tenancy-orginvite-${randomUUID().slice(0, 8)}@example.com`
+    await $fetch(`/api/o/${org.slug}/invite`, { method: 'POST', body: { email, roles: ['member'] }, ...withOrgHeader(auth, org.slug) })
+    const err = await $fetch(`/api/o/${org.slug}/invite`, { method: 'POST', body: { email, roles: ['member'] }, ...withOrgHeader(auth, org.slug) }).catch(e => e)
+    expect(err.statusCode).toBe(409)
+  })
+
+  it('creates a link invite, lists it, and revokes it', async () => {
+    const { org, auth } = await createOrgWithAdmin(sql)
+    const res = await $fetch(`/api/o/${org.slug}/invite`, {
+      method: 'POST',
+      body: { link: true, display_name: 'test-tenancy-link', roles: ['member'] },
+      ...withOrgHeader(auth, org.slug)
+    })
+    expect(res.invite.kind).toBe('link')
+    expect(res.invite.url).toMatch(/\/accept-invite\?token=/)
+
+    const list = await $fetch<{ invites: Array<{ id: string, kind: string }> }>(`/api/o/${org.slug}/invites`, withOrgHeader(auth, org.slug))
+    expect(list.invites.map(i => i.id)).toContain(res.invite.id)
+
+    await $fetch(`/api/o/${org.slug}/invites/${res.invite.id}`, { method: 'DELETE', ...withOrgHeader(auth, org.slug) })
+    const after = await sql`SELECT 1 FROM invites WHERE id = ${res.invite.id}`
+    expect(after.length).toBe(0)
   })
 
   it('admin attaches an existing user → no email sent, membership created', async () => {
@@ -129,6 +152,7 @@ describe('POST /api/o/[orgSlug]/invite', () => {
       ...withOrgHeader(auth, org.slug)
     })
     expect(res.status).toBe('pending')
-    expect(res.membership.roles).toEqual(['admin'])
+    const orgs = await sql<{ roles: string[] }[]>`SELECT roles FROM invite_orgs WHERE invite_id = ${res.invite.id}`
+    expect(orgs[0]!.roles).toEqual(['admin'])
   })
 })

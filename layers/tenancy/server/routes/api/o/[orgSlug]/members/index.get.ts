@@ -5,13 +5,11 @@ import { withOrgPermission } from '#tenant/server'
 const SORTABLE_COLUMNS = ['display_name', 'email', 'status', 'joined_at'] as const
 type SortColumn = typeof SORTABLE_COLUMNS[number]
 
-// Lifecycle order used by the "status" sort. Active first, then not-verified
-// self-registrations, then pending invites, then expired ones.
+// Lifecycle order used by the "status" sort: active first, then not-verified
+// self-registrations. Pending invites are listed separately (./invites).
 const STATUS_ORDER_SQL = `CASE
     WHEN users.verified = true THEN 0
-    WHEN users.password IS NOT NULL THEN 1
-    WHEN users.token_expires_at > now() THEN 2
-    ELSE 3
+    ELSE 1
   END`
 
 // List members of the active org with pagination, search, and sort.
@@ -67,9 +65,7 @@ export default defineEventHandler(async (event) => {
         'memberships.created_at as joined_at',
         'users.email as email',
         'users.display_name as display_name',
-        'users.verified as verified',
-        'users.password as password',
-        'users.token_expires_at as token_expires_at'
+        'users.verified as verified'
       ])
       .where('memberships.org_id', '=', ctx.orgId)
       .$if(!!pattern, qb => qb.where(eb => eb.or([
@@ -81,15 +77,8 @@ export default defineEventHandler(async (event) => {
       .offset((page - 1) * pageSize)
       .execute()
 
-    const now = Date.now()
     const decorated = rows.map((r) => {
-      let status: 'active' | 'not_verified' | 'pending_invite' | 'expired_invite'
-      if (r.verified) status = 'active'
-      else if (r.password !== null) status = 'not_verified'
-      else {
-        const expiresMs = r.token_expires_at ? new Date(r.token_expires_at).getTime() : 0
-        status = expiresMs > now ? 'pending_invite' : 'expired_invite'
-      }
+      const status: 'active' | 'not_verified' = r.verified ? 'active' : 'not_verified'
       return {
         membership_id: r.membership_id,
         user_id: r.user_id,

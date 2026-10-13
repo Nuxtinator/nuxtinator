@@ -37,6 +37,7 @@
     "@nuxtinator/mcp": "workspace:*",
     "@nuxtinator/messages": "workspace:*",
     "@nuxtinator/oauth": "workspace:*",
+    "@nuxtinator/social-auth": "workspace:*",
     "@nuxtinator/tenancy": "workspace:*",
     "@nuxtinator/videos": "workspace:*",
     "kysely": "^0.28.17",

@@ -1,12 +1,11 @@
-// Helper to seed a pending-invite user (password=null, verified=false, with a
-// token_key + token_expires_at). Used by both core invite-acceptance tests
-// and (indirectly) by the tenancy invite tests that test the same path.
+// Helper to seed a pending invite row directly. Used by both core
+// invite-acceptance tests and the tenancy invite tests that test the same path.
 import type postgres from 'postgres'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
 export interface PendingInvite {
-  userId: string
-  email: string
+  inviteId: string
+  email: string | null
   display_name: string
   token: string
   expiresAt: string
@@ -15,23 +14,25 @@ export interface PendingInvite {
 export async function createPendingInvite(
   sql: ReturnType<typeof postgres>,
   opts: {
-    email?: string
+    // `null` makes a shareable link invite with no address.
+    email?: string | null
     display_name?: string
     expiresInMs?: number
+    invitedBy?: string
   } = {}
 ): Promise<PendingInvite> {
-  const userId = randomUUID()
-  const email = opts.email ?? `test-core-invite-${randomUUID().slice(0, 8)}@example.com`
+  const inviteId = randomUUID()
+  const email = opts.email === undefined ? `test-core-invite-${randomUUID().slice(0, 8)}@example.com` : opts.email
   const display_name = opts.display_name ?? 'Pending Invite'
   const token = randomUUID()
   const expiresInMs = opts.expiresInMs ?? 7 * 24 * 60 * 60 * 1000
   const expiresAt = new Date(Date.now() + expiresInMs).toISOString()
-  const now = new Date().toISOString()
+  const tokenHash = createHash('sha256').update(token).digest('hex')
 
   await sql`
-    INSERT INTO users (id, created, updated, email, display_name, avatar, password, verified, is_admin, token_key, token_expires_at)
-    VALUES (${userId}, ${now}, ${now}, ${email}, ${display_name}, '', NULL, false, false, ${token}, ${expiresAt})
+    INSERT INTO invites (id, token_hash, email, display_name, invited_by, expires_at)
+    VALUES (${inviteId}, ${tokenHash}, ${email}, ${display_name}, ${opts.invitedBy ?? null}, ${expiresAt})
   `
 
-  return { userId, email, display_name, token, expiresAt }
+  return { inviteId, email, display_name, token, expiresAt }
 }

@@ -18,10 +18,10 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  if (!current_password || typeof current_password !== 'string') {
+  if (current_password !== undefined && typeof current_password !== 'string') {
     throw createError({
       statusCode: 400,
-      statusMessage: 'Current password is required'
+      statusMessage: 'Current password must be a string'
     })
   }
 
@@ -58,29 +58,35 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // Verify current password
-  const isPasswordValid = currentUser.password
-    ? await bcrypt.compare(current_password, currentUser.password)
-    : false
+  // Confirmed by the current password, or by a recent re-authentication for
+  // accounts without one.
+  if (current_password) {
+    // Verify current password
+    const isPasswordValid = currentUser.password
+      ? await bcrypt.compare(current_password, currentUser.password)
+      : false
 
-  if (!isPasswordValid) {
-    // Log failed attempt
-    logEvent({
-      eventType: 'EMAIL_CHANGE_FAILED',
-      tableName: 'users',
-      recordId: user.userId,
-      userId: user.userId,
-      userAgent: getHeader(event, 'user-agent') || undefined,
-      metadata: {
-        reason: 'invalid_password',
-        attempted_new_email: trimmedEmail
-      }
-    })
+    if (!isPasswordValid) {
+      // Log failed attempt
+      logEvent({
+        eventType: 'EMAIL_CHANGE_FAILED',
+        tableName: 'users',
+        recordId: user.userId,
+        userId: user.userId,
+        userAgent: getHeader(event, 'user-agent') || undefined,
+        metadata: {
+          reason: 'invalid_password',
+          attempted_new_email: trimmedEmail
+        }
+      })
 
-    throw createError({
-      statusCode: 401,
-      statusMessage: 'Current password is incorrect'
-    })
+      throw createError({
+        statusCode: 401,
+        statusMessage: 'Current password is incorrect'
+      })
+    }
+  } else {
+    await requireRecentAuth(event)
   }
 
   // Check if new email is already taken by another user

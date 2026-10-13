@@ -11,7 +11,7 @@ import {
   clearMailhog
 } from './helpers'
 
-const HOST_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../../host')
+const HOST_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../../dev')
 
 // NODE_ENV='development' at build + run time so the email layer routes to
 // Mailpit (see core's global-setup.ts for the why).
