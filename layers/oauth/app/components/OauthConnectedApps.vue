@@ -8,13 +8,14 @@
 
 import { h } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
-import { PERMISSION_META } from '#core/app/utils/permissions'
 
 interface ConnectedApp {
   client_id: string
   client_name: string
   dynamic: boolean
   scope: string
+  // Each scope with the title people read it by.
+  scopes: { scope: string, title: string, description: string }[]
   granted_at: string
   last_used_at: string | null
   has_active_tokens: boolean
@@ -27,11 +28,6 @@ interface ConnectedAppsResponse {
 const UBadge = resolveComponent('UBadge')
 const UIcon = resolveComponent('UIcon')
 const UTooltip = resolveComponent('UTooltip')
-
-function describeScope(scope: string): string {
-  const meta = (PERMISSION_META as Record<string, { title: string, description: string }>)[scope]
-  return meta?.title || scope
-}
 
 const toast = useToast()
 
@@ -101,9 +97,6 @@ const formatRelative = (iso: string | null): string => {
 
 const formatDate = (iso: string): string =>
   new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-
-const scopeChips = (scope: string): string[] =>
-  scope.split(/\s+/).filter(Boolean)
 
 // ── Connection guide (collapsible + tabs) ──────────────────────────
 //
@@ -309,10 +302,10 @@ const columns: TableColumn<ConnectedApp>[] = [
     // is one hover away via the tooltip's `text` prop. Newlines render
     // because we override `content.class` with `whitespace-pre-line`.
     cell: ({ row }) => {
-      const scopes = scopeChips(row.original.scope)
+      const scopes = row.original.scopes
       const count = scopes.length
       const label = `${count} permission${count === 1 ? '' : 's'}`
-      const tooltipText = scopes.map(s => `• ${describeScope(s)}`).join('\n')
+      const tooltipText = scopes.map(s => `• ${s.title}`).join('\n')
       return h(UTooltip, {
         text: tooltipText,
         delayDuration: 100,

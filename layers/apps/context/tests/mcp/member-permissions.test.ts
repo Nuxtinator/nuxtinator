@@ -69,6 +69,17 @@ describe('MCP access for org members without host-level roles', () => {
     expect(res.status, location).toBe(302)
     expect(location).not.toContain('error=invalid_scope')
     expect(location).toContain('/oauth/consent?request_id=')
+
+    // The consent screen names each permission by its registered title.
+    const consentPath = new URL(location, nuxtUrl('/'))
+    const csrfCookie = res.headers.getSetCookie().map(c => c.split(';')[0]).join('; ')
+    const consent = await fetch(nuxtUrl(`${consentPath.pathname}${consentPath.search}`), {
+      headers: { cookie: `${getAuthHeaders(user).headers.cookie}; active-org-slug=${orgA.slug}; ${csrfCookie}` }
+    })
+    const html = await consent.text()
+    expect(consent.status, html).toBe(200)
+    expect(html).toContain('Read portfolios')
+    expect(html).toContain('Stay connected')
   })
 
   it('tools/call passes the permission gate for the org the member belongs to', async () => {

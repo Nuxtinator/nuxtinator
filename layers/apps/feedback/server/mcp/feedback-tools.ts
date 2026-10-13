@@ -66,6 +66,7 @@ const POST_TYPES = ['task', 'feature', 'bug', 'artifact', 'feedback'] as const
 
 export const listProjectsTool = defineMcpTool({
   name: 'feedback_list_projects',
+  title: 'List Boards',
   description: 'List kanban projects (boards) in the active org, plus the global column set with its workflow order. Call this first to get the project_id and column names other feedback tools need.',
   scope: 'feedback.read',
   input: z.object({ org: orgInput }).strict(),
@@ -96,6 +97,7 @@ export const listProjectsTool = defineMcpTool({
 
 export const listCardsTool = defineMcpTool({
   name: 'feedback_list_cards',
+  title: 'List Cards',
   description: 'List cards in the active org, optionally filtered to one project and/or one column (by name, e.g. "TODO"). Cards in TODO are approved and waiting to be worked; cards in ARCHIVE were rejected, deferred, or accepted as-is.',
   scope: 'feedback.read',
   input: z.object({
@@ -146,6 +148,7 @@ export const listCardsTool = defineMcpTool({
 
 export const createProjectTool = defineMcpTool({
   name: 'feedback_create_project',
+  title: 'Create Board',
   description: 'Create a kanban project (board) in the active org, along with its default swimlane. Columns are global to the deployment, so the new board immediately uses the existing FEEDBACK INBOX / TODO / DOING / DONE / ARCHIVE workflow. Board names are not unique — call feedback_list_projects first and reuse the existing board rather than creating a near-duplicate. Returns the project_id that feedback_create_card and feedback_list_cards need.',
   scope: 'feedback.write',
   input: z.object({
@@ -198,6 +201,7 @@ export const createProjectTool = defineMcpTool({
 
 export const createCardTool = defineMcpTool({
   name: 'feedback_create_card',
+  title: 'Create Card',
   description: 'Create a card on a project board in the active org. New findings/ideas belong in the default FEEDBACK INBOX column for human triage — only target another column when explicitly asked. Start the description with a "## What happens" section in plain behavior-first language a teammate can read without opening code (when someone does X, Y goes wrong — instead of Z; no function names or jargon there), then "## Why it matters", then "## Technical detail" with file:line evidence. Put the proposed fix as concrete steps in post_meta.plan (not in the description); use post_meta for machine data too (repo, branch, file, line, category, dedupe_key).',
   scope: 'feedback.write',
   input: z.object({
@@ -264,6 +268,7 @@ export const createCardTool = defineMcpTool({
 
 export const moveCardTool = defineMcpTool({
   name: 'feedback_move_card',
+  title: 'Move Card',
   description: 'Move a card to another column by name. Typical agent flow: pick a card from TODO, move it to DOING while working on it, then to DONE when finished. Leave triage moves (into TODO or ARCHIVE) to humans unless instructed.',
   scope: 'feedback.write',
   input: z.object({
@@ -306,6 +311,7 @@ export const moveCardTool = defineMcpTool({
 
 export const updateCardTool = defineMcpTool({
   name: 'feedback_update_card',
+  title: 'Update Card',
   description: 'Update a card\'s title, description, priority, or post_meta. Use append_description to add a work log (e.g. the commit hash that resolved it) without overwriting the original text. post_meta_merge shallow-merges keys into the existing post_meta.',
   scope: 'feedback.write',
   input: z.object({

@@ -125,10 +125,12 @@ describe('/mcp transport (integration)', async () => {
     })
     const res = await callMcp({ method: 'tools/list', token: fx.token })
     expect(res.status).toBe(200)
-    const result = (res.body as { result?: { tools?: Array<{ name: string }> } }).result
+    const result = (res.body as { result?: { tools?: Array<{ name: string, title?: string }> } }).result
     const names = (result?.tools ?? []).map(t => t.name).sort()
     // Only the pages.view tools are visible — write/destructive scopes hidden.
     expect(names).toEqual(['expensive_thing', 'failing_tool', 'list_pages', 'output_check'])
+    expect(result?.tools?.find(t => t.name === 'list_pages')?.title).toBe('List Pages')
+    expect(result?.tools?.find(t => t.name === 'output_check')).not.toHaveProperty('title')
   })
 
   it('tools/list hides a tool whose scope the user has but the token does not', async () => {

@@ -1,14 +1,16 @@
 // Lists OAuth grants the authenticated user has approved.
 //
 // Surfaces what's needed by the user's "Connected apps" UI: the
-// client name, when it was granted, what permissions it carries,
-// when it was last used, and whether any tokens are still live.
+// client name, when it was granted, what permissions it carries (with
+// their titles), when it was last used, and whether any tokens are still
+// live.
 // Revoked consents are filtered out — once a user revokes, the row
 // stays in the DB for audit but disappears from this listing.
 
 import { sql } from 'kysely'
 import { requireAuth } from '#core/server/utils/auth'
 import { runInOrgTransaction } from '#tenant/server'
+import { oauthScopeLabel } from '../../../utils/oauth-scope-labels'
 
 export default defineEventHandler(async (event) => {
   const user = requireAuth(event)
@@ -89,6 +91,9 @@ export default defineEventHandler(async (event) => {
   }
 
   return {
-    apps: Array.from(byClient.values())
+    apps: Array.from(byClient.values()).map(app => ({
+      ...app,
+      scopes: app.scope.split(' ').filter(Boolean).map(oauthScopeLabel)
+    }))
   }
 })

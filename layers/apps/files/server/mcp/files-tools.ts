@@ -92,6 +92,7 @@ function textResult(text: string, structured?: Record<string, unknown>) {
 
 export const listFilesTool = defineMcpTool({
   name: 'files_list',
+  title: 'List Files',
   description: 'List documents, sites, and uploaded files in the active org, newest first. '
     + 'Shared items include share_url, and shared files a raw_url (both null when unshared).',
   scope: 'files.read',
@@ -135,6 +136,7 @@ export const listFilesTool = defineMcpTool({
 
 export const readDocTool = defineMcpTool({
   name: 'files_read_doc',
+  title: 'Read Document',
   description: 'Read a single document, returning its markdown body.',
   scope: 'files.read',
   input: z.object({ org: orgInput, id: z.string().uuid() }).strict(),
@@ -157,6 +159,7 @@ export const readDocTool = defineMcpTool({
 
 export const readSiteTool = defineMcpTool({
   name: 'files_read_site',
+  title: 'Read Site',
   description: 'Read a single site, returning its self-contained HTML and public share URL (null when not shared).',
   scope: 'files.read',
   input: z.object({ org: orgInput, id: z.string().uuid() }).strict(),
@@ -182,6 +185,7 @@ export const readSiteTool = defineMcpTool({
 
 export const createDocTool = defineMcpTool({
   name: 'files_create_doc',
+  title: 'Create Document',
   description: 'Create a new markdown document in the active org.',
   scope: 'files.write',
   input: z.object({
@@ -230,6 +234,7 @@ export const createDocTool = defineMcpTool({
 
 export const updateDocTool = defineMcpTool({
   name: 'files_update_doc',
+  title: 'Update Document',
   description: 'Update a document\'s title and/or markdown body. Creates a new version snapshot.',
   scope: 'files.write',
   input: z.object({
@@ -263,6 +268,7 @@ export const updateDocTool = defineMcpTool({
 
 export const createSiteTool = defineMcpTool({
   name: 'files_create_site',
+  title: 'Create Site',
   description: 'Create a new site: an HTML page (inline CSS/JS/images) in the active org. '
     + 'It may also reference shared files by their raw_url (<video src>, <img src>, '
     + '<a href="<raw_url>?download=1"> for a download), and outside resources such as fonts '
@@ -315,6 +321,7 @@ export const createSiteTool = defineMcpTool({
 
 export const updateSiteTool = defineMcpTool({
   name: 'files_update_site',
+  title: 'Update Site',
   description: 'Replace a site\'s title and/or full HTML. Creates a new version snapshot; '
     + 'changes go live immediately at its share URL. The HTML may reference shared files by '
     + 'their raw_url (<video src>, <img src>, <a href="<raw_url>?download=1">) as well as inline '
@@ -351,6 +358,7 @@ export const updateSiteTool = defineMcpTool({
 
 export const beginUploadTool = defineMcpTool({
   name: 'files_begin_upload',
+  title: 'Start Upload',
   description: `Start uploading a binary file (max ${MAX_FILE_MB} MB) to the active org. `
     + 'Returns a presigned upload_url. Next: PUT the raw bytes to upload_url with the returned '
     + 'headers (e.g. `curl -X PUT -H \'Content-Type: <mime>\' -T <path> "<upload_url>"`), '
@@ -387,6 +395,7 @@ export const beginUploadTool = defineMcpTool({
 
 export const completeUploadTool = defineMcpTool({
   name: 'files_complete_upload',
+  title: 'Finish Upload',
   description: 'Finish an upload started with files_begin_upload, after the bytes were PUT to its upload_url. '
     + 'Creates the file item. Set share=true to issue a public link; the result\'s raw_url can be '
     + 'embedded in a site (<video src>, <img src>, or <a href="<raw_url>?download=1">).',
@@ -451,6 +460,7 @@ export const completeUploadTool = defineMcpTool({
 
 export const shareTool = defineMcpTool({
   name: 'files_share',
+  title: 'Share Publicly',
   description: 'Issue a public link for a document, site, or file. Returns the existing link when the item '
     + 'is already shared; reissue=true replaces it, which breaks every page that embeds the old link. '
     + 'Files also get a raw_url to embed in a site.',
@@ -487,6 +497,7 @@ export const shareTool = defineMcpTool({
 
 export const unshareTool = defineMcpTool({
   name: 'files_unshare',
+  title: 'Stop Sharing',
   description: 'Revoke an item\'s public link. New loads fail immediately; a file already loaded through '
     + `its raw_url can keep working for up to ${RAW_LINK_TTL_SECONDS / 60} minutes.`,
   scope: 'files.write',

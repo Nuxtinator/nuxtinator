@@ -40,6 +40,9 @@ export interface McpToolResult<O = unknown> {
 
 export interface McpToolDef<I = unknown, O = unknown> {
   name: string
+  // What people see the tool called, e.g. "Move Card"; sent as the MCP
+  // tool `title`.
+  title?: string
   description: string
   scope: Permission
   destructive?: boolean

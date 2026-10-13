@@ -1,6 +1,6 @@
 {
   "name": "@nuxtinator/mcp",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "Reusable Nuxt layer that turns a project into an MCP server (Streamable HTTP, stateless).",

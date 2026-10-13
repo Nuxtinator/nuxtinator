@@ -5,6 +5,7 @@ import { db } from '#core/server/utils/database'
 // Read tool — `pages.view` is in mcpReadScopes so this skips the writes bucket.
 export const listPagesTool = defineMcpTool({
   name: 'list_pages',
+  title: 'List Pages',
   description: 'List pages from the fixture DB.',
   scope: 'pages.view',
   input: z.object({

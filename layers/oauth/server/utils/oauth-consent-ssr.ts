@@ -2,26 +2,18 @@ import type { H3Event } from 'h3'
 import { db } from '#core/server/utils/database'
 import { getAuthUser } from '#core/server/utils/auth'
 import { runInOrgTransaction } from '#tenant/server'
-import { PERMISSION_META } from '#core/app/utils/permissions'
 import { getOauthConfig } from './oauth-config'
 import { verifyCookiePayload } from './oauth-crypto'
-import { parseScopeString, OFFLINE_ACCESS_SCOPE } from './oauth-validation'
+import { parseScopeString } from './oauth-validation'
+import { oauthScopeLabel, type OauthScopeLabel } from './oauth-scope-labels'
 
 export interface ConsentViewModel {
   status: 'ok' | 'not_found' | 'wrong_user' | 'consumed' | 'expired' | 'missing_csrf' | 'unauthorized'
   requestId?: string
   clientName?: string
   clientDynamic?: boolean
-  scopeItems?: { scope: string, description: string }[]
+  scopeItems?: OauthScopeLabel[]
   csrfToken?: string
-}
-
-function describeScope(scope: string): string {
-  if (scope === OFFLINE_ACCESS_SCOPE) {
-    return 'Maintain access when you are not actively using the client (refresh tokens)'
-  }
-  const meta = PERMISSION_META[scope]
-  return meta?.description || scope
 }
 
 export async function loadConsentView(event: H3Event, requestId: string): Promise<ConsentViewModel> {
@@ -59,10 +51,7 @@ export async function loadConsentView(event: H3Event, requestId: string): Promis
     .executeTakeFirst()
 
   const scopes = parseScopeString(pending.scope)
-  const scopeItems = scopes.map(scope => ({
-    scope,
-    description: describeScope(scope)
-  }))
+  const scopeItems = scopes.map(oauthScopeLabel)
 
   return {
     status: 'ok',

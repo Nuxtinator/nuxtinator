@@ -50,8 +50,9 @@ function page(status: number, body: string): string {
     .muted { color: var(--text-muted); font-size: 0.875rem; }
     ul { list-style: none; padding: 0; }
     li { padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.5rem; margin-bottom: 0.5rem; }
-    .scope { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; font-size: 0.875rem; }
+    .scope-title { font-weight: 600; }
     .scope-desc { color: var(--text-muted); font-size: 0.875rem; margin-top: 0.25rem; }
+    .scope { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; margin-top: 0.25rem; }
     .buttons { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1.5rem; }
     button { padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 1rem; font-weight: 600; cursor: pointer; border: 1px solid transparent; }
     button.primary { background: var(--primary); color: var(--primary-text); }
@@ -124,8 +125,9 @@ export default defineEventHandler(async (event) => {
 
   const scopeList = (vm.scopeItems ?? []).map(item => `
     <li>
+      <div class="scope-title">${escapeHtml(item.title)}</div>
+      ${item.description ? `<div class="scope-desc">${escapeHtml(item.description)}</div>` : ''}
       <div class="scope">${escapeHtml(item.scope)}</div>
-      <div class="scope-desc">${escapeHtml(item.description)}</div>
     </li>`).join('')
 
   return page(200, `
