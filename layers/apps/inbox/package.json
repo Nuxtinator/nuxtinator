@@ -7,9 +7,9 @@
     ".": "./nuxt.config.ts"
   },
   "dependencies": {
-    "croner": "^9.0.0",
+    "croner": "^10.0.1",
     "dompurify": "^3.4.13",
-    "nodemailer": "^9.0.1",
+    "nodemailer": "^10.1.0",
     "sanitize-html": "^2.17.7"
   },
   "devDependencies": {

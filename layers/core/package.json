@@ -9,10 +9,10 @@
     "./test-helpers": "./tests/helpers/index.ts"
   },
   "dependencies": {
-    "@bradenmacdonald/s3-lite-client": "^0.9.6",
+    "@bradenmacdonald/s3-lite-client": "^1.0.0",
     "@nuxtjs/i18n": "^10.6.0",
     "bcrypt": "^6.0.0",
-    "croner": "^9.0.0",
+    "croner": "^10.0.1",
     "jsonwebtoken": "^9.0.2",
     "semver": "^7.6.0"
   },

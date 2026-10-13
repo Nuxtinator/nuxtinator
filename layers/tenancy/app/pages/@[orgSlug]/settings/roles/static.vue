@@ -59,7 +59,7 @@ const fetchOverrides = async (key: string) => {
   try {
     const r = await $fetch<{ overrides: OverrideRow[] }>(
       `/api/o/${orgSlug.value}/role-overrides`,
-      { params: { role: key } }
+      { query: { role: key } }
     )
     const m = new Map<string, Effect>()
     for (const row of r.overrides) m.set(row.permission, row.effect)
@@ -141,7 +141,7 @@ const onReset = async () => {
   try {
     await $fetch(`/api/o/${orgSlug.value}/role-overrides`, {
       method: 'DELETE',
-      params: { role: selectedRoleKey.value }
+      query: { role: selectedRoleKey.value }
     })
     overridesByRole.value = { ...overridesByRole.value, [selectedRoleKey.value]: new Map() }
     toast.add({ title: 'Overrides reset', color: 'success' })

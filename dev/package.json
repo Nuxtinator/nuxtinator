@@ -20,9 +20,9 @@
     "test:db": "../scripts/setup-test-db.sh"
   },
   "dependencies": {
-    "@iconify-json/lucide": "^1.2.104",
-    "@iconify-json/simple-icons": "^1.2.80",
-    "@nuxt/ui": "^4.10.0",
+    "@iconify-json/lucide": "^1.2.143",
+    "@iconify-json/simple-icons": "^1.2.100",
+    "@nuxt/ui": "^4.11.3",
     "@nuxtinator/ai": "workspace:*",
     "@nuxtinator/context": "workspace:*",
     "@nuxtinator/core": "workspace:*",
@@ -41,21 +41,21 @@
     "@nuxtinator/videos": "workspace:*",
     "kysely": "^0.28.17",
     "kysely-postgres-js": "^2.0.0",
-    "nuxt": "^4.5.2",
-    "postgres": "^3.4.7",
-    "tailwindcss": "^4.2.4"
+    "nuxt": "^4.6.1",
+    "postgres": "^3.4.9",
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@nuxt/eslint": "^1.17.0",
-    "@nuxt/test-utils": "^4.1.0",
-    "@playwright/test": "^1.57.0",
+    "@nuxt/test-utils": "^4.3.3",
+    "@playwright/test": "^1.64.0",
     "@types/jsonwebtoken": "^9.0.10",
     "bcrypt": "^6.0.0",
-    "eslint": "^10.8.1",
-    "jsonwebtoken": "^9.0.2",
-    "playwright-core": "^1.57.0",
+    "eslint": "^10.12.0",
+    "jsonwebtoken": "^9.0.3",
+    "playwright-core": "^1.64.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.0.17",
-    "vue-tsc": "^3.2.7"
+    "vitest": "^5.0.4",
+    "vue-tsc": "^3.3.13"
   }
 }

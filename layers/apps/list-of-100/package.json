@@ -8,7 +8,7 @@
     "./test-helpers": "./tests/helpers/index.ts"
   },
   "dependencies": {
-    "apexcharts": "^5.10.0",
+    "apexcharts": "^8.2.0",
     "vue3-apexcharts": "^1.11.0"
   },
   "optionalDependencies": {

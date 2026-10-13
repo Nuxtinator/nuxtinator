@@ -9,10 +9,10 @@
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
-    "croner": "^9.0.0",
+    "croner": "^10.0.1",
     "dompurify": "^3.4.13",
     "emoji-mart": "^5.6.0",
-    "marked": "^14.1.0"
+    "marked": "^18.1.1"
   },
   "optionalDependencies": {
     "@nuxtinator/core": "*"

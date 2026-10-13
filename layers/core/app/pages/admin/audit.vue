@@ -56,7 +56,7 @@ const fetchPage = async (reset = false) => {
 
     const r = await $fetch<{ logs: LogRow[], nextCursor: string | null }>(
       '/api/admin/audit',
-      { params }
+      { query: params }
     )
     if (reset) logs.value = r.logs
     else logs.value = [...logs.value, ...r.logs]

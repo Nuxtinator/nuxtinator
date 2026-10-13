@@ -65,6 +65,11 @@ export default defineNuxtConfig({
     '#permissions': fileURLToPath(new URL('./app/utils/permissions.ts', import.meta.url))
   },
 
+  // fetchdts-based $fetch typing; the legacy InternalApi engine hits TS2589 at this app's route count.
+  experimental: {
+    routeTypedFetch: true
+  },
+
   nitro: {
     typescript: {
       tsConfig: {

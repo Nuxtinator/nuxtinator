@@ -113,7 +113,7 @@ export async function uploadToS3(
 
     // Upload to S3. Public objects go to the public-read bucket; private
     // objects stay in the primary bucket (the client's default).
-    await client.putObject(key, fileData, {
+    await client.putObject(key, fileData as Uint8Array<ArrayBuffer>, {
       metadata: {
         'Content-Type': contentType
       },
