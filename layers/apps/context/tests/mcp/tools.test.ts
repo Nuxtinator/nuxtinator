@@ -74,9 +74,9 @@ describe('context MCP tools file', () => {
     expect(src).toMatch(/const PRIVACY_INSTRUCTION = '[^']*initials[^']*'/)
     const withInstruction = src.match(/description: `[^`]*\$\{PRIVACY_INSTRUCTION\}`/g) ?? []
     expect(withInstruction).toHaveLength(3)
-    expect(src).toMatch(/name: 'update_section',\s*description: `[^`]*\$\{PRIVACY_INSTRUCTION\}`/)
-    expect(src).toMatch(/name: 'bulk_update_sections',\s*description: `[^`]*\$\{PRIVACY_INSTRUCTION\}`/)
-    expect(src).toMatch(/name: 'update_suggestion',\s*description: `[^`]*\$\{PRIVACY_INSTRUCTION\}`/)
+    expect(src).toMatch(/name: 'update_section',\s*(?:title: '[^']*',\s*)?description: `[^`]*\$\{PRIVACY_INSTRUCTION\}`/)
+    expect(src).toMatch(/name: 'bulk_update_sections',\s*(?:title: '[^']*',\s*)?description: `[^`]*\$\{PRIVACY_INSTRUCTION\}`/)
+    expect(src).toMatch(/name: 'update_suggestion',\s*(?:title: '[^']*',\s*)?description: `[^`]*\$\{PRIVACY_INSTRUCTION\}`/)
   })
 
   it('update_section accepts optional last_edited_at for optimistic locking', async () => {
