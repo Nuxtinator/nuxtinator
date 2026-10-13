@@ -139,6 +139,38 @@ export interface UserPermissionGrantsTable {
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
+export type SessionClient = 'web' | 'native'
+
+// One signed-in device. See migration 011_create_sessions.
+export interface SessionsTable {
+  id: Generated<string>
+  user_id: string
+  client: SessionClient
+  refresh_token_hash: string
+  previous_refresh_token_hash: string | null
+  rotated_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+  last_used_at: ColumnType<Date, Date | string | undefined, Date | string>
+  expires_at: ColumnType<Date, Date | string, Date | string>
+  authenticated_at: ColumnType<Date, Date | string | undefined, Date | string>
+  user_agent: string | null
+  ip: string | null
+}
+
+// A pending invitation; `email` is NULL for shareable link invites. See
+// migration 012_create_invites.
+export interface InvitesTable {
+  id: Generated<string>
+  token_hash: string
+  email: string | null
+  display_name: string | null
+  invited_by: string | null
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+  expires_at: ColumnType<Date, Date | string, Date | string>
+  accepted_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
+  accepted_by: string | null
+}
+
 export type NotificationEmailMode = 'immediate' | 'digest' | 'none'
 
 export interface NotificationsTable {
@@ -156,7 +188,7 @@ export interface NotificationsTable {
   emailed_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
 }
 
-// The eight always-on core tables. Optional-layer tables live in the global
+// The always-on core tables. Optional-layer tables live in the global
 // `NuxtinatorDatabaseTables` registry and are joined in by `Database` below.
 export interface CoreDatabase {
   users: UsersTable
@@ -168,6 +200,8 @@ export interface CoreDatabase {
   core_settings: CoreSettingsTable
   core_host_settings: CoreHostSettingsTable
   user_permission_grants: UserPermissionGrantsTable
+  sessions: SessionsTable
+  invites: InvitesTable
 }
 
 // The full schema Kysely sees: core tables plus whatever optional layers

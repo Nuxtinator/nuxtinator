@@ -59,6 +59,7 @@ Dev server: <http://localhost:2080>.
 | [core](layers/core/) | Always | Auth, admin shell, RBAC, registries, single-mode `#tenant` kernel, migrations runner, launcher chrome. Never optional. | [layers.md](documentation/layers.md) |
 | [tenancy](layers/tenancy/) | Optional | Multi-tenant orgs + memberships + RLS. Adds `/@:slug/...` URL aliases and the multi-mode `#tenant` kernel. Omit for single-tenant. | [tenancy.md](documentation/tenancy.md) |
 | [email-mailgun](layers/email-mailgun/) | Choice | Mailgun (HTTP API in prod, MailHog locally). Provides `#email`. | — |
+| [social-auth](layers/social-auth/) | Optional | Sign in with Google and Sign in with Apple, for the web app and native apps. | [README](layers/social-auth/README.md) |
 | [oauth](layers/oauth/) | Optional | OAuth 2.1 issuer (token, consent, admin endpoints). | — |
 | [mcp](layers/mcp/) | Optional | MCP server transport. Depends on `oauth`. | — |
 | [apps/messages](layers/apps/messages/) | Optional | Team messaging app (channels, DMs, comments, reactions). | — |
@@ -195,6 +196,7 @@ Read the **Available layers** table above. Map casual language to layer names:
 - "single-tenant" / "no orgs" / "just one team" → omit `tenancy`
 - "Mailgun" / "email" (default backend) → `email-mailgun`
 - "no email" / "skip email" → omit any email layer
+- "Sign in with Google" / "Sign in with Apple" / "social login" → `social-auth`
 - "OAuth" / "OAuth server" / "issue tokens" → `oauth`
 - "MCP" / "Model Context Protocol" → `mcp` (and `oauth`, automatically)
 - "calendar" → `apps/calendar`
@@ -291,6 +293,7 @@ The scaffolded `.env.example` contains the union of every layer's vars. Trim it 
 - Always keep the **Core** block (`APP_TITLE`, `DATABASE_URL`, `JWT_SECRET`, `NUXT_SECRET_ENCRYPTION_KEY`, `NUXT_PUBLIC_SITE_URL`, `NODE_ENV`).
 - Keep `APP_DATABASE_URL` only if `tenancy` is selected.
 - Keep the `MAILGUN_*` + `SMTP_FROM*` block only if `email-mailgun` is selected.
+- Keep `NUXT_SOCIAL_AUTH_*` only if `social-auth` is selected.
 - Keep `OAUTH_*` only if `oauth` is selected.
 - Keep `MCP_*` only if `mcp` is selected.
 - Keep `S3_*` only if a layer that uploads is selected (`videos`, `messages`, etc.).

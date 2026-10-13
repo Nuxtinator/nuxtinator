@@ -3,7 +3,7 @@ import { getHeader } from 'h3'
 import { withOrgPermission } from '#tenant/server'
 import { validateRoleNames, getRolePermissions } from '#core/server/utils/rbac'
 import { logEvent } from '#core/server/utils/activity-logger'
-import { getSiteUrl } from '#core/server/utils/site-url'
+import { createInvite, findPendingInvite } from '#core/server/utils/invites'
 import { sendTemplateEmail } from '#email'
 import { adminDb } from '#tenant/admin-db'
 
@@ -12,15 +12,18 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 // Per-org admin invite (single org). Subset-delegation enforced against the
 // inviter's effective perm set in *this* org.
 //
-// Existing user → silent attach (no email). New user → invite email + token.
+// `link: true` → a single-use invite link with no email, returned for the
+// inviter to share. Existing user → silent attach (no email). New address →
+// an invite (no user row until it's accepted) and an invite email.
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, 'org.members.invite', async (tx, ctx) => {
     const body = await readBody(event)
     const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : ''
     const display_name = typeof body?.display_name === 'string' ? body.display_name.trim() : ''
     const inputRoles = Array.isArray(body?.roles) ? body.roles : null
+    const link = body?.link === true
 
-    if (!EMAIL_RE.test(email)) {
+    if (!link && !EMAIL_RE.test(email)) {
       throw createError({ statusCode: 400, statusMessage: 'A valid email is required' })
     }
     if (!inputRoles || inputRoles.some((r: unknown) => typeof r !== 'string')) {
@@ -44,6 +47,29 @@ export default defineEventHandler(async (event) => {
       })
     }
 
+    if (link) {
+      const invite = await createInvite(tx, {
+        email: null,
+        display_name: display_name || null,
+        invitedBy: ctx.userId,
+        orgs: [{ orgId: ctx.orgId, roles }]
+      })
+
+      logEvent({
+        eventType: 'org_invite_link_created',
+        tableName: 'invites',
+        recordId: invite.id,
+        userId: ctx.userId,
+        userAgent: getHeader(event, 'user-agent') || undefined,
+        metadata: { orgId: ctx.orgId, roles }
+      }, tx).catch(() => {})
+
+      return {
+        invite: { id: invite.id, kind: 'link', url: invite.url, expires_at: invite.expiresAt },
+        status: 'pending'
+      }
+    }
+
     // User lookup hits the global users table — not RLS-scoped.
     const existing = await adminDb
       .selectFrom('users')
@@ -51,57 +77,69 @@ export default defineEventHandler(async (event) => {
       .where('email', '=', email)
       .executeTakeFirst()
 
-    const now = new Date()
-    const nowIso = now.toISOString()
-    const tokenExpiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
+    if (!existing) {
+      if (await findPendingInvite(tx, email, ctx.orgId)) {
+        throw createError({ statusCode: 409, statusMessage: 'An invitation is already pending for this email. Resend it from the pending invites list.' })
+      }
 
-    let userId: string
-    let isNewUser: boolean
-    let inviteToken: string | null = null
+      const invite = await createInvite(tx, {
+        email,
+        display_name: display_name || null,
+        invitedBy: ctx.userId,
+        orgs: [{ orgId: ctx.orgId, roles }]
+      })
 
-    if (existing) {
-      userId = existing.id
-      isNewUser = false
-
-      // The membership insert below runs with RLS active and the active org's
-      // GUC set, so it'll only succeed against this org. A pre-check makes
-      // the error message kinder.
-      const dupe = await tx
-        .selectFrom('memberships')
-        .select('id')
-        .where('user_id', '=', userId)
-        .where('org_id', '=', ctx.orgId)
+      const inviter = await adminDb
+        .selectFrom('users')
+        .select(['display_name', 'email'])
+        .where('id', '=', ctx.userId)
         .executeTakeFirst()
-      if (dupe) {
-        throw createError({ statusCode: 409, statusMessage: 'User is already a member of this org' })
-      }
-    } else {
-      if (display_name.length < 2) {
-        throw createError({ statusCode: 400, statusMessage: 'Display name must be at least 2 characters for new users' })
-      }
-      userId = randomUUID()
-      inviteToken = randomUUID()
-      isNewUser = true
-
-      // The users table is not RLS-protected; insert via adminDb.
-      await adminDb
-        .insertInto('users')
-        .values({
-          id: userId,
-          created: nowIso,
-          updated: nowIso,
-          email,
-          display_name,
-          avatar: '',
-          password: null,
-          verified: false,
-          is_admin: false,
-          token_key: inviteToken,
-          token_expires_at: tokenExpiresAt
+      try {
+        await sendTemplateEmail({
+          to: email,
+          template: 'invite',
+          data: {
+            userName: display_name || undefined,
+            inviterName: inviter?.display_name || inviter?.email || 'Someone',
+            orgName: ctx.orgName,
+            inviteUrl: invite.url
+          }
         })
-        .execute()
+      } catch (err) {
+        console.error('Error sending invite email:', err)
+      }
+
+      logEvent({
+        eventType: 'org_invite_sent',
+        tableName: 'invites',
+        recordId: invite.id,
+        userId: ctx.userId,
+        userAgent: getHeader(event, 'user-agent') || undefined,
+        metadata: { orgId: ctx.orgId, email, roles }
+      }, tx).catch(() => {})
+
+      return {
+        invite: { id: invite.id, kind: 'email', email, expires_at: invite.expiresAt },
+        status: 'pending'
+      }
     }
 
+    const userId = existing.id
+
+    // The membership insert below runs with RLS active and the active org's
+    // GUC set, so it'll only succeed against this org. A pre-check makes
+    // the error message kinder.
+    const dupe = await tx
+      .selectFrom('memberships')
+      .select('id')
+      .where('user_id', '=', userId)
+      .where('org_id', '=', ctx.orgId)
+      .executeTakeFirst()
+    if (dupe) {
+      throw createError({ statusCode: 409, statusMessage: 'User is already a member of this org' })
+    }
+
+    const nowIso = new Date().toISOString()
     const membershipId = randomUUID()
     await tx
       .insertInto('memberships')
@@ -116,11 +154,6 @@ export default defineEventHandler(async (event) => {
       .execute()
 
     const nitro = useNitroApp()
-    if (isNewUser) {
-      try {
-        await nitro.hooks.callHook('user.created', { userId, email, viaInvite: true })
-      } catch (err) { console.warn('[hook user.created]', err) }
-    }
     try {
       await nitro.hooks.callHook('membership.created', {
         membershipId,
@@ -131,31 +164,8 @@ export default defineEventHandler(async (event) => {
       })
     } catch (err) { console.warn('[hook membership.created]', err) }
 
-    if (isNewUser && inviteToken) {
-      const inviteUrl = `${getSiteUrl()}/accept-invite?token=${inviteToken}`
-      const inviter = await adminDb
-        .selectFrom('users')
-        .select(['display_name', 'email'])
-        .where('id', '=', ctx.userId)
-        .executeTakeFirst()
-      try {
-        await sendTemplateEmail({
-          to: email,
-          template: 'invite',
-          data: {
-            userName: display_name,
-            inviterName: inviter?.display_name || inviter?.email || 'Someone',
-            orgName: ctx.orgName,
-            inviteUrl
-          }
-        })
-      } catch (err) {
-        console.error('Error sending invite email:', err)
-      }
-    }
-
     logEvent({
-      eventType: isNewUser ? 'org_invite_sent' : 'org_invite_attached',
+      eventType: 'org_invite_attached',
       tableName: 'memberships',
       recordId: membershipId,
       userId: ctx.userId,
@@ -164,9 +174,9 @@ export default defineEventHandler(async (event) => {
     }, tx).catch(() => {})
 
     return {
-      user: { id: userId, email, display_name: existing?.display_name ?? display_name },
+      user: { id: userId, email, display_name: existing.display_name },
       membership: { id: membershipId, roles },
-      status: isNewUser ? 'pending' : 'attached'
+      status: 'attached'
     }
   })
 })

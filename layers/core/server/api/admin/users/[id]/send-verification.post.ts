@@ -16,7 +16,7 @@ export default defineEventHandler(async (event) => {
 
   const target = await db
     .selectFrom('users')
-    .select(['id', 'email', 'display_name', 'verified', 'password'])
+    .select(['id', 'email', 'display_name', 'verified'])
     .where('id', '=', id)
     .executeTakeFirst()
 
@@ -26,16 +26,6 @@ export default defineEventHandler(async (event) => {
 
   if (target.verified) {
     throw createError({ statusCode: 400, statusMessage: 'User is already verified' })
-  }
-
-  // Pending invites haven't set a password yet — they need /resend-invite, not
-  // verification. Otherwise the verification link they'd click would land them
-  // in the wrong flow.
-  if (target.password === null) {
-    throw createError({
-      statusCode: 409,
-      statusMessage: 'User has not accepted their invite. Use POST /api/admin/users/[id]/resend-invite instead.'
-    })
   }
 
   const tokenKey = randomUUID()

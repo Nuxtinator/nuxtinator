@@ -25,6 +25,11 @@ interface CoreHookMap {
     email: string
     viaInvite: boolean
   }) => void | Promise<void>
+  // Fired (and awaited) just before a user row is deleted, while everything
+  // tied to it still exists.
+  'user.deleting': (p: {
+    userId: string
+  }) => void | Promise<void>
   'user.verified': (p: {
     userId: string
     email: string

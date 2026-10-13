@@ -16,21 +16,12 @@ export default defineEventHandler(async (event) => {
 
   const target = await db
     .selectFrom('users')
-    .select(['id', 'email', 'display_name', 'password'])
+    .select(['id', 'email', 'display_name'])
     .where('id', '=', id)
     .executeTakeFirst()
 
   if (!target) {
     throw createError({ statusCode: 404, statusMessage: 'User not found' })
-  }
-
-  // A reset only makes sense once a password exists. Pending invites haven't
-  // set one — they need /resend-invite to finish onboarding instead.
-  if (target.password === null) {
-    throw createError({
-      statusCode: 409,
-      statusMessage: 'User has not accepted their invite. Use POST /api/admin/users/[id]/resend-invite instead.'
-    })
   }
 
   const token = randomUUID()

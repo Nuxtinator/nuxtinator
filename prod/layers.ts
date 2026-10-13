@@ -33,6 +33,7 @@ export const LAYERS: readonly LayerSpec[] = [
   { id: 'core',          pkg: '@nuxtinator/core',          repo: 'corsacca/nuxtinator', subdir: 'layers/core' },
   { id: 'tenancy',       pkg: '@nuxtinator/tenancy',       repo: 'corsacca/nuxtinator', subdir: 'layers/tenancy' },
   { id: 'email-mailgun', pkg: '@nuxtinator/email-mailgun', repo: 'corsacca/nuxtinator', subdir: 'layers/email-mailgun' },
+  { id: 'social-auth',   pkg: '@nuxtinator/social-auth',   repo: 'corsacca/nuxtinator', subdir: 'layers/social-auth' },
   { id: 'ai',            pkg: '@nuxtinator/ai',            repo: 'corsacca/nuxtinator', subdir: 'layers/ai' },
   { id: 'oauth',         pkg: '@nuxtinator/oauth',         repo: 'corsacca/nuxtinator', subdir: 'layers/oauth' },
   { id: 'mcp',           pkg: '@nuxtinator/mcp',           repo: 'corsacca/nuxtinator', subdir: 'layers/mcp' },

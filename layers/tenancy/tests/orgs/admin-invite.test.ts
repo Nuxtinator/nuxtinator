@@ -1,8 +1,9 @@
 // Host-admin multi-org invite. Lives in core but requires tenancy (orgs +
 // memberships tables, requireOperatorAdmin from #tenant/server).
 //
-// Two paths:
-//   - new email   → creates user with password=null + memberships + invite email
+// Paths:
+//   - new email   → an invite row carrying the orgs + an invite email; no user
+//   - link        → an invite row with no email; the URL comes back to share
 //   - existing email → silent attach: only memberships, no email
 import { describe, it, expect, afterEach, afterAll, beforeEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
@@ -63,7 +64,7 @@ describe('POST /api/admin/users/invite (host-admin multi-org)', () => {
     expect(err.statusCode).toBe(400)
   })
 
-  it('new email → creates user (password null), memberships, and sends invite email', async () => {
+  it('new email → creates an invite carrying the orgs and sends one email; no user row', async () => {
     const { auth } = await createOperatorAdmin(sql)
     const orgA = await createTestOrg(sql)
     const orgB = await createTestOrg(sql)
@@ -82,32 +83,95 @@ describe('POST /api/admin/users/invite (host-admin multi-org)', () => {
       ...auth
     })
 
-    expect(res.user.email).toBe(email)
+    expect(res.invite.kind).toBe('email')
     expect(res.attachments.every((a: { status: string }) => a.status === 'pending')).toBe(true)
 
-    // User exists with password null (pending invite)
-    const userRows = await sql<{ password: string | null, verified: boolean, token_key: string, token_expires_at: Date | null }[]>`
-      SELECT password, verified, token_key, token_expires_at FROM users WHERE email = ${email}
-    `
-    expect(userRows.length).toBe(1)
-    expect(userRows[0]!.password).toBeNull()
-    expect(userRows[0]!.verified).toBe(false)
-    expect(userRows[0]!.token_expires_at).not.toBeNull()
+    const users = await sql`SELECT 1 FROM users WHERE email = ${email}`
+    expect(users.length).toBe(0)
 
-    // Two memberships
-    const memberships = await sql<{ org_id: string, roles: string[] }[]>`
-      SELECT org_id, roles FROM memberships WHERE user_id = ${res.user.id}
+    const orgs = await sql<{ org_id: string, roles: string[] }[]>`
+      SELECT org_id, roles FROM invite_orgs WHERE invite_id = ${res.invite.id}
     `
-    expect(memberships.length).toBe(2)
-    const orgARow = memberships.find(m => m.org_id === orgA.id)!
-    const orgBRow = memberships.find(m => m.org_id === orgB.id)!
-    expect(orgARow.roles).toEqual(['admin'])
-    expect(orgBRow.roles).toEqual(['member'])
+    expect(orgs.find(o => o.org_id === orgA.id)!.roles).toEqual(['admin'])
+    expect(orgs.find(o => o.org_id === orgB.id)!.roles).toEqual(['member'])
 
-    // Single invite email
+    // The emailed token opens this invite.
     const msg = await waitForMailTo(email)
     const token = extractTokenFromBody(msg.body, 'token')
-    expect(token).toBe(userRows[0]!.token_key)
+    const info = await $fetch(`/api/auth/invite-info?token=${token}`)
+    expect(info.email).toBe(email)
+    expect(info.orgs.map((o: { slug: string }) => o.slug).sort()).toEqual([orgA.slug, orgB.slug].sort())
+  })
+
+  it('link → returns a shareable URL, and accepting it grants the orgs', async () => {
+    const { auth } = await createOperatorAdmin(sql)
+    const org = await createTestOrg(sql)
+
+    const res = await $fetch('/api/admin/users/invite', {
+      method: 'POST',
+      body: { link: true, display_name: 'test-tenancy-link', attachments: [{ orgId: org.id, roles: ['member'] }] },
+      ...auth
+    })
+    expect(res.invite.kind).toBe('link')
+    const token = new URL(res.invite.url).searchParams.get('token')!
+
+    const joiner = await createTenancyUser(sql)
+    await $fetch('/api/auth/accept-invite', {
+      method: 'POST',
+      body: { token },
+      ...(await import('../helpers')).getAuthHeaders(joiner)
+    })
+
+    const memberships = await sql<{ roles: string[] }[]>`
+      SELECT roles FROM memberships WHERE user_id = ${joiner.id} AND org_id = ${org.id}
+    `
+    expect(memberships[0]!.roles).toEqual(['member'])
+  })
+
+  it('accepting into an account already in the org adds the invite\'s roles to the existing ones', async () => {
+    const { auth } = await createOperatorAdmin(sql)
+    const org = await createTestOrg(sql)
+    const existing = await createTenancyUser(sql)
+    await sql`INSERT INTO memberships (id, user_id, org_id, roles) VALUES (${randomUUID()}, ${existing.id}, ${org.id}, ${'{member}'})`
+
+    const res = await $fetch('/api/admin/users/invite', {
+      method: 'POST',
+      body: { link: true, display_name: 'test-tenancy-link', attachments: [{ orgId: org.id, roles: ['admin'] }] },
+      ...auth
+    })
+    const token = new URL(res.invite.url).searchParams.get('token')!
+    await $fetch('/api/auth/accept-invite', {
+      method: 'POST',
+      body: { token },
+      ...(await import('../helpers')).getAuthHeaders(existing)
+    })
+
+    const rows = await sql<{ roles: string[] }[]>`SELECT roles FROM memberships WHERE user_id = ${existing.id} AND org_id = ${org.id}`
+    expect(rows[0]!.roles.sort()).toEqual(['admin', 'member'])
+  })
+
+  it('lists, resends and revokes pending invites', async () => {
+    const { auth } = await createOperatorAdmin(sql)
+    const org = await createTestOrg(sql)
+    const email = `test-tenancy-invite-${randomUUID().slice(0, 8)}@example.com`
+    const created = await $fetch('/api/admin/users/invite', {
+      method: 'POST',
+      body: { email, attachments: [{ orgId: org.id, roles: ['member'] }] },
+      ...auth
+    })
+
+    const list = await $fetch<{ invites: Array<{ id: string, status: string, orgs: Array<{ id: string }> }> }>('/api/admin/invites', auth)
+    const row = list.invites.find(i => i.id === created.invite.id)!
+    expect(row.status).toBe('valid')
+    expect(row.orgs[0]!.id).toBe(org.id)
+
+    await clearMailhog()
+    await $fetch(`/api/admin/invites/${created.invite.id}/resend`, { method: 'POST', ...auth })
+    await waitForMailTo(email)
+
+    await $fetch(`/api/admin/invites/${created.invite.id}`, { method: 'DELETE', ...auth })
+    const after = await sql`SELECT 1 FROM invites WHERE id = ${created.invite.id}`
+    expect(after.length).toBe(0)
   })
 
   it('existing email → silent attach (memberships added, no email sent)', async () => {

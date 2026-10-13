@@ -25,6 +25,7 @@
         "@nuxtinator/mcp": "workspace:*",
         "@nuxtinator/messages": "workspace:*",
         "@nuxtinator/oauth": "workspace:*",
+        "@nuxtinator/social-auth": "workspace:*",
         "@nuxtinator/tenancy": "workspace:*",
         "@nuxtinator/videos": "workspace:*",
         "kysely": "^0.28.17",
@@ -49,7 +50,7 @@
     },
     "layers/ai": {
       "name": "@nuxtinator/ai",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "tinfoil": "^1.2.1",
       },
@@ -144,7 +145,7 @@
     },
     "layers/apps/helpinator": {
       "name": "@nuxtinator/helpinator",
-      "version": "0.1.1",
+      "version": "0.3.0",
       "dependencies": {
         "@mozilla/readability": "^0.6.0",
         "croner": "^9.0.0",
@@ -174,7 +175,7 @@
     },
     "layers/apps/inbox": {
       "name": "@nuxtinator/inbox",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "croner": "^9.0.0",
         "dompurify": "^3.4.13",
@@ -256,7 +257,7 @@
     },
     "layers/core": {
       "name": "@nuxtinator/core",
-      "version": "1.8.1",
+      "version": "1.9.0",
       "dependencies": {
         "@bradenmacdonald/s3-lite-client": "^0.9.6",
         "@nuxtjs/i18n": "^10.6.0",
@@ -340,6 +341,26 @@
     "layers/oauth": {
       "name": "@nuxtinator/oauth",
       "version": "1.1.4",
+      "optionalDependencies": {
+        "@nuxtinator/core": "*",
+      },
+      "peerDependencies": {
+        "@nuxt/ui": "^4.0.0",
+        "h3": "^1.0.0",
+        "kysely": "^0.28.0",
+        "nuxt": "^4.0.0",
+        "vue": "^3.0.0",
+      },
+    },
+    "layers/social-auth": {
+      "name": "@nuxtinator/social-auth",
+      "version": "0.1.0",
+      "dependencies": {
+        "jsonwebtoken": "^9.0.2",
+      },
+      "devDependencies": {
+        "@types/jsonwebtoken": "^9.0.10",
+      },
       "optionalDependencies": {
         "@nuxtinator/core": "*",
       },
@@ -723,6 +744,8 @@
     "@nuxtinator/messages": ["@nuxtinator/messages@workspace:layers/apps/messages"],
 
     "@nuxtinator/oauth": ["@nuxtinator/oauth@workspace:layers/oauth"],
+
+    "@nuxtinator/social-auth": ["@nuxtinator/social-auth@workspace:layers/social-auth"],
 
     "@nuxtinator/tenancy": ["@nuxtinator/tenancy@workspace:layers/tenancy"],
 

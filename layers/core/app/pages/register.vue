@@ -15,8 +15,10 @@ const state = reactive({
 })
 
 const loading = ref(false)
-const error = ref('')
+const error = ref(authErrorMessage(route.query.auth_error))
 const success = ref(false)
+
+const redirectTarget = computed(() => typeof route.query.redirect === 'string' ? route.query.redirect : undefined)
 
 const passwordMatch = computed(() => {
   if (!state.confirmPassword) return true
@@ -137,6 +139,12 @@ const redirectToLogin = () => {
           :title="error"
           :close-button="{ icon: 'i-lucide-x', color: 'gray', variant: 'ghost' }"
           @close="error = ''"
+        />
+
+        <AuthProviderButtons
+          intent="login"
+          :redirect="redirectTarget"
+          separator="or"
         />
 
         <!-- Display Name Input -->

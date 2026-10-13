@@ -9,6 +9,7 @@
     "dev",
     "layers/core",
     "layers/tenancy",
+    "layers/social-auth",
     "layers/email-mailgun",
     "layers/ai",
     "layers/oauth",

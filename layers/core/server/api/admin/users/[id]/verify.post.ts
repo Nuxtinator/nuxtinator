@@ -13,7 +13,7 @@ export default defineEventHandler(async (event) => {
 
   const existing = await db
     .selectFrom('users')
-    .select(['id', 'email', 'verified', 'password'])
+    .select(['id', 'email', 'verified'])
     .where('id', '=', id)
     .executeTakeFirst()
 
@@ -23,15 +23,6 @@ export default defineEventHandler(async (event) => {
 
   if (existing.verified) {
     return { user: { id: existing.id, verified: true } }
-  }
-
-  // Pending invites haven't set a password yet — verifying them strands the
-  // invite (the accept gate keys off password). They need /resend-invite.
-  if (existing.password === null) {
-    throw createError({
-      statusCode: 409,
-      statusMessage: 'User has not accepted their invite. Use POST /api/admin/users/[id]/resend-invite instead.'
-    })
   }
 
   await db
