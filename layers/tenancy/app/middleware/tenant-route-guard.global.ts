@@ -17,7 +17,6 @@ const SYSTEM_PREFIXES = [
   // Social-auth layer's "what should we call you?" sign-up step.
   '/social-auth',
   '/orgs',
-  '/dashboard',
   '/kitchen',
   // Public share routes — anonymous visitors must be able to hit these
   // without getting bounced to /orgs by the active-slug rewrite. The

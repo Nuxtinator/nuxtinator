@@ -56,7 +56,7 @@ async function onSubmit() {
       body: { name: form.name.trim(), slug: form.slug.trim() }
     })
     await refreshOrgs()
-    await router.push(`/@${res.slug}/`)
+    await router.push(`/@${res.slug}/dashboard`)
   } catch (err: unknown) {
     error.value = (err as { data?: { statusMessage?: string } } | null)?.data?.statusMessage || 'Failed to create organization'
   } finally {

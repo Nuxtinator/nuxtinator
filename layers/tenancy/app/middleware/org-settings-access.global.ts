@@ -22,11 +22,11 @@ export default defineNuxtRouteMiddleware(async (to) => {
       perms = res.perms ?? []
       cache.value = { ...cache.value, [slug]: perms }
     } catch {
-      return navigateTo(`/@${slug}/`)
+      return navigateTo(`/@${slug}/dashboard`)
     }
   }
 
   if (!perms.includes('org.settings.access')) {
-    return navigateTo(`/@${slug}/`)
+    return navigateTo(`/@${slug}/dashboard`)
   }
 })

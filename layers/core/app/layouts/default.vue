@@ -50,7 +50,7 @@ watch(() => route.path, () => {
             v-if="orgSwitcher"
           />
           <NuxtLink
-            to="/"
+            to="/dashboard"
             class="text-base font-semibold truncate"
           >
             {{ activeApp?.title || config.public.appName }}
@@ -81,7 +81,7 @@ watch(() => route.path, () => {
             v-if="orgSwitcher"
           />
           <NuxtLink
-            to="/"
+            to="/dashboard"
             class="text-xl font-semibold hover:text-(--ui-text-muted) transition-colors truncate"
           >
             {{ config.public.appName }}

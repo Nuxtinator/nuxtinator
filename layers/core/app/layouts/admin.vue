@@ -52,7 +52,7 @@ watch(() => route.path, () => {
         <span class="text-lg font-semibold">Admin</span>
       </div>
       <UButton
-        to="/"
+        to="/dashboard"
         icon="i-lucide-arrow-left"
         variant="ghost"
         color="neutral"

@@ -15,6 +15,6 @@ export default defineNuxtRouteMiddleware(async (_to, _from) => {
   }
 
   if (!(currentUser as { is_admin?: boolean }).is_admin) {
-    return navigateTo('/')
+    return navigateTo('/dashboard')
   }
 })
