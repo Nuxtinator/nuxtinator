@@ -55,16 +55,11 @@ const verb = computed(() => props.intent === 'link' ? 'Link' : 'Continue with')
       {{ verb }} {{ p.label }}
     </UButton>
 
-    <div
+    <USeparator
       v-if="separator"
-      class="relative pt-3"
-    >
-      <div class="absolute inset-0 top-3 flex items-center">
-        <div class="w-full border-t border-(--ui-border)" />
-      </div>
-      <div class="relative flex justify-center text-sm">
-        <span class="px-2 bg-(--ui-bg) text-(--ui-text-muted)">{{ separator }}</span>
-      </div>
-    </div>
+      :label="separator"
+      class="pt-3"
+      :ui="{ container: 'font-normal text-muted' }"
+    />
   </div>
 </template>
