@@ -4,9 +4,9 @@
 const { user, checkAuth } = useAuth()
 const toast = useToast()
 
-const { data } = useLazyFetch<{ can_upload: boolean, max_mb: number, types: string[] }>('/api/profile/avatar', {
+const { data } = useLazyFetch<{ can_upload: boolean, max_mb: number, types: string[], types_text: string }>('/api/profile/avatar', {
   key: 'profile-avatar',
-  default: () => ({ can_upload: false, max_mb: 0, types: [] })
+  default: () => ({ can_upload: false, max_mb: 0, types: [], types_text: '' })
 })
 
 const input = ref<HTMLInputElement | null>(null)
@@ -17,7 +17,7 @@ async function upload(event: Event) {
   if (input.value) input.value.value = ''
   if (!file) return
   if (!data.value.types.includes(file.type)) {
-    toast.add({ title: 'Use a JPEG, PNG, GIF or WebP image', color: 'error' })
+    toast.add({ title: `Use a ${data.value.types_text} image`, color: 'error' })
     return
   }
   if (file.size > data.value.max_mb * 1024 * 1024) {

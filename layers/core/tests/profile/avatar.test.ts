@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { $fetch } from '@nuxt/test-utils/e2e'
+import { $fetch, fetch } from '@nuxt/test-utils/e2e'
 import {
   getHostAdminDb,
   cleanupCoreTestData,
@@ -84,6 +84,21 @@ describe('/api/profile/avatar', () => {
       ...auth
     }).catch(e => e)
     expect(err.statusCode).toBe(400)
+  })
+
+  it.skipIf(SKIP_S3)('accepts an upload sent without a Content-Length', async () => {
+    const { user, auth } = await createAndLoginUser(sql)
+    const encoded = new Response(form(TINY_PNG, 'a.png', 'image/png'))
+    const bytes = new Uint8Array(await encoded.arrayBuffer())
+    const res = await fetch('/api/profile/avatar', {
+      method: 'POST',
+      headers: { ...auth.headers, 'content-type': encoded.headers.get('content-type')! },
+      body: new ReadableStream({ start(c) { c.enqueue(bytes); c.close() } }),
+      duplex: 'half'
+    } as RequestInit)
+    expect(res.status).toBe(200)
+    expect(await avatarOf(user.id)).toMatch(/\/avatars\/[0-9a-f]+\.png$/)
+    await $fetch('/api/profile/avatar', { method: 'DELETE', ...auth })
   })
 
   it.skipIf(SKIP_S3)('uploads an image, stores its URL, and removes it', async () => {

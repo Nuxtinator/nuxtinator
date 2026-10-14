@@ -34,6 +34,8 @@ onMounted(() => {
         emailError.value = 'The new email address is already in use'
         break
     }
+    // Shown once: a reload or a later return to this URL doesn't repeat it.
+    navigateTo({ query: { ...route.query, email_change: undefined } }, { replace: true })
   }
 })
 

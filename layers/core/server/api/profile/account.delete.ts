@@ -60,7 +60,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // Delete related data in correct order (foreign key constraints)
-  await db.transaction().execute(async (trx) => {
+  const deleted = await db.transaction().execute(async (trx) => {
     // 1. Delete password reset requests
     await trx
       .deleteFrom('password_reset_requests')
@@ -74,11 +74,20 @@ export default defineEventHandler(async (event) => {
       .execute()
 
     // 3. Delete the user
-    await trx
+    return await trx
       .deleteFrom('users')
       .where('id', '=', user.userId)
-      .execute()
+      .returning('avatar')
+      .executeTakeFirst()
   })
+
+  if (deleted) {
+    try {
+      await useNitroApp().hooks.callHook('user.deleted', { userId: user.userId, avatar: deleted.avatar })
+    } catch (err) {
+      console.warn('[hook user.deleted] handler threw:', err)
+    }
+  }
 
   // Log account deletion (this log entry won't have user_id since we deleted it)
   logEvent({

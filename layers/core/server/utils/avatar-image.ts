@@ -4,12 +4,18 @@ export const AVATAR_FOLDER = 'avatars'
 export const AVATAR_MAX_MB = 2
 export const AVATAR_MAX_BYTES = AVATAR_MAX_MB * 1024 * 1024
 
-// Accepted avatar types and the file extension each is stored under.
-export const AVATAR_TYPES: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/gif': 'gif',
-  'image/webp': 'webp'
+// Accepted avatar types, with the file extension each is stored under and its name.
+export const AVATAR_TYPES: Record<string, { ext: string, name: string }> = {
+  'image/jpeg': { ext: 'jpg', name: 'JPEG' },
+  'image/png': { ext: 'png', name: 'PNG' },
+  'image/gif': { ext: 'gif', name: 'GIF' },
+  'image/webp': { ext: 'webp', name: 'WebP' }
+}
+
+// The accepted types as a phrase, e.g. "JPEG, PNG, GIF or WebP".
+export function avatarTypesText(): string {
+  const names = Object.values(AVATAR_TYPES).map(t => t.name)
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names.at(-1)}` : names.join('')
 }
 
 // The image type of the bytes themselves, or null when they aren't one of the

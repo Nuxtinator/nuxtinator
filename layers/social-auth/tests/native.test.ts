@@ -13,6 +13,9 @@ import {
 } from './helpers'
 
 const NATIVE = { 'x-auth-client': 'native' }
+// With public storage configured, provider photos are copied, and one that
+// can't be downloaded (like the example.com URLs here) is skipped.
+const STORAGE = !!process.env.S3_BUCKET_NAME && !!process.env.S3_PUBLIC_BASE_URL
 
 interface NativeResult {
   accessToken: string
@@ -53,7 +56,7 @@ describe('POST /api/social-auth/native', () => {
     expect(users[0]!.verified).toBe(true)
     expect(users[0]!.password).toBeNull()
     expect(users[0]!.display_name).toBe('Goo Gler')
-    expect(users[0]!.avatar).toBe('https://example.com/a.png')
+    expect(users[0]!.avatar).toBe(STORAGE ? '' : 'https://example.com/a.png')
 
     const second = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub, email }) })
     expect(second.created).toBe(false)
