@@ -3,7 +3,8 @@ import { $fetch, fetch } from '@nuxt/test-utils/e2e'
 import {
   getHostAdminDb,
   cleanupCoreTestData,
-  createAndLoginUser
+  createAndLoginUser,
+  publicStorageConfigured
 } from '../helpers'
 
 // 1x1 PNG.
@@ -20,7 +21,7 @@ function form(file: Buffer, filename: string, type: string, field = 'file'): For
 }
 
 // Uploads need a writable public bucket.
-const SKIP_S3 = !process.env.S3_BUCKET_NAME || !process.env.S3_PUBLIC_BASE_URL
+const SKIP_S3 = !publicStorageConfigured()
 
 describe('/api/profile/avatar', () => {
   const sql = getHostAdminDb()

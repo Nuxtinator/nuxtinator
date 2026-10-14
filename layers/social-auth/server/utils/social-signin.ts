@@ -119,7 +119,7 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
     if (await hasIdentityFor(input.userId, input.provider)) return { kind: 'error', code: 'one_per_provider' }
     await db.insertInto('user_identities').values(identityRow(input.userId, input)).execute()
     logLinked(input.userId, input)
-    await importAvatar(input.userId, profile.picture)
+    startAvatarImport(input.userId, profile.picture)
     return { kind: 'linked', userId: input.userId }
   }
 
@@ -144,7 +144,7 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
     if (await hasIdentityFor(existing.id, input.provider)) return { kind: 'error', code: 'one_per_provider' }
     await db.insertInto('user_identities').values(identityRow(existing.id, input)).execute()
     logLinked(existing.id, input)
-    await importAvatar(existing.id, profile.picture)
+    startAvatarImport(existing.id, profile.picture)
     return { kind: 'signed_in', userId: existing.id, created: false, inviteAccepted: false }
   }
 
@@ -205,7 +205,7 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
     userAgent: input.userAgent,
     metadata: { provider: input.provider }
   })
-  await importAvatar(account.userId, profile.picture)
+  startAvatarImport(account.userId, profile.picture)
 
   return { kind: 'signed_in', userId: account.userId, created: true, inviteAccepted: !!usableInvite }
 }
@@ -216,6 +216,11 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
 // copied to the app's public storage, and a photo that can't be copied (not an
 // accepted image, too large, unreachable) is skipped; otherwise the provider's
 // URL is stored as-is.
+// Runs the import in the background so sign-in doesn't wait for the download and upload.
+function startAvatarImport(userId: string, pictureUrl: string | null): void {
+  void importAvatar(userId, pictureUrl)
+}
+
 async function importAvatar(userId: string, pictureUrl: string | null): Promise<void> {
   if (!pictureUrl || !/^https:\/\//.test(pictureUrl)) return
   let uploadedKey: string | null = null
@@ -227,7 +232,7 @@ async function importAvatar(userId: string, pictureUrl: string | null): Promise<
     if (isPublicStorageConfigured()) {
       const data = await downloadAvatar(pictureUrl)
       const uploaded = data ? await uploadAvatar(data) : null
-      if (!uploaded) return
+      if (!uploaded?.ok) return
       avatar = uploaded.url
       uploadedKey = uploaded.key
     }

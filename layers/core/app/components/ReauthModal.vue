@@ -11,8 +11,7 @@ onMounted(() => {
   if (typeof status !== 'string' || !status) return
   if (status === 'success') toast.add({ title: 'Account linked', color: 'success' })
   else toast.add({ title: authErrorMessage(status), color: 'error' })
-  // Shown once: a reload or a re-authentication returning here doesn't repeat it.
-  navigateTo({ query: { ...route.query, link: undefined } }, { replace: true })
+  clearQueryParam('link')
 })
 
 interface Methods {

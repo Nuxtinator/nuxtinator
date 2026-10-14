@@ -1,43 +1,63 @@
 import { sql } from 'kysely'
 import { db } from './database'
 import { deleteFromS3, getPublicUrl, isPublicStorageConfigured, uploadToS3 } from './storage'
-import { AVATAR_FOLDER, AVATAR_MAX_BYTES, AVATAR_TYPES, avatarImageType } from './avatar-image'
+import { AVATAR_FOLDER, AVATAR_MAX_BYTES, AVATAR_TYPES, avatarImageType, isAllowedAvatarUrl } from './avatar-image'
 
-// Uploads avatar bytes to public storage, or returns null when they are too
-// large or not an accepted image.
-export async function uploadAvatar(data: Uint8Array): Promise<{ url: string, key: string } | null> {
+export type AvatarUpload =
+  | { ok: true, url: string, key: string }
+  | { ok: false, reason: 'too_large' | 'unsupported' }
+
+// Uploads avatar bytes to public storage, unless they are too large or not an
+// accepted image.
+export async function uploadAvatar(data: Uint8Array): Promise<AvatarUpload> {
+  if (data.byteLength > AVATAR_MAX_BYTES) return { ok: false, reason: 'too_large' }
   const type = avatarImageType(data)
-  if (!type || data.byteLength > AVATAR_MAX_BYTES) return null
-  const uploaded = await uploadToS3(Buffer.from(data), `avatar.${AVATAR_TYPES[type]!.ext}`, type, 'public', AVATAR_FOLDER)
-  return { url: uploaded.url, key: uploaded.key }
+  if (!type) return { ok: false, reason: 'unsupported' }
+  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data)
+  const uploaded = await uploadToS3(buffer, `avatar.${AVATAR_TYPES[type].ext}`, type, 'public', AVATAR_FOLDER)
+  return { ok: true, url: uploaded.url, key: uploaded.key }
 }
 
 const DOWNLOAD_TIMEOUT_MS = 5000
+const DOWNLOAD_MAX_REDIRECTS = 3
 
 // Downloads an image to use as an avatar, or null when the request fails,
-// times out or passes the size limit.
-export async function downloadAvatar(url: string): Promise<Uint8Array | null> {
+// times out, passes the size limit or is redirected somewhere not allowed.
+// Redirects are followed by hand so every hop is checked.
+export async function downloadAvatar(input: string): Promise<Buffer | null> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
-    if (!res.ok || !res.body) return null
-    if (Number(res.headers.get('content-length')) > AVATAR_MAX_BYTES) {
-      await res.body.cancel()
-      return null
-    }
-    const reader = res.body.getReader()
-    const chunks: Uint8Array[] = []
-    let total = 0
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      total += value.byteLength
-      if (total > AVATAR_MAX_BYTES) {
-        await reader.cancel()
+    const signal = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)
+    let url = new URL(input)
+    for (let hop = 0; ; hop++) {
+      if (!isAllowedAvatarUrl(url)) return null
+      const res = await fetch(url, { redirect: 'manual', signal })
+      if (res.status >= 300 && res.status < 400) {
+        await res.body?.cancel()
+        const location = res.headers.get('location')
+        if (!location || hop >= DOWNLOAD_MAX_REDIRECTS) return null
+        url = new URL(location, url)
+        continue
+      }
+      if (!res.ok || !res.body) return null
+      if (Number(res.headers.get('content-length')) > AVATAR_MAX_BYTES) {
+        await res.body.cancel()
         return null
       }
-      chunks.push(value)
+      const reader = res.body.getReader()
+      const chunks: Uint8Array[] = []
+      let total = 0
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        total += value.byteLength
+        if (total > AVATAR_MAX_BYTES) {
+          await reader.cancel()
+          return null
+        }
+        chunks.push(value)
+      }
+      return Buffer.concat(chunks)
     }
-    return Buffer.concat(chunks)
   } catch {
     return null
   }

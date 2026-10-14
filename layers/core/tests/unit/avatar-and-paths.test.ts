@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { withQueryParams } from '../../server/utils/account-path'
-import { avatarImageType } from '../../server/utils/avatar-image'
+import { avatarImageType, isAllowedAvatarUrl } from '../../server/utils/avatar-image'
 
 describe('withQueryParams', () => {
   it('adds to a path without a query', () => {
@@ -25,5 +25,19 @@ describe('avatarImageType', () => {
   it('rejects anything else', () => {
     expect(avatarImageType(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>'))).toBeNull()
     expect(avatarImageType(new Uint8Array())).toBeNull()
+  })
+})
+
+describe('isAllowedAvatarUrl', () => {
+  it('allows HTTPS hosts', () => {
+    expect(isAllowedAvatarUrl(new URL('https://lh3.googleusercontent.com/a/photo'))).toBe(true)
+  })
+
+  it('refuses other schemes and IP addresses', () => {
+    expect(isAllowedAvatarUrl(new URL('http://lh3.googleusercontent.com/a/photo'))).toBe(false)
+    expect(isAllowedAvatarUrl(new URL('https://169.254.169.254/latest/meta-data'))).toBe(false)
+    expect(isAllowedAvatarUrl(new URL('https://10.0.0.5/photo.png'))).toBe(false)
+    expect(isAllowedAvatarUrl(new URL('https://[::1]/photo.png'))).toBe(false)
+    expect(isAllowedAvatarUrl(new URL('file:///etc/passwd'))).toBe(false)
   })
 })
