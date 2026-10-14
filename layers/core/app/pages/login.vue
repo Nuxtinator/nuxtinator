@@ -213,14 +213,10 @@ function switchToReset() {
 
         <template v-if="registrationOpen">
           <!-- Divider -->
-          <div class="relative">
-            <div class="absolute inset-0 flex items-center">
-              <div class="w-full border-t border-(--ui-border)" />
-            </div>
-            <div class="relative flex justify-center text-sm">
-              <span class="px-2 bg-(--ui-bg) text-(--ui-text-muted)">Don't have an account?</span>
-            </div>
-          </div>
+          <USeparator
+            label="Don't have an account?"
+            :ui="{ container: 'font-normal text-muted' }"
+          />
 
           <!-- Register Link -->
           <UButton

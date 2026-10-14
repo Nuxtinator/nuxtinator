@@ -2,7 +2,9 @@
 
 Sign in with Google and Sign in with Apple, for the web app and for native iOS/Android apps.
 
-Each provider turns on when its credentials are set. With none set, the layer loads but does nothing. When a provider is configured, its button appears on `/login`, `/register` and `/accept-invite`, and under **Sign-in Methods** on `/account`.
+Requires `@nuxtinator/core` 2.2.0 or later.
+
+Each provider turns on when its credentials are set. With none set, the layer loads but does nothing. When a provider is configured, its button appears on `/login`, `/register` and `/accept-invite`, and under **Sign-in Methods** on the account page.
 
 ## What happens when someone signs in
 
@@ -22,7 +24,7 @@ The first account on a deployment becomes host admin, the same as with `/registe
 
 **Hide My Email.** An Apple user who hides their email gets a `@privaterelay.appleid.com` address that never matches an existing account. They link Apple from `/account` while signed in. To email relay addresses, register your sending domain under Sign in with Apple → Email Communication in the Apple developer portal; mail to relay addresses is dropped otherwise.
 
-**Avatars.** A Google profile photo becomes the avatar of a user who has none. The photo is copied to public S3 storage when `S3_*` and `S3_PUBLIC_BASE_URL` are configured; otherwise Google's URL is stored. Apple provides no photo.
+**Avatars.** When an account is created or Google is linked, a Google profile photo becomes the avatar of a user who has none. The photo is copied to public S3 storage when `S3_*` and `S3_PUBLIC_BASE_URL` are configured; otherwise Google's URL is stored. Only photos from `googleusercontent.com` (and redirects that stay there) are used. Apple provides no photo.
 
 **Account deletion.** For Apple identities, the refresh token is stored encrypted (this needs `NUXT_SECRET_ENCRYPTION_KEY`). Deleting the account or unlinking Apple revokes the app's access at Apple, which App Store review requires.
 
@@ -32,6 +34,7 @@ The first account on a deployment becomes host admin, the same as with `/registe
 NUXT_SOCIAL_AUTH_GOOGLE_CLIENT_ID=          # OAuth client, type "Web application"
 NUXT_SOCIAL_AUTH_GOOGLE_CLIENT_SECRET=
 NUXT_SOCIAL_AUTH_GOOGLE_NATIVE_CLIENT_IDS=  # comma-separated iOS / Android client IDs
+NUXT_SOCIAL_AUTH_GOOGLE_PHOTO_HOSTS=        # optional; comma-separated photo hosts, default googleusercontent.com
 
 NUXT_SOCIAL_AUTH_APPLE_SERVICES_ID=         # Services ID (web)
 NUXT_SOCIAL_AUTH_APPLE_TEAM_ID=
@@ -52,10 +55,10 @@ A provider's button (and its entry under Sign-in Methods) shows only when its we
 `GET /api/social-auth/:provider/start?intent=login|link|reauth&invite=…&redirect=/path`
 
 - `login`: sign in or sign up.
-- `link`: add the provider to the signed-in account (from `/account`).
+- `link`: add the provider to the signed-in account (from the account page).
 - `reauth`: prove identity again before a sensitive action (core's step-up; see `useReauth`).
 
-The flow state (state, nonce, PKCE verifier, intent) is kept in a signed, 10-minute, `HttpOnly` cookie. Apple returns with a cross-site form POST that doesn't carry `SameSite=Lax` cookies. `POST …/callback` re-issues it as a top-level GET to the same URL, and that GET does carry them. Errors return to `/login`, `/accept-invite` or `/account` with an `auth_error` / `link` code. The pages never echo text from the URL.
+The flow state (state, nonce, PKCE verifier, intent) is kept in a signed, 10-minute, `HttpOnly` cookie. Apple returns with a cross-site form POST that doesn't carry `SameSite=Lax` cookies. `POST …/callback` re-issues it as a top-level GET to the same URL, and that GET does carry them. Errors return to `/login` or `/accept-invite` with an `auth_error` code. Link and re-authentication flows return to their `redirect` path (default: core's `accountPath`, `/account` unless the host sets it) with a `link` code. The pages never echo text from the URL.
 
 ## Native apps
 

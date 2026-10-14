@@ -85,7 +85,8 @@ export default defineEventHandler(async (event) => {
     displayName,
     clientId,
     refreshTokenEnc,
-    userAgent
+    userAgent,
+    waitUntil: promise => event.waitUntil(promise)
   })
 
   switch (outcome.kind) {

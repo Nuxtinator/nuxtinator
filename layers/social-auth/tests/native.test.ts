@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { randomUUID } from 'node:crypto'
+import { lookup } from 'node:dns/promises'
 import {
   getHostAdminDb,
   createTestUser,
@@ -9,10 +10,18 @@ import {
   googleIdToken,
   appleIdToken,
   socialEmail,
+  photoUrl,
+  publicStorageConfigured,
+  waitForAvatar,
   TEST_GOOGLE_WEB_CLIENT
 } from './helpers'
 
 const NATIVE = { 'x-auth-client': 'native' }
+// With public storage configured, provider photos are copied into it;
+// otherwise the provider's URL is stored as-is.
+const STORAGE = publicStorageConfigured()
+const STORED = /\/avatars\/[0-9a-f]+\.png$/
+const UNLISTED_HOST_RESOLVES = await lookup('localhost.').then(() => true, () => false)
 
 interface NativeResult {
   accessToken: string
@@ -44,21 +53,68 @@ describe('POST /api/social-auth/native', () => {
   it('creates a verified, password-less account on first sign-in and signs in to it after', async () => {
     const email = socialEmail()
     const sub = randomUUID()
-    const first = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub, email, name: 'Goo Gler', picture: 'https://example.com/a.png' }) })
+    const first = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub, email, name: 'Goo Gler' }) })
     expect(first.created).toBe(true)
     expect(first.accessToken).toBeTruthy()
 
-    const users = await sql<{ id: string, verified: boolean, password: string | null, display_name: string, avatar: string }[]>`
-      SELECT id, verified, password, display_name, avatar FROM users WHERE email = ${email}`
+    const users = await sql<{ id: string, verified: boolean, password: string | null, display_name: string }[]>`
+      SELECT id, verified, password, display_name FROM users WHERE email = ${email}`
     expect(users[0]!.verified).toBe(true)
     expect(users[0]!.password).toBeNull()
     expect(users[0]!.display_name).toBe('Goo Gler')
-    expect(users[0]!.avatar).toBe('https://example.com/a.png')
 
     const second = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub, email }) })
     expect(second.created).toBe(false)
     const me = await api('/api/auth/me', { headers: { authorization: `Bearer ${second.accessToken}` } })
     expect(me.user.id).toBe(users[0]!.id)
+  })
+
+  describe('provider photo', () => {
+    async function signUpWithPhoto(path: string) {
+      const email = socialEmail()
+      const sub = randomUUID()
+      const res = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub, email, name: 'Photo Owner', picture: photoUrl(path) }) })
+      const bearer = { headers: { authorization: `Bearer ${res.accessToken}` } }
+      return { email, sub, bearer }
+    }
+
+    it('is copied to storage, or stored as-is without storage', async () => {
+      const { email, bearer } = await signUpWithPhoto('/photo.png')
+      const avatar = await waitForAvatar(sql, email, a => a !== '')
+      if (STORAGE) expect(avatar).toMatch(STORED)
+      else expect(avatar).toBe(photoUrl('/photo.png'))
+      await api('/api/profile/avatar', { method: 'DELETE', ...bearer })
+    })
+
+    it.skipIf(!STORAGE)('follows an HTTPS redirect', async () => {
+      const { email, bearer } = await signUpWithPhoto('/redirect')
+      expect(await waitForAvatar(sql, email, a => a !== '')).toMatch(STORED)
+      await api('/api/profile/avatar', { method: 'DELETE', ...bearer })
+    })
+
+    // `localhost.` reaches the photo host and passes its certificate but isn't a listed host.
+    it.skipIf(!UNLISTED_HOST_RESOLVES)('is skipped when it comes from a host not listed for the provider', async () => {
+      const email = socialEmail()
+      const picture = photoUrl('/photo.png').replace('//localhost:', '//localhost.:')
+      await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email, name: 'Elsewhere', picture }) })
+      expect(await waitForAvatar(sql, email, a => a !== '', 1500)).toBe('')
+    })
+
+    it.skipIf(!STORAGE)('is skipped when a redirect leads to plain HTTP or an IP address', async () => {
+      const toHttp = await signUpWithPhoto('/to-http')
+      const toIp = await signUpWithPhoto('/to-ip')
+      expect(await waitForAvatar(sql, toHttp.email, a => a !== '', 1500)).toBe('')
+      expect(await waitForAvatar(sql, toIp.email, a => a !== '', 1500)).toBe('')
+    })
+
+    it('is not imported again on a later sign-in through the linked provider', async () => {
+      const { email, sub, bearer } = await signUpWithPhoto('/photo.png')
+      await waitForAvatar(sql, email, a => a !== '')
+      await api('/api/profile/avatar', { method: 'DELETE', ...bearer })
+
+      await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub, email, picture: photoUrl('/photo.png') }) })
+      expect(await waitForAvatar(sql, email, a => a !== '', 1500)).toBe('')
+    })
   })
 
   it('accepts the web client id as audience (Android)', async () => {
