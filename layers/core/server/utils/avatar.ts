@@ -1,11 +1,9 @@
 import { sql } from 'kysely'
 import { db } from './database'
 import { deleteFromS3, getPublicUrl, isPublicStorageConfigured, uploadToS3 } from './storage'
-import { AVATAR_FOLDER, AVATAR_MAX_BYTES, AVATAR_TYPES, avatarImageType, isAllowedAvatarUrl } from './avatar-image'
+import { AVATAR_FOLDER, AVATAR_MAX_BYTES, AVATAR_TYPES, avatarImageType, isAllowedAvatarUrl, isAvatarHostListed } from './avatar-image'
 
-export type AvatarUpload =
-  | { ok: true, url: string, key: string }
-  | { ok: false, reason: 'too_large' | 'unsupported' }
+export type AvatarUpload = { ok: true, url: string, key: string } | { ok: false, reason: 'too_large' | 'unsupported' }
 
 // Uploads avatar bytes to public storage, unless they are too large or not an
 // accepted image.
@@ -21,27 +19,33 @@ export async function uploadAvatar(data: Uint8Array): Promise<AvatarUpload> {
 const DOWNLOAD_TIMEOUT_MS = 5000
 const DOWNLOAD_MAX_REDIRECTS = 3
 
-// Downloads an image to use as an avatar, or null when the request fails,
-// times out, passes the size limit or is redirected somewhere not allowed.
-// Redirects are followed by hand so every hop is checked.
-export async function downloadAvatar(input: string): Promise<Buffer | null> {
+// Downloads an image to use as an avatar from one of `hosts`, or null when the
+// request fails, times out, passes the size limit or leaves those hosts.
+export async function downloadAvatar(input: string, hosts: string[]): Promise<Buffer | null> {
+  const skip = (reason: string) => {
+    console.warn(`[avatar] download skipped: ${reason}`)
+    return null
+  }
   try {
     const signal = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)
     let url = new URL(input)
     for (let hop = 0; ; hop++) {
-      if (!isAllowedAvatarUrl(url)) return null
+      if (!isAllowedAvatarUrl(url) || !isAvatarHostListed(url.hostname, hosts)) return skip(`host not allowed (${url.host})`)
       const res = await fetch(url, { redirect: 'manual', signal })
       if (res.status >= 300 && res.status < 400) {
         await res.body?.cancel()
         const location = res.headers.get('location')
-        if (!location || hop >= DOWNLOAD_MAX_REDIRECTS) return null
+        if (!location || hop >= DOWNLOAD_MAX_REDIRECTS) return skip('too many or empty redirects')
         url = new URL(location, url)
         continue
       }
-      if (!res.ok || !res.body) return null
+      if (!res.ok || !res.body) {
+        await res.body?.cancel()
+        return skip(`HTTP ${res.status}`)
+      }
       if (Number(res.headers.get('content-length')) > AVATAR_MAX_BYTES) {
         await res.body.cancel()
-        return null
+        return skip('too large')
       }
       const reader = res.body.getReader()
       const chunks: Uint8Array[] = []
@@ -52,14 +56,14 @@ export async function downloadAvatar(input: string): Promise<Buffer | null> {
         total += value.byteLength
         if (total > AVATAR_MAX_BYTES) {
           await reader.cancel()
-          return null
+          return skip('too large')
         }
         chunks.push(value)
       }
       return Buffer.concat(chunks)
     }
-  } catch {
-    return null
+  } catch (err) {
+    return skip((err as Error).message)
   }
 }
 

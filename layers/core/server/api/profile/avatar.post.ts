@@ -15,14 +15,17 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 501, statusMessage: 'Avatar uploads are not available' })
   }
 
-  await readBodyWithLimit(event, AVATAR_MAX_BYTES + MULTIPART_OVERHEAD, TOO_LARGE)
-  const parts = await readMultipartFormData(event)
-  const file = parts?.find(part => part.name === 'file' && part.filename)
-  if (!file) {
+  const body = await readBodyWithLimit(event, AVATAR_MAX_BYTES + MULTIPART_OVERHEAD, TOO_LARGE)
+  // The web parser handles quoted boundaries and large parts, unlike h3's readMultipartFormData.
+  const form = await new Response(body as Uint8Array<ArrayBuffer>, { headers: { 'content-type': getHeader(event, 'content-type') || '' } })
+    .formData()
+    .catch(() => null)
+  const file = form?.get('file')
+  if (!(file instanceof Blob)) {
     throw createError({ statusCode: 400, statusMessage: 'No image provided' })
   }
 
-  const uploaded = await uploadAvatar(file.data)
+  const uploaded = await uploadAvatar(Buffer.from(await file.arrayBuffer()))
   if (!uploaded.ok) {
     throw uploaded.reason === 'too_large'
       ? createError({ statusCode: 413, statusMessage: TOO_LARGE })

@@ -28,7 +28,8 @@ export default defineEventHandler(async (event) => {
     displayName,
     clientId: pending.clientId,
     refreshTokenEnc: pending.refreshTokenEnc,
-    userAgent
+    userAgent,
+    waitUntil: promise => event.waitUntil(promise)
   })
   clearPendingSignup(event)
 

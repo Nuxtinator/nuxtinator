@@ -32,8 +32,17 @@ export function avatarImageType(data: Uint8Array): AvatarType | null {
   return null
 }
 
-// Whether the avatar download may request this URL: HTTPS only, and never an
-// IP address, so a redirect can't point it at an internal or metadata service.
+// HTTPS and not an IP address. This alone doesn't stop a hostname that
+// resolves to an internal address; callers also limit the hosts.
 export function isAllowedAvatarUrl(url: URL): boolean {
   return url.protocol === 'https:' && !isIP(url.hostname.replace(/^\[|\]$/g, ''))
+}
+
+// Whether `hostname` is one of `hosts` or a subdomain of one.
+export function isAvatarHostListed(hostname: string, hosts: string[]): boolean {
+  const name = hostname.toLowerCase()
+  return hosts.some((h) => {
+    const host = h.toLowerCase()
+    return name === host || name.endsWith(`.${host}`)
+  })
 }

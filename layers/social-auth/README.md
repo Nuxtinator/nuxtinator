@@ -24,7 +24,7 @@ The first account on a deployment becomes host admin, the same as with `/registe
 
 **Hide My Email.** An Apple user who hides their email gets a `@privaterelay.appleid.com` address that never matches an existing account. They link Apple from `/account` while signed in. To email relay addresses, register your sending domain under Sign in with Apple → Email Communication in the Apple developer portal; mail to relay addresses is dropped otherwise.
 
-**Avatars.** A Google profile photo becomes the avatar of a user who has none. The photo is copied to public S3 storage when `S3_*` and `S3_PUBLIC_BASE_URL` are configured; otherwise Google's URL is stored. Apple provides no photo.
+**Avatars.** When an account is created or Google is linked, a Google profile photo becomes the avatar of a user who has none. The photo is copied to public S3 storage when `S3_*` and `S3_PUBLIC_BASE_URL` are configured; otherwise Google's URL is stored. Only photos from `googleusercontent.com` (and redirects that stay there) are used. Apple provides no photo.
 
 **Account deletion.** For Apple identities, the refresh token is stored encrypted (this needs `NUXT_SECRET_ENCRYPTION_KEY`). Deleting the account or unlinking Apple revokes the app's access at Apple, which App Store review requires.
 
@@ -34,6 +34,7 @@ The first account on a deployment becomes host admin, the same as with `/registe
 NUXT_SOCIAL_AUTH_GOOGLE_CLIENT_ID=          # OAuth client, type "Web application"
 NUXT_SOCIAL_AUTH_GOOGLE_CLIENT_SECRET=
 NUXT_SOCIAL_AUTH_GOOGLE_NATIVE_CLIENT_IDS=  # comma-separated iOS / Android client IDs
+NUXT_SOCIAL_AUTH_GOOGLE_PHOTO_HOSTS=        # optional; comma-separated photo hosts, default googleusercontent.com
 
 NUXT_SOCIAL_AUTH_APPLE_SERVICES_ID=         # Services ID (web)
 NUXT_SOCIAL_AUTH_APPLE_TEAM_ID=

@@ -43,9 +43,8 @@ function getS3Settings() {
   }
 }
 
-// Whether public uploads can work: credentials, the primary bucket (which the
-// client needs even when public objects go to a separate public bucket) and a
-// public base URL are all set. Lets callers with a non-storage fallback skip the attempt.
+// Whether public uploads can work: credentials, the primary bucket (the client
+// always needs it) and a public base URL are set.
 export function isPublicStorageConfigured(): boolean {
   const settings = getS3Settings()
   return !!(settings.endpoint && settings.accessKeyId && settings.secretAccessKey

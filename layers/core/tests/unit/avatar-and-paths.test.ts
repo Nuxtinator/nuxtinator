@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { withQueryParams } from '../../server/utils/account-path'
-import { avatarImageType, isAllowedAvatarUrl } from '../../server/utils/avatar-image'
+import { avatarImageType, isAllowedAvatarUrl, isAvatarHostListed } from '../../server/utils/avatar-image'
 
 describe('withQueryParams', () => {
   it('adds to a path without a query', () => {
@@ -9,6 +9,10 @@ describe('withQueryParams', () => {
 
   it('keeps an existing query and hash', () => {
     expect(withQueryParams('/settings?tab=account#top', { link: 'failed' })).toBe('/settings?tab=account&link=failed#top')
+  })
+
+  it('stays on the site when the path normalises to //host', () => {
+    expect(withQueryParams('/.//evil.com', { link: 'success' })).toBe('/evil.com?link=success')
   })
 })
 
@@ -39,5 +43,18 @@ describe('isAllowedAvatarUrl', () => {
     expect(isAllowedAvatarUrl(new URL('https://10.0.0.5/photo.png'))).toBe(false)
     expect(isAllowedAvatarUrl(new URL('https://[::1]/photo.png'))).toBe(false)
     expect(isAllowedAvatarUrl(new URL('file:///etc/passwd'))).toBe(false)
+  })
+})
+
+describe('isAvatarHostListed', () => {
+  it('matches a listed host and its subdomains', () => {
+    expect(isAvatarHostListed('googleusercontent.com', ['googleusercontent.com'])).toBe(true)
+    expect(isAvatarHostListed('lh3.googleusercontent.com', ['googleusercontent.com'])).toBe(true)
+  })
+
+  it('refuses other hosts, including look-alikes', () => {
+    expect(isAvatarHostListed('evilgoogleusercontent.com', ['googleusercontent.com'])).toBe(false)
+    expect(isAvatarHostListed('googleusercontent.com.evil.example', ['googleusercontent.com'])).toBe(false)
+    expect(isAvatarHostListed('anything.example', [])).toBe(false)
   })
 })

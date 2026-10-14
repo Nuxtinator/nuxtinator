@@ -90,6 +90,12 @@ describe('POST /api/social-auth/native', () => {
       await api('/api/profile/avatar', { method: 'DELETE', ...bearer })
     })
 
+    it('is skipped when it comes from a host not listed for the provider', async () => {
+      const email = socialEmail()
+      await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email, name: 'Elsewhere', picture: 'https://example.com/a.png' }) })
+      expect(await waitForAvatar(sql, email, a => a !== '', 1500)).toBe('')
+    })
+
     it.skipIf(!STORAGE)('is skipped when a redirect leads to plain HTTP or an IP address', async () => {
       const toHttp = await signUpWithPhoto('/to-http')
       const toIp = await signUpWithPhoto('/to-ip')
@@ -97,7 +103,7 @@ describe('POST /api/social-auth/native', () => {
       expect(await waitForAvatar(sql, toIp.email, a => a !== '', 1500)).toBe('')
     })
 
-    it('is not brought back by a later sign-in after the user removed it', async () => {
+    it('is not imported again on a later sign-in through the linked provider', async () => {
       const { email, sub, bearer } = await signUpWithPhoto('/photo.png')
       await waitForAvatar(sql, email, a => a !== '')
       await api('/api/profile/avatar', { method: 'DELETE', ...bearer })

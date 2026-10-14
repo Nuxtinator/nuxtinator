@@ -20,6 +20,16 @@ function form(file: Buffer, filename: string, type: string, field = 'file'): For
   return fd
 }
 
+// A request body with no Content-Length.
+function streamOf(bytes: Uint8Array): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes)
+      controller.close()
+    }
+  })
+}
+
 // Uploads need a writable public bucket.
 const SKIP_S3 = !publicStorageConfigured()
 
@@ -87,6 +97,18 @@ describe('/api/profile/avatar', () => {
     expect(err.statusCode).toBe(400)
   })
 
+  it.skipIf(SKIP_S3)('rejects an oversized body sent without a Content-Length with 413', async () => {
+    const { auth } = await createAndLoginUser(sql)
+    const encoded = new Response(form(Buffer.concat([TINY_PNG, Buffer.alloc(3 * 1024 * 1024)]), 'big.png', 'image/png'))
+    const res = await fetch('/api/profile/avatar', {
+      method: 'POST',
+      headers: { ...auth.headers, 'content-type': encoded.headers.get('content-type')! },
+      body: streamOf(new Uint8Array(await encoded.arrayBuffer())),
+      duplex: 'half'
+    } as RequestInit)
+    expect(res.status).toBe(413)
+  })
+
   it.skipIf(SKIP_S3)('accepts an upload sent without a Content-Length', async () => {
     const { user, auth } = await createAndLoginUser(sql)
     const encoded = new Response(form(TINY_PNG, 'a.png', 'image/png'))
@@ -94,7 +116,7 @@ describe('/api/profile/avatar', () => {
     const res = await fetch('/api/profile/avatar', {
       method: 'POST',
       headers: { ...auth.headers, 'content-type': encoded.headers.get('content-type')! },
-      body: new ReadableStream({ start(c) { c.enqueue(bytes); c.close() } }),
+      body: streamOf(bytes),
       duplex: 'half'
     } as RequestInit)
     expect(res.status).toBe(200)

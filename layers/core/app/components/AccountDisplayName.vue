@@ -9,10 +9,10 @@ const nameLoading = ref(false)
 const nameError = ref('')
 const nameSuccess = ref('')
 
-// Watch user changes to update name field
-watch(user, (newUser) => {
-  if (newUser) {
-    nameState.display_name = newUser.display_name
+// Watch the saved name to update the field, leaving an unsaved edit alone otherwise
+watch(() => user.value?.display_name, (name) => {
+  if (name) {
+    nameState.display_name = name
   }
 })
 

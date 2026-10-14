@@ -9,6 +9,8 @@ const { data } = useLazyFetch<{ can_upload: boolean, max_mb: number, types: stri
   default: () => ({ can_upload: false, max_mb: 0, types: [], types_text: '' })
 })
 
+const errorMessage = (err: unknown) => (err as { data?: { statusMessage?: string } } | null)?.data?.statusMessage
+
 const input = ref<HTMLInputElement | null>(null)
 const busy = ref<'upload' | 'remove' | null>(null)
 
@@ -31,8 +33,8 @@ async function upload(event: Event) {
     await $fetch('/api/profile/avatar', { method: 'POST', body })
     await checkAuth()
     toast.add({ title: 'Avatar updated', color: 'success' })
-  } catch (err: any) {
-    toast.add({ title: err?.data?.statusMessage || 'Could not upload the image', color: 'error' })
+  } catch (err) {
+    toast.add({ title: errorMessage(err) || 'Could not upload the image', color: 'error' })
   } finally {
     busy.value = null
   }
@@ -44,8 +46,8 @@ async function remove() {
     await $fetch('/api/profile/avatar', { method: 'DELETE' })
     await checkAuth()
     toast.add({ title: 'Avatar removed', color: 'success' })
-  } catch (err: any) {
-    toast.add({ title: err?.data?.statusMessage || 'Could not remove the avatar', color: 'error' })
+  } catch (err) {
+    toast.add({ title: errorMessage(err) || 'Could not remove the avatar', color: 'error' })
   } finally {
     busy.value = null
   }

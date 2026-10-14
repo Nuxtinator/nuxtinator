@@ -5,17 +5,16 @@
 // This server's env differs from the other projects' servers, so its URL and
 // the signing key reach the tests through `provide` rather than the shared
 // NUXT_TEST_CONTEXT env var, which the last project to boot overwrites.
-import { createServer, type Server } from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { generateKeyPairSync } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import type { TestProject } from 'vitest/node'
 import { createTest, useTestContext } from '@nuxt/test-utils/e2e'
 import { fileURLToPath } from 'node:url'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import {
   getHostAdminDb,
   closeTestDatabases,
@@ -52,42 +51,44 @@ const TINY_PNG = Buffer.from(
 )
 
 let photoServer: Server | null = null
+let plainPhotoServer: Server | null = null
+let certDir: string | null = null
 
-// An HTTPS stand-in for a provider's photo host, with a throwaway self-signed
-// certificate (the Nuxt server below skips certificate checks). Paths:
-// /photo.png, /redirect (→ /photo.png), /to-http (→ http://…/photo.png),
-// /to-ip (→ https://127.0.0.1:…/photo.png).
-async function startPhotoServer(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), 'social-photo-'))
-  try {
-    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=localhost',
-      '-keyout', join(dir, 'key.pem'), '-out', join(dir, 'cert.pem')], { stdio: 'ignore' })
-    const key = readFileSync(join(dir, 'key.pem'))
-    const cert = readFileSync(join(dir, 'cert.pem'))
-    let port = 0
-    photoServer = createHttpsServer({ key, cert }, (req, res) => {
-      const redirects: Record<string, string> = {
-        '/redirect': '/photo.png',
-        '/to-http': `http://localhost:${port}/photo.png`,
-        '/to-ip': `https://127.0.0.1:${port}/photo.png`
-      }
-      const location = redirects[req.url ?? '']
-      if (location) {
-        res.writeHead(302, { location }).end()
-      } else if (req.url === '/photo.png') {
-        res.writeHead(200, { 'content-type': 'image/png' }).end(TINY_PNG)
-      } else {
-        res.writeHead(404).end()
-      }
-    })
-    await new Promise<void>(r => photoServer!.listen(0, () => r()))
-    const addr = photoServer.address()
-    if (!addr || typeof addr === 'string') throw new Error('Photo server failed to bind')
-    port = addr.port
-    return `https://localhost:${port}`
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
+function servePhoto(redirects: Record<string, string>) {
+  return (req: IncomingMessage, res: ServerResponse) => {
+    const location = redirects[req.url ?? '']
+    if (location) res.writeHead(302, { location }).end()
+    else if (req.url === '/photo.png') res.writeHead(200, { 'content-type': 'image/png' }).end(TINY_PNG)
+    else res.writeHead(404).end()
   }
+}
+
+async function listen(server: Server): Promise<number> {
+  await new Promise<void>(r => server.listen(0, () => r()))
+  const addr = server.address()
+  if (!addr || typeof addr === 'string') throw new Error('Photo server failed to bind')
+  return addr.port
+}
+
+// A provider photo host at https://localhost with a throwaway certificate, plus
+// a plain-HTTP twin that only the /to-http redirect points at.
+async function startPhotoServers(): Promise<{ baseUrl: string, certFile: string }> {
+  certDir = mkdtempSync(join(tmpdir(), 'social-photo-'))
+  const keyFile = join(certDir, 'key.pem')
+  const certFile = join(certDir, 'cert.pem')
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=localhost',
+    '-addext', 'subjectAltName=DNS:localhost', '-keyout', keyFile, '-out', certFile], { stdio: 'ignore' })
+
+  plainPhotoServer = createServer(servePhoto({}))
+  const plainPort = await listen(plainPhotoServer)
+  const redirects: Record<string, string> = {
+    '/redirect': '/photo.png',
+    '/to-http': `http://localhost:${plainPort}/photo.png`
+  }
+  photoServer = createHttpsServer({ key: readFileSync(keyFile), cert: readFileSync(certFile) }, servePhoto(redirects))
+  const port = await listen(photoServer)
+  redirects['/to-ip'] = `https://127.0.0.1:${port}/photo.png`
+  return { baseUrl: `https://localhost:${port}`, certFile }
 }
 
 let hooks: ReturnType<typeof createTest> | null = null
@@ -104,7 +105,7 @@ export async function setup(project: TestProject) {
   process.env.NODE_ENV = 'development'
 
   const jwksUrl = await startJwksServer()
-  const photoBaseUrl = await startPhotoServer()
+  const photo = await startPhotoServers()
 
   hooks = createTest({
     rootDir: HOST_DIR,
@@ -118,8 +119,10 @@ export async function setup(project: TestProject) {
       NUXT_SOCIAL_AUTH_GOOGLE_JWKS_URL: jwksUrl,
       NUXT_SOCIAL_AUTH_APPLE_BUNDLE_IDS: TEST_APPLE_BUNDLE,
       NUXT_SOCIAL_AUTH_APPLE_JWKS_URL: jwksUrl,
-      // Accepts the photo server's self-signed certificate.
-      NODE_TLS_REJECT_UNAUTHORIZED: '0'
+      // 127.0.0.1 is listed so only the IP-address rule refuses the /to-ip redirect.
+      NUXT_SOCIAL_AUTH_GOOGLE_PHOTO_HOSTS: 'localhost,127.0.0.1',
+      // Trusts the photo host's self-signed certificate.
+      NODE_EXTRA_CA_CERTS: photo.certFile
     },
     nuxtConfig: {
       vite: { define: { 'process.env.NODE_ENV': JSON.stringify('development') } },
@@ -130,7 +133,7 @@ export async function setup(project: TestProject) {
   await hooks.beforeAll()
   project.provide('socialAuthUrl', useTestContext().url!)
   project.provide('socialAuthPrivateKey', privateKey.export({ format: 'pem', type: 'pkcs8' }).toString())
-  project.provide('socialPhotoBaseUrl', photoBaseUrl)
+  project.provide('socialPhotoBaseUrl', photo.baseUrl)
 
   await cleanupSocialTestData(getHostAdminDb())
 }
@@ -143,5 +146,7 @@ export async function teardown() {
     await hooks?.afterAll()
     jwksServer?.close()
     photoServer?.close()
+    plainPhotoServer?.close()
+    if (certDir) rmSync(certDir, { recursive: true, force: true })
   }
 }

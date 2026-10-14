@@ -1,7 +1,6 @@
 <script setup lang="ts">
-// Prompt shown by `useReauth().withReauth` when the server asks the user to
-// confirm who they are before a sensitive action. Also reports the outcome of
-// provider flows (re-authentication, linking) that return with `?link=<code>`.
+// Prompt shown by `useReauth().withReauth` to confirm identity before a sensitive
+// action. Also reports provider flows that return with `?link=<code>`.
 const { open, settle } = useReauth()
 const route = useRoute()
 const toast = useToast()

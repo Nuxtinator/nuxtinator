@@ -1,33 +1,50 @@
 import type { H3Event } from 'h3'
 
-// Reads the request body into memory, failing with 413 once it passes `limit`
-// bytes, whether or not the client declared a Content-Length. The body is
-// cached on the event, so h3's readers (readMultipartFormData, readBody) use it
-// instead of reading the request again.
+const IDLE_TIMEOUT_MS = 30_000
+const LINGER_MS = 2_000
+
+// Reads the request body with a size cap (413) and an idle timeout (408), and
+// caches it on the event so h3's body readers reuse it.
 export function readBodyWithLimit(event: H3Event, limit: number, message = 'Request body too large'): Promise<Buffer> {
-  const tooLarge = () => createError({ statusCode: 413, statusMessage: message })
-  if (Number(getHeader(event, 'content-length')) > limit) return Promise.reject(tooLarge())
   const req = event.node.req
+  // After the error response, discards incoming bytes briefly so the client can read it, then closes.
+  const fail = (statusCode: number, statusMessage: string) => {
+    req.removeAllListeners('data')
+    setResponseHeader(event, 'connection', 'close')
+    event.node.res.once('finish', () => {
+      req.resume()
+      setTimeout(() => req.destroy(), LINGER_MS).unref()
+    })
+    return createError({ statusCode, statusMessage })
+  }
+  if (Number(getHeader(event, 'content-length')) > limit) return Promise.reject(fail(413, message))
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let total = 0
+    let idle = setTimeout(() => reject(fail(408, 'Request body timed out')), IDLE_TIMEOUT_MS)
+    const restartIdle = () => {
+      clearTimeout(idle)
+      idle = setTimeout(() => reject(fail(408, 'Request body timed out')), IDLE_TIMEOUT_MS)
+    }
     req.on('data', (chunk: Buffer) => {
+      restartIdle()
       total += chunk.length
       if (total > limit) {
-        req.removeAllListeners('data')
-        req.pause()
-        // Close the connection after the 413 instead of draining the rest of the body.
-        event.node.res.once('finish', () => req.destroy())
-        reject(tooLarge())
+        clearTimeout(idle)
+        reject(fail(413, message))
         return
       }
       chunks.push(chunk)
     })
     req.on('end', () => {
+      clearTimeout(idle)
       const body = Buffer.concat(chunks)
       event._requestBody = body
       resolve(body)
     })
-    req.on('error', reject)
+    req.on('error', (err) => {
+      clearTimeout(idle)
+      reject(err)
+    })
   })
 }

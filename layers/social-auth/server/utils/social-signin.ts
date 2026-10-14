@@ -5,8 +5,9 @@ import { acceptInvite, emitAcceptedMemberships, findInviteByToken, inviteState }
 import { encryptSecret } from '#core/server/utils/secret-crypto'
 import { deleteFromS3, isPublicStorageConfigured } from '#core/server/utils/storage'
 import { downloadAvatar, uploadAvatar } from '#core/server/utils/avatar'
+import { isAllowedAvatarUrl, isAvatarHostListed } from '#core/server/utils/avatar-image'
 import { logEvent } from '#core/server/utils/activity-logger'
-import type { SocialProfile, SocialProviderId } from './social-providers'
+import { getProviderConfig, type SocialProfile, type SocialProviderId } from './social-providers'
 import type { SocialIntent } from './social-flow'
 
 // What happens when a provider vouches for someone. Shared by the web
@@ -34,6 +35,8 @@ export interface SignInInput {
   clientId: string | null
   refreshTokenEnc: string | null
   userAgent?: string
+  // Keeps background work (the avatar import) alive after the response.
+  waitUntil?: (promise: Promise<unknown>) => void
 }
 
 export function encryptRefreshToken(token: string | null): string | null {
@@ -119,7 +122,7 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
     if (await hasIdentityFor(input.userId, input.provider)) return { kind: 'error', code: 'one_per_provider' }
     await db.insertInto('user_identities').values(identityRow(input.userId, input)).execute()
     logLinked(input.userId, input)
-    startAvatarImport(input.userId, profile.picture)
+    startAvatarImport(input, input.userId)
     return { kind: 'linked', userId: input.userId }
   }
 
@@ -144,7 +147,7 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
     if (await hasIdentityFor(existing.id, input.provider)) return { kind: 'error', code: 'one_per_provider' }
     await db.insertInto('user_identities').values(identityRow(existing.id, input)).execute()
     logLinked(existing.id, input)
-    startAvatarImport(existing.id, profile.picture)
+    startAvatarImport(input, existing.id)
     return { kind: 'signed_in', userId: existing.id, created: false, inviteAccepted: false }
   }
 
@@ -205,24 +208,32 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
     userAgent: input.userAgent,
     metadata: { provider: input.provider }
   })
-  startAvatarImport(account.userId, profile.picture)
+  startAvatarImport(input, account.userId)
 
   return { kind: 'signed_in', userId: account.userId, created: true, inviteAccepted: !!usableInvite }
 }
 
-// Sets the user's avatar from the provider's photo, unless they already have
-// one. Runs only when an account is created or a provider is linked, not on
-// every sign-in, so a removed avatar doesn't return. When S3 is configured the photo is
-// copied to the app's public storage, and a photo that can't be copied (not an
-// accepted image, too large, unreachable) is skipped; otherwise the provider's
-// URL is stored as-is.
-// Runs the import in the background so sign-in doesn't wait for the download and upload.
-function startAvatarImport(userId: string, pictureUrl: string | null): void {
-  void importAvatar(userId, pictureUrl)
+// Imports the provider's photo in the background so sign-in doesn't wait for it.
+function startAvatarImport(input: SignInInput, userId: string): void {
+  const photoHosts = getProviderConfig(input.provider)?.photoHosts ?? []
+  const work = importAvatar(userId, input.profile.picture, photoHosts)
+  input.waitUntil?.(work)
 }
 
-async function importAvatar(userId: string, pictureUrl: string | null): Promise<void> {
-  if (!pictureUrl || !/^https:\/\//.test(pictureUrl)) return
+// Sets an empty avatar from the provider's photo: copied to storage when it's
+// configured, otherwise the provider's URL. Called on account creation and linking.
+async function importAvatar(userId: string, pictureUrl: string | null, photoHosts: string[]): Promise<void> {
+  if (!pictureUrl) return
+  let url: URL
+  try {
+    url = new URL(pictureUrl)
+  } catch {
+    return
+  }
+  if (!isAllowedAvatarUrl(url) || !isAvatarHostListed(url.hostname, photoHosts)) {
+    console.warn(`[social-auth] photo host not allowed: ${url.host}`)
+    return
+  }
   let uploadedKey: string | null = null
   try {
     const user = await db.selectFrom('users').select('avatar').where('id', '=', userId).executeTakeFirst()
@@ -230,15 +241,18 @@ async function importAvatar(userId: string, pictureUrl: string | null): Promise<
 
     let avatar = pictureUrl
     if (isPublicStorageConfigured()) {
-      const data = await downloadAvatar(pictureUrl)
+      const data = await downloadAvatar(pictureUrl, photoHosts)
       const uploaded = data ? await uploadAvatar(data) : null
-      if (!uploaded?.ok) return
+      if (!uploaded?.ok) {
+        if (uploaded) console.warn(`[social-auth] photo not used: ${uploaded.reason}`)
+        return
+      }
       avatar = uploaded.url
       uploadedKey = uploaded.key
     }
 
     const result = await db.updateTable('users').set({ avatar }).where('id', '=', userId).where('avatar', '=', '').executeTakeFirst()
-    // Another sign-in set the avatar first: drop this copy.
+    // The avatar was set, or the user removed, in the meantime: drop this copy.
     if (!Number(result.numUpdatedRows) && uploadedKey) await deleteFromS3(uploadedKey, 'public').catch(() => {})
   } catch (err) {
     if (uploadedKey) await deleteFromS3(uploadedKey, 'public').catch(() => {})

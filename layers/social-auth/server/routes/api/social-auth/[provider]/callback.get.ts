@@ -63,7 +63,8 @@ export default defineEventHandler(async (event) => {
     invite: flow.invite,
     clientId: cfg.webClientId,
     refreshTokenEnc,
-    userAgent
+    userAgent,
+    waitUntil: promise => event.waitUntil(promise)
   }).catch((err) => {
     console.warn(`[social-auth] ${cfg.id} sign-in failed:`, (err as Error).message)
     return { kind: 'error' as const, code: 'failed' as const }
@@ -104,4 +105,3 @@ export default defineEventHandler(async (event) => {
     }
   }
 })
-
