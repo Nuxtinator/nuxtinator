@@ -2,6 +2,8 @@
 
 Sign in with Google and Sign in with Apple, for the web app and for native iOS/Android apps.
 
+Requires `@nuxtinator/core` 2.2.0 or later.
+
 Each provider turns on when its credentials are set. With none set, the layer loads but does nothing. When a provider is configured, its button appears on `/login`, `/register` and `/accept-invite`, and under **Sign-in Methods** on the account page.
 
 ## What happens when someone signs in

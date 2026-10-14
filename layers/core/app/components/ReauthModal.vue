@@ -1,8 +1,16 @@
 <script setup lang="ts">
 // Prompt shown by `useReauth().withReauth` when the server asks the user to
-// confirm who they are before a sensitive action.
+// confirm who they are before a sensitive action. Also reports the outcome of
+// provider flows (re-authentication, linking) that return with `?link=<code>`.
 const { open, settle } = useReauth()
 const route = useRoute()
+const toast = useToast()
+
+onMounted(() => {
+  const status = route.query.link
+  if (status === 'success') toast.add({ title: 'Account linked', color: 'success' })
+  else if (typeof status === 'string' && status) toast.add({ title: authErrorMessage(status), color: 'error' })
+})
 
 interface Methods {
   password: boolean

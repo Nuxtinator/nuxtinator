@@ -3,7 +3,9 @@ import { createUserAccount } from '#core/server/utils/accounts'
 import { isSelfRegistrationOpen } from '#core/server/utils/registration'
 import { acceptInvite, emitAcceptedMemberships, findInviteByToken, inviteState } from '#core/server/utils/invites'
 import { encryptSecret } from '#core/server/utils/secret-crypto'
-import { isPublicStorageConfigured, uploadToS3 } from '#core/server/utils/storage'
+import { deleteFromS3, isPublicStorageConfigured } from '#core/server/utils/storage'
+import { AVATAR_MAX_BYTES } from '#core/server/utils/avatar-image'
+import { uploadAvatar } from '#core/server/utils/avatar'
 import { logEvent } from '#core/server/utils/activity-logger'
 import type { SocialProfile, SocialProviderId } from './social-providers'
 import type { SocialIntent } from './social-flow'
@@ -124,7 +126,6 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
 
   if (identity) {
     await touchIdentity(identity.id, input)
-    await importAvatar(identity.user_id, profile.picture)
     return { kind: 'signed_in', userId: identity.user_id, created: false, inviteAccepted: false }
   }
 
@@ -210,11 +211,10 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
   return { kind: 'signed_in', userId: account.userId, created: true, inviteAccepted: !!usableInvite }
 }
 
-const AVATAR_MAX_BYTES = 2 * 1024 * 1024
-
 // Sets the user's avatar from the provider's photo, unless they already have
-// one. The image is copied to the app's public storage when S3 is configured;
-// otherwise the provider's URL is stored as-is.
+// one. Runs only when an account is created or a provider is first linked, so
+// an avatar the user removed stays removed. The image is copied to the app's
+// public storage when S3 is configured; otherwise the provider's URL is stored as-is.
 async function importAvatar(userId: string, pictureUrl: string | null): Promise<void> {
   if (!pictureUrl || !/^https:\/\//.test(pictureUrl)) return
   try {
@@ -222,16 +222,16 @@ async function importAvatar(userId: string, pictureUrl: string | null): Promise<
     if (!user || user.avatar) return
 
     let avatar = pictureUrl
+    let uploadedKey: string | null = null
     if (isPublicStorageConfigured()) {
       try {
         const res = await fetch(pictureUrl)
-        const contentType = res.headers.get('content-type') || ''
-        if (res.ok && contentType.startsWith('image/')) {
-          const buf = Buffer.from(await res.arrayBuffer())
-          if (buf.length <= AVATAR_MAX_BYTES) {
-            const ext = contentType.split('/')[1]?.split(';')[0] || 'jpg'
-            const uploaded = await uploadToS3(buf, `avatar.${ext}`, contentType, 'public', 'avatars')
+        const declared = Number(res.headers.get('content-length'))
+        if (res.ok && !(declared > AVATAR_MAX_BYTES)) {
+          const uploaded = await uploadAvatar(new Uint8Array(await res.arrayBuffer()))
+          if (uploaded) {
             avatar = uploaded.url
+            uploadedKey = uploaded.key
           }
         }
       } catch {
@@ -239,7 +239,9 @@ async function importAvatar(userId: string, pictureUrl: string | null): Promise<
       }
     }
 
-    await db.updateTable('users').set({ avatar }).where('id', '=', userId).where('avatar', '=', '').execute()
+    const result = await db.updateTable('users').set({ avatar }).where('id', '=', userId).where('avatar', '=', '').executeTakeFirst()
+    // Another sign-in set the avatar first: drop this copy.
+    if (!Number(result.numUpdatedRows) && uploadedKey) await deleteFromS3(uploadedKey, 'public').catch(() => {})
   } catch (err) {
     console.warn('[social-auth] avatar import failed:', (err as Error).message)
   }

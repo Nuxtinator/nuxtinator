@@ -1,7 +1,8 @@
 import { sql } from 'kysely'
+import { getAccountPath, withQueryParams } from '../../utils/account-path'
 
 export default defineEventHandler(async (event) => {
-  const accountPath = useRuntimeConfig(event).public.accountPath
+  const accountPath = getAccountPath(event)
   const query = getQuery(event)
   const token = query.token as string
 
@@ -22,12 +23,12 @@ export default defineEventHandler(async (event) => {
 
     if (!user) {
       // Redirect to the account page with an error message
-      return sendRedirect(event, `${accountPath}?email_change=invalid_token`)
+      return sendRedirect(event, withQueryParams(accountPath, { email_change: 'invalid_token' }))
     }
 
     if (!user.pending_email) {
       // No pending email change
-      return sendRedirect(event, `${accountPath}?email_change=no_pending`)
+      return sendRedirect(event, withQueryParams(accountPath, { email_change: 'no_pending' }))
     }
 
     const oldEmail = user.email
@@ -49,7 +50,7 @@ export default defineEventHandler(async (event) => {
         .where('id', '=', user.id)
         .execute()
 
-      return sendRedirect(event, `${accountPath}?email_change=email_taken`)
+      return sendRedirect(event, withQueryParams(accountPath, { email_change: 'email_taken' }))
     }
 
     // Update email and clear pending fields
@@ -78,7 +79,7 @@ export default defineEventHandler(async (event) => {
     })
 
     // Redirect to the account page with a success message
-    return sendRedirect(event, `${accountPath}?email_change=success`)
+    return sendRedirect(event, withQueryParams(accountPath, { email_change: 'success' }))
   } catch (error) {
     console.error('Email change verification error:', error)
     throw createError({

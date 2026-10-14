@@ -1,4 +1,5 @@
 import { getAuthUser } from '#core/server/utils/auth'
+import { getAccountPath } from '#core/server/utils/account-path'
 import { authorizationUrl, getProviderConfig, randomToken } from '../../../../utils/social-providers'
 import { safeRedirect, setFlowCookie, type SocialIntent } from '../../../../utils/social-flow'
 
@@ -18,7 +19,7 @@ export default defineEventHandler(async (event) => {
   let sessionId: string | null = null
   if (intent !== 'login') {
     const user = getAuthUser(event)
-    if (!user) return sendRedirect(event, `/login?redirect=${encodeURIComponent(redirect || useRuntimeConfig(event).public.accountPath)}`)
+    if (!user) return sendRedirect(event, `/login?redirect=${encodeURIComponent(redirect || getAccountPath(event))}`)
     userId = user.userId
     sessionId = user.sid
   }

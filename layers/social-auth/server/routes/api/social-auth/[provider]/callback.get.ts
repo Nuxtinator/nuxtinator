@@ -1,6 +1,7 @@
 import { getHeader } from 'h3'
 import { startSession, markReauthenticated } from '#core/server/utils/sessions'
 import { postSignInRedirect } from '#core/server/utils/accounts'
+import { getAccountPath, withQueryParams } from '#core/server/utils/account-path'
 import { logEvent } from '#core/server/utils/activity-logger'
 import { db } from '#core/server/utils/database'
 import { exchangeCode, getProviderConfig, verifyIdToken } from '../../../../utils/social-providers'
@@ -13,11 +14,11 @@ export default defineEventHandler(async (event) => {
   const cfg = getProviderConfig(getRouterParam(event, 'provider') || '')
   const flow = takeFlowCookie(event)
   const query = getQuery(event)
-  const accountPath = useRuntimeConfig(event).public.accountPath
+  const accountPath = getAccountPath(event)
 
   const fail = (code: SignInErrorCode | 'cancelled', f: SocialFlow | null = flow) => {
     if (f?.intent === 'link' || f?.intent === 'reauth') {
-      return sendRedirect(event, withLinkStatus(f.redirect || accountPath, code))
+      return sendRedirect(event, withQueryParams(f.redirect || accountPath, { link: code }))
     }
     if (f?.invite) {
       return sendRedirect(event, `/accept-invite?token=${encodeURIComponent(f.invite)}&auth_error=${code}`)
@@ -84,7 +85,7 @@ export default defineEventHandler(async (event) => {
       return sendRedirect(event, '/social-auth/complete')
 
     case 'linked':
-      return sendRedirect(event, withLinkStatus(flow.redirect || accountPath, 'success'))
+      return sendRedirect(event, withQueryParams(flow.redirect || accountPath, { link: 'success' }))
 
     case 'reauthed':
       if (flow.sessionId) await markReauthenticated(flow.sessionId)
@@ -104,9 +105,3 @@ export default defineEventHandler(async (event) => {
   }
 })
 
-// A same-site path with `link=<code>` added, which the sign-in methods card reports.
-function withLinkStatus(path: string, code: string): string {
-  const url = new URL(path, 'http://local')
-  url.searchParams.set('link', code)
-  return `${url.pathname}${url.search}${url.hash}`
-}

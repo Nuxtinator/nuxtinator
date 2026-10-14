@@ -61,18 +61,15 @@ describe('POST /api/social-auth/native', () => {
     expect(me.user.id).toBe(users[0]!.id)
   })
 
-  it('fills an empty avatar on a later sign-in but keeps one already set', async () => {
+  it('a later sign-in does not bring back an avatar the user removed', async () => {
     const email = socialEmail()
     const sub = randomUUID()
-    await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub, email, name: 'No Photo' }) })
-    const avatar = async () => (await sql<{ avatar: string }[]>`SELECT avatar FROM users WHERE email = ${email}`)[0]!.avatar
-    expect(await avatar()).toBe('')
+    await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub, email, name: 'Photo Owner', picture: 'https://example.com/a.png' }) })
+    await sql`UPDATE users SET avatar = '' WHERE email = ${email}`
 
-    await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub, email, picture: 'https://example.com/later.png' }) })
-    expect(await avatar()).toBe('https://example.com/later.png')
-
-    await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub, email, picture: 'https://example.com/newer.png' }) })
-    expect(await avatar()).toBe('https://example.com/later.png')
+    await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub, email, picture: 'https://example.com/a.png' }) })
+    const rows = await sql<{ avatar: string }[]>`SELECT avatar FROM users WHERE email = ${email}`
+    expect(rows[0]!.avatar).toBe('')
   })
 
   it('accepts the web client id as audience (Android)', async () => {

@@ -1,15 +1,12 @@
 <script setup lang="ts">
 // Account card: the user's avatar, with upload (when public storage is
 // configured) and remove.
-const MAX_MB = 2
-const TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
-
 const { user, checkAuth } = useAuth()
 const toast = useToast()
 
-const { data } = useLazyFetch<{ can_upload: boolean }>('/api/profile/avatar', {
+const { data } = useLazyFetch<{ can_upload: boolean, max_mb: number, types: string[] }>('/api/profile/avatar', {
   key: 'profile-avatar',
-  default: () => ({ can_upload: false })
+  default: () => ({ can_upload: false, max_mb: 0, types: [] })
 })
 
 const input = ref<HTMLInputElement | null>(null)
@@ -19,12 +16,12 @@ async function upload(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0]
   if (input.value) input.value.value = ''
   if (!file) return
-  if (!TYPES.includes(file.type)) {
+  if (!data.value.types.includes(file.type)) {
     toast.add({ title: 'Use a JPEG, PNG, GIF or WebP image', color: 'error' })
     return
   }
-  if (file.size > MAX_MB * 1024 * 1024) {
-    toast.add({ title: `Image too large (max ${MAX_MB} MB)`, color: 'error' })
+  if (file.size > data.value.max_mb * 1024 * 1024) {
+    toast.add({ title: `Image too large (max ${data.value.max_mb} MB)`, color: 'error' })
     return
   }
   busy.value = 'upload'
@@ -73,7 +70,7 @@ async function remove() {
           <input
             ref="input"
             type="file"
-            :accept="TYPES.join(',')"
+            :accept="data.types.join(',')"
             class="hidden"
             @change="upload"
           >

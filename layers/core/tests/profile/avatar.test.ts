@@ -40,8 +40,10 @@ describe('/api/profile/avatar', () => {
 
   it('says whether uploads are available', async () => {
     const { auth } = await createAndLoginUser(sql)
-    const res = await $fetch<{ can_upload: boolean }>('/api/profile/avatar', auth)
+    const res = await $fetch<{ can_upload: boolean, max_mb: number, types: string[] }>('/api/profile/avatar', auth)
     expect(typeof res.can_upload).toBe('boolean')
+    expect(res.max_mb).toBe(2)
+    expect(res.types).toContain('image/png')
   })
 
   it('DELETE clears an avatar that points elsewhere', async () => {
@@ -53,14 +55,25 @@ describe('/api/profile/avatar', () => {
     expect(await avatarOf(user.id)).toBe('')
   })
 
-  it.skipIf(SKIP_S3)('rejects a non-image with 415', async () => {
+  it.skipIf(SKIP_S3)('rejects bytes that are not an image with 415, whatever their declared type', async () => {
     const { auth } = await createAndLoginUser(sql)
     const err = await $fetch('/api/profile/avatar', {
       method: 'POST',
-      body: form(Buffer.from('plain text'), 'file.txt', 'text/plain'),
+      body: form(Buffer.from('plain text'), 'file.png', 'image/png'),
       ...auth
     }).catch(e => e)
     expect(err.statusCode).toBe(415)
+  })
+
+  it.skipIf(SKIP_S3)('rejects an oversized body with 413', async () => {
+    const { auth } = await createAndLoginUser(sql)
+    const big = Buffer.concat([TINY_PNG, Buffer.alloc(3 * 1024 * 1024)])
+    const err = await $fetch('/api/profile/avatar', {
+      method: 'POST',
+      body: form(big, 'big.png', 'image/png'),
+      ...auth
+    }).catch(e => e)
+    expect(err.statusCode).toBe(413)
   })
 
   it.skipIf(SKIP_S3)('rejects a body without a "file" field with 400', async () => {
