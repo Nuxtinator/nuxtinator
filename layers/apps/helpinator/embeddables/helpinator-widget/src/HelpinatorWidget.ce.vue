@@ -433,6 +433,8 @@ async function handoff() {
 }
 .hp-right { right: var(--helpinator-offset-x, 20px); }
 .hp-left { left: var(--helpinator-offset-x, 20px); align-items: flex-start; }
+.hp-right .hp-panel { right: var(--helpinator-offset-x, 20px); }
+.hp-left .hp-panel { left: var(--helpinator-offset-x, 20px); }
 
 .hp-launcher {
   width: 56px;
@@ -457,9 +459,17 @@ svg {
   stroke-linejoin: round;
 }
 
+/*
+ * The panel is fixed to the viewport, not stacked on the launcher: when the
+ * launcher is raised (e.g. above a sticky footer) the panel slides down over it
+ * rather than running off the top of the screen. It closes from its own header.
+ */
 .hp-panel {
+  --hp-panel-height: min(var(--helpinator-height, 560px), calc(100dvh - 32px));
+  position: fixed;
+  bottom: clamp(16px, calc(var(--helpinator-offset-y, 20px) + 68px), calc(100dvh - var(--hp-panel-height) - 16px));
   width: min(var(--helpinator-width, 370px), calc(100vw - 32px));
-  height: min(var(--helpinator-height, 560px), calc(100vh - 110px));
+  height: var(--hp-panel-height);
   background: var(--hp-bg);
   border: 1px solid var(--hp-border);
   border-radius: var(--hp-radius);
