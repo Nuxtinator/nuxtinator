@@ -465,9 +465,10 @@ svg {
  * rather than running off the top of the screen. It closes from its own header.
  */
 .hp-panel {
-  --hp-panel-height: min(var(--helpinator-height, 560px), calc(100dvh - 32px));
+  --hp-vh: 100vh;
+  --hp-panel-height: min(var(--helpinator-height, 560px), calc(var(--hp-vh) - 32px));
   position: fixed;
-  bottom: clamp(16px, calc(var(--helpinator-offset-y, 20px) + 68px), calc(100dvh - var(--hp-panel-height) - 16px));
+  bottom: clamp(16px, calc(var(--helpinator-offset-y, 20px) + 68px), calc(var(--hp-vh) - var(--hp-panel-height) - 16px));
   width: min(var(--helpinator-width, 370px), calc(100vw - 32px));
   height: var(--hp-panel-height);
   background: var(--hp-bg);
@@ -477,6 +478,11 @@ svg {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+/* dvh tracks mobile browser chrome; older browsers keep the vh fallback above.
+   (A plain duplicate declaration can't fall back — var() makes both parse.) */
+@supports (height: 100dvh) {
+  .hp-panel { --hp-vh: 100dvh; }
 }
 
 .hp-header {
