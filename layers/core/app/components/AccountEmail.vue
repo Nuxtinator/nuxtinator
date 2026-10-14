@@ -1,9 +1,11 @@
 <script setup lang="ts">
-// Account card: change the email address. The verification link returns to
-// the account page with `?email_change=<outcome>`, shown here.
+// Account row: the email address, changed from a panel opened from Change.
+// The verification link returns to the account page with
+// `?email_change=<outcome>`, shown under the row.
 const { user } = useAuth()
 const { withReauth } = useReauth()
 const route = useRoute()
+const { open, toggle, close } = useAccountRow('email')
 
 // Provider-only accounts have no password and confirm through `withReauth`.
 const hasPassword = computed(() => user.value?.has_password !== false)
@@ -14,7 +16,7 @@ const emailState = reactive({
 })
 const emailLoading = ref(false)
 const emailError = ref('')
-const emailSuccess = ref('')
+const emailNotice = ref<{ color: 'success' | 'error', title: string } | null>(null)
 
 // Check for email change status in query params
 onMounted(() => {
@@ -22,19 +24,27 @@ onMounted(() => {
   if (emailChangeStatus) {
     switch (emailChangeStatus) {
       case 'success':
-        emailSuccess.value = 'Email address successfully changed! You can now log in with your new email.'
+        emailNotice.value = { color: 'success', title: 'Email address successfully changed! You can now log in with your new email.' }
         break
       case 'invalid_token':
-        emailError.value = 'Invalid or expired verification link'
+        emailNotice.value = { color: 'error', title: 'Invalid or expired verification link' }
         break
       case 'no_pending':
-        emailError.value = 'No pending email change found'
+        emailNotice.value = { color: 'error', title: 'No pending email change found' }
         break
       case 'email_taken':
-        emailError.value = 'The new email address is already in use'
+        emailNotice.value = { color: 'error', title: 'The new email address is already in use' }
         break
     }
     clearQueryParam('email_change')
+  }
+})
+
+watch(open, (isOpen) => {
+  if (isOpen) {
+    emailState.new_email = ''
+    emailState.current_password = ''
+    emailError.value = ''
   }
 })
 
@@ -48,7 +58,6 @@ const canSubmitEmail = computed(() => {
 // Handle email change
 async function handleEmailChange() {
   emailError.value = ''
-  emailSuccess.value = ''
 
   if (!canSubmitEmail.value) {
     return
@@ -72,11 +81,8 @@ async function handleEmailChange() {
       }
     }))
 
-    emailSuccess.value = 'Verification email sent! Please check your new email address to confirm the change.'
-
-    // Reset form
-    emailState.new_email = ''
-    emailState.current_password = ''
+    emailNotice.value = { color: 'success', title: `Verification email sent to ${emailState.new_email.trim()}. Click the link in it to confirm the change.` }
+    close()
   } catch (err: any) {
     emailError.value = err.data?.statusMessage || 'Failed to request email change'
   } finally {
@@ -86,63 +92,89 @@ async function handleEmailChange() {
 </script>
 
 <template>
-  <UCard>
-    <template #header>
-      <h2 class="text-xl font-semibold">
-        Change Email Address
-      </h2>
-    </template>
-    <form
-      class="space-y-4"
-      @submit.prevent="handleEmailChange"
+  <AccountRow
+    label="Email"
+    :value="user?.email"
+    :open="open"
+  >
+    <template
+      v-if="!open"
+      #actions
     >
-      <div class="text-sm text-(--ui-text-muted) mb-4">
-        <p>Current email: <strong>{{ user?.email }}</strong></p>
-        <p class="mt-2">
+      <UButton
+        color="neutral"
+        variant="outline"
+        @click="toggle"
+      >
+        Change
+      </UButton>
+    </template>
+    <template
+      v-if="emailNotice"
+      #footer
+    >
+      <UAlert
+        :color="emailNotice.color"
+        :title="emailNotice.title"
+        close
+        @update:open="emailNotice = null"
+      />
+    </template>
+    <template #panel>
+      <form
+        class="space-y-4 max-w-md"
+        @submit.prevent="handleEmailChange"
+      >
+        <p class="text-sm text-(--ui-text-muted)">
           A verification link will be sent to your new email address.
         </p>
-      </div>
-      <UFormField label="New Email Address">
-        <UInput
-          v-model="emailState.new_email"
-          type="email"
-          size="lg"
-          :disabled="emailLoading"
-          placeholder="Enter new email address"
-          autocomplete="email"
+        <UFormField label="New email address">
+          <UInput
+            v-model="emailState.new_email"
+            type="email"
+            class="w-full"
+            autofocus
+            :disabled="emailLoading"
+            placeholder="Enter new email address"
+            autocomplete="email"
+          />
+        </UFormField>
+        <UFormField
+          v-if="hasPassword"
+          label="Current password"
+        >
+          <UInput
+            v-model="emailState.current_password"
+            type="password"
+            class="w-full"
+            :disabled="emailLoading"
+            placeholder="Enter your current password"
+            autocomplete="current-password"
+          />
+        </UFormField>
+        <UAlert
+          v-if="emailError"
+          color="error"
+          :title="emailError"
         />
-      </UFormField>
-      <UFormField
-        v-if="hasPassword"
-        label="Current Password"
-      >
-        <UInput
-          v-model="emailState.current_password"
-          type="password"
-          size="lg"
-          :disabled="emailLoading"
-          placeholder="Enter your current password"
-          autocomplete="current-password"
-        />
-      </UFormField>
-      <UAlert
-        v-if="emailError"
-        color="error"
-        :title="emailError"
-      />
-      <UAlert
-        v-if="emailSuccess"
-        color="success"
-        :title="emailSuccess"
-      />
-      <UButton
-        type="submit"
-        size="lg"
-        :loading="emailLoading"
-        :disabled="!canSubmitEmail"
-      >
-        Send Verification Email
-      </UButton>
-    </form>
-  </UCard>
+        <div class="flex gap-2">
+          <UButton
+            type="submit"
+            :loading="emailLoading"
+            :disabled="!canSubmitEmail"
+          >
+            Send verification email
+          </UButton>
+          <UButton
+            color="neutral"
+            variant="ghost"
+            :disabled="emailLoading"
+            @click="close"
+          >
+            Cancel
+          </UButton>
+        </div>
+      </form>
+    </template>
+  </AccountRow>
 </template>

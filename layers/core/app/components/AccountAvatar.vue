@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Account card: the user's avatar, with upload (when public storage is
+// Account row: the user's avatar, with upload (when public storage is
 // configured) and remove.
 const { user, checkAuth } = useAuth()
 const toast = useToast()
@@ -55,50 +55,48 @@ async function remove() {
 </script>
 
 <template>
-  <UCard>
-    <template #header>
-      <h2 class="text-xl font-semibold">
-        Avatar
-      </h2>
-    </template>
-    <div class="flex items-center gap-4">
+  <AccountRow
+    label="Avatar"
+    :value="data.can_upload ? `${data.types_text}, up to ${data.max_mb} MB` : undefined"
+  >
+    <template #leading>
       <UAvatar
         :src="user?.avatar || undefined"
         :alt="user?.display_name"
-        size="3xl"
+        size="2xl"
       />
-      <div class="flex flex-wrap gap-2">
-        <template v-if="data.can_upload">
-          <input
-            ref="input"
-            type="file"
-            :accept="data.types.join(',')"
-            class="hidden"
-            @change="upload"
-          >
-          <UButton
-            color="neutral"
-            variant="outline"
-            icon="i-lucide-upload"
-            :loading="busy === 'upload'"
-            :disabled="!!busy"
-            @click="input?.click()"
-          >
-            Upload image
-          </UButton>
-        </template>
-        <UButton
-          v-if="user?.avatar"
-          color="neutral"
-          variant="ghost"
-          icon="i-lucide-trash-2"
-          :loading="busy === 'remove'"
-          :disabled="!!busy"
-          @click="remove"
+    </template>
+    <template #actions>
+      <template v-if="data.can_upload">
+        <input
+          ref="input"
+          type="file"
+          :accept="data.types.join(',')"
+          class="hidden"
+          @change="upload"
         >
-          Remove
+        <UButton
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-upload"
+          :loading="busy === 'upload'"
+          :disabled="!!busy"
+          @click="input?.click()"
+        >
+          Upload
         </UButton>
-      </div>
-    </div>
-  </UCard>
+      </template>
+      <UButton
+        v-if="user?.avatar"
+        color="neutral"
+        variant="ghost"
+        icon="i-lucide-trash-2"
+        :loading="busy === 'remove'"
+        :disabled="!!busy"
+        @click="remove"
+      >
+        Remove
+      </UButton>
+    </template>
+  </AccountRow>
 </template>

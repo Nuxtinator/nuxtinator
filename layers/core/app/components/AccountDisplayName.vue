@@ -1,25 +1,25 @@
 <script setup lang="ts">
-// Account card: change the display name.
+// Account row: the display name, edited in a panel opened from Change.
 const { user } = useAuth()
+const toast = useToast()
+const { open, toggle, close } = useAccountRow('display-name')
 
 const nameState = reactive({
-  display_name: user.value?.display_name || ''
+  display_name: ''
 })
 const nameLoading = ref(false)
 const nameError = ref('')
-const nameSuccess = ref('')
 
-// Watch the saved name to update the field, leaving an unsaved edit alone otherwise
-watch(() => user.value?.display_name, (name) => {
-  if (name) {
-    nameState.display_name = name
+watch(open, (isOpen) => {
+  if (isOpen) {
+    nameState.display_name = user.value?.display_name || ''
+    nameError.value = ''
   }
 })
 
 // Handle name update
 async function handleNameUpdate() {
   nameError.value = ''
-  nameSuccess.value = ''
 
   if (!nameState.display_name.trim()) {
     nameError.value = 'Display name is required'
@@ -36,12 +36,13 @@ async function handleNameUpdate() {
       }
     })
 
-    nameSuccess.value = 'Display name updated successfully'
-
     // Update user in auth composable
     if (user.value) {
       user.value.display_name = nameState.display_name.trim()
     }
+
+    toast.add({ title: 'Display name updated', color: 'success' })
+    close()
   } catch (err: any) {
     nameError.value = err.data?.statusMessage || 'Failed to update display name'
   } finally {
@@ -51,43 +52,61 @@ async function handleNameUpdate() {
 </script>
 
 <template>
-  <UCard>
-    <template #header>
-      <h2 class="text-xl font-semibold">
-        Change Display Name
-      </h2>
-    </template>
-    <form
-      class="space-y-4"
-      @submit.prevent="handleNameUpdate"
+  <AccountRow
+    label="Display name"
+    :value="user?.display_name || 'Not set'"
+    :open="open"
+  >
+    <template
+      v-if="!open"
+      #actions
     >
-      <UFormField label="Display Name">
-        <UInput
-          v-model="nameState.display_name"
-          type="text"
-          size="lg"
-          :disabled="nameLoading"
-          placeholder="Enter your display name"
-        />
-      </UFormField>
-      <UAlert
-        v-if="nameError"
-        color="error"
-        :title="nameError"
-      />
-      <UAlert
-        v-if="nameSuccess"
-        color="success"
-        :title="nameSuccess"
-      />
       <UButton
-        type="submit"
-        size="lg"
-        :loading="nameLoading"
-        :disabled="!nameState.display_name.trim() || nameLoading"
+        color="neutral"
+        variant="outline"
+        @click="toggle"
       >
-        Update Name
+        Change
       </UButton>
-    </form>
-  </UCard>
+    </template>
+    <template #panel>
+      <form
+        class="space-y-4 max-w-md"
+        @submit.prevent="handleNameUpdate"
+      >
+        <UFormField label="Display name">
+          <UInput
+            v-model="nameState.display_name"
+            type="text"
+            class="w-full"
+            autofocus
+            :disabled="nameLoading"
+            placeholder="Enter your display name"
+          />
+        </UFormField>
+        <UAlert
+          v-if="nameError"
+          color="error"
+          :title="nameError"
+        />
+        <div class="flex gap-2">
+          <UButton
+            type="submit"
+            :loading="nameLoading"
+            :disabled="!nameState.display_name.trim() || nameLoading"
+          >
+            Save
+          </UButton>
+          <UButton
+            color="neutral"
+            variant="ghost"
+            :disabled="nameLoading"
+            @click="close"
+          >
+            Cancel
+          </UButton>
+        </div>
+      </form>
+    </template>
+  </AccountRow>
 </template>

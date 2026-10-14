@@ -1,7 +1,6 @@
 <script setup lang="ts">
-// Account card: the ways the user can sign in (password + each registered
-// provider), with link / unlink. Hidden when no provider is registered, since
-// the password card already covers that case.
+// Account rows: one per registered sign-in provider, with link / unlink.
+// Renders nothing when no provider is registered.
 interface Methods {
   password: boolean
   count: number
@@ -46,68 +45,38 @@ async function unlink(id: string) {
 </script>
 
 <template>
-  <UCard v-if="methods.providers.length">
-    <template #header>
-      <h2 class="text-xl font-semibold">
-        Sign-in Methods
-      </h2>
+  <AccountRow
+    v-for="p in methods.providers"
+    :key="p.id"
+    :label="p.label"
+    :value="p.linked ? (p.linked.email || 'Linked') : 'Not linked'"
+  >
+    <template #leading>
+      <UIcon
+        :name="p.icon"
+        class="size-5"
+      />
     </template>
-    <ul class="divide-y divide-(--ui-border)">
-      <li class="flex items-center justify-between gap-4 py-3 first:pt-0">
-        <div class="flex items-center gap-3">
-          <UIcon
-            name="i-lucide-key-round"
-            class="size-5"
-          />
-          <div>
-            <div class="font-medium">
-              Password
-            </div>
-            <div class="text-sm text-(--ui-text-muted)">
-              {{ methods.password ? 'Set' : 'Not set' }}
-            </div>
-          </div>
-        </div>
-      </li>
-      <li
-        v-for="p in methods.providers"
-        :key="p.id"
-        class="flex items-center justify-between gap-4 py-3 last:pb-0"
+    <template #actions>
+      <UButton
+        v-if="p.linked"
+        color="neutral"
+        variant="outline"
+        :loading="unlinking === p.id"
+        :disabled="methods.count <= 1"
+        @click="unlink(p.id)"
       >
-        <div class="flex items-center gap-3">
-          <UIcon
-            :name="p.icon"
-            class="size-5"
-          />
-          <div>
-            <div class="font-medium">
-              {{ p.label }}
-            </div>
-            <div class="text-sm text-(--ui-text-muted)">
-              {{ p.linked ? (p.linked.email || 'Linked') : 'Not linked' }}
-            </div>
-          </div>
-        </div>
-        <UButton
-          v-if="p.linked"
-          color="neutral"
-          variant="outline"
-          :loading="unlinking === p.id"
-          :disabled="methods.count <= 1"
-          @click="unlink(p.id)"
-        >
-          Unlink
-        </UButton>
-        <UButton
-          v-else
-          color="neutral"
-          variant="outline"
-          :to="linkUrl(p)"
-          external
-        >
-          Link
-        </UButton>
-      </li>
-    </ul>
-  </UCard>
+        Unlink
+      </UButton>
+      <UButton
+        v-else
+        color="neutral"
+        variant="outline"
+        :to="linkUrl(p)"
+        external
+      >
+        Link
+      </UButton>
+    </template>
+  </AccountRow>
 </template>

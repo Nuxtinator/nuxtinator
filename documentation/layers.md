@@ -42,14 +42,14 @@ The host itself ships **no** permissions or roles — operator-admin is the `use
 
 ### A host's own account page
 
-Core's `/account` page is built from card components: `AccountInfo`, `AccountAvatar`, `AccountAppearance`, `AccountDisplayName`, `AccountEmail`, `AccountPassword`, `AccountSignInMethods`, `AccountSessions`, `AccountSections` (the cards other layers register, such as OAuth's Connected apps), `AccountSignOut` and `AccountDelete`. A host that wants an account page in its own layout writes a page that renders the cards it wants, plus `<ReauthModal />`. It then points core at that page so the email-change and provider-link flows return there:
+Core's `/account` page is a few `<AccountGroup title="…">` cards, each stacking row components: `AccountAvatar`, `AccountDisplayName`, `AccountMemberSince`, `AccountEmail`, `AccountPassword`, `AccountSignInMethods` (one row per provider), `AccountSessions`, `AccountAppearance`, `AccountSignOut` and `AccountDelete`. Rows that edit something open their form under the row when clicked, one at a time. `AccountSections` renders the cards other layers register, such as OAuth's Connected apps, and goes between groups. A host that wants an account page in its own layout writes a page that groups the rows it wants, plus `<ReauthModal />`. It then points core at that page so the email-change and provider-link flows return there:
 
 ```ts
 // nuxt.config.ts
 runtimeConfig: { public: { accountPath: '/profile' } }
 ```
 
-`AccountAvatar` offers uploads only when public S3 storage is configured (`S3_ENDPOINT`, the access keys, `S3_BUCKET_NAME` and `S3_PUBLIC_BASE_URL`; `S3_PUBLIC_BUCKET_NAME` alone isn't enough); without it, the card shows the avatar and can remove it.
+`AccountAvatar` offers uploads only when public S3 storage is configured (`S3_ENDPOINT`, the access keys, `S3_BUCKET_NAME` and `S3_PUBLIC_BASE_URL`; `S3_PUBLIC_BUCKET_NAME` alone isn't enough); without it, the row shows the avatar and can remove it.
 
 ---
 
