@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { randomUUID } from 'node:crypto'
+import { lookup } from 'node:dns/promises'
 import {
   getHostAdminDb,
   createTestUser,
@@ -20,6 +21,7 @@ const NATIVE = { 'x-auth-client': 'native' }
 // otherwise the provider's URL is stored as-is.
 const STORAGE = publicStorageConfigured()
 const STORED = /\/avatars\/[0-9a-f]+\.png$/
+const UNLISTED_HOST_RESOLVES = await lookup('localhost.').then(() => true, () => false)
 
 interface NativeResult {
   accessToken: string
@@ -90,9 +92,11 @@ describe('POST /api/social-auth/native', () => {
       await api('/api/profile/avatar', { method: 'DELETE', ...bearer })
     })
 
-    it('is skipped when it comes from a host not listed for the provider', async () => {
+    // `localhost.` reaches the photo host and passes its certificate but isn't a listed host.
+    it.skipIf(!UNLISTED_HOST_RESOLVES)('is skipped when it comes from a host not listed for the provider', async () => {
       const email = socialEmail()
-      await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email, name: 'Elsewhere', picture: 'https://example.com/a.png' }) })
+      const picture = photoUrl('/photo.png').replace('//localhost:', '//localhost.:')
+      await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email, name: 'Elsewhere', picture }) })
       expect(await waitForAvatar(sql, email, a => a !== '', 1500)).toBe('')
     })
 

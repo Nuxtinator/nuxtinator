@@ -7,9 +7,9 @@ export function clearQueryParam(key: string): void {
   const router = useRouter()
   clearedKeys.add(key)
   lastReplace = lastReplace.then(() => {
-    const current = router.currentRoute.value.query
+    const { query: current, hash } = router.currentRoute.value
     if (![...clearedKeys].some(k => k in current)) return
     const query = Object.fromEntries(Object.entries(current).filter(([k]) => !clearedKeys.has(k)))
-    return router.replace({ query })
+    return router.replace({ query, hash })
   }).catch(() => {})
 }

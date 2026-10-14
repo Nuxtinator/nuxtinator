@@ -77,7 +77,7 @@ async function startPhotoServers(): Promise<{ baseUrl: string, certFile: string 
   const keyFile = join(certDir, 'key.pem')
   const certFile = join(certDir, 'cert.pem')
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=localhost',
-    '-addext', 'subjectAltName=DNS:localhost', '-keyout', keyFile, '-out', certFile], { stdio: 'ignore' })
+    '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1', '-keyout', keyFile, '-out', certFile], { stdio: 'ignore' })
 
   plainPhotoServer = createServer(servePhoto({}))
   const plainPort = await listen(plainPhotoServer)
@@ -119,7 +119,7 @@ export async function setup(project: TestProject) {
       NUXT_SOCIAL_AUTH_GOOGLE_JWKS_URL: jwksUrl,
       NUXT_SOCIAL_AUTH_APPLE_BUNDLE_IDS: TEST_APPLE_BUNDLE,
       NUXT_SOCIAL_AUTH_APPLE_JWKS_URL: jwksUrl,
-      // 127.0.0.1 is listed so only the IP-address rule refuses the /to-ip redirect.
+      // 127.0.0.1 is listed and in the certificate, so only the IP-address rule refuses /to-ip.
       NUXT_SOCIAL_AUTH_GOOGLE_PHOTO_HOSTS: 'localhost,127.0.0.1',
       // Trusts the photo host's self-signed certificate.
       NODE_EXTRA_CA_CERTS: photo.certFile

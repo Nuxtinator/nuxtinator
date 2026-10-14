@@ -49,7 +49,7 @@ Core's `/account` page is built from card components: `AccountInfo`, `AccountAva
 runtimeConfig: { public: { accountPath: '/profile' } }
 ```
 
-`AccountAvatar` offers uploads only when public S3 storage is configured (`S3_PUBLIC_BASE_URL` and a bucket); without it, the card shows the avatar and can remove it.
+`AccountAvatar` offers uploads only when public S3 storage is configured (`S3_ENDPOINT`, the access keys, `S3_BUCKET_NAME` and `S3_PUBLIC_BASE_URL`; `S3_PUBLIC_BUCKET_NAME` alone isn't enough); without it, the card shows the avatar and can remove it.
 
 ---
 

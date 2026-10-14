@@ -10,7 +10,6 @@ export function readBodyWithLimit(event: H3Event, limit: number, message = 'Requ
   // After the error response, discards incoming bytes briefly so the client can read it, then closes.
   const fail = (statusCode: number, statusMessage: string) => {
     req.removeAllListeners('data')
-    setResponseHeader(event, 'connection', 'close')
     event.node.res.once('finish', () => {
       req.resume()
       setTimeout(() => req.destroy(), LINGER_MS).unref()
