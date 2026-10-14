@@ -85,9 +85,17 @@ export function clearPendingSignup(event: H3Event): void {
   deleteCookie(event, PENDING_COOKIE, { path: '/' })
 }
 
-// Only same-site paths are accepted as post-sign-in destinations.
+// Only same-site paths are accepted as post-sign-in destinations, checked in
+// normalised form so dot segments can't turn one into `//other.host`.
 export function safeRedirect(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  if (!value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) return null
-  return value.slice(0, 1000)
+  if (typeof value !== 'string' || !value.startsWith('/')) return null
+  let url: URL
+  try {
+    url = new URL(value, 'http://local')
+  } catch {
+    return null
+  }
+  const path = `${url.pathname}${url.search}${url.hash}`
+  if (url.origin !== 'http://local' || path.startsWith('//')) return null
+  return path.slice(0, 1000)
 }

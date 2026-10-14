@@ -26,6 +26,8 @@ export interface ProviderConfig {
   nativeAudiences: string[]
   webEnabled: boolean
   nativeEnabled: boolean
+  // Hosts (and their subdomains) the provider's profile photos may be fetched from.
+  photoHosts: string[]
 }
 
 function list(value: unknown): string[] {
@@ -34,7 +36,7 @@ function list(value: unknown): string[] {
 
 function settings() {
   return useRuntimeConfig().socialAuth as {
-    google: { clientId: string, clientSecret: string, nativeClientIds: string, jwksUrl: string }
+    google: { clientId: string, clientSecret: string, nativeClientIds: string, jwksUrl: string, photoHosts: string }
     apple: { servicesId: string, teamId: string, keyId: string, privateKey: string, bundleIds: string, jwksUrl: string }
   }
 }
@@ -54,7 +56,8 @@ export function getProviderConfig(id: string): ProviderConfig | null {
       // Android apps request ID tokens for the web client ID, so it's accepted too.
       nativeAudiences: [...nativeIds, ...(g.clientId ? [g.clientId] : [])],
       webEnabled: !!(g.clientId && g.clientSecret),
-      nativeEnabled: nativeIds.length > 0 || !!g.clientId
+      nativeEnabled: nativeIds.length > 0 || !!g.clientId,
+      photoHosts: g.photoHosts ? list(g.photoHosts) : ['googleusercontent.com']
     }
   }
   if (id === 'apple') {
@@ -70,7 +73,9 @@ export function getProviderConfig(id: string): ProviderConfig | null {
       webClientId: a.servicesId,
       nativeAudiences: bundleIds,
       webEnabled: !!(a.servicesId && signing),
-      nativeEnabled: bundleIds.length > 0
+      nativeEnabled: bundleIds.length > 0,
+      // Apple sends no profile photo.
+      photoHosts: []
     }
   }
   return null

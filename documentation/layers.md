@@ -40,6 +40,17 @@ Layers feed these at boot from a Nitro plugin. The host bridges each registry to
 
 The host itself ships **no** permissions or roles — operator-admin is the `users.is_admin` boolean (no slug), checked via `requireOperatorAdmin(event)` from [tenant-kernel/server.ts](../layers/core/tenant-kernel/server.ts).
 
+### A host's own account page
+
+Core's `/account` page is built from card components: `AccountInfo`, `AccountAvatar`, `AccountAppearance`, `AccountDisplayName`, `AccountEmail`, `AccountPassword`, `AccountSignInMethods`, `AccountSessions`, `AccountSections` (the cards other layers register, such as OAuth's Connected apps), `AccountSignOut` and `AccountDelete`. A host that wants an account page in its own layout writes a page that renders the cards it wants, plus `<ReauthModal />`. It then points core at that page so the email-change and provider-link flows return there:
+
+```ts
+// nuxt.config.ts
+runtimeConfig: { public: { accountPath: '/profile' } }
+```
+
+`AccountAvatar` offers uploads only when public S3 storage is configured (`S3_ENDPOINT`, the access keys, `S3_BUCKET_NAME` and `S3_PUBLIC_BASE_URL`; `S3_PUBLIC_BUCKET_NAME` alone isn't enough); without it, the card shows the avatar and can remove it.
+
 ---
 
 ## The `#tenant` kernel
@@ -435,6 +446,8 @@ The tenancy layer emits Nitro hooks layers can subscribe to. In single mode thes
 | `org.created` | `{ orgId, slug, createdByUserId }` | New org row inserted. |
 | `org.deleted` | `{ orgId, slug }` | Org is being deleted. Fires before the row cascade so subscribers can still read the org's rows (e.g. to collect S3 keys the cascade would strand). |
 | `user.created` | `{ userId, email, viaInvite }` | New user row inserted. (Fires in both modes.) |
+| `user.deleting` | `{ userId }` | Just before a user row is deleted, while everything tied to it still exists. (Both modes.) |
+| `user.deleted` | `{ userId, avatar }` | After a user's deletion has committed. (Both modes.) |
 | `user.verified` | `{ userId, email }` | User accepts invite or verifies email. (Both modes.) |
 | `membership.created` | `{ membershipId, userId, orgId, roles, createdByUserId }` | Membership row inserted. |
 | `membership.updated` | `{ membershipId, userId, orgId, oldRoles, newRoles }` | Roles changed. |
