@@ -2,8 +2,8 @@
 import type { HelpinatorLibrary } from '../../utils/helpinator-types'
 
 // The helpinator nav: "All conversations", then one channel per widget.
-// Channels filter the conversation list via `?widget=<id>`. Managers also get
-// collapsible Libraries and Widgets sections linking to each one's settings.
+// Channels filter the conversation list via `?widget=<id>`; managers get a cog
+// on each channel linking to that widget's settings, and a Libraries section.
 defineProps<{
   // Highlights a channel off the list page (e.g. the widget a transcript came from).
   activeWidgetId?: string | null
@@ -40,7 +40,7 @@ const onList = computed(() => route.path === listPath.value)
 const queryWidget = computed(() => typeof route.query.widget === 'string' ? route.query.widget : null)
 
 const librariesPath = computed(() => pathTo('/helpinator/libraries'))
-const widgetsPath = computed(() => pathTo('/helpinator/widgets'))
+const widgetPath = (id: string) => pathTo(`/helpinator/widgets/${id}`)
 const isAt = (path: string) => route.path === path
 
 const allActive = computed(() => onList.value && !queryWidget.value)
@@ -74,17 +74,32 @@ const itemClass = (active: boolean) => active
       </p>
 
       <nav class="flex flex-col gap-px">
-        <NuxtLink
+        <div
           v-for="w in widgets"
           :key="w.id"
-          :to="{ path: listPath, query: { widget: w.id } }"
-          class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition"
-          :class="itemClass(onList ? queryWidget === w.id : activeWidgetId === w.id)"
+          class="group flex items-center rounded-md transition"
+          :class="itemClass(onList ? queryWidget === w.id : (activeWidgetId === w.id || isAt(widgetPath(w.id))))"
         >
-          <UIcon name="i-lucide-app-window" class="size-4 shrink-0" />
-          <span class="truncate flex-1" :class="{ 'opacity-60': w.enabled === false }">{{ w.name }}</span>
-          <span v-if="w.enabled === false" class="text-[10px] uppercase tracking-wide text-(--ui-text-dimmed)">Off</span>
-        </NuxtLink>
+          <NuxtLink
+            :to="{ path: listPath, query: { widget: w.id } }"
+            class="flex items-center gap-2 pl-2 py-1.5 text-sm min-w-0 flex-1"
+            :class="status?.canManage ? 'pr-1' : 'pr-2'"
+          >
+            <UIcon name="i-lucide-app-window" class="size-4 shrink-0" />
+            <span class="truncate flex-1" :class="{ 'opacity-60': w.enabled === false }">{{ w.name }}</span>
+            <span v-if="w.enabled === false" class="text-[10px] uppercase tracking-wide text-(--ui-text-dimmed)">Off</span>
+          </NuxtLink>
+          <NuxtLink
+            v-if="status?.canManage"
+            :to="widgetPath(w.id)"
+            :aria-label="`${w.name} settings`"
+            title="Widget settings"
+            class="shrink-0 mr-1 p-1 rounded text-(--ui-text-dimmed) hover:text-(--ui-text) focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+            :class="{ 'lg:opacity-100 text-(--ui-text)': isAt(widgetPath(w.id)) }"
+          >
+            <UIcon name="i-lucide-settings" class="size-3.5 block" />
+          </NuxtLink>
+        </div>
       </nav>
     </HelpinatorSidebarSection>
 
@@ -113,34 +128,6 @@ const itemClass = (active: boolean) => active
           >
             <UIcon :name="l.kind === 'portfolio' ? 'i-lucide-book-open' : 'i-lucide-globe'" class="size-4 shrink-0" />
             <span class="truncate flex-1">{{ l.name }}</span>
-          </NuxtLink>
-        </nav>
-      </HelpinatorSidebarSection>
-
-      <HelpinatorSidebarSection
-        id="widgets"
-        title="Widgets"
-        :add-to="pathTo('/helpinator/widgets/new')"
-        add-label="New widget"
-      >
-        <nav class="flex flex-col gap-px">
-          <NuxtLink
-            :to="widgetsPath"
-            class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition"
-            :class="itemClass(isAt(widgetsPath))"
-          >
-            <UIcon name="i-lucide-settings" class="size-4 shrink-0" />
-            <span class="truncate flex-1">All widgets</span>
-          </NuxtLink>
-          <NuxtLink
-            v-for="w in widgets"
-            :key="w.id"
-            :to="pathTo(`/helpinator/widgets/${w.id}`)"
-            class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition"
-            :class="itemClass(isAt(pathTo(`/helpinator/widgets/${w.id}`)))"
-          >
-            <UIcon name="i-lucide-sliders-horizontal" class="size-4 shrink-0" />
-            <span class="truncate flex-1" :class="{ 'opacity-60': w.enabled === false }">{{ w.name }}</span>
           </NuxtLink>
         </nav>
       </HelpinatorSidebarSection>

@@ -58,9 +58,12 @@ watch(() => route.fullPath, () => {
           aria-label="Open sidebar"
           @click="open = true"
         />
-        <h1 class="font-semibold truncate flex-1">
-          {{ title }}
-        </h1>
+        <div class="flex items-center gap-1 min-w-0 flex-1">
+          <h1 class="font-semibold truncate">
+            {{ title }}
+          </h1>
+          <slot name="title" />
+        </div>
         <slot name="actions" />
       </header>
       <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">

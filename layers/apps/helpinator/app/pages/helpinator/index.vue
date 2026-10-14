@@ -77,6 +77,17 @@ function pagePath(url: string | null): string {
 
 <template>
   <HelpinatorShell :title="title">
+    <template v-if="status?.canManage && widgetId !== 'all'" #title>
+      <UButton
+        :to="pathTo(`/helpinator/widgets/${widgetId}`)"
+        icon="i-lucide-settings"
+        variant="ghost"
+        color="neutral"
+        size="xs"
+        aria-label="Widget settings"
+        title="Widget settings"
+      />
+    </template>
     <template #actions>
       <USelect v-model="state" :items="stateItems" size="sm" class="w-44" />
     </template>
