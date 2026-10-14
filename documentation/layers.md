@@ -40,6 +40,17 @@ Layers feed these at boot from a Nitro plugin. The host bridges each registry to
 
 The host itself ships **no** permissions or roles — operator-admin is the `users.is_admin` boolean (no slug), checked via `requireOperatorAdmin(event)` from [tenant-kernel/server.ts](../layers/core/tenant-kernel/server.ts).
 
+### A host's own account page
+
+Core's `/account` page is built from card components: `AccountInfo`, `AccountAvatar`, `AccountAppearance`, `AccountDisplayName`, `AccountEmail`, `AccountPassword`, `AccountSignInMethods`, `AccountSessions`, `AccountSections` (the cards other layers register, such as OAuth's Connected apps), `AccountSignOut` and `AccountDelete`. A host that wants an account page in its own layout writes a page that renders the cards it wants, plus `<ReauthModal />`. It then points core at that page so the email-change and provider-link flows return there:
+
+```ts
+// nuxt.config.ts
+runtimeConfig: { public: { accountPath: '/profile' } }
+```
+
+`AccountAvatar` offers uploads only when public S3 storage is configured (`S3_PUBLIC_BASE_URL` and a bucket); without it, the card shows the avatar and can remove it.
+
 ---
 
 ## The `#tenant` kernel

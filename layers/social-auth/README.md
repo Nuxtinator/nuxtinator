@@ -2,7 +2,7 @@
 
 Sign in with Google and Sign in with Apple, for the web app and for native iOS/Android apps.
 
-Each provider turns on when its credentials are set. With none set, the layer loads but does nothing. When a provider is configured, its button appears on `/login`, `/register` and `/accept-invite`, and under **Sign-in Methods** on `/account`.
+Each provider turns on when its credentials are set. With none set, the layer loads but does nothing. When a provider is configured, its button appears on `/login`, `/register` and `/accept-invite`, and under **Sign-in Methods** on the account page.
 
 ## What happens when someone signs in
 
@@ -52,10 +52,10 @@ A provider's button (and its entry under Sign-in Methods) shows only when its we
 `GET /api/social-auth/:provider/start?intent=login|link|reauth&invite=…&redirect=/path`
 
 - `login`: sign in or sign up.
-- `link`: add the provider to the signed-in account (from `/account`).
+- `link`: add the provider to the signed-in account (from the account page).
 - `reauth`: prove identity again before a sensitive action (core's step-up; see `useReauth`).
 
-The flow state (state, nonce, PKCE verifier, intent) is kept in a signed, 10-minute, `HttpOnly` cookie. Apple returns with a cross-site form POST that doesn't carry `SameSite=Lax` cookies. `POST …/callback` re-issues it as a top-level GET to the same URL, and that GET does carry them. Errors return to `/login`, `/accept-invite` or `/account` with an `auth_error` / `link` code. The pages never echo text from the URL.
+The flow state (state, nonce, PKCE verifier, intent) is kept in a signed, 10-minute, `HttpOnly` cookie. Apple returns with a cross-site form POST that doesn't carry `SameSite=Lax` cookies. `POST …/callback` re-issues it as a top-level GET to the same URL, and that GET does carry them. Errors return to `/login` or `/accept-invite` with an `auth_error` code. Link and re-authentication flows return to their `redirect` path (default: core's `accountPath`, `/account` unless the host sets it) with a `link` code. The pages never echo text from the URL.
 
 ## Native apps
 

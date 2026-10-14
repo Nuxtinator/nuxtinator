@@ -13,10 +13,11 @@ export default defineEventHandler(async (event) => {
   const cfg = getProviderConfig(getRouterParam(event, 'provider') || '')
   const flow = takeFlowCookie(event)
   const query = getQuery(event)
+  const accountPath = useRuntimeConfig(event).public.accountPath
 
   const fail = (code: SignInErrorCode | 'cancelled', f: SocialFlow | null = flow) => {
     if (f?.intent === 'link' || f?.intent === 'reauth') {
-      return sendRedirect(event, `/account?link=${code}`)
+      return sendRedirect(event, withLinkStatus(f.redirect || accountPath, code))
     }
     if (f?.invite) {
       return sendRedirect(event, `/accept-invite?token=${encodeURIComponent(f.invite)}&auth_error=${code}`)
@@ -83,11 +84,11 @@ export default defineEventHandler(async (event) => {
       return sendRedirect(event, '/social-auth/complete')
 
     case 'linked':
-      return sendRedirect(event, flow.redirect || '/account?link=success')
+      return sendRedirect(event, withLinkStatus(flow.redirect || accountPath, 'success'))
 
     case 'reauthed':
       if (flow.sessionId) await markReauthenticated(flow.sessionId)
-      return sendRedirect(event, flow.redirect || '/account')
+      return sendRedirect(event, flow.redirect || accountPath)
 
     case 'signed_in': {
       const user = await db.selectFrom('users').select(['id', 'email', 'display_name']).where('id', '=', outcome.userId).executeTakeFirstOrThrow()
@@ -102,3 +103,10 @@ export default defineEventHandler(async (event) => {
     }
   }
 })
+
+// A same-site path with `link=<code>` added, which the sign-in methods card reports.
+function withLinkStatus(path: string, code: string): string {
+  const url = new URL(path, 'http://local')
+  url.searchParams.set('link', code)
+  return `${url.pathname}${url.search}${url.hash}`
+}

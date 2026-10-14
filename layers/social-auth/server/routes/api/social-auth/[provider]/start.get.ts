@@ -18,7 +18,7 @@ export default defineEventHandler(async (event) => {
   let sessionId: string | null = null
   if (intent !== 'login') {
     const user = getAuthUser(event)
-    if (!user) return sendRedirect(event, `/login?redirect=${encodeURIComponent(redirect || '/account')}`)
+    if (!user) return sendRedirect(event, `/login?redirect=${encodeURIComponent(redirect || useRuntimeConfig(event).public.accountPath)}`)
     userId = user.userId
     sessionId = user.sid
   }

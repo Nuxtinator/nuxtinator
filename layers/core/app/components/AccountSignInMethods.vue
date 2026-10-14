@@ -23,8 +23,8 @@ const { data: methods, refresh } = useLazyFetch<Methods>('/api/auth/methods', {
   default: () => ({ password: false, count: 0, providers: [] })
 })
 
-// Provider flows started from here (link, or re-authentication) return with
-// `?link=<code>`.
+// Provider flows started from here (link, or re-authentication) return to
+// this page with `?link=<code>`.
 onMounted(() => {
   const status = route.query.link
   if (status === 'success') toast.add({ title: 'Account linked', color: 'success' })
@@ -34,7 +34,7 @@ onMounted(() => {
 const unlinking = ref<string | null>(null)
 
 function linkUrl(p: Methods['providers'][number]): string {
-  const params = new URLSearchParams({ intent: 'link', redirect: '/account' })
+  const params = new URLSearchParams({ intent: 'link', redirect: route.path })
   return `${p.startPath}?${params.toString()}`
 }
 

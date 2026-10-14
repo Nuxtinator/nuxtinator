@@ -124,6 +124,7 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
 
   if (identity) {
     await touchIdentity(identity.id, input)
+    await importAvatar(identity.user_id, profile.picture)
     return { kind: 'signed_in', userId: identity.user_id, created: false, inviteAccepted: false }
   }
 
