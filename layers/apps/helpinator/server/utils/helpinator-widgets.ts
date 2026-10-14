@@ -6,6 +6,7 @@ import { sql, type Selectable, type Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { HelpinatorAppearance } from '../database/schema'
 import { helpinatorAssertLibraries } from './helpinator-libraries'
+import { helpinatorParseOriginEntry } from './helpinator-origins'
 
 type Tx = Transaction<Database>
 
@@ -60,21 +61,16 @@ export function helpinatorResolvedAppearance(stored: unknown): Required<Helpinat
   return { ...HELPINATOR_DEFAULT_APPEARANCE, ...helpinatorSanitizeAppearance(stored) }
 }
 
-// Reduce each entry to a bare origin (scheme://host[:port]); invalid entries
-// are rejected so a typo surfaces in the form instead of silently blocking.
+// Reduce each entry to a bare origin (scheme://host[:port]) or a subdomain
+// wildcard (scheme://*.domain[:port]); invalid entries are rejected so a typo
+// surfaces in the form instead of silently blocking.
 export function helpinatorNormalizeOrigins(list: string[]): string[] {
   const out = new Set<string>()
   for (const raw of list) {
     const trimmed = raw.trim()
     if (!trimmed) continue
-    let origin: string
-    try {
-      const u = new URL(trimmed)
-      if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('protocol')
-      origin = u.origin
-    } catch {
-      throw createError({ statusCode: 400, statusMessage: `Invalid origin: ${trimmed}` })
-    }
+    const origin = helpinatorParseOriginEntry(trimmed)
+    if (!origin) throw createError({ statusCode: 400, statusMessage: `Invalid origin: ${trimmed}` })
     out.add(origin)
   }
   return [...out]

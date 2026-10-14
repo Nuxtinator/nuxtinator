@@ -11,6 +11,7 @@ import { db } from '#core/server/utils/database'
 import { consumeRateLimit, logRateLimitExceeded } from '#core/server/utils/rate-limit'
 import { getClientIp } from '#core/server/utils/client-ip'
 import type { HelpinatorWidgetRow } from './helpinator-widgets'
+import { helpinatorOriginAllowed } from './helpinator-origins'
 
 type Tx = Transaction<Database>
 
@@ -53,12 +54,12 @@ export function helpinatorRequestOrigin(event: H3Event): string | null {
   return originOf(getHeader(event, 'origin')) ?? originOf(getHeader(event, 'referer'))
 }
 
-// Allowed: an origin on the widget's list; this host itself (the admin page's
+// Allowed: an origin on the widget's list (exact or *.domain wildcard); this host itself (the admin page's
 // live preview); loopback outside production so local embedding just works.
 export function helpinatorAssertOrigin(event: H3Event, widget: HelpinatorWidgetRow): string {
   const origin = helpinatorRequestOrigin(event)
   if (origin) {
-    if (widget.allowed_origins.includes(origin)) return origin
+    if (helpinatorOriginAllowed(origin, widget.allowed_origins)) return origin
     if (origin === getRequestURL(event).origin) return origin
     const siteUrl = originOf(String(useRuntimeConfig().public.siteUrl || ''))
     if (siteUrl && origin === siteUrl) return origin

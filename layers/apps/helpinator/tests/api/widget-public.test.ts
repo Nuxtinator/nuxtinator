@@ -55,6 +55,20 @@ describe('public widget API', () => {
     expect(err.statusCode).toBe(403)
   })
 
+  it('allows subdomains covered by a wildcard origin', async () => {
+    const { org } = await createHelpinatorOrgWith(sql)
+    const p = await seedPortfolio(sql, org.id, 'Public Help', { faq: 'Opening hours are 9-5.' })
+    const widget = await seedWidget(sql, { orgId: org.id, portfolioId: p.id, sectionKey: 'faq', origins: ['https://*.help-site.example'] })
+    const ok = await $fetch<{ id: string }>(`/api/v1/helpinator/widgets/${widget.id}/config`, {
+      headers: widgetHeaders(null, 'https://app.help-site.example')
+    })
+    expect(ok.id).toBe(widget.id)
+    for (const origin of ['https://help-site.example', 'https://evilhelp-site.example', 'http://app.help-site.example']) {
+      const err = await $fetch(`/api/v1/helpinator/widgets/${widget.id}/config`, { headers: widgetHeaders(null, origin) }).catch(e => e)
+      expect(err.statusCode, origin).toBe(403)
+    }
+  })
+
   it('404s an unknown or malformed widget id', async () => {
     expect((await $fetch(`/api/v1/helpinator/widgets/${randomUUID()}/config`, { headers: widgetHeaders() }).catch(e => e)).statusCode).toBe(404)
     expect((await $fetch('/api/v1/helpinator/widgets/nope/config', { headers: widgetHeaders() }).catch(e => e)).statusCode).toBe(404)

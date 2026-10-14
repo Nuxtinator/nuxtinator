@@ -268,7 +268,7 @@ async function togglePreview() {
               <USelect v-model="form.default_section_key" :items="sectionItems" class="w-full" />
             </UFormField>
 
-            <UFormField label="Allowed sites" help="One origin per line, e.g. https://www.example.org. Localhost works in development without being listed.">
+            <UFormField label="Allowed sites" help="One origin per line, e.g. https://www.example.org. Use https://*.example.org for every subdomain (the bare domain needs its own line). Localhost works in development without being listed.">
               <UTextarea v-model="form.originsText" :rows="3" class="w-full font-mono text-xs" placeholder="https://www.example.org" />
             </UFormField>
 
