@@ -453,6 +453,11 @@ async function onSaveCard(patch: Partial<Card>) {
     toast.add({ title: 'Save failed', description: e?.data?.statusMessage, color: 'error' })
   }
 }
+// The panel keeps its open card and draft; only the board's copy is refreshed.
+function onCardReplied(updated: Card) {
+  const i = cards.value.findIndex(c => c.id === updated.id)
+  if (i >= 0) cards.value.splice(i, 1, updated)
+}
 async function onDeleteCard(cardId: string) {
   try {
     await $fetch(`/api/feedback/cards/${cardId}`, { method: 'DELETE' })
@@ -802,6 +807,7 @@ async function onReorderProjects(payload: { orderedIds: string[] }) {
       @save="onSaveCard"
       @delete="onDeleteCard"
       @archive="onArchiveCard"
+      @replied="onCardReplied"
     />
 
     <UModal v-model:open="projectModalOpen" :title="projectForm.mode === 'create' ? 'New project' : 'Project settings'">
