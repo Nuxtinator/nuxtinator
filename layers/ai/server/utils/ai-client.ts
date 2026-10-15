@@ -26,7 +26,7 @@ import { getAnthropicConfig, getOpenAiConfig, getOpenRouterConfig } from './ai-c
 import { ANTHROPIC_VERSION, getAllModels, getModelInfo, supportsTemperature } from './ai-model-list'
 import { getOrgApiKey, getHostApiKey, getProviderApiKey, loadModelList, resolveFeatureModel, resolveEmbeddingModel } from './ai-settings'
 import { getAiFeatureKind } from './ai-feature-registry'
-import { AI_PROVIDERS, AI_PROVIDER_LABELS, providerOf, reasoningParams, wireModelId } from './ai-provider'
+import { AI_PROVIDERS, AI_PROVIDER_LABELS, openRouterSessionId, providerOf, reasoningParams, wireModelId } from './ai-provider'
 import { tinfoilFetch } from './tinfoil-client'
 import { runCompletionLoop, type ProviderCall, type ProviderToolCall, type ProviderTurn } from './ai-tool-loop'
 import { readCompletionStream, type StreamedTurn } from './ai-stream'
@@ -229,6 +229,10 @@ function buildBody(
   // an unrecognised `temperature`.
   if (temperature !== undefined && supportsTemperature(run.model)) {
     body.temperature = temperature
+  }
+  if (run.provider === 'openrouter') {
+    const first = apiMessages[0] as { role?: string, content?: unknown } | undefined
+    body.session_id = openRouterSessionId(run.model, first?.role === 'system' ? first.content : '')
   }
   return { ...body, ...reasoningParams(run.info?.reasoning, reasoning), ...extra }
 }

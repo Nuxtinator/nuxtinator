@@ -223,6 +223,11 @@ then discard it, which exercises a consumer's `onTextDiscard`.
   prices cache reads for; keep your grounding prefix byte-stable so
   caching-capable models hit it. The tool loop sends the tool definitions on
   every round (past `maxToolRounds` it adds `tool_choice: 'none'` rather than
-  dropping them) because the definitions lead the cached prefix. Each round
+  dropping them) because the definitions lead the cached prefix. OpenRouter
+  requests carry a `session_id` derived from model + system prompt, which keeps
+  calls sharing that prefix on one provider endpoint; Gemini's cache is
+  implicit (no `cache_control`) and lives on a single endpoint, so without it
+  calls scatter and miss. Don't pin a provider (`provider.order`) for caching:
+  pinned Gemini calls get no cache hits. Each round
   trip logs `[ai] <model> prompt=… cached=… cache_write=…` so hits can be
   checked in the server log.

@@ -3,6 +3,7 @@
 // never uses as a vendor (`tinfoil/`, `openai-api/`, `anthropic-api/`), so the
 // catalogs share one id space and OpenRouter's own `openai/…` and
 // `anthropic/…` slugs stay unambiguous. Pure — unit-tested without Nuxt.
+import { createHash } from 'node:crypto'
 import type { AiProvider, AiReasoningLevel, AiReasoningSpec } from '../../types/ai-ext'
 
 export const AI_PROVIDERS: readonly AiProvider[] = ['openrouter', 'tinfoil', 'openai', 'anthropic']
@@ -78,4 +79,11 @@ export function reasoningParams(
   if (!spec.enable) return {}
   const effort = spec.effortMap[level] ?? level
   return substituteEffort(spec.enable, effort) as Record<string, unknown>
+}
+
+// OpenRouter pins a session to one provider endpoint, so calls sharing model + system
+// prompt reach the endpoint holding their prompt cache (Gemini's cache is implicit).
+export function openRouterSessionId(model: string, system: unknown): string {
+  const prefix = typeof system === 'string' ? system : JSON.stringify(system ?? '')
+  return `ai-${createHash('sha256').update(`${model}\n${prefix}`).digest('hex').slice(0, 32)}`
 }
