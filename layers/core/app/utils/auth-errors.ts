@@ -8,6 +8,7 @@ const MESSAGES: Record<string, string> = {
   already_linked: 'That account is already linked to a different user.',
   one_per_provider: 'An account from that provider is already linked. Unlink it first.',
   invite_invalid: 'That invitation is no longer valid.',
+  reauth_required: 'Confirm it\'s you, then link the sign-in method again.',
   registration_closed: 'There is no account for that sign-in, and new accounts need an invitation.'
 }
 

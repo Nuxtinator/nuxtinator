@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, inject } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
 import {
@@ -233,6 +233,28 @@ describe('POST /api/social-auth/native', () => {
     const err = await nativeSignIn({ provider: 'apple', intent: 'link', idToken: appleIdToken({ sub: appleSub, email: 'relay@privaterelay.appleid.com' }) }, { authorization: `Bearer ${other.accessToken}` }).catch(e => e)
     expect(err.statusCode).toBe(409)
     expect(err.data?.data?.code).toBe('already_linked')
+  })
+
+  it('refuses to link a provider without a recent re-authentication', async () => {
+    const email = socialEmail()
+    const first = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email, name: 'Stale' }) })
+    const bearer = { authorization: `Bearer ${first.accessToken}` }
+    await sql`
+      UPDATE sessions SET authenticated_at = now() - interval '1 day'
+      WHERE user_id = (SELECT id FROM users WHERE email = ${email})
+    `
+
+    const appleSub = randomUUID()
+    const err = await nativeSignIn({ provider: 'apple', intent: 'link', idToken: appleIdToken({ sub: appleSub, email: 'relay@privaterelay.appleid.com' }) }, bearer).catch(e => e)
+    expect(err.statusCode).toBe(403)
+    expect(err.data?.data?.reauth).toBe(true)
+    expect(await sql`SELECT 1 FROM user_identities WHERE subject = ${appleSub}`).toHaveLength(0)
+
+    const recent = await api('/api/auth/recent', { headers: bearer }).catch(e => e)
+    expect(recent.statusCode).toBe(403)
+
+    const start = await fetch(new URL('/api/social-auth/google/start?intent=link&redirect=/account', inject('socialAuthUrl')), { headers: bearer, redirect: 'manual' })
+    expect(start.headers.get('location')).toContain('link=reauth_required')
   })
 
   it('won\'t unlink the only way to sign in, but will once a password is set', async () => {

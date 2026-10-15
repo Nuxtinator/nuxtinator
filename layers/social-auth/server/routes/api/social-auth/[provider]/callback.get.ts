@@ -1,5 +1,5 @@
 import { getHeader } from 'h3'
-import { startSession, markReauthenticated } from '#core/server/utils/sessions'
+import { startSession, markReauthenticated, hasRecentAuth } from '#core/server/utils/sessions'
 import { postSignInRedirect } from '#core/server/utils/accounts'
 import { getAccountPath, withQueryParams } from '#core/server/utils/account-path'
 import { logEvent } from '#core/server/utils/activity-logger'
@@ -16,7 +16,7 @@ export default defineEventHandler(async (event) => {
   const query = getQuery(event)
   const accountPath = getAccountPath(event)
 
-  const fail = (code: SignInErrorCode | 'cancelled', f: SocialFlow | null = flow) => {
+  const fail = (code: SignInErrorCode | 'cancelled' | 'reauth_required', f: SocialFlow | null = flow) => {
     if (f?.intent === 'link' || f?.intent === 'reauth') {
       return sendRedirect(event, withQueryParams(f.redirect || accountPath, { link: code }))
     }
@@ -29,6 +29,8 @@ export default defineEventHandler(async (event) => {
   if (!cfg?.webEnabled || !flow || flow.provider !== cfg.id) return fail('failed')
   if (typeof query.error === 'string') return fail(query.error === 'access_denied' || query.error === 'user_cancelled_authorize' ? 'cancelled' : 'failed')
   if (query.state !== flow.state || typeof query.code !== 'string') return fail('failed')
+  // The step-up checked at start must still hold when the identity is linked.
+  if (flow.intent === 'link' && !(flow.sessionId && await hasRecentAuth(flow.sessionId))) return fail('reauth_required')
 
   let profile
   let refreshToken: string | null
