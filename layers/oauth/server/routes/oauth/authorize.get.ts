@@ -21,6 +21,7 @@ import {
 } from '../../utils/oauth-validation'
 import { logOauthEvent, OAUTH_EVENTS } from '../../utils/oauth-audit'
 import type { H3Event } from 'h3'
+import { getClientIp } from '#core/server/utils/client-ip'
 
 function sendHtmlError(event: H3Event, status: number, title: string, message: string): string {
   setResponseStatus(event, status)
@@ -30,7 +31,7 @@ function sendHtmlError(event: H3Event, status: number, title: string, message: s
 
 export default defineEventHandler(async (event) => {
   const cfg = getOauthConfig()
-  const ip = getRequestIP(event, { xForwardedFor: true }) || 'unknown'
+  const ip = getClientIp(event)
   const userAgent = getHeader(event, 'user-agent') || undefined
 
   // Counts and records in one locked step, so parallel requests can't all pass.
