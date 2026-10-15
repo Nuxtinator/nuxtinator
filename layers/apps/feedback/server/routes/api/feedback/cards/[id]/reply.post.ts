@@ -27,7 +27,7 @@ export default defineEventHandler(async (event) => {
   }
   const subjectIn = typeof body.subject === 'string' ? body.subject.trim().slice(0, SUBJECT_CAP) : ''
 
-  return await withOrgPermission(event, 'feedback.write', async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
     const card = await tx
       .selectFrom('cards')
       .select(['id', 'post_type', 'post_meta'])
