@@ -6,7 +6,13 @@ import { sql, type Selectable, type Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { HelpinatorLibraryKind } from '../database/schema'
 import { HELPINATOR_UUID_RE } from './helpinator-widgets'
-import { helpinatorUrlLooksPublic } from './helpinator-safe-fetch'
+import { urlLooksPublic } from '#core/server/utils/safe-fetch'
+
+// `HELPINATOR_CRAWL_ALLOW_PRIVATE=true` lets the crawler reach private and
+// loopback addresses (local development against a site on your own machine).
+export function helpinatorCrawlAllowsPrivate(): boolean {
+  return process.env.HELPINATOR_CRAWL_ALLOW_PRIVATE === 'true'
+}
 
 type Tx = Transaction<Database>
 
@@ -29,7 +35,7 @@ const HTTP_URL = z.string().trim().max(2000).refine((v) => {
   } catch {
     return false
   }
-}, 'Enter an http(s) URL').refine(helpinatorUrlLooksPublic, 'That address is not reachable from the internet')
+}, 'Enter an http(s) URL').refine(url => urlLooksPublic(url, helpinatorCrawlAllowsPrivate()), 'That address is not reachable from the internet')
 
 export const HELPINATOR_MAX_PAGE_MB = 10
 

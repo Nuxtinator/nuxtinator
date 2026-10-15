@@ -3,7 +3,10 @@
 // down). Per-org: reads the org's grounding_source_urls setting, fetches each
 // URL's HTML → text, upserts, prunes URLs no longer configured, resets the
 // per-org static-pack cache. Fetches happen OUTSIDE any transaction; reads/writes
-// run in scoped transactions (the send-sweep pattern).
+// run in scoped transactions (the send-sweep pattern). URLs come from org
+// admins, so fetches go through core's safeFetch, which refuses private,
+// loopback and cloud-metadata addresses on every redirect hop.
+import { safeFetch } from '#core/server/utils/safe-fetch'
 import { getInboxSettings } from './inbox-settings'
 import {
   inboxUpsertGroundingDocument,
@@ -38,13 +41,21 @@ function htmlToPlainText(html: string): string {
     .trim()
 }
 
+const MAX_PAGE_BYTES = 5 * 1024 * 1024
+
 async function fetchPageText(url: string): Promise<string> {
   // VITEST short-circuit — no network in tests; the grounding-refresh endpoint
   // still exercises the upsert/prune path against these stubs.
   if (process.env.VITEST) return `Stubbed reference content for ${url}.`
-  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return htmlToPlainText(await res.text())
+  const res = await safeFetch(url, {
+    headers: { accept: 'text/html,application/xhtml+xml,text/plain' },
+    timeoutMs: 10_000,
+    maxBytes: MAX_PAGE_BYTES,
+    wantBody: status => status >= 200 && status < 300
+  })
+  if (res.status < 200 || res.status >= 300) throw new Error(`HTTP ${res.status}`)
+  if (res.tooLarge || res.body === null) throw new Error('page too large')
+  return htmlToPlainText(res.body)
 }
 
 // Sync one org's grounding. orgId null = single-tenant deployment-global scope.
