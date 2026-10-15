@@ -23,6 +23,16 @@ describe('POST /api/auth/login + GET /api/auth/me', () => {
     expect(err.statusCode).toBe(401)
   })
 
+  it('a concurrent burst of wrong passwords gets at most 10 tries per email', async () => {
+    const user = await createTestUser(sql, { password: 'rightpw' })
+    const results = await Promise.all(Array.from({ length: 30 }, (_, i) =>
+      $fetch('/api/auth/login', { method: 'POST', body: { email: user.email, password: `wrong-${i}` } }).catch(e => e)
+    ))
+    const statuses = results.map(r => r.statusCode)
+    expect(statuses.filter(s => s === 401).length).toBeLessThanOrEqual(10)
+    expect(statuses.filter(s => s === 429).length).toBeGreaterThanOrEqual(20)
+  })
+
   it('returns 401 when user is not verified', async () => {
     const user = await createTestUser(sql, { verified: false, password: 'pw' })
     const err = await $fetch('/api/auth/login', {
