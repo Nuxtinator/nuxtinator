@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { useActiveOrg } from '#tenant'
+
 const { apps } = await useApps()
 const activeApp = useActiveApp(apps)
 const route = useRoute()
 const { isHostAdmin } = usePermissions()
 const isHome = computed(() => /^\/(@[^/]+\/?)?$/.test(route.path))
+const { slug } = useActiveOrg()
+const homePath = computed(() => slug.value ? `/@${slug.value}/` : '/')
 
 // OrgSettingsRailLink ships with the tenancy layer; single-tenant builds have
 // no org settings, so the rail's bottom slot stays empty.
@@ -18,7 +22,7 @@ onBeforeUnmount(stop)
 <template>
   <aside class="flex-col items-center w-14 shrink-0 border-r border-(--ui-border) bg-neutral-200 dark:bg-neutral-950 py-3 gap-1">
     <NuxtLink
-      to="/"
+      :to="homePath"
       class="flex items-center justify-center size-10 rounded-md transition-colors"
       :class="isHome
         ? 'bg-(--ui-bg-accented) text-(--ui-text)'
