@@ -3,7 +3,7 @@
 // and to the conversations the caller can access (channels + their own DMs).
 
 import { sql } from 'kysely'
-import { withOrgContext } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 import { accessibleConversationIds } from '../../../utils/conversation-access'
 
 const MAX_LIMIT = 50
@@ -37,7 +37,7 @@ const ESCAPED_BODY_COMMENT = sql<string>`
 `
 
 export default defineEventHandler(async (event) => {
-  return await withOrgContext(event, { appId: 'messages' }, async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'messages' }, 'messages.read', async (tx, ctx) => {
     const q = getQuery(event)
     const query = typeof q.q === 'string' ? q.q.trim() : ''
     const limit = Math.min(MAX_LIMIT, Math.max(1, Number(q.limit) || 20))

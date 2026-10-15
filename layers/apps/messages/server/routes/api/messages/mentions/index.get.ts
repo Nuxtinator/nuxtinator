@@ -1,13 +1,13 @@
 // GET /api/messages/mentions?cursor=&limit=
 // Items + comments where the caller was mentioned, newest first.
 
-import { withOrgContext } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 
 const DEFAULT_LIMIT = 30
 const MAX_LIMIT = 100
 
 export default defineEventHandler(async (event) => {
-  return await withOrgContext(event, { appId: 'messages' }, async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'messages' }, 'messages.read', async (tx, ctx) => {
     const q = getQuery(event)
     const cursor = typeof q.cursor === 'string' ? q.cursor : null
     const limit = Math.min(MAX_LIMIT, Math.max(1, Number(q.limit) || DEFAULT_LIMIT))
