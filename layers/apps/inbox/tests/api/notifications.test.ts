@@ -93,6 +93,28 @@ describe('staff notification targeting', () => {
     expect(rows[0]!.email_mode).toBe('immediate')
   })
 
+  it('does not email an assignee who has left the org; the reply goes to the broadcast instead', async () => {
+    const { org, user, domain } = await createInboxOrgWith(sql)
+    await setInboxOrgSetting(sql, org.id, 'auto_ack_enabled', false)
+    const former = await createInboxUser(sql)
+    const sender = uniqueSender('former')
+    const first = await postInbound({ recipient: `hello@${domain}`, from: `R <${sender}>` })
+    const convId = first.body.conversation_id as string
+    // Assigned to someone who is no longer a member of the org.
+    const [row] = await sql`
+      UPDATE inbox_conversations SET assigned_user_id = ${former.id} WHERE id = ${convId} RETURNING reply_token
+    `
+    await postInbound({
+      recipient: `contact+${row!.reply_token}@${domain}`,
+      from: `R <${sender}>`,
+      subject: 'Re: Test subject'
+    })
+
+    const rows = (await notificationRows(convId)).filter(r => (r.title as string).startsWith('New reply from'))
+    expect(rows.map(r => r.user_id)).not.toContain(former.id)
+    expect(rows.map(r => r.user_id)).toContain(user.id)
+  })
+
   it('never notifies for a vacation auto-reply; a held intruder message raises the held notice', async () => {
     const { domain } = await createInboxOrgWith(sql)
     const sender = uniqueSender('quiet')
