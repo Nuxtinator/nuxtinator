@@ -37,6 +37,7 @@ const emit = defineEmits<{
   save: [patch: Partial<Card> & { post_meta?: Record<string, any> }]
   delete: [cardId: string]
   archive: [patch: Partial<Card> & { post_meta?: Record<string, any> }]
+  replied: [card: Card]
 }>()
 
 const toast = useToast()
@@ -287,6 +288,76 @@ const submittedAtFormatted = computed(() => {
   if (isNaN(d.getTime())) return ''
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 })
+
+// -------- Reply to submitter --------
+// Only signed-in widget submissions carry an address to reply to.
+const submitterEmail = computed(() => {
+  const v = getMeta('submitter_email')
+  return typeof v === 'string' ? v.trim() : ''
+})
+
+interface FeedbackReply {
+  sent_at: string
+  sent_by_name: string
+  to: string
+  subject: string
+  message: string
+}
+
+const replies = computed<FeedbackReply[]>(() => {
+  const v = draft.value?.post_meta?.replies
+  return Array.isArray(v) ? v : []
+})
+
+function formatDateTime(iso: string): string {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+// The submitter's fields as the reply email quotes them.
+const originalFeedback = computed(() => {
+  const problem = String(getMeta('problem_description') || '').trim()
+  const fix = String(getMeta('suggested_fix') || '').trim()
+  const parts = getMeta('feedback_sub_type') === 'idea'
+    ? [{ label: 'Idea', text: fix }, { label: 'Problem it solves', text: problem }]
+    : [{ label: 'Problem', text: problem }, { label: 'Suggested solution', text: fix }]
+  return parts.filter(p => p.text)
+})
+
+const replyOpen = ref(false)
+const replySending = ref(false)
+const replyForm = reactive({ subject: '', message: '' })
+
+function openReply() {
+  if (!props.card) return
+  const headline = cardHeadline(props.card)
+  const short = headline.length > 80 ? `${headline.slice(0, 77)}…` : headline
+  const name = String(getMeta('submitter_name') || '').trim().split(/\s+/)[0]
+  replyForm.subject = `Re: ${short}`
+  replyForm.message = name ? `Hi ${name},\n\n` : ''
+  replyOpen.value = true
+}
+
+async function sendReply() {
+  if (!props.card || !draft.value || !replyForm.message.trim()) return
+  replySending.value = true
+  try {
+    const updated = await $fetch<Card>(`/api/feedback/cards/${props.card.id}/reply`, {
+      method: 'POST',
+      body: { subject: replyForm.subject, message: replyForm.message }
+    })
+    // Carry the new reply into the draft so a later Save keeps it.
+    draft.value.post_meta = { ...draft.value.post_meta, replies: updated.post_meta?.replies ?? [] }
+    emit('replied', updated)
+    replyOpen.value = false
+    toast.add({ title: 'Reply sent', description: `Emailed ${submitterEmail.value}`, icon: 'i-lucide-send', color: 'success' })
+  } catch (err: any) {
+    toast.add({ title: 'Reply failed', description: err?.data?.statusMessage || err?.message, color: 'error' })
+  } finally {
+    replySending.value = false
+  }
+}
 
 function setMeta(key: string, value: any) {
   if (!draft.value) return
@@ -577,6 +648,22 @@ async function handleCopyForAgent() {
                 <UIcon name="i-lucide-external-link" class="shrink-0" />
                 <span>{{ getMeta('page_url') }}</span>
               </a>
+              <div v-if="submitterEmail" class="flex items-center justify-between gap-2">
+                <span class="inline-flex min-w-0 items-center gap-1.5 text-(--ui-text-muted)">
+                  <UIcon name="i-lucide-mail" class="shrink-0" />
+                  <span class="truncate">{{ submitterEmail }}</span>
+                </span>
+                <UButton
+                  size="xs"
+                  color="primary"
+                  variant="soft"
+                  icon="i-lucide-reply"
+                  title="Email the submitter"
+                  @click="openReply"
+                >
+                  Reply
+                </UButton>
+              </div>
               <p v-if="!getMeta('submitter_name') && !getMeta('page_url') && !deviceSummary && !submittedAtFormatted" class="text-(--ui-text-muted) italic">
                 No user or device info captured.
               </p>
@@ -673,6 +760,26 @@ async function handleCopyForAgent() {
                     </li>
                   </ul>
                 </div>
+              </div>
+            </section>
+
+            <!-- Section 2c: Replies sent to the submitter -->
+            <section v-if="replies.length" class="space-y-3 pt-4 border-t border-(--ui-border)">
+              <h3 class="text-sm font-semibold text-(--ui-text-muted) uppercase tracking-wide">
+                Replies
+              </h3>
+              <div
+                v-for="(r, i) in replies"
+                :key="`${r.sent_at}-${i}`"
+                class="rounded-md bg-(--ui-bg-elevated)/50 px-3 py-2 space-y-1"
+              >
+                <div class="flex flex-wrap items-center gap-x-2 text-xs text-(--ui-text-muted)">
+                  <UIcon name="i-lucide-send" class="shrink-0" />
+                  <span class="text-(--ui-text)">{{ r.sent_by_name }}</span>
+                  <span>→ {{ r.to }}</span>
+                  <span>· {{ formatDateTime(r.sent_at) }}</span>
+                </div>
+                <p class="text-sm whitespace-pre-wrap break-words">{{ r.message }}</p>
               </div>
             </section>
 
@@ -797,6 +904,51 @@ async function handleCopyForAgent() {
       </div>
     </template>
   </USlideover>
+
+  <UModal
+    v-model:open="replyOpen"
+    :title="`Reply to ${getMeta('submitter_name') || submitterEmail}`"
+    description="Sent by email. Their original feedback is quoted below your message."
+    :ui="{ content: 'max-w-xl' }"
+  >
+    <template #body>
+      <div class="space-y-4">
+        <UFormField label="To">
+          <UInput :model-value="submitterEmail" disabled icon="i-lucide-mail" class="w-full" />
+        </UFormField>
+        <UFormField label="Subject">
+          <UInput v-model="replyForm.subject" class="w-full" />
+        </UFormField>
+        <UFormField label="Message" required>
+          <UTextarea v-model="replyForm.message" :rows="8" autofocus autoresize class="w-full" />
+        </UFormField>
+        <div v-if="originalFeedback.length" class="space-y-2">
+          <div class="text-xs font-medium text-(--ui-text-muted)">
+            They wrote{{ submittedAtFormatted ? ` on ${submittedAtFormatted}` : '' }}
+          </div>
+          <div class="border-l-4 border-(--ui-border-accented) pl-3 space-y-2 text-sm text-(--ui-text-muted)">
+            <div v-for="p in originalFeedback" :key="p.label">
+              <div class="font-medium text-(--ui-text-toned)">{{ p.label }}</div>
+              <p class="whitespace-pre-wrap break-words">{{ p.text }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+    <template #footer>
+      <div class="flex w-full justify-end gap-2">
+        <UButton variant="ghost" @click="replyOpen = false">Cancel</UButton>
+        <UButton
+          icon="i-lucide-send"
+          :loading="replySending"
+          :disabled="!replyForm.message.trim()"
+          @click="sendReply"
+        >
+          Send
+        </UButton>
+      </div>
+    </template>
+  </UModal>
 
   <UModal v-model:open="lightboxOpen" fullscreen :close="false">
     <template #content>
