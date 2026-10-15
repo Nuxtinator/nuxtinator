@@ -58,7 +58,7 @@ APP_DATABASE_URL=postgres://app_user:...@localhost/<dbname>  # default for the h
 NUXT_TENANT_FLOW_SECRET=<random 32+ bytes hex>        # HMAC key for OAuth state-binding
 ```
 
-The host's `db` falls back to `DATABASE_URL` if `APP_DATABASE_URL` is unset (dev convenience). For production multi-tenant, both should be set so RLS isolation is real.
+The host's `db` falls back to `DATABASE_URL` if `APP_DATABASE_URL` is unset. With the tenancy layer loaded, `db`'s role must be one RLS applies to: if it is a superuser, has `BYPASSRLS`, or owns an RLS table, every request is refused with a 503 and the reason is logged as `[tenancy] Tenant isolation is not enforced…` ([rls-guard.ts](../layers/tenancy/server/utils/rls-guard.ts)). Set both variables, in dev too.
 
 `NUXT_TENANT_FLOW_SECRET` is consumed by `encodeFlowOrg`/`decodeFlowOrg` (see [layers/tenancy/server/utils/tenant.ts](../layers/tenancy/server/utils/tenant.ts)). Used by OAuth flows to bind the active org to the `state` parameter — without this, an OAuth flow started in org A and completed after a tab switch could land tokens in org B.
 

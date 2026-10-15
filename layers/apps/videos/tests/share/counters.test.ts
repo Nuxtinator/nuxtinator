@@ -62,7 +62,7 @@ describe('POST /api/videos/share/:token/play', () => {
     expect(c.play_count).toBe(5)
   })
 
-  it('org video: anonymous play gets 404 (RLS hides the row)', async () => {
+  it('org video: anonymous play gets 404 (existence not revealed)', async () => {
     const { org, user } = await createVideosOrgWith(sql, ['admin'])
     const video = await createTestVideo(sql, {
       org_id: org.id, user_id: user.id, visibility: 'org', play_count: 0
@@ -91,7 +91,7 @@ describe('POST /api/videos/share/:token/play', () => {
     expect(c.play_count).toBe(0)
   })
 
-  it('private video: anonymous play gets 404 (RLS hides the row)', async () => {
+  it('private video: anonymous play gets 404 (existence not revealed)', async () => {
     const { org, user } = await createVideosOrgWith(sql, ['admin'])
     const video = await createTestVideo(sql, {
       org_id: org.id, user_id: user.id, visibility: 'private', play_count: 0
@@ -211,7 +211,7 @@ describe('POST /api/videos/share/:token/view', () => {
     expect(c.view_count).toBe(2)
   })
 
-  it('private video: anonymous (no GUC) view returns 404 — RLS hides the row', async () => {
+  it('private video: anonymous view returns 404 (existence not revealed)', async () => {
     const { org, user } = await createVideosOrgWith(sql, ['admin'])
     const video = await createTestVideo(sql, {
       org_id: org.id, user_id: user.id, visibility: 'private'
@@ -226,7 +226,7 @@ describe('POST /api/videos/share/:token/view', () => {
     const video = await createTestVideo(sql, {
       org_id: a.org.id, user_id: a.user.id, visibility: 'private'
     })
-    // b.user with b.org as active → RLS hides a.org rows → 404.
+    // b.user is neither the owner nor a member of a.org → 403.
     const err = await $fetch(`/api/videos/share/${video.share_token}/view`, {
       method: 'POST', ...withOrgHeader(b.auth, b.org.slug)
     }).catch(e => e)
