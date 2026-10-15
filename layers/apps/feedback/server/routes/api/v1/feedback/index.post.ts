@@ -61,10 +61,10 @@ function sanitizeFilename(name: string): string {
 }
 
 export default defineEventHandler(async (event) => {
-  const authUser = getWidgetAuthUser(event)
   // Per-IP cap first — before parsing multipart / reading file bytes. Anonymous
   // submissions are the abuse path, so they get a tighter limit than signed-in.
-  await enforceWidgetRateLimit(event, 'ratelimit.feedback.submit', 'ip', widgetClientIp(event), authUser ? 20 : 5, 60_000)
+  const signedIn = !!getWidgetAuthUser(event, null)
+  await enforceWidgetRateLimit(event, 'ratelimit.feedback.submit', 'ip', widgetClientIp(event), signedIn ? 20 : 5, 60_000)
 
   const contentType = (getHeader(event, 'content-type') || '').toLowerCase()
   const isMultipart = contentType.startsWith('multipart/form-data')
@@ -127,6 +127,7 @@ export default defineEventHandler(async (event) => {
   if (!projectId) {
     throw createError({ statusCode: 400, statusMessage: 'project_id required' })
   }
+  const authUser = getWidgetAuthUser(event, projectId)
   // Per-project cap before any S3 upload — bounds flooding of a single target
   // even across rotating IPs.
   await enforceWidgetRateLimit(event, 'ratelimit.feedback.submit.project', 'project', projectId, 60, 60_000)

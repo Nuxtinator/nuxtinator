@@ -226,7 +226,7 @@ describe('public widget endpoints', () => {
     const submitter = await createFeedbackUser(sql)
     // The widget Bearer path verifies a feedback-scoped token (signScopedToken),
     // not a full session cookie — mint one carrying the matching scope.
-    const token = generateScopedTestToken(submitter, 'feedback')
+    const token = generateScopedTestToken(submitter, 'feedback', { project_id: project.id })
 
     const res = await $fetch<{ id: string }>('/api/v1/feedback', {
       method: 'POST',
