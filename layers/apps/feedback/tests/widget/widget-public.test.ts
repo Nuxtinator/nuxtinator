@@ -80,6 +80,26 @@ describe('public widget endpoints', () => {
     expect(meta.feedback_sub_type).toBe('bug')
   })
 
+  it('POST /api/v1/feedback: stores page_url only when it is an http(s) URL', async () => {
+    const { org } = await createFeedbackOrgWith(sql, ['admin'])
+    const project = await createTestProject(sql, { org_id: org.id })
+    const cases: Array<[string, string]> = [
+      ['https://example.com/page?x=1', 'https://example.com/page?x=1'],
+      ['javascript:alert(document.cookie)', ''],
+      ['JaVaScRiPt:alert(1)', ''],
+      ['data:text/html,<script>alert(1)</script>', ''],
+      ['/relative/path', '']
+    ]
+    for (const [sent, stored] of cases) {
+      const res = await $fetch<{ id: string }>('/api/v1/feedback', {
+        method: 'POST',
+        body: { project_id: project.id, problem_description: 'pd', submitter_name: 'Anon', page_url: sent }
+      })
+      const rows = await sql<{ post_meta: any }[]>`SELECT post_meta FROM cards WHERE id = ${res.id}`
+      expect(rows[0]!.post_meta.page_url, sent).toBe(stored)
+    }
+  })
+
   it('POST /api/v1/feedback: authenticated submitter tags the card with their user id', async () => {
     const { org } = await createFeedbackOrgWith(sql, ['admin'])
     const project = await createTestProject(sql, { org_id: org.id })

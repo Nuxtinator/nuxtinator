@@ -289,6 +289,9 @@ const submittedAtFormatted = computed(() => {
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 })
 
+// Only http(s) page URLs become links; anything else is shown as text.
+const pageUrlIsLink = computed(() => /^https?:\/\//i.test(String(getMeta('page_url'))))
+
 // -------- Reply to submitter --------
 // Only signed-in widget submissions carry an address to reply to.
 const submitterEmail = computed(() => {
@@ -639,7 +642,7 @@ async function handleCopyForAgent() {
                 </span>
               </div>
               <a
-                v-if="getMeta('page_url')"
+                v-if="pageUrlIsLink"
                 :href="getMeta('page_url')"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -648,6 +651,10 @@ async function handleCopyForAgent() {
                 <UIcon name="i-lucide-external-link" class="shrink-0" />
                 <span>{{ getMeta('page_url') }}</span>
               </a>
+              <span
+                v-else-if="getMeta('page_url')"
+                class="break-all text-(--ui-text-muted)"
+              >{{ getMeta('page_url') }}</span>
               <div v-if="submitterEmail" class="flex items-center justify-between gap-2">
                 <span class="inline-flex min-w-0 items-center gap-1.5 text-(--ui-text-muted)">
                   <UIcon name="i-lucide-mail" class="shrink-0" />

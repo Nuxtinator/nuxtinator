@@ -48,6 +48,18 @@ function clampString(v: unknown, max = CHAR_CAP): string {
   return s.length > max ? s.slice(0, max) : s
 }
 
+// An absolute http(s) URL, else ''. Staff open page_url as a link, so other
+// schemes (javascript:, data:) are never stored.
+function httpUrl(v: unknown): string {
+  const s = clampString(v)
+  try {
+    const protocol = new URL(s).protocol
+    return protocol === 'http:' || protocol === 'https:' ? s : ''
+  } catch {
+    return ''
+  }
+}
+
 interface IncomingFile {
   kind: 'screenshot' | 'attachment'
   filename: string
@@ -183,7 +195,7 @@ export default defineEventHandler(async (event) => {
     problem_description,
     suggested_fix,
     screenshot_url: typeof body.screenshot_url === 'string' ? body.screenshot_url : '',
-    page_url: typeof body.page_url === 'string' ? body.page_url : '',
+    page_url: httpUrl(body.page_url),
     page_path: typeof body.page_path === 'string' ? body.page_path : '',
     locale: typeof body.locale === 'string' ? body.locale : '',
     referrer: typeof body.referrer === 'string' ? body.referrer : '',
