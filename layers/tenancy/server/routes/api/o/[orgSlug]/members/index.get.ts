@@ -65,6 +65,8 @@ export default defineEventHandler(async (event) => {
         'memberships.created_at as joined_at',
         'users.email as email',
         'users.display_name as display_name',
+        'users.avatar as avatar',
+        'users.is_admin as is_admin',
         'users.verified as verified'
       ])
       .where('memberships.org_id', '=', ctx.orgId)
@@ -77,6 +79,11 @@ export default defineEventHandler(async (event) => {
       .offset((page - 1) * pageSize)
       .execute()
 
+    // Mirrors `authorizeMemberAvatarEdit`.
+    const actor = await tx.selectFrom('users').select('is_admin').where('id', '=', ctx.userId).executeTakeFirst()
+    const actorIsAdmin = !!actor?.is_admin
+    const canEditAvatars = actorIsAdmin || ctx.perms.has('org.members.edit_avatar')
+
     const decorated = rows.map((r) => {
       const status: 'active' | 'not_verified' = r.verified ? 'active' : 'not_verified'
       return {
@@ -84,6 +91,8 @@ export default defineEventHandler(async (event) => {
         user_id: r.user_id,
         email: r.email,
         display_name: r.display_name,
+        avatar: r.avatar || null,
+        avatar_editable: canEditAvatars && (actorIsAdmin || !r.is_admin),
         roles: r.roles,
         status,
         joined_at: r.joined_at

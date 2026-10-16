@@ -14,6 +14,8 @@ interface MemberRow {
   user_id: string
   email: string
   display_name: string
+  avatar: string | null
+  avatar_editable: boolean
   roles: string[]
   status: MemberStatus
   joined_at: string
@@ -41,7 +43,8 @@ const STATUS_META: Record<MemberStatus, { label: string, color: 'success' | 'war
 const route = useRoute()
 const orgSlug = computed(() => route.params.orgSlug as string)
 const toast = useToast()
-const { user: currentUser } = useAuth()
+const { user: currentUser, checkAuth } = useAuth()
+const { isHostAdmin } = usePermissions()
 
 const { data: org } = await useFetch<OrgInfo>(() => `/api/o/${orgSlug.value}`, {
   watch: [orgSlug],
@@ -53,7 +56,8 @@ const has = (p: string) => myPerms.value.has(p)
 const canInvite = computed(() => has('org.members.invite'))
 const canRemove = computed(() => has('org.members.remove'))
 const canManageRoles = computed(() => has('org.members.manage_roles'))
-const canOpenMember = computed(() => canRemove.value || canManageRoles.value || canInvite.value)
+const canEditAvatar = computed(() => has('org.members.edit_avatar') || isHostAdmin.value)
+const canOpenMember = computed(() => canRemove.value || canManageRoles.value || canInvite.value || canEditAvatar.value)
 
 const { roles: assignableRoles, refresh: refreshRoles } = await useOrgAssignableRoles(orgSlug)
 
@@ -295,6 +299,69 @@ const handleSaveRoles = async () => {
     })
   } finally {
     savingRoles.value = false
+  }
+}
+
+// ---------- avatar ----------
+const { data: avatarInfo } = useLazyFetch<{ can_upload: boolean, max_mb: number, types: string[], types_text: string }>('/api/profile/avatar', {
+  key: 'profile-avatar',
+  default: () => ({ can_upload: false, max_mb: 0, types: [], types_text: '' })
+})
+const avatarInput = ref<HTMLInputElement | null>(null)
+const avatarBusy = ref<'upload' | 'remove' | null>(null)
+
+const applyAvatar = async (userId: string, avatar: string | null) => {
+  if (data.value) {
+    data.value = {
+      ...data.value,
+      rows: data.value.rows.map(r => r.user_id === userId ? { ...r, avatar } : r)
+    }
+  }
+  if (selectedMember.value?.user_id === userId) {
+    selectedMember.value = { ...selectedMember.value, avatar }
+  }
+  if (currentUser.value?.id === userId) await checkAuth()
+}
+
+const handleAvatarUpload = async (event: Event) => {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (avatarInput.value) avatarInput.value.value = ''
+  if (!file || !selectedMember.value) return
+  if (!avatarInfo.value.types.includes(file.type)) {
+    toast.add({ title: `Use a ${avatarInfo.value.types_text} image`, color: 'error' })
+    return
+  }
+  if (file.size > avatarInfo.value.max_mb * 1024 * 1024) {
+    toast.add({ title: `Image too large (max ${avatarInfo.value.max_mb} MB)`, color: 'error' })
+    return
+  }
+  const userId = selectedMember.value.user_id
+  avatarBusy.value = 'upload'
+  try {
+    const body = new FormData()
+    body.append('file', file)
+    const res = await $fetch<{ avatar: string }>(`/api/o/${orgSlug.value}/members/${userId}/avatar`, { method: 'POST', body })
+    await applyAvatar(userId, res.avatar)
+    toast.add({ title: 'Avatar updated', color: 'success' })
+  } catch (err: unknown) {
+    toast.add({ title: (err as { data?: { statusMessage?: string } })?.data?.statusMessage || 'Could not upload the image', color: 'error' })
+  } finally {
+    avatarBusy.value = null
+  }
+}
+
+const handleAvatarRemove = async () => {
+  if (!selectedMember.value) return
+  const userId = selectedMember.value.user_id
+  avatarBusy.value = 'remove'
+  try {
+    await $fetch(`/api/o/${orgSlug.value}/members/${userId}/avatar`, { method: 'DELETE' })
+    await applyAvatar(userId, null)
+    toast.add({ title: 'Avatar removed', color: 'success' })
+  } catch (err: unknown) {
+    toast.add({ title: (err as { data?: { statusMessage?: string } })?.data?.statusMessage || 'Could not remove the avatar', color: 'error' })
+  } finally {
+    avatarBusy.value = null
   }
 }
 
@@ -611,7 +678,16 @@ const handleRemove = async () => {
         >
           <!-- Identity hero -->
           <section class="flex items-start gap-4">
-            <div class="shrink-0 size-16 rounded-full bg-gradient-to-br from-(--ui-primary) to-(--ui-primary)/60 text-white flex items-center justify-center text-xl font-semibold ring-1 ring-(--ui-border) shadow-sm">
+            <img
+              v-if="selectedMember.avatar"
+              :src="selectedMember.avatar"
+              :alt="selectedMember.display_name"
+              class="shrink-0 size-16 rounded-full object-cover ring-1 ring-(--ui-border) shadow-sm"
+            >
+            <div
+              v-else
+              class="shrink-0 size-16 rounded-full bg-gradient-to-br from-(--ui-primary) to-(--ui-primary)/60 text-white flex items-center justify-center text-xl font-semibold ring-1 ring-(--ui-border) shadow-sm"
+            >
               {{ initialsOf(selectedMember.display_name, selectedMember.email) }}
             </div>
             <div class="flex-1 min-w-0">
@@ -656,6 +732,43 @@ const handleRemove = async () => {
                   />
                   {{ STATUS_META[selectedMember.status].label }}
                 </UBadge>
+              </div>
+              <div
+                v-if="selectedMember.avatar_editable && (avatarInfo.can_upload || selectedMember.avatar)"
+                class="mt-3 flex items-center gap-2 flex-wrap"
+              >
+                <template v-if="avatarInfo.can_upload">
+                  <input
+                    ref="avatarInput"
+                    type="file"
+                    :accept="avatarInfo.types.join(',')"
+                    class="hidden"
+                    @change="handleAvatarUpload"
+                  >
+                  <UButton
+                    size="xs"
+                    color="neutral"
+                    variant="outline"
+                    icon="i-lucide-upload"
+                    :loading="avatarBusy === 'upload'"
+                    :disabled="!!avatarBusy"
+                    @click="avatarInput?.click()"
+                  >
+                    {{ selectedMember.avatar ? 'Change avatar' : 'Upload avatar' }}
+                  </UButton>
+                </template>
+                <UButton
+                  v-if="selectedMember.avatar"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-trash-2"
+                  :loading="avatarBusy === 'remove'"
+                  :disabled="!!avatarBusy"
+                  @click="handleAvatarRemove"
+                >
+                  Remove avatar
+                </UButton>
               </div>
             </div>
           </section>
