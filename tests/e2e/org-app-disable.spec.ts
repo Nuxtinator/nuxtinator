@@ -28,7 +28,7 @@ test('disable an app from settings → tile disappears from the org launcher', a
   const { org } = await loginIntoNewOrg(page)
 
   // 1. Org home shows the Messages tile.
-  await page.goto(`/@${org.slug}/`)
+  await page.goto(`/@${org.slug}/dashboard`)
   await expect(page.locator('section').filter({ hasText: /apps/i }).first()).toContainText(APP_TITLE_RE)
 
   // 2. Disable Messages from settings/apps. The row uses USwitch (role=switch).
@@ -44,7 +44,7 @@ test('disable an app from settings → tile disappears from the org launcher', a
   ])
 
   // 3. Back to the launcher: Messages tile is gone.
-  await page.goto(`/@${org.slug}/`)
+  await page.goto(`/@${org.slug}/dashboard`)
   await expect(page.locator('section').filter({ hasText: /apps/i }).first()).not.toContainText(APP_TITLE_RE)
 })
 
@@ -62,5 +62,5 @@ test('opening a disabled app\'s page redirects to the org home', async ({ page }
   ])
 
   await page.goto(`/@${org.slug}/messages`)
-  await expect(page).toHaveURL(new RegExp(`/@${org.slug}/?$`), { timeout: 5000 })
+  await expect(page).toHaveURL(new RegExp(`/@${org.slug}/dashboard$`), { timeout: 5000 })
 })

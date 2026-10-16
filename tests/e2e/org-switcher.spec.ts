@@ -32,15 +32,15 @@ test('multi-org user: picker shows all orgs; dropdown switches to another', asyn
   await expect(page.locator('body')).toContainText(b!.name)
 
   // Click into orgA
-  await page.locator(`a[href="/@${a!.slug}/"]`).first().click()
-  await expect(page).toHaveURL(new RegExp(`/@${a!.slug}/?$`), { timeout: 5000 })
+  await page.locator(`a[href="/@${a!.slug}/dashboard"]`).first().click()
+  await expect(page).toHaveURL(new RegExp(`/@${a!.slug}/dashboard$`), { timeout: 5000 })
 
   // Open OrgSwitcher dropdown (the trigger has aria-label "Active organization: ...")
   await page.getByRole('button', { name: new RegExp(`Active organization: ${a!.name}`, 'i') }).click()
 
   // Click the other org in the popover
-  await page.locator(`a[href="/@${b!.slug}/"]`).first().click()
-  await expect(page).toHaveURL(new RegExp(`/@${b!.slug}/?$`), { timeout: 5000 })
+  await page.locator(`a[href="/@${b!.slug}/dashboard"]`).first().click()
+  await expect(page).toHaveURL(new RegExp(`/@${b!.slug}/dashboard$`), { timeout: 5000 })
   await expect(page.locator('body')).toContainText(b!.name)
 })
 
@@ -59,5 +59,5 @@ test('switching from an app into an org that has it disabled lands on that org\'
 
   await page.getByRole('button', { name: new RegExp(`Active organization: ${a!.name}`, 'i') }).click()
   await page.locator(`a[href="/@${b!.slug}/messages"]`).first().click()
-  await expect(page).toHaveURL(new RegExp(`/@${b!.slug}/?$`), { timeout: 5000 })
+  await expect(page).toHaveURL(new RegExp(`/@${b!.slug}/dashboard$`), { timeout: 5000 })
 })

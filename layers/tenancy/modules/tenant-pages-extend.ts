@@ -9,7 +9,8 @@ import type { NuxtPage } from 'nuxt/schema'
 // Routes excluded from doubling:
 //   - The tenancy layer's own pages already living under `/@:orgSlug/`.
 //   - System routes: /admin, /account, /login, /register, /reset-password,
-//     /accept-invite, /orgs, /, /dashboard. These are global; no slug needed.
+//     /accept-invite, /orgs, /. These are global; no slug needed.
+//   - /dashboard: the tenancy layer ships its own `/@:orgSlug/dashboard`.
 //   - 404 / catch-alls.
 //
 // The original (un-prefixed) route stays in the table; the router guard

@@ -32,7 +32,7 @@ async function submit() {
       body: isPasswordStep.value ? { password: password.value } : { display_name: displayName.value.trim() }
     })
     await checkAuth()
-    await navigateTo(res.redirect || '/', { replace: true })
+    await navigateTo(res.redirect || launcherPath(), { replace: true })
   } catch (err: any) {
     error.value = err?.data?.statusMessage || (isPasswordStep.value ? 'Could not link your account' : 'Could not finish signing up')
     password.value = ''

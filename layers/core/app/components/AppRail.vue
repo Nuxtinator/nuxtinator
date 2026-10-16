@@ -5,9 +5,9 @@ const { apps } = await useApps()
 const activeApp = useActiveApp(apps)
 const route = useRoute()
 const { isHostAdmin } = usePermissions()
-const isHome = computed(() => /^\/(@[^/]+\/?)?$/.test(route.path))
+const isHome = computed(() => /^\/(@[^/]+\/)?dashboard\/?$/.test(route.path))
 const { slug } = useActiveOrg()
-const homePath = computed(() => slug.value ? `/@${slug.value}/` : '/')
+const homePath = computed(() => launcherPath(slug.value))
 
 // OrgSettingsRailLink ships with the tenancy layer; single-tenant builds have
 // no org settings, so the rail's bottom slot stays empty.

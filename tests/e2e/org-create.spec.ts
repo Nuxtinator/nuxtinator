@@ -36,8 +36,8 @@ test('operator admin creates a new org and lands inside it', async ({ page }) =>
   await page.fill('input[placeholder="acme"]', slug)
   await page.getByRole('button', { name: /^create$/i }).click()
 
-  // Lands at /@<slug>/ with the org name visible in the chrome / page.
-  await expect(page).toHaveURL(new RegExp(`/@${slug}/?$`), { timeout: 5000 })
+  // Lands at /@<slug>/dashboard with the org name visible in the chrome / page.
+  await expect(page).toHaveURL(new RegExp(`/@${slug}/dashboard$`), { timeout: 5000 })
   await expect(page.locator('body')).toContainText(name)
 
   // The org row exists in the DB with the user as admin.

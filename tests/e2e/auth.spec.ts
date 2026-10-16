@@ -39,7 +39,7 @@ test('login form auto-redirects single-org user past the picker into their org',
   await page.fill('input[name="password"]', 'testpassword123')
   await page.click('button[type="submit"]')
 
-  await expect(page).toHaveURL(new RegExp(`/@${org.slug}/?$`), { timeout: 5000 })
+  await expect(page).toHaveURL(new RegExp(`/@${org.slug}/dashboard$`), { timeout: 5000 })
   await expect(page.locator('body')).toContainText(org.name)
 })
 

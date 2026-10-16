@@ -64,7 +64,7 @@ test('org admin invites a new email; invite email arrives; new user can accept',
     inviteePage.waitForResponse(r => r.url().includes('/api/auth/accept-invite') && r.status() === 200, { timeout: 10_000 }),
     inviteePage.getByRole('button', { name: /activate account/i }).click()
   ])
-  await expect(inviteePage).toHaveURL(new RegExp(`/@${org.slug}/?$`), { timeout: 10_000 })
+  await expect(inviteePage).toHaveURL(new RegExp(`/@${org.slug}/dashboard$`), { timeout: 10_000 })
   await expect(inviteePage.locator('h1').first()).toContainText(org.name, { timeout: 5000 })
   await inviteeContext.close()
 })
