@@ -185,6 +185,38 @@ describe('context suggest mode', () => {
     )).rejects.toMatchObject({ statusCode: 409 })
   })
 
+  it('a reviewer approves with edits: the edited content is written as the reviewer', async () => {
+    const { org, admin, adminAuth, portfolio, token } = await setup()
+    const res = await callMcpTool(token, 'update_section', {
+      org: org.slug, portfolio_id: portfolio.id, section_key: 'identity', content: 'Suggested text.'
+    })
+    const setId = res.structuredContent?.suggestion_set_id as string
+    const suggestionId = res.structuredContent?.suggestion_id as string
+
+    await expect($fetch(`/api/context/suggestions/${setId}/decide`, {
+      method: 'POST', body: { action: 'approve', content: 'Edited.' }, ...withOrgHeader(adminAuth, org.slug)
+    })).rejects.toMatchObject({ statusCode: 400 })
+
+    const decided = await $fetch<{ set: { suggestions: Array<{ status: string, proposed_content: string }> } }>(
+      `/api/context/suggestions/${setId}/decide`,
+      {
+        method: 'POST',
+        body: { action: 'approve', suggestion_ids: [suggestionId], content: 'Suggested text, tidied.' },
+        ...withOrgHeader(adminAuth, org.slug)
+      }
+    )
+    expect(decided.set.suggestions[0]).toMatchObject({ status: 'approved', proposed_content: 'Suggested text.' })
+    expect(await content(portfolio.id, 'identity')).toBe('Suggested text, tidied.')
+
+    const versions = await sql<{ edited_by: string, source: string, suggestion_id: string, content: string }[]>`
+      SELECT v.edited_by, v.source, v.suggestion_id, v.content
+      FROM context_section_versions v
+      JOIN context_sections s ON s.id = v.section_id
+      WHERE s.portfolio_id = ${portfolio.id} AND s.section_key = 'identity'
+    `
+    expect(versions).toEqual([{ edited_by: admin.id, source: 'suggestion', suggestion_id: suggestionId, content: 'Suggested text, tidied.' }])
+  })
+
   it('flags a suggestion whose section changed since, and approval still overwrites', async () => {
     const { org, adminAuth, portfolio, token } = await setup()
     const res = await callMcpTool(token, 'update_section', {

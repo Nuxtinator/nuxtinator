@@ -8,7 +8,7 @@ const props = defineProps<{
   isAuthor: boolean
   busy: boolean
 }>()
-const emit = defineEmits<{ approve: [], reject: [], withdraw: [] }>()
+const emit = defineEmits<{ approve: [content?: string], reject: [], withdraw: [] }>()
 
 const pending = computed(() => props.suggestion.status === 'pending')
 const status = computed(() => CONTEXT_SUGGESTION_STATUSES[props.suggestion.status])
@@ -20,6 +20,15 @@ const compareWith = ref<'current' | 'base'>('current')
 const before = computed(() => pending.value && compareWith.value === 'current'
   ? props.suggestion.current_content
   : props.suggestion.base_content)
+
+// A reviewer can edit the proposed content and approve the edited version.
+const editing = ref(false)
+const draft = ref('')
+function startEdit() {
+  draft.value = props.suggestion.proposed_content
+  editing.value = true
+}
+watch(pending, (p) => { if (!p) editing.value = false })
 </script>
 
 <template>
@@ -74,8 +83,14 @@ const before = computed(() => pending.value && compareWith.value === 'current'
       description="The section changed after this was suggested. Approving replaces the current content, including those changes."
     />
 
+    <textarea
+      v-if="editing"
+      v-model="draft"
+      :aria-label="`Edit suggestion for ${suggestion.section_title}`"
+      class="block w-full min-h-64 p-3 font-mono text-sm outline-none bg-(--ui-bg) border-b border-(--ui-border) resize-y"
+    />
     <div class="max-h-[32rem] overflow-auto px-3 py-2 text-sm">
-      <ContextTextDiff :before="before" :after="suggestion.proposed_content" />
+      <ContextTextDiff :before="before" :after="editing ? draft : suggestion.proposed_content" />
     </div>
 
     <div
@@ -96,7 +111,21 @@ const before = computed(() => pending.value && compareWith.value === 'current'
       v-if="pending && (canReview || isAuthor)"
       class="px-3 py-2 border-t border-(--ui-border) bg-(--ui-bg-elevated) flex items-center gap-2"
     >
-      <template v-if="canReview">
+      <template v-if="canReview && editing">
+        <UButton
+          size="xs"
+          color="success"
+          icon="i-lucide-check"
+          :disabled="busy || !suggestion.section_exists"
+          @click="emit('approve', draft)"
+        >
+          Approve with edits
+        </UButton>
+        <UButton size="xs" color="neutral" variant="ghost" :disabled="busy" @click="editing = false">
+          Cancel
+        </UButton>
+      </template>
+      <template v-else-if="canReview">
         <UButton
           size="xs"
           color="success"
@@ -105,6 +134,16 @@ const before = computed(() => pending.value && compareWith.value === 'current'
           @click="emit('approve')"
         >
           Approve
+        </UButton>
+        <UButton
+          size="xs"
+          color="neutral"
+          variant="soft"
+          icon="i-lucide-pencil"
+          :disabled="busy || !suggestion.section_exists"
+          @click="startEdit"
+        >
+          Edit
         </UButton>
         <UButton size="xs" color="error" variant="soft" icon="i-lucide-x" :disabled="busy" @click="emit('reject')">
           Reject

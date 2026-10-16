@@ -400,11 +400,13 @@ async function pendingInSet(tx: Tx, setId: string, ids?: string[]) {
 
 // Approve or reject pending suggestions in a set. An approval writes the
 // section as the suggester (the reviewer when the suggester's account is
-// gone) and links the version to the suggestion.
+// gone) and links the version to the suggestion. `content` approves a single
+// suggestion with the reviewer's edits; that version is written as the
+// reviewer, and the suggestion keeps the content as proposed.
 export async function decideSuggestions(
   tx: Tx,
   setId: string,
-  input: { action: 'approve' | 'reject', ids?: string[], note?: string | null },
+  input: { action: 'approve' | 'reject', ids?: string[], note?: string | null, content?: string },
   reviewerId: string
 ): Promise<Array<{ id: string, portfolio_id: string, section_key: string, section_id?: string, version_id?: string }>> {
   if (!UUID_RE.test(setId)) notFound()
@@ -414,14 +416,20 @@ export async function decideSuggestions(
     .where('id', '=', setId)
     .executeTakeFirst()
   if (!set) notFound()
+  if (input.content !== undefined && (input.action !== 'approve' || input.ids?.length !== 1)) {
+    throw createError({ statusCode: 400, statusMessage: 'Edited content approves exactly one suggestion.' })
+  }
 
   const targets = await pendingInSet(tx, setId, input.ids)
   const decided: Array<{ id: string, portfolio_id: string, section_key: string, section_id?: string, version_id?: string }> = []
   for (const t of targets) {
     let written: { section_id: string, version_id: string } | undefined
     if (input.action === 'approve') {
+      const edited = input.content !== undefined && input.content !== t.proposed_content
       const { section, versionId } = await saveSectionContent(
-        tx, t.portfolio_id, t.section_key, t.proposed_content, set.author_id ?? reviewerId,
+        tx, t.portfolio_id, t.section_key,
+        edited ? input.content! : t.proposed_content,
+        edited ? reviewerId : (set.author_id ?? reviewerId),
         { source: 'suggestion', suggestionId: t.id }
       )
       written = { section_id: section.id, version_id: versionId }
