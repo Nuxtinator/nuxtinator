@@ -4,6 +4,7 @@ import { startSession, nativeTokenFields, markReauthenticated, hasRecentAuth } f
 import { postSignInRedirect } from '#core/server/utils/accounts'
 import { logEvent } from '#core/server/utils/activity-logger'
 import { checkRateLimit } from '#core/server/utils/rate-limit'
+import { checkAccountPassword, enforceLoginRateLimit } from '#core/server/utils/password-sign-in'
 import { getClientIp } from '#core/server/utils/client-ip'
 import { db } from '#core/server/utils/database'
 import { exchangeCode, getProviderConfig, verifyIdToken } from '../../../utils/social-providers'
@@ -33,10 +34,12 @@ const ERROR_STATUS: Partial<Record<SignInErrorCode, number>> = {
 // Body: { provider, idToken, nonce?, authorizationCode? (Apple, to allow
 // revoking access when the account is deleted), displayName?, invite?,
 // intent? (login | link | reauth; link and reauth need the Bearer token, and
-// link also a recent re-authentication) }.
+// link also a recent re-authentication), password? }.
 //
 // 422 with `needsDisplayName` means a new account needs a name: ask the user
 // and repeat the call (with a fresh ID token if the first has expired).
+// 409 with `needsPassword` means the email belongs to an account that has a
+// password: ask for it and repeat the call with `password` to link and sign in.
 export default defineEventHandler(async (event) => {
   const body = await readBody(event).catch(() => null) as Record<string, unknown> | null
   const cfg = getProviderConfig(typeof body?.provider === 'string' ? body.provider : '')
@@ -47,6 +50,7 @@ export default defineEventHandler(async (event) => {
   const intent: SocialIntent = body?.intent === 'link' || body?.intent === 'reauth' ? body.intent : 'login'
   const invite = typeof body?.invite === 'string' && body.invite.length <= 200 ? body.invite : null
   const displayName = typeof body?.displayName === 'string' ? body.displayName.trim() : null
+  const password = typeof body?.password === 'string' && body.password ? body.password : null
   const userAgent = getHeader(event, 'user-agent') || undefined
 
   const ip = getClientIp(event)
@@ -80,7 +84,7 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const outcome = await completeSocialSignIn({
+  const signIn = (passwordConfirmedFor: string | null = null) => completeSocialSignIn({
     provider: cfg.id,
     profile,
     intent,
@@ -90,14 +94,27 @@ export default defineEventHandler(async (event) => {
     clientId,
     refreshTokenEnc,
     userAgent,
+    passwordConfirmedFor,
     waitUntil: promise => event.waitUntil(promise)
   })
+  let outcome = await signIn()
+
+  if (outcome.kind === 'needs_password' && password) {
+    const account = await db.selectFrom('users').select(['id', 'email']).where('id', '=', outcome.userId).executeTakeFirstOrThrow()
+    await enforceLoginRateLimit(event, account.email, '/api/social-auth/native')
+    if (!(await checkAccountPassword(account, password, userAgent))) {
+      throw createError({ statusCode: 401, statusMessage: 'Password is incorrect', data: { needsPassword: true } })
+    }
+    outcome = await signIn(account.id)
+  }
 
   switch (outcome.kind) {
     case 'error':
       throw createError({ statusCode: ERROR_STATUS[outcome.code] ?? 409, statusMessage: ERROR_MESSAGES[outcome.code], data: { code: outcome.code } })
     case 'needs_name':
       throw createError({ statusCode: 422, statusMessage: 'Display name required', data: { needsDisplayName: true } })
+    case 'needs_password':
+      throw createError({ statusCode: 409, statusMessage: 'Enter this account\'s password to link the sign-in method', data: { needsPassword: true } })
     case 'linked':
       return { success: true, linked: true }
     case 'reauthed':

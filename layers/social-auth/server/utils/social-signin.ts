@@ -20,6 +20,7 @@ export type SignInOutcome
     | { kind: 'needs_name' }
     | { kind: 'linked', userId: string }
     | { kind: 'reauthed', userId: string }
+    | { kind: 'needs_password', userId: string }
     | { kind: 'error', code: SignInErrorCode }
 
 export interface SignInInput {
@@ -35,6 +36,9 @@ export interface SignInInput {
   clientId: string | null
   refreshTokenEnc: string | null
   userAgent?: string
+  // The account whose password the user just entered, which lets the provider
+  // link to an existing account that has a password.
+  passwordConfirmedFor?: string | null
   // Keeps background work (the avatar import) alive after the response.
   waitUntil?: (promise: Promise<unknown>) => void
 }
@@ -134,17 +138,20 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
   if (!profile.email) return { kind: 'error', code: 'failed' }
   if (!profile.emailVerified) return { kind: 'error', code: 'email_unverified' }
 
-  // An existing account with this email is linked automatically — but only if
-  // that account proved it owns the address. Otherwise whoever registered it
-  // first (possibly not the owner) would inherit the owner's provider sign-in.
+  // An existing account with this email is linked only if that account proved
+  // it owns the address. Otherwise whoever registered it first (possibly not
+  // the owner) would inherit the owner's provider sign-in. An account with a
+  // password also needs that password: verifying the email proves who owns
+  // the address, not who chose the password.
   const existing = await db
     .selectFrom('users')
-    .select(['id', 'verified'])
+    .select(['id', 'verified', sql<boolean>`password is not null`.as('has_password')])
     .where(sql`lower(email)`, '=', profile.email)
     .executeTakeFirst()
   if (existing) {
     if (!existing.verified) return { kind: 'error', code: 'unverified_account' }
     if (await hasIdentityFor(existing.id, input.provider)) return { kind: 'error', code: 'one_per_provider' }
+    if (existing.has_password && input.passwordConfirmedFor !== existing.id) return { kind: 'needs_password', userId: existing.id }
     await db.insertInto('user_identities').values(identityRow(existing.id, input)).execute()
     logLinked(existing.id, input)
     startAvatarImport(input, existing.id)
