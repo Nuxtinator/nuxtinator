@@ -42,15 +42,15 @@ describe('/api/o/[orgSlug]/members/[userId]/avatar', () => {
     const member = await memberWithAvatar(org.id)
     const operator = await memberWithAvatar(org.id, { is_admin: true })
 
-    type Row = { user_id: string, avatar: string | null, avatar_editable: boolean }
+    type Row = { user_id: string, avatar: string | null, editable: boolean }
     const rows = async (headers: typeof auth) => (await $fetch<{ rows: Row[] }>(`/api/o/${org.slug}/members`, headers)).rows
 
     const asAdmin = await rows(auth)
-    expect(asAdmin.find(r => r.user_id === member.id)).toMatchObject({ avatar: PHOTO, avatar_editable: true })
-    expect(asAdmin.find(r => r.user_id === operator.id)?.avatar_editable).toBe(false)
+    expect(asAdmin.find(r => r.user_id === member.id)).toMatchObject({ avatar: PHOTO, editable: true })
+    expect(asAdmin.find(r => r.user_id === operator.id)?.editable).toBe(false)
 
-    expect((await rows(getAuthHeaders(member))).every(r => !r.avatar_editable)).toBe(true)
-    expect((await rows(getAuthHeaders(operator))).every(r => r.avatar_editable)).toBe(true)
+    expect((await rows(getAuthHeaders(member))).every(r => !r.editable)).toBe(true)
+    expect((await rows(getAuthHeaders(operator))).every(r => r.editable)).toBe(true)
   })
 
   it('org admin can remove a member\'s avatar', async () => {
@@ -91,6 +91,31 @@ describe('/api/o/[orgSlug]/members/[userId]/avatar', () => {
     const err = await $fetch(`/api/o/${org.slug}/members/${operator.id}/avatar`, { method: 'DELETE', ...auth }).catch(e => e)
     expect(err.statusCode).toBe(403)
     expect(await avatarOf(operator.id)).toBe(PHOTO)
+  })
+
+  it('an org admin cannot change the avatar of a member who is also in another org', async () => {
+    const { org, auth } = await createOrgWithAdmin(sql)
+    const member = await memberWithAvatar(org.id)
+    const otherOrg = await createTestOrg(sql)
+    await addTestMembership(sql, { user_id: member.id, org_id: otherOrg.id, roles: ['member'] })
+
+    const rows = (await $fetch<{ rows: { user_id: string, editable: boolean }[] }>(`/api/o/${org.slug}/members`, auth)).rows
+    expect(rows.find(r => r.user_id === member.id)?.editable).toBe(false)
+
+    const err = await $fetch(`/api/o/${org.slug}/members/${member.id}/avatar`, { method: 'DELETE', ...auth }).catch(e => e)
+    expect(err.statusCode).toBe(403)
+    expect(await avatarOf(member.id)).toBe(PHOTO)
+  })
+
+  it('an operator admin can change the avatar of a member who is also in another org', async () => {
+    const { org } = await createOrgWithAdmin(sql)
+    const operator = await memberWithAvatar(org.id, { is_admin: true })
+    const member = await memberWithAvatar(org.id)
+    const otherOrg = await createTestOrg(sql)
+    await addTestMembership(sql, { user_id: member.id, org_id: otherOrg.id, roles: ['member'] })
+
+    await $fetch(`/api/o/${org.slug}/members/${member.id}/avatar`, { method: 'DELETE', ...getAuthHeaders(operator) })
+    expect(await avatarOf(member.id)).toBe('')
   })
 
   it('returns 404 for a user who is not a member of this org', async () => {

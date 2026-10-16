@@ -9,7 +9,7 @@ export const ORG_PERMISSIONS = [
   'org.members.invite',
   'org.members.remove',
   'org.members.manage_roles',
-  'org.members.edit_avatar',
+  'org.members.edit_user',
   'org.roles.read',
   'org.roles.write',
   'org.roles.delete',
@@ -40,9 +40,9 @@ export const ORG_PERMISSION_META: Record<string, { title: string, description: s
     title: 'Manage member roles',
     description: 'Change the roles assigned to a member.'
   },
-  'org.members.edit_avatar': {
-    title: 'Edit member avatars',
-    description: 'Set or remove a member\'s avatar. The avatar belongs to their account, so it shows in every org they are in.'
+  'org.members.edit_user': {
+    title: 'Edit member profiles',
+    description: 'Change a member\'s profile, such as their avatar. Only for members who belong to no other org.'
   },
   'org.roles.read': {
     title: 'View roles',

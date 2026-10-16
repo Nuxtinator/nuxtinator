@@ -15,7 +15,7 @@ interface MemberRow {
   email: string
   display_name: string
   avatar: string | null
-  avatar_editable: boolean
+  editable: boolean
   roles: string[]
   status: MemberStatus
   joined_at: string
@@ -56,8 +56,8 @@ const has = (p: string) => myPerms.value.has(p)
 const canInvite = computed(() => has('org.members.invite'))
 const canRemove = computed(() => has('org.members.remove'))
 const canManageRoles = computed(() => has('org.members.manage_roles'))
-const canEditAvatar = computed(() => has('org.members.edit_avatar') || isHostAdmin.value)
-const canOpenMember = computed(() => canRemove.value || canManageRoles.value || canInvite.value || canEditAvatar.value)
+const canEditMembers = computed(() => has('org.members.edit_user') || isHostAdmin.value)
+const canOpenMember = computed(() => canRemove.value || canManageRoles.value || canInvite.value || canEditMembers.value)
 
 const { roles: assignableRoles, refresh: refreshRoles } = await useOrgAssignableRoles(orgSlug)
 
@@ -734,7 +734,7 @@ const handleRemove = async () => {
                 </UBadge>
               </div>
               <div
-                v-if="selectedMember.avatar_editable && (avatarInfo.can_upload || selectedMember.avatar)"
+                v-if="selectedMember.editable && (avatarInfo.can_upload || selectedMember.avatar)"
                 class="mt-3 flex items-center gap-2 flex-wrap"
               >
                 <template v-if="avatarInfo.can_upload">
