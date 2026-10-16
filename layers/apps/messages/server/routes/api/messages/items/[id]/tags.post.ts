@@ -3,7 +3,7 @@
 // Tags an item for the caller. Adds the tag to the user's vocabulary if new.
 
 import { z } from 'zod'
-import { withOrgContext } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 import { requireConversationAccess } from '../../../../../utils/conversation-access'
 
 const Body = z.object({
@@ -11,7 +11,7 @@ const Body = z.object({
 })
 
 export default defineEventHandler(async (event) => {
-  return await withOrgContext(event, { appId: 'messages' }, async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'messages' }, 'messages.read', async (tx, ctx) => {
     const itemId = getRouterParam(event, 'id')!
 
     const item = await tx

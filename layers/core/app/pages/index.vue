@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const { user, authReady } = useAuth()
 const config = useRuntimeConfig()
+const registrationOpen = await useRegistrationOpen({ lazy: true })
 
 // Signed-in users belong on the launcher at /dashboard (in multi-tenant mode
 // the tenancy route guard forwards that into the active org or the picker).
@@ -17,7 +18,7 @@ watch([authReady, user], ([r, u]) => {
       </h1>
       <template v-if="authReady && !user">
         <p class="text-(--ui-text-muted) mb-8 max-w-lg mx-auto">
-          Get started by signing in or creating an account.
+          {{ registrationOpen ? 'Get started by signing in or creating an account.' : 'Sign in to get started.' }}
         </p>
         <div class="flex gap-3 justify-center">
           <UButton
@@ -28,6 +29,7 @@ watch([authReady, user], ([r, u]) => {
             Sign in
           </UButton>
           <UButton
+            v-if="registrationOpen"
             to="/register"
             color="neutral"
             variant="subtle"

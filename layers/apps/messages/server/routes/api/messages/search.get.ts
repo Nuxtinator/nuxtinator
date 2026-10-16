@@ -1,8 +1,10 @@
 // GET /api/messages/search?q=...&limit=
-// Postgres FTS over body_text on items + comments, scoped by RLS to this org.
+// Postgres FTS over body_text on items + comments, scoped by RLS to this org
+// and to the conversations the caller can access (channels + their own DMs).
 
 import { sql } from 'kysely'
-import { withOrgContext } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
+import { accessibleConversationIds } from '../../../utils/conversation-access'
 
 const MAX_LIMIT = 50
 
@@ -35,7 +37,7 @@ const ESCAPED_BODY_COMMENT = sql<string>`
 `
 
 export default defineEventHandler(async (event) => {
-  return await withOrgContext(event, { appId: 'messages' }, async (tx, _ctx) => {
+  return await withOrgPermission(event, { appId: 'messages' }, 'messages.read', async (tx, ctx) => {
     const q = getQuery(event)
     const query = typeof q.q === 'string' ? q.q.trim() : ''
     const limit = Math.min(MAX_LIMIT, Math.max(1, Number(q.limit) || 20))
@@ -57,6 +59,7 @@ export default defineEventHandler(async (event) => {
         sql<string>`ts_headline('english', ${ESCAPED_BODY_ITEM}, ${tsQuery}, 'MaxWords=30,MinWords=10')`.as('headline')
       ])
       .where('i.deleted_at', 'is', null)
+      .where('i.conversation_id', 'in', accessibleConversationIds(tx, ctx.userId))
       .where(sql<boolean>`i.body_tsv @@ ${tsQuery}`)
       .orderBy(sql`ts_rank(i.body_tsv, ${tsQuery})`, 'desc')
       .limit(limit)
@@ -78,6 +81,7 @@ export default defineEventHandler(async (event) => {
       ])
       .where('c.deleted_at', 'is', null)
       .where('i.deleted_at', 'is', null)
+      .where('i.conversation_id', 'in', accessibleConversationIds(tx, ctx.userId))
       .where(sql<boolean>`c.body_tsv @@ ${tsQuery}`)
       .orderBy(sql`ts_rank(c.body_tsv, ${tsQuery})`, 'desc')
       .limit(limit)

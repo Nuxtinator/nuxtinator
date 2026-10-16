@@ -1,11 +1,11 @@
 import type { H3Event } from 'h3'
-import { getRequestIP, getHeader, setResponseHeader } from 'h3'
+import { getHeader, setResponseHeader } from 'h3'
 import { consumeRateLimit, logRateLimitExceeded } from '#core/server/utils/rate-limit'
+import { getClientIp } from '#core/server/utils/client-ip'
 
-// Client IP for rate-limit keying. Trustworthy only behind a proxy you control
-// — X-Forwarded-For is otherwise caller-spoofable.
+// Client IP for rate-limit keying, resolved through the trusted-proxy list.
 export function widgetClientIp(event: H3Event): string {
-  return getRequestIP(event, { xForwardedFor: true }) || 'unknown'
+  return getClientIp(event)
 }
 
 // Enforce a sliding-window limit on `action` for one identifier (e.g. an IP or

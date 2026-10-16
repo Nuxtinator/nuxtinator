@@ -63,6 +63,7 @@ import { db } from '~~/server/utils/database'
 
 export const listPagesTool = defineMcpTool({
   name: 'list_pages',
+  title: 'List Pages',
   description: 'List CMS pages.',
   scope: 'pages.view',
   input: z.object({

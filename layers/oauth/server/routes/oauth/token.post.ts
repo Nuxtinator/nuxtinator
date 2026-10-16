@@ -20,6 +20,7 @@ import {
 } from '../../utils/oauth-validation'
 import { logOauthEvent, OAUTH_EVENTS } from '../../utils/oauth-audit'
 import { revokeFamily } from '../../utils/oauth-revoke'
+import { getClientIp } from '#core/server/utils/client-ip'
 
 type TokenErrorCode
   = | 'invalid_request'
@@ -52,7 +53,7 @@ export default defineEventHandler(async (event) => {
   const cfg = getOauthConfig()
 
   // Rate limit
-  const ip = getRequestIP(event, { xForwardedFor: true }) || 'unknown'
+  const ip = getClientIp(event)
   const userAgent = getHeader(event, 'user-agent') || undefined
   // Counts and records in one locked step, so parallel requests can't all pass.
   // Kept under the `ratelimit.*` namespace (not `oauth.*`) so it's prunable

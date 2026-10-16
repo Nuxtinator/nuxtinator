@@ -64,7 +64,7 @@ export async function createSuggestionSet(
 }
 
 async function supersedeOwnPending(tx: Tx, portfolioId: string, key: string, authorId: string): Promise<void> {
-  await tx
+  const superseded = await tx
     .updateTable('context_suggestions')
     .set({ status: 'superseded', decided_at: sql<Date>`now()` })
     .where('portfolio_id', '=', portfolioId)
@@ -74,7 +74,9 @@ async function supersedeOwnPending(tx: Tx, portfolioId: string, key: string, aut
       .selectFrom('context_suggestion_sets')
       .select('id')
       .where('author_id', '=', authorId))
+    .returning('set_id')
     .execute()
+  for (const setId of new Set(superseded.map(r => r.set_id))) await resolveSetNotifications(tx, setId)
 }
 
 async function insertSuggestion(tx: Tx, setId: string, portfolioId: string, item: NewSuggestion): Promise<string> {
@@ -98,6 +100,25 @@ async function insertSuggestion(tx: Tx, setId: string, portfolioId: string, item
 
 export function suggestionSetLink(setId: string): string {
   return `/context/suggestions/${setId}`
+}
+
+// Once nothing in a set is pending there is nothing left to review, so every
+// reviewer's notification about it is marked read, not just the decider's.
+async function resolveSetNotifications(tx: Tx, setId: string): Promise<void> {
+  const pending = await tx
+    .selectFrom('context_suggestions')
+    .select('id')
+    .where('set_id', '=', setId)
+    .where('status', '=', 'pending')
+    .executeTakeFirst()
+  if (pending) return
+  await tx
+    .updateTable('notifications')
+    .set({ read_at: sql<Date>`now()` })
+    .where('app_id', '=', 'context')
+    .where('link', '=', suggestionSetLink(setId))
+    .where('read_at', 'is', null)
+    .execute()
 }
 
 // Users in the active org (every user in single mode) holding `perm` through
@@ -400,11 +421,13 @@ async function pendingInSet(tx: Tx, setId: string, ids?: string[]) {
 
 // Approve or reject pending suggestions in a set. An approval writes the
 // section as the suggester (the reviewer when the suggester's account is
-// gone) and links the version to the suggestion.
+// gone) and links the version to the suggestion. `content` approves a single
+// suggestion with the reviewer's edits; that version is written as the
+// reviewer, and the suggestion keeps the content as proposed.
 export async function decideSuggestions(
   tx: Tx,
   setId: string,
-  input: { action: 'approve' | 'reject', ids?: string[], note?: string | null },
+  input: { action: 'approve' | 'reject', ids?: string[], note?: string | null, content?: string },
   reviewerId: string
 ): Promise<Array<{ id: string, portfolio_id: string, section_key: string, section_id?: string, version_id?: string }>> {
   if (!UUID_RE.test(setId)) notFound()
@@ -414,14 +437,20 @@ export async function decideSuggestions(
     .where('id', '=', setId)
     .executeTakeFirst()
   if (!set) notFound()
+  if (input.content !== undefined && (input.action !== 'approve' || input.ids?.length !== 1)) {
+    throw createError({ statusCode: 400, statusMessage: 'Edited content approves exactly one suggestion.' })
+  }
 
   const targets = await pendingInSet(tx, setId, input.ids)
   const decided: Array<{ id: string, portfolio_id: string, section_key: string, section_id?: string, version_id?: string }> = []
   for (const t of targets) {
     let written: { section_id: string, version_id: string } | undefined
     if (input.action === 'approve') {
+      const edited = input.content !== undefined && input.content !== t.proposed_content
       const { section, versionId } = await saveSectionContent(
-        tx, t.portfolio_id, t.section_key, t.proposed_content, set.author_id ?? reviewerId,
+        tx, t.portfolio_id, t.section_key,
+        edited ? input.content! : t.proposed_content,
+        edited ? reviewerId : (set.author_id ?? reviewerId),
         { source: 'suggestion', suggestionId: t.id }
       )
       written = { section_id: section.id, version_id: versionId }
@@ -438,6 +467,7 @@ export async function decideSuggestions(
       .execute()
     decided.push({ id: t.id, portfolio_id: t.portfolio_id, section_key: t.section_key, ...written })
   }
+  await resolveSetNotifications(tx, setId)
   return decided
 }
 
@@ -461,6 +491,7 @@ export async function withdrawSuggestions(
     .set({ status: 'withdrawn', decided_by: userId, decided_at: sql<Date>`now()` })
     .where('id', 'in', targets.map(t => t.id))
     .execute()
+  await resolveSetNotifications(tx, setId)
   return targets.map(t => t.id)
 }
 

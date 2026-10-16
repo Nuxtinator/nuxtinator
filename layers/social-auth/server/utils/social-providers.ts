@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, randomBytes, type JsonWebKey, type KeyObject } from 'node:crypto'
+import { createHash, createPublicKey, randomBytes, type KeyObject, type webcrypto } from 'node:crypto'
 import jwt from 'jsonwebtoken'
 import { getSiteUrl } from '#core/server/utils/site-url'
 
@@ -26,6 +26,8 @@ export interface ProviderConfig {
   nativeAudiences: string[]
   webEnabled: boolean
   nativeEnabled: boolean
+  // Hosts (and their subdomains) the provider's profile photos may be fetched from.
+  photoHosts: string[]
 }
 
 function list(value: unknown): string[] {
@@ -34,7 +36,7 @@ function list(value: unknown): string[] {
 
 function settings() {
   return useRuntimeConfig().socialAuth as {
-    google: { clientId: string, clientSecret: string, nativeClientIds: string, jwksUrl: string }
+    google: { clientId: string, clientSecret: string, nativeClientIds: string, jwksUrl: string, photoHosts: string }
     apple: { servicesId: string, teamId: string, keyId: string, privateKey: string, bundleIds: string, jwksUrl: string }
   }
 }
@@ -54,7 +56,8 @@ export function getProviderConfig(id: string): ProviderConfig | null {
       // Android apps request ID tokens for the web client ID, so it's accepted too.
       nativeAudiences: [...nativeIds, ...(g.clientId ? [g.clientId] : [])],
       webEnabled: !!(g.clientId && g.clientSecret),
-      nativeEnabled: nativeIds.length > 0 || !!g.clientId
+      nativeEnabled: nativeIds.length > 0 || !!g.clientId,
+      photoHosts: g.photoHosts ? list(g.photoHosts) : ['googleusercontent.com']
     }
   }
   if (id === 'apple') {
@@ -70,7 +73,9 @@ export function getProviderConfig(id: string): ProviderConfig | null {
       webClientId: a.servicesId,
       nativeAudiences: bundleIds,
       webEnabled: !!(a.servicesId && signing),
-      nativeEnabled: bundleIds.length > 0
+      nativeEnabled: bundleIds.length > 0,
+      // Apple sends no profile photo.
+      photoHosts: []
     }
   }
   return null
@@ -182,7 +187,7 @@ export async function revokeAppleToken(clientId: string, refreshToken: string): 
     token: refreshToken,
     token_type_hint: 'refresh_token'
   })
-  await $fetch<unknown, string>('https://appleid.apple.com/auth/revoke', {
+  await $fetch<void, string>('https://appleid.apple.com/auth/revoke', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: body.toString()
@@ -197,7 +202,7 @@ const jwksCache = new Map<string, { at: number, keys: Map<string, KeyObject> }>(
 async function loadJwks(url: string, force = false): Promise<Map<string, KeyObject>> {
   const cached = jwksCache.get(url)
   if (cached && !force && Date.now() - cached.at < JWKS_TTL_MS) return cached.keys
-  const res = await $fetch<{ keys: Array<JsonWebKey & { kid?: string }> }, string>(url)
+  const res = await $fetch<{ keys: Array<webcrypto.JsonWebKey & { kid?: string }> }, string>(url)
   const keys = new Map<string, KeyObject>()
   for (const jwk of res.keys ?? []) {
     if (jwk.kid) keys.set(jwk.kid, createPublicKey({ key: jwk, format: 'jwk' }))

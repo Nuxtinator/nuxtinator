@@ -24,7 +24,7 @@ import { extractMentions } from '../utils/markdown-mentions'
 import { fanoutMentions } from '../utils/mention-fanout'
 import { notifyMessages } from '../utils/notification-creator'
 import { getDmMemberIds } from '../utils/dm-members'
-import { requireConversationAccess, loadConversation } from '../utils/conversation-access'
+import { requireConversationAccess, loadConversation, accessibleConversationIds } from '../utils/conversation-access'
 import {
   validateMcpMarkdown,
   MAX_ITEM_BODY_BYTES,
@@ -58,6 +58,7 @@ function textResult(text: string, structured?: Record<string, unknown>) {
 
 export const listConversationsTool = defineMcpTool({
   name: 'messages_list_conversations',
+  title: 'List Conversations',
   description: 'List channels and DMs the calling user has access to in the active org. Includes unread counts.',
   scope: 'messages.read',
   input: z.object({ org: orgInput }).strict(),
@@ -147,6 +148,7 @@ export const listConversationsTool = defineMcpTool({
 
 export const listItemsTool = defineMcpTool({
   name: 'messages_list_items',
+  title: 'List Messages',
   description: 'List items in a conversation, newest first. Body returned as markdown.',
   scope: 'messages.read',
   input: z.object({
@@ -205,6 +207,7 @@ export const listItemsTool = defineMcpTool({
 
 export const readItemTool = defineMcpTool({
   name: 'messages_read_item',
+  title: 'Read Message',
   description: 'Read a single item with all its comments. Bodies returned as markdown.',
   scope: 'messages.read',
   input: z.object({ org: orgInput, item_id: z.string().uuid() }).strict(),
@@ -286,7 +289,8 @@ export const readItemTool = defineMcpTool({
 
 export const searchTool = defineMcpTool({
   name: 'messages_search',
-  description: 'Postgres full-text search over messages items + comments in the active org.',
+  title: 'Search Messages',
+  description: 'Postgres full-text search over messages items + comments in the active org, limited to channels and your own DMs.',
   scope: 'messages.read',
   input: z.object({
     org: orgInput,
@@ -310,6 +314,7 @@ export const searchTool = defineMcpTool({
           sql<string>`ts_headline('english', coalesce(i.body_md, ''), ${tsQuery}, 'MaxWords=30,MinWords=10')`.as('headline')
         ])
         .where('i.deleted_at', 'is', null)
+        .where('i.conversation_id', 'in', accessibleConversationIds(tx, ctx.auth.userId))
         .where(sql<boolean>`i.body_tsv @@ ${tsQuery}`)
         .orderBy(sql`ts_rank(i.body_tsv, ${tsQuery})`, 'desc')
         .limit(limit)
@@ -329,6 +334,7 @@ export const searchTool = defineMcpTool({
         ])
         .where('c.deleted_at', 'is', null)
         .where('i.deleted_at', 'is', null)
+        .where('i.conversation_id', 'in', accessibleConversationIds(tx, ctx.auth.userId))
         .where(sql<boolean>`c.body_tsv @@ ${tsQuery}`)
         .orderBy(sql`ts_rank(c.body_tsv, ${tsQuery})`, 'desc')
         .limit(limit)
@@ -361,6 +367,7 @@ export const searchTool = defineMcpTool({
 
 export const listNotificationsTool = defineMcpTool({
   name: 'messages_list_notifications',
+  title: 'List Notifications',
   description: 'List unread mentions, DMs, and comment notifications for the calling user.',
   scope: 'messages.read',
   input: z.object({
@@ -413,6 +420,7 @@ export const listNotificationsTool = defineMcpTool({
 
 export const postItemTool = defineMcpTool({
   name: 'messages_post_item',
+  title: 'Post Message',
   description: 'Post a markdown item to a conversation. Mentions written as `[@DisplayName](user-uuid)` resolve to mention nodes.',
   scope: 'messages.write',
   input: z.object({
@@ -495,6 +503,7 @@ export const postItemTool = defineMcpTool({
 
 export const postCommentTool = defineMcpTool({
   name: 'messages_post_comment',
+  title: 'Post Comment',
   description: 'Post a markdown comment on an item. `parent_comment_id` may only reference a top-level comment.',
   scope: 'messages.write',
   input: z.object({
@@ -626,6 +635,7 @@ export const postCommentTool = defineMcpTool({
 
 export const reactTool = defineMcpTool({
   name: 'messages_react',
+  title: 'Add Reaction',
   description: 'Add a reaction emoji to an item or comment.',
   scope: 'messages.write',
   input: z.object({
@@ -693,6 +703,7 @@ export const reactTool = defineMcpTool({
 
 export const markReadTool = defineMcpTool({
   name: 'messages_mark_read',
+  title: 'Mark as Read',
   description: 'Mark a conversation as read (UPSERT messages_conversation_reads.last_read_at) or mark notification IDs as read. Provide exactly one of conversation_id or notification_ids.',
   scope: 'messages.write',
   // MCP requires a tool's input to project to a single JSON Schema object — a

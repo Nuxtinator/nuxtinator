@@ -22,7 +22,7 @@ export default defineEventHandler(async (event) => {
   if (!swimlaneId) throw createError({ statusCode: 400, statusMessage: 'swimlane_id required' })
   if (!columnId) throw createError({ statusCode: 400, statusMessage: 'column_id required' })
 
-  return await withOrgPermission(event, 'feedback.write', async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
     const row = await tx
       .insertInto('cards')
       .values({

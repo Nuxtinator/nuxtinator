@@ -68,7 +68,7 @@
     },
     "layers/apps/context": {
       "name": "@nuxtinator/context",
-      "version": "1.9.1",
+      "version": "1.10.1",
       "dependencies": {
         "archiver": "^7.0.1",
         "diff": "^9.0.0",
@@ -111,7 +111,7 @@
     },
     "layers/apps/feedback": {
       "name": "@nuxtinator/feedback",
-      "version": "1.4.1",
+      "version": "1.5.0",
       "dependencies": {
         "zod": "^3.23.0",
       },
@@ -127,7 +127,7 @@
     },
     "layers/apps/files": {
       "name": "@nuxtinator/files",
-      "version": "1.4.0",
+      "version": "1.5.1",
       "dependencies": {
         "dompurify": "^3.4.13",
         "marked": "^18.1.1",
@@ -145,7 +145,7 @@
     },
     "layers/apps/helpinator": {
       "name": "@nuxtinator/helpinator",
-      "version": "0.3.0",
+      "version": "0.3.2",
       "dependencies": {
         "@mozilla/readability": "^0.6.0",
         "croner": "^10.0.1",
@@ -153,6 +153,7 @@
         "linkedom": "^0.18.13",
         "marked": "^18.1.1",
         "robots-parser": "^3.0.1",
+        "tldts": "^7.4.18",
         "turndown": "^7.2.4",
       },
       "devDependencies": {
@@ -175,7 +176,7 @@
     },
     "layers/apps/inbox": {
       "name": "@nuxtinator/inbox",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "dependencies": {
         "croner": "^10.0.1",
         "dompurify": "^3.4.13",
@@ -200,7 +201,7 @@
     },
     "layers/apps/list-of-100": {
       "name": "@nuxtinator/list-of-100",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "dependencies": {
         "apexcharts": "^8.2.0",
         "vue3-apexcharts": "^1.11.0",
@@ -218,7 +219,7 @@
     },
     "layers/apps/messages": {
       "name": "@nuxtinator/messages",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "dependencies": {
         "@emoji-mart/data": "^1.2.1",
         "croner": "^10.0.1",
@@ -239,7 +240,7 @@
     },
     "layers/apps/videos": {
       "name": "@nuxtinator/videos",
-      "version": "1.2.2",
+      "version": "1.2.3",
       "dependencies": {
         "fix-webm-duration": "^1.0.6",
         "mediabunny": "^1.25.1",
@@ -257,7 +258,7 @@
     },
     "layers/core": {
       "name": "@nuxtinator/core",
-      "version": "1.9.0",
+      "version": "2.2.0",
       "dependencies": {
         "@bradenmacdonald/s3-lite-client": "^1.0.0",
         "@nuxtjs/i18n": "^10.6.0",
@@ -294,7 +295,7 @@
     },
     "layers/email-mailgun": {
       "name": "@nuxtinator/email-mailgun",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "dependencies": {
         "nodemailer": "^10.1.0",
       },
@@ -309,7 +310,7 @@
     },
     "layers/mcp": {
       "name": "@nuxtinator/mcp",
-      "version": "1.1.2",
+      "version": "1.2.0",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.30.0",
         "zod": "^3.23.0",
@@ -337,7 +338,7 @@
     },
     "layers/oauth": {
       "name": "@nuxtinator/oauth",
-      "version": "1.1.4",
+      "version": "1.2.0",
       "optionalDependencies": {
         "@nuxtinator/core": "*",
       },
@@ -351,7 +352,7 @@
     },
     "layers/social-auth": {
       "name": "@nuxtinator/social-auth",
-      "version": "0.1.0",
+      "version": "0.3.0",
       "dependencies": {
         "jsonwebtoken": "^9.0.2",
       },
@@ -371,7 +372,7 @@
     },
     "layers/tenancy": {
       "name": "@nuxtinator/tenancy",
-      "version": "1.8.0",
+      "version": "2.0.0",
       "optionalDependencies": {
         "@nuxtinator/core": "*",
       },
@@ -2551,6 +2552,10 @@
     "tinyglobby": ["tinyglobby@0.2.17", "", { "dependencies": { "fdir": "^6.5.0", "picomatch": "^4.0.4" } }, "sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g=="],
 
     "tinyrainbow": ["tinyrainbow@3.2.0", "", {}, "sha512-LgO3D9yZJjApUiuUfl9iFAwrtaX4+lok3wJIqttGoKCHlWUqHqbQpnxCf82L8FjgKsh4iGo78hqJwgL8F6To2A=="],
+
+    "tldts": ["tldts@7.4.18", "", { "dependencies": { "tldts-core": "^7.4.18" }, "bin": { "tldts": "bin/cli.js" } }, "sha512-somxA8xKAUzlAxl0TX/jMSYIbRNFIVGnI96pVGJPeMc5BsHmfVXn6mOJT6U++ELnl04eGfzpfcEuZe8WiASkXg=="],
+
+    "tldts-core": ["tldts-core@7.4.18", "", {}, "sha512-KI2PKvCmvQI/xD6ypPqkU0i7oxNXR/O58RLRaHR4svsgVUQ2JE/XC8BtMbG6PSehD27I8sZJRcC1ASnCy6lp3g=="],
 
     "to-regex-range": ["to-regex-range@5.0.1", "", { "dependencies": { "is-number": "^7.0.0" } }, "sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ=="],
 

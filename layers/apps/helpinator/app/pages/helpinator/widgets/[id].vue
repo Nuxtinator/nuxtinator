@@ -4,6 +4,7 @@
 // preview of the saved widget running on this page.
 import type { HelpinatorWidget, HelpinatorPortfolioOption, HelpinatorAppearanceForm, HelpinatorLibrarySummary } from '../../../utils/helpinator-types'
 import { helpinatorErrorMessage } from '../../../utils/helpinator-types'
+import type { AiModelInfo } from '#ai'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -15,6 +16,9 @@ const isNew = computed(() => route.params.id === 'new')
 const { data: status } = useHelpinatorStatus()
 const { data: portfolios } = useFetch<HelpinatorPortfolioOption[]>('/api/helpinator/portfolios', { default: () => [] })
 const { data: libraries } = useFetch<HelpinatorLibrarySummary[]>('/api/helpinator/libraries', { default: () => [] })
+const { data: modelChoice } = useFetch<{ models: AiModelInfo[], defaultModel: string }>('/api/helpinator/models', {
+  default: () => ({ models: [], defaultModel: '' })
+})
 
 // The server's defaults (one source of truth). The form shows them filled in
 // and saves only the fields that differ, so untouched fields keep following
@@ -31,7 +35,9 @@ const form = reactive({
   enabled: true,
   appearance: {} as HelpinatorAppearanceForm,
   extra_instructions: '',
-  starter_questions: [] as string[]
+  starter_questions: [] as string[],
+  // '' = the org's choice.
+  chat_model: ''
 })
 const saved = ref<HelpinatorWidget | null>(null)
 const saving = ref(false)
@@ -50,6 +56,7 @@ function fill(w: HelpinatorWidget) {
   form.appearance = { ...w.appearance_defaults, ...w.appearance }
   form.extra_instructions = w.extra_instructions
   form.starter_questions = [...w.starter_questions]
+  form.chat_model = w.chat_model ?? ''
 }
 
 if (!isNew.value) {
@@ -69,6 +76,13 @@ const defaultPortfolio = computed(() => defaultLibrary.value?.kind === 'portfoli
   ? portfolios.value?.find((p: HelpinatorPortfolioOption) => p.id === defaultLibrary.value?.portfolio_id) ?? null
   : null)
 const sectionItems = computed(() => (defaultPortfolio.value?.sections ?? []).map((s: HelpinatorPortfolioOption['sections'][number]) => ({ label: s.title, value: s.key })))
+const orgDefaultLabel = computed(() => {
+  const id = modelChoice.value.defaultModel
+  if (!id) return 'Organization default (none set)'
+  return `Organization default (${modelChoice.value.models.find((m: AiModelInfo) => m.id === id)?.name ?? id})`
+})
+// Saved pick the org can no longer use, still selected in the form.
+const modelFallingBack = computed(() => Boolean(saved.value?.chat_model_unavailable) && form.chat_model === saved.value?.chat_model)
 const positionItems = [
   { label: 'Bottom right', value: 'bottom-right' },
   { label: 'Bottom left', value: 'bottom-left' }
@@ -127,7 +141,8 @@ async function save() {
       enabled: form.enabled,
       appearance: appearanceOverrides(),
       extra_instructions: form.extra_instructions,
-      starter_questions: form.starter_questions.map(q => q.trim()).filter(Boolean)
+      starter_questions: form.starter_questions.map(q => q.trim()).filter(Boolean),
+      chat_model: form.chat_model || null
     }
     const w = isNew.value
       ? await $fetch<HelpinatorWidget>('/api/helpinator/widgets', { method: 'POST', body })
@@ -268,9 +283,23 @@ async function togglePreview() {
               <USelect v-model="form.default_section_key" :items="sectionItems" class="w-full" />
             </UFormField>
 
-            <UFormField label="Allowed sites" help="One origin per line, e.g. https://www.example.org. Localhost works in development without being listed.">
+            <UFormField label="Allowed sites" help="One origin per line, e.g. https://www.example.org. Use https://*.example.org for every subdomain (the bare domain needs its own line). Localhost works in development without being listed.">
               <UTextarea v-model="form.originsText" :rows="3" class="w-full font-mono text-xs" placeholder="https://www.example.org" />
             </UFormField>
+
+            <UFormField label="AI model" help="The model that answers on this widget. Choose from the models your organization has enabled.">
+              <AiModelSelect v-model="form.chat_model" :items="modelChoice.models" clearable :clear-label="orgDefaultLabel" class="w-full" />
+            </UFormField>
+            <UAlert
+              v-if="modelFallingBack"
+              color="warning"
+              variant="subtle"
+              icon="i-lucide-triangle-alert"
+              title="This model is no longer available to your organization."
+              :description="modelChoice.defaultModel
+                ? 'Until you choose another, this widget answers with the organization default.'
+                : 'The organization has no default model either, so this widget cannot answer until you choose another.'"
+            />
 
             <UFormField label="Daily message limit" help="Visitor messages per 24 hours across all conversations on this widget. Protects your AI budget.">
               <UInput v-model.number="form.daily_message_cap" type="number" :min="1" class="w-40" />

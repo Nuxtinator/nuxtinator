@@ -1,6 +1,6 @@
 import { getHeader } from 'h3'
 import { getAuthUser } from '#core/server/utils/auth'
-import { startSession, nativeTokenFields, markReauthenticated } from '#core/server/utils/sessions'
+import { startSession, nativeTokenFields, markReauthenticated, hasRecentAuth } from '#core/server/utils/sessions'
 import { postSignInRedirect } from '#core/server/utils/accounts'
 import { logEvent } from '#core/server/utils/activity-logger'
 import { checkRateLimit } from '#core/server/utils/rate-limit'
@@ -15,7 +15,15 @@ const ERROR_MESSAGES: Record<SignInErrorCode, string> = {
   unverified_account: 'An unverified account already uses this email address',
   already_linked: 'This provider account is linked to a different user',
   one_per_provider: 'An account from this provider is already linked',
+  registration_closed: 'Registration is closed; an invitation is required to create an account',
+  invite_invalid: 'The invitation is no longer valid',
   failed: 'Sign-in failed'
+}
+
+const ERROR_STATUS: Partial<Record<SignInErrorCode, number>> = {
+  failed: 401,
+  registration_closed: 403,
+  invite_invalid: 410
 }
 
 // Sign-in from a native app that already holds an ID token from the
@@ -24,7 +32,8 @@ const ERROR_MESSAGES: Record<SignInErrorCode, string> = {
 //
 // Body: { provider, idToken, nonce?, authorizationCode? (Apple, to allow
 // revoking access when the account is deleted), displayName?, invite?,
-// intent? (login | link | reauth; link and reauth need the Bearer token) }.
+// intent? (login | link | reauth; link and reauth need the Bearer token, and
+// link also a recent re-authentication) }.
 //
 // 422 with `needsDisplayName` means a new account needs a name: ask the user
 // and repeat the call (with a fresh ID token if the first has expired).
@@ -52,6 +61,9 @@ export default defineEventHandler(async (event) => {
 
   const authUser = intent === 'login' ? null : getAuthUser(event)
   if (intent !== 'login' && !authUser) throw createError({ statusCode: 401, statusMessage: 'Authentication required' })
+  if (intent === 'link' && !(await hasRecentAuth(authUser!.sid))) {
+    throw createError({ statusCode: 403, statusMessage: 'Please confirm it\'s you to continue', data: { reauth: true } })
+  }
 
   // Apple's native authorization code is exchanged with the app's bundle ID
   // (the token's audience) to obtain a refresh token we can later revoke.
@@ -77,12 +89,13 @@ export default defineEventHandler(async (event) => {
     displayName,
     clientId,
     refreshTokenEnc,
-    userAgent
+    userAgent,
+    waitUntil: promise => event.waitUntil(promise)
   })
 
   switch (outcome.kind) {
     case 'error':
-      throw createError({ statusCode: outcome.code === 'failed' ? 401 : 409, statusMessage: ERROR_MESSAGES[outcome.code], data: { code: outcome.code } })
+      throw createError({ statusCode: ERROR_STATUS[outcome.code] ?? 409, statusMessage: ERROR_MESSAGES[outcome.code], data: { code: outcome.code } })
     case 'needs_name':
       throw createError({ statusCode: 422, statusMessage: 'Display name required', data: { needsDisplayName: true } })
     case 'linked':

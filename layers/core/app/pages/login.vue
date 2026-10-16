@@ -6,6 +6,7 @@ definePageMeta({
 const router = useRouter()
 const route = useRoute()
 const { login } = useAuth()
+const registrationOpen = await useRegistrationOpen()
 
 const state = reactive({
   email: '',
@@ -210,27 +211,25 @@ function switchToReset() {
           Sign In
         </UButton>
 
-        <!-- Divider -->
-        <div class="relative">
-          <div class="absolute inset-0 flex items-center">
-            <div class="w-full border-t border-(--ui-border)" />
-          </div>
-          <div class="relative flex justify-center text-sm">
-            <span class="px-2 bg-(--ui-bg) text-(--ui-text-muted)">Don't have an account?</span>
-          </div>
-        </div>
+        <template v-if="registrationOpen">
+          <!-- Divider -->
+          <USeparator
+            label="Don't have an account?"
+            :ui="{ container: 'font-normal text-muted' }"
+          />
 
-        <!-- Register Link -->
-        <UButton
-          color="neutral"
-          variant="outline"
-          size="lg"
-          block
-          :disabled="loading"
-          @click="redirectToRegister"
-        >
-          Create Account
-        </UButton>
+          <!-- Register Link -->
+          <UButton
+            color="neutral"
+            variant="outline"
+            size="lg"
+            block
+            :disabled="loading"
+            @click="redirectToRegister"
+          >
+            Create Account
+          </UButton>
+        </template>
       </form>
     </UCard>
 

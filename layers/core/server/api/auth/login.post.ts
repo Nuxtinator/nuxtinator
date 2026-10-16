@@ -1,7 +1,7 @@
 import bcrypt from 'bcrypt'
 import { db } from '../../utils/database'
 import { logLoginFailed, logLogin } from '../../utils/activity-logger'
-import { checkRateLimit, logRateLimitExceeded } from '../../utils/rate-limit'
+import { checkRateLimit, consumeRateLimit, logRateLimitExceeded } from '../../utils/rate-limit'
 import { startSession, nativeTokenFields } from '../../utils/sessions'
 import { postSignInRedirect } from '../../utils/accounts'
 import { readBody, getHeader, setResponseHeader } from 'h3'
@@ -14,9 +14,12 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Email and password are required' })
   }
 
-  // Check rate limit before processing login
+  // Two limits per email: 5 failures, and 10 attempts of any outcome. The
+  // attempt count is reserved atomically, so a burst of concurrent requests
+  // can't all pass before their failures are logged.
   const userAgent = getHeader(event, 'user-agent') || undefined
-  const rateCheck = await checkRateLimit('LOGIN_FAILED', 'email', email, 15 * 60 * 1000, 5)
+  const attempts = await consumeRateLimit('LOGIN_ATTEMPT', 'email', email, 15 * 60 * 1000, 10)
+  const rateCheck = attempts.allowed ? await checkRateLimit('LOGIN_FAILED', 'email', email, 15 * 60 * 1000, 5) : attempts
 
   if (!rateCheck.allowed) {
     logRateLimitExceeded(email, '/api/auth/login', userAgent)

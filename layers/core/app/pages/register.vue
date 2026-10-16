@@ -6,6 +6,7 @@ definePageMeta({
 const router = useRouter()
 const route = useRoute()
 const { register } = useAuth()
+const registrationOpen = await useRegistrationOpen()
 
 const state = reactive({
   display_name: '',
@@ -123,6 +124,28 @@ const redirectToLogin = () => {
           description="Please check your email to verify your account."
           :ui="{ icon: 'i-lucide-check-circle' }"
         />
+      </div>
+
+      <div
+        v-else-if="!registrationOpen"
+        class="space-y-6"
+      >
+        <UAlert
+          color="neutral"
+          variant="soft"
+          icon="i-lucide-lock"
+          title="Registration is closed"
+          description="New accounts can only be created from an invitation."
+        />
+        <UButton
+          color="neutral"
+          variant="outline"
+          size="lg"
+          block
+          @click="redirectToLogin"
+        >
+          Back to Sign In
+        </UButton>
       </div>
 
       <!-- Registration Form -->
@@ -263,14 +286,10 @@ const redirectToLogin = () => {
         </UButton>
 
         <!-- Divider -->
-        <div class="relative">
-          <div class="absolute inset-0 flex items-center">
-            <div class="w-full border-t border-(--ui-border)" />
-          </div>
-          <div class="relative flex justify-center text-sm">
-            <span class="px-2 bg-(--ui-bg) text-(--ui-text-muted)">Already have an account?</span>
-          </div>
-        </div>
+        <USeparator
+          label="Already have an account?"
+          :ui="{ container: 'font-normal text-muted' }"
+        />
 
         <!-- Login Link -->
         <UButton

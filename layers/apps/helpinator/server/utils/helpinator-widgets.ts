@@ -6,6 +6,8 @@ import { sql, type Selectable, type Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { HelpinatorAppearance } from '../database/schema'
 import { helpinatorAssertLibraries } from './helpinator-libraries'
+import { helpinatorParseOriginEntry } from './helpinator-origins'
+import { helpinatorChatModels } from './helpinator-bot'
 
 type Tx = Transaction<Database>
 
@@ -60,21 +62,16 @@ export function helpinatorResolvedAppearance(stored: unknown): Required<Helpinat
   return { ...HELPINATOR_DEFAULT_APPEARANCE, ...helpinatorSanitizeAppearance(stored) }
 }
 
-// Reduce each entry to a bare origin (scheme://host[:port]); invalid entries
-// are rejected so a typo surfaces in the form instead of silently blocking.
+// Reduce each entry to a bare origin (scheme://host[:port]) or a subdomain
+// wildcard (scheme://*.domain[:port]); invalid entries are rejected so a typo
+// surfaces in the form instead of silently blocking.
 export function helpinatorNormalizeOrigins(list: string[]): string[] {
   const out = new Set<string>()
   for (const raw of list) {
     const trimmed = raw.trim()
     if (!trimmed) continue
-    let origin: string
-    try {
-      const u = new URL(trimmed)
-      if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('protocol')
-      origin = u.origin
-    } catch {
-      throw createError({ statusCode: 400, statusMessage: `Invalid origin: ${trimmed}` })
-    }
+    const origin = helpinatorParseOriginEntry(trimmed)
+    if (!origin) throw createError({ statusCode: 400, statusMessage: `Invalid origin: ${trimmed}` })
     out.add(origin)
   }
   return [...out]
@@ -99,7 +96,9 @@ export const HelpinatorWidgetInput = z.object({
   enabled: z.boolean().default(true),
   appearance: z.record(z.unknown()).default({}),
   extra_instructions: z.string().max(4000).default(''),
-  starter_questions: z.array(z.string().max(STARTER_QUESTION_MAX)).max(HELPINATOR_MAX_STARTER_QUESTIONS).default([])
+  starter_questions: z.array(z.string().max(STARTER_QUESTION_MAX)).max(HELPINATOR_MAX_STARTER_QUESTIONS).default([]),
+  // Own chat model; null / '' follows the org's `helpinator.chat` choice.
+  chat_model: z.string().trim().max(200).nullable().default(null)
 })
 export type HelpinatorWidgetInputValue = z.infer<typeof HelpinatorWidgetInput>
 
@@ -120,6 +119,18 @@ async function assertBinding(tx: Tx, input: HelpinatorWidgetInputValue): Promise
     .executeTakeFirst()
   if (!section) throw createError({ statusCode: 400, statusMessage: 'Unknown section for the default library\'s portfolio' })
   return key
+}
+
+// The chat model to store (null = org default). A new pick must be one the org
+// may use; an unchanged pick is kept even when it no longer is, so editing
+// other fields doesn't force a model change (turns fall back meanwhile).
+async function assertChatModel(tx: Tx, model: string | null, current: string | null): Promise<string | null> {
+  const id = model?.trim() || null
+  if (!id || id === current) return id
+  if (!(await helpinatorChatModels(tx)).some(m => m.id === id)) {
+    throw createError({ statusCode: 400, statusMessage: 'That AI model is not available to this organization' })
+  }
+  return id
 }
 
 // Same libraries, same default: order-insensitive.
@@ -156,6 +167,7 @@ export async function helpinatorCreateWidget(
   userId: string
 ): Promise<HelpinatorWidgetRow> {
   const sectionKey = await assertBinding(tx, input)
+  const chatModel = await assertChatModel(tx, input.chat_model, null)
   return await tx
     .insertInto('helpinator_widgets')
     .values({
@@ -169,6 +181,7 @@ export async function helpinatorCreateWidget(
       appearance: sql`${JSON.stringify(helpinatorAppearanceOverrides(input.appearance))}::text::jsonb`,
       extra_instructions: input.extra_instructions.trim(),
       starter_questions: helpinatorNormalizeStarterQuestions(input.starter_questions),
+      chat_model: chatModel,
       created_by: userId
     })
     .returningAll()
@@ -182,6 +195,7 @@ export async function helpinatorUpdateWidget(
 ): Promise<HelpinatorWidgetRow> {
   const existing = await helpinatorGetWidgetOr404(tx, id)
   const sectionKey = await assertBinding(tx, input)
+  const chatModel = await assertChatModel(tx, input.chat_model, existing.chat_model)
   const libraryIds = [...new Set(input.library_ids)]
   const updated = await tx
     .updateTable('helpinator_widgets')
@@ -196,6 +210,7 @@ export async function helpinatorUpdateWidget(
       appearance: sql`${JSON.stringify(helpinatorAppearanceOverrides(input.appearance))}::text::jsonb`,
       extra_instructions: input.extra_instructions.trim(),
       starter_questions: helpinatorNormalizeStarterQuestions(input.starter_questions),
+      chat_model: chatModel,
       updated_at: sql`now()`
     })
     .where('id', '=', id)

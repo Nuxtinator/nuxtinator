@@ -11,7 +11,10 @@ export default defineNuxtConfig({
         // may send (NUXT_SOCIAL_AUTH_GOOGLE_NATIVE_CLIENT_IDS).
         nativeClientIds: '',
         // Overrides Google's signing-key URL; only for tests and emulators.
-        jwksUrl: ''
+        jwksUrl: '',
+        // Comma-separated hosts profile photos may come from; empty means
+        // googleusercontent.com (NUXT_SOCIAL_AUTH_GOOGLE_PHOTO_HOSTS).
+        photoHosts: ''
       },
       apple: {
         // Services ID used by the web flow (NUXT_SOCIAL_AUTH_APPLE_SERVICES_ID).

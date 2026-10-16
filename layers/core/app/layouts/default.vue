@@ -11,6 +11,8 @@ const { apps } = await useApps()
 const activeApp = useActiveApp(apps)
 const route = useRoute()
 
+const accountAvatar = computed(() => user.value?.avatar ? { src: user.value.avatar, alt: user.value.display_name || user.value.email } : undefined)
+
 const mobileSidebarOpen = ref(false)
 const mobileRailOpen = ref(false)
 
@@ -61,7 +63,9 @@ watch(() => route.path, () => {
           <ThemeToggle size="sm" />
           <UButton
             to="/account"
-            icon="i-lucide-user"
+            :icon="accountAvatar ? undefined : 'i-lucide-user'"
+            :avatar="accountAvatar"
+            :ui="accountAvatar ? { base: 'p-0 rounded-full', leadingAvatarSize: 'sm' } : undefined"
             variant="ghost"
             color="neutral"
             size="sm"
@@ -92,7 +96,9 @@ watch(() => route.path, () => {
           <ThemeToggle size="sm" />
           <UButton
             to="/account"
-            icon="i-lucide-user"
+            :icon="accountAvatar ? undefined : 'i-lucide-user'"
+            :avatar="accountAvatar"
+            :ui="accountAvatar ? { base: 'p-0 rounded-full', leadingAvatarSize: 'sm' } : undefined"
             variant="ghost"
             color="neutral"
             size="sm"

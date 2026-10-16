@@ -12,6 +12,7 @@ declare module 'vitest' {
   export interface ProvidedContext {
     socialAuthUrl: string
     socialAuthPrivateKey: string
+    socialPhotoBaseUrl: string
   }
 }
 
@@ -58,4 +59,26 @@ export async function cleanupSocialTestData(sql: ReturnType<typeof postgres>): P
   await sql`DELETE FROM invites WHERE email LIKE 'test-social-%@example.com' OR display_name LIKE 'test-social-%'`
   await sql`DELETE FROM activity_logs WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'test-social-%@example.com')`
   await sql`DELETE FROM users WHERE email LIKE 'test-social-%@example.com'`
+}
+
+// The HTTPS photo host from global-setup.
+export function photoUrl(path: string): string {
+  return `${inject('socialPhotoBaseUrl')}${path}`
+}
+
+// The user's avatar once `ready` accepts it, or whatever it is after `timeoutMs`.
+// Provider photos are imported in the background after sign-in.
+export async function waitForAvatar(
+  sql: ReturnType<typeof postgres>,
+  email: string,
+  ready: (avatar: string) => boolean,
+  timeoutMs = 5000
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const rows = await sql<{ avatar: string }[]>`SELECT avatar FROM users WHERE email = ${email}`
+    const avatar = rows[0]?.avatar ?? ''
+    if (ready(avatar) || Date.now() > deadline) return avatar
+    await new Promise(r => setTimeout(r, 100))
+  }
 }

@@ -45,11 +45,19 @@ export default defineEventHandler(async (event) => {
     console.warn('[hook user.deleting] handler threw:', err)
   }
 
-  await db.transaction().execute(async (trx) => {
+  const deleted = await db.transaction().execute(async (trx) => {
     await trx.deleteFrom('password_reset_requests').where('user_id', '=', id).execute()
     // memberships cascade-delete via the FK ON DELETE CASCADE.
-    await trx.deleteFrom('users').where('id', '=', id).execute()
+    return await trx.deleteFrom('users').where('id', '=', id).returning('avatar').executeTakeFirst()
   })
+
+  if (deleted) {
+    try {
+      await useNitroApp().hooks.callHook('user.deleted', { userId: id, avatar: deleted.avatar })
+    } catch (err) {
+      console.warn('[hook user.deleted] handler threw:', err)
+    }
+  }
 
   await logEvent({
     eventType: 'admin_delete_user',

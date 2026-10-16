@@ -1,6 +1,7 @@
 import { getHeader } from 'h3'
-import { startSession, markReauthenticated } from '#core/server/utils/sessions'
+import { startSession, markReauthenticated, hasRecentAuth } from '#core/server/utils/sessions'
 import { postSignInRedirect } from '#core/server/utils/accounts'
+import { getAccountPath, withQueryParams } from '#core/server/utils/account-path'
 import { logEvent } from '#core/server/utils/activity-logger'
 import { db } from '#core/server/utils/database'
 import { exchangeCode, getProviderConfig, verifyIdToken } from '../../../../utils/social-providers'
@@ -13,10 +14,11 @@ export default defineEventHandler(async (event) => {
   const cfg = getProviderConfig(getRouterParam(event, 'provider') || '')
   const flow = takeFlowCookie(event)
   const query = getQuery(event)
+  const accountPath = getAccountPath(event)
 
-  const fail = (code: SignInErrorCode | 'cancelled', f: SocialFlow | null = flow) => {
+  const fail = (code: SignInErrorCode | 'cancelled' | 'reauth_required', f: SocialFlow | null = flow) => {
     if (f?.intent === 'link' || f?.intent === 'reauth') {
-      return sendRedirect(event, `/account?link=${code}`)
+      return sendRedirect(event, withQueryParams(f.redirect || accountPath, { link: code }))
     }
     if (f?.invite) {
       return sendRedirect(event, `/accept-invite?token=${encodeURIComponent(f.invite)}&auth_error=${code}`)
@@ -27,6 +29,8 @@ export default defineEventHandler(async (event) => {
   if (!cfg?.webEnabled || !flow || flow.provider !== cfg.id) return fail('failed')
   if (typeof query.error === 'string') return fail(query.error === 'access_denied' || query.error === 'user_cancelled_authorize' ? 'cancelled' : 'failed')
   if (query.state !== flow.state || typeof query.code !== 'string') return fail('failed')
+  // The step-up checked at start must still hold when the identity is linked.
+  if (flow.intent === 'link' && !(flow.sessionId && await hasRecentAuth(flow.sessionId))) return fail('reauth_required')
 
   let profile
   let refreshToken: string | null
@@ -61,7 +65,8 @@ export default defineEventHandler(async (event) => {
     invite: flow.invite,
     clientId: cfg.webClientId,
     refreshTokenEnc,
-    userAgent
+    userAgent,
+    waitUntil: promise => event.waitUntil(promise)
   }).catch((err) => {
     console.warn(`[social-auth] ${cfg.id} sign-in failed:`, (err as Error).message)
     return { kind: 'error' as const, code: 'failed' as const }
@@ -83,11 +88,11 @@ export default defineEventHandler(async (event) => {
       return sendRedirect(event, '/social-auth/complete')
 
     case 'linked':
-      return sendRedirect(event, flow.redirect || '/account?link=success')
+      return sendRedirect(event, withQueryParams(flow.redirect || accountPath, { link: 'success' }))
 
     case 'reauthed':
       if (flow.sessionId) await markReauthenticated(flow.sessionId)
-      return sendRedirect(event, flow.redirect || '/account')
+      return sendRedirect(event, flow.redirect || accountPath)
 
     case 'signed_in': {
       const user = await db.selectFrom('users').select(['id', 'email', 'display_name']).where('id', '=', outcome.userId).executeTakeFirstOrThrow()

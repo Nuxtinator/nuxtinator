@@ -93,6 +93,28 @@ describe('staff notification targeting', () => {
     expect(rows[0]!.email_mode).toBe('immediate')
   })
 
+  it('does not email an assignee who has left the org; the reply goes to the broadcast instead', async () => {
+    const { org, user, domain } = await createInboxOrgWith(sql)
+    await setInboxOrgSetting(sql, org.id, 'auto_ack_enabled', false)
+    const former = await createInboxUser(sql)
+    const sender = uniqueSender('former')
+    const first = await postInbound({ recipient: `hello@${domain}`, from: `R <${sender}>` })
+    const convId = first.body.conversation_id as string
+    // Assigned to someone who is no longer a member of the org.
+    const [row] = await sql`
+      UPDATE inbox_conversations SET assigned_user_id = ${former.id} WHERE id = ${convId} RETURNING reply_token
+    `
+    await postInbound({
+      recipient: `contact+${row!.reply_token}@${domain}`,
+      from: `R <${sender}>`,
+      subject: 'Re: Test subject'
+    })
+
+    const rows = (await notificationRows(convId)).filter(r => (r.title as string).startsWith('New reply from'))
+    expect(rows.map(r => r.user_id)).not.toContain(former.id)
+    expect(rows.map(r => r.user_id)).toContain(user.id)
+  })
+
   it('never notifies for a vacation auto-reply; a held intruder message raises the held notice', async () => {
     const { domain } = await createInboxOrgWith(sql)
     const sender = uniqueSender('quiet')
@@ -113,5 +135,28 @@ describe('staff notification targeting', () => {
     expect(held.body.status).toBe('held')
     const heldRows = (await notificationRows(convId)).filter(r => (r.title as string).startsWith('Held message from'))
     expect(heldRows.length).toBeGreaterThan(0)
+  })
+
+  it('opening a conversation marks only the opener\'s notifications for it read', async () => {
+    const { org, user, opts, domain } = await createInboxOrgWith(sql)
+    const other = await createInboxUser(sql)
+    await addTestMembership(sql, { user_id: other.id, org_id: org.id, roles: ['admin'] })
+    const opened = await postInbound({ recipient: `hello@${domain}`, from: `A <${uniqueSender('open-a')}>` })
+    const untouched = await postInbound({ recipient: `hello@${domain}`, from: `B <${uniqueSender('open-b')}>` })
+    const link = `/inbox/${opened.body.conversation_id as string}`
+
+    const res = await $fetch<{ updated: number }>('/api/notifications/read', {
+      method: 'POST', body: { links: [link, `${link}?filter=open`] }, ...opts
+    })
+    expect(res.updated).toBe(1)
+
+    const rows = await sql<{ user_id: string, link: string, read: boolean }[]>`
+      SELECT user_id, link, read_at IS NOT NULL AS read FROM notifications
+      WHERE link IN (${link}, ${`/inbox/${untouched.body.conversation_id as string}`})
+    `
+    const read = (userId: string, l: string) => rows.find(r => r.user_id === userId && r.link === l)?.read
+    expect(read(user.id, link)).toBe(true)
+    expect(read(other.id, link)).toBe(false)
+    expect(read(user.id, `/inbox/${untouched.body.conversation_id as string}`)).toBe(false)
   })
 })

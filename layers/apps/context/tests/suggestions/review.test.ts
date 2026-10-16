@@ -185,6 +185,38 @@ describe('context suggest mode', () => {
     )).rejects.toMatchObject({ statusCode: 409 })
   })
 
+  it('a reviewer approves with edits: the edited content is written as the reviewer', async () => {
+    const { org, admin, adminAuth, portfolio, token } = await setup()
+    const res = await callMcpTool(token, 'update_section', {
+      org: org.slug, portfolio_id: portfolio.id, section_key: 'identity', content: 'Suggested text.'
+    })
+    const setId = res.structuredContent?.suggestion_set_id as string
+    const suggestionId = res.structuredContent?.suggestion_id as string
+
+    await expect($fetch(`/api/context/suggestions/${setId}/decide`, {
+      method: 'POST', body: { action: 'approve', content: 'Edited.' }, ...withOrgHeader(adminAuth, org.slug)
+    })).rejects.toMatchObject({ statusCode: 400 })
+
+    const decided = await $fetch<{ set: { suggestions: Array<{ status: string, proposed_content: string }> } }>(
+      `/api/context/suggestions/${setId}/decide`,
+      {
+        method: 'POST',
+        body: { action: 'approve', suggestion_ids: [suggestionId], content: 'Suggested text, tidied.' },
+        ...withOrgHeader(adminAuth, org.slug)
+      }
+    )
+    expect(decided.set.suggestions[0]).toMatchObject({ status: 'approved', proposed_content: 'Suggested text.' })
+    expect(await content(portfolio.id, 'identity')).toBe('Suggested text, tidied.')
+
+    const versions = await sql<{ edited_by: string, source: string, suggestion_id: string, content: string }[]>`
+      SELECT v.edited_by, v.source, v.suggestion_id, v.content
+      FROM context_section_versions v
+      JOIN context_sections s ON s.id = v.section_id
+      WHERE s.portfolio_id = ${portfolio.id} AND s.section_key = 'identity'
+    `
+    expect(versions).toEqual([{ edited_by: admin.id, source: 'suggestion', suggestion_id: suggestionId, content: 'Suggested text, tidied.' }])
+  })
+
   it('flags a suggestion whose section changed since, and approval still overwrites', async () => {
     const { org, adminAuth, portfolio, token } = await setup()
     const res = await callMcpTool(token, 'update_section', {
@@ -367,6 +399,38 @@ describe('context suggest mode', () => {
       WHERE user_id = ${admin.id} AND app_id = 'context' ORDER BY created_at
     `
     expect(rows.map(r => [r.link === `/context/suggestions/${setA}`, r.read])).toEqual([[true, true], [false, false]])
+  })
+
+  it('once nothing in a set is pending, every reviewer\'s notification about it is read', async () => {
+    const { org, admin, adminAuth, portfolio, token } = await setup()
+    const { user: reviewer } = await addContextMember(sql, org.id, ['admin'])
+    await seedTestSection(sql, { portfolio_id: portfolio.id, section_key: 'vision-and-values', content: 'V.', last_edited_by: admin.id })
+    const res = await callMcpTool(token, 'bulk_update_sections', {
+      org: org.slug,
+      portfolio_id: portfolio.id,
+      updates: [
+        { section_key: 'identity', content: 'A.' },
+        { section_key: 'vision-and-values', content: 'B.' }
+      ]
+    })
+    expect(res.isError, res.content[0]?.text).toBeFalsy()
+    const setId = res.structuredContent?.suggestion_set_id as string
+    const [first, second] = await suggestions(setId)
+
+    const readByUser = async () => new Map((await sql<{ user_id: string, read: boolean }[]>`
+      SELECT user_id, read_at IS NOT NULL AS read FROM notifications
+      WHERE link = ${`/context/suggestions/${setId}`}
+    `).map(r => [r.user_id, r.read]))
+
+    await $fetch(`/api/context/suggestions/${setId}/decide`, {
+      method: 'POST', body: { action: 'approve', suggestion_ids: [first!.id] }, ...withOrgHeader(adminAuth, org.slug)
+    })
+    expect(await readByUser()).toEqual(new Map([[admin.id, false], [reviewer.id, false]]))
+
+    await $fetch(`/api/context/suggestions/${setId}/decide`, {
+      method: 'POST', body: { action: 'reject', suggestion_ids: [second!.id] }, ...withOrgHeader(adminAuth, org.slug)
+    })
+    expect(await readByUser()).toEqual(new Map([[admin.id, true], [reviewer.id, true]]))
   })
 
   it('a failing bulk call leaves no suggestion behind', async () => {

@@ -7,7 +7,7 @@ import { helpinatorHandoffAvailable } from '../../../../../../utils/helpinator-c
 
 export default defineEventHandler(async (event) => {
   return await helpinatorWithWidget(event, async (tx, widget) => {
-    const aiConfigured = await helpinatorAiReady(tx)
+    const aiConfigured = await helpinatorAiReady(tx, widget.chat_model)
     return helpinatorPublicConfig(widget, { aiConfigured, handoffAvailable: await helpinatorHandoffAvailable(tx) })
   })
 })

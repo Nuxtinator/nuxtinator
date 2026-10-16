@@ -1,11 +1,12 @@
 import bcrypt from 'bcrypt'
 import { db } from '../../utils/database'
-import { logRegisterAttempt } from '../../utils/activity-logger'
 import { sendTemplateEmail } from '#email'
-import { checkRateLimit, logRateLimitExceeded } from '../../utils/rate-limit'
+import { consumeRateLimit, logRateLimitExceeded } from '../../utils/rate-limit'
+import { getClientIp } from '../../utils/client-ip'
 import { readBody, getHeader, setResponseHeader } from 'h3'
 import { getSiteUrl } from '../../utils/site-url'
 import { createUserAccount } from '../../utils/accounts'
+import { isSelfRegistrationOpen } from '../../utils/registration'
 import { startSession, nativeTokenFields } from '../../utils/sessions'
 import { useRuntimeConfig, createError } from '#imports'
 import { launcherPath } from '#core/app/utils/launcher'
@@ -21,10 +22,14 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Display name must be at least 2 characters long' })
   }
 
-  // Check rate limit by IP
-  const clientIp = getHeader(event, 'x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  if (!(await isSelfRegistrationOpen(db))) {
+    throw createError({ statusCode: 403, statusMessage: 'Registration is closed', data: { code: 'registration_closed' } })
+  }
+
+  // Rate limit by client IP; counting and recording the attempt is one atomic step.
+  const clientIp = getClientIp(event)
   const userAgent = getHeader(event, 'user-agent') || undefined
-  const rateCheck = await checkRateLimit('REGISTER_ATTEMPT', 'ip', clientIp, 15 * 60 * 1000, 10)
+  const rateCheck = await consumeRateLimit('REGISTER_ATTEMPT', 'ip', clientIp, 15 * 60 * 1000, 10)
 
   if (!rateCheck.allowed) {
     logRateLimitExceeded(clientIp, '/api/auth/register', userAgent)
@@ -35,9 +40,6 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // Log this registration attempt
-  logRegisterAttempt(clientIp, userAgent)
-
   // Hash password
   const hashedPassword = await bcrypt.hash(password, 12)
 
@@ -46,7 +48,7 @@ export default defineEventHandler(async (event) => {
   // transaction so the "who got the admin role" audit row commits with the
   // user row.
   const { userId, tokenKey, isFirstUser } = await db.transaction().execute(trx =>
-    createUserAccount(trx, { email, display_name, passwordHash: hashedPassword, verified: false }, userAgent)
+    createUserAccount(trx, { email, display_name, passwordHash: hashedPassword, verified: false, selfSignup: true }, userAgent)
   )
 
   // First user gets auto-logged-in — no verification email, session started directly.

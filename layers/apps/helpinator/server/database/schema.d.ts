@@ -88,6 +88,8 @@ export interface HelpinatorWidgetsTable {
   extra_instructions: Generated<string>
   // Clickable suggestions shown before the visitor's first message.
   starter_questions: Generated<string[]>
+  // Own chat model; null follows the org's `helpinator.chat` choice.
+  chat_model: string | null
   created_by: string | null
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>

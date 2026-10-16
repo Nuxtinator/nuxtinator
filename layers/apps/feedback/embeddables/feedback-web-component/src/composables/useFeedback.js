@@ -53,7 +53,7 @@ export function useFeedback() {
       // Bearer-aware identity endpoint — works first-party (cookie) AND
       // cross-origin (the token from /api/v1/feedback/token). The core
       // /api/auth/me is cookie-only and can't authenticate a cross-origin embed.
-      const data = await api.request('/api/v1/feedback/me')
+      const data = await api.request(`/api/v1/feedback/me?project_id=${encodeURIComponent(projectId?.value || '')}`)
       auth.setUser(data.user)
     } catch (e) {
       if (e.status === 401) auth.reset()

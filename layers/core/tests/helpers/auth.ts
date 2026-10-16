@@ -90,9 +90,9 @@ export async function createTestSession(
 // A scope-tagged bearer token, matching `signScopedToken` in core auth. Used
 // by cross-origin flows (e.g. the feedback widget's `Authorization: Bearer`),
 // which verify the token carries the expected `scope` claim.
-export function generateScopedTestToken(user: TestUser, scope: string): string {
+export function generateScopedTestToken(user: TestUser, scope: string, claims: Record<string, unknown> = {}): string {
   return jwt.sign(
-    { userId: user.id, email: user.email, display_name: user.display_name, scope },
+    { userId: user.id, email: user.email, display_name: user.display_name, ...claims, scope },
     jwtSecret(),
     { expiresIn: '7d' }
   )

@@ -98,6 +98,7 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
       tools: visible.map((entry) => {
         const tool: Record<string, unknown> = {
           name: entry.def.name,
+          ...(entry.def.title ? { title: entry.def.title } : {}),
           description: entry.def.description,
           inputSchema: entry.inputJsonSchema
         }

@@ -42,7 +42,7 @@ export async function isAiConfigured(_tx: AiDbClient): Promise<boolean> {
   return false
 }
 
-export async function resolveAiRun(_tx: AiDbClient, _feature: string): Promise<AiCompletionRun> {
+export async function resolveAiRun(_tx: AiDbClient, _feature: string, _opts: { model?: string | null } = {}): Promise<AiCompletionRun> {
   notConfigured()
 }
 
@@ -83,7 +83,7 @@ export async function resolveDefaultModel(_tx: AiDbClient): Promise<string> {
   return ''
 }
 
-export async function resolveFeatureModel(_tx: AiDbClient, _feature: string): Promise<string> {
+export async function resolveFeatureModel(_tx: AiDbClient, _feature: string, _override?: string | null): Promise<string> {
   return ''
 }
 

@@ -19,13 +19,13 @@ const COLUMN_TO_STATUS: Record<string, string> = {
 }
 
 export default defineEventHandler(async (event) => {
-  const authUser = requireWidgetAuthUser(event)
   const query = getQuery(event)
   const projectId = typeof query.project_id === 'string' ? query.project_id : ''
 
   if (!projectId) {
     throw createError({ statusCode: 400, statusMessage: 'project_id required' })
   }
+  const authUser = requireWidgetAuthUser(event, projectId)
 
   return await withProjectOrgContext(event, projectId, async (tx) => {
     const rows = await tx

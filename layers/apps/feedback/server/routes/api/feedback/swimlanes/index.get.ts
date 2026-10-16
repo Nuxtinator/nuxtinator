@@ -1,5 +1,5 @@
 import { getQuery } from 'h3'
-import { withOrgContext } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
@@ -9,7 +9,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'project_id is required' })
   }
 
-  return await withOrgContext(event, async (tx) => {
+  return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.read', async (tx) => {
     const rows = await tx
       .selectFrom('swimlanes')
       .selectAll()

@@ -4,6 +4,7 @@
 // explicit per-org overrides, and RLS scopes reads to the caller's org
 // through the transaction.
 import { getSetting } from '#core/server/utils/settings-store'
+import { urlLooksPublic } from '#core/server/utils/safe-fetch'
 import type { DbClient } from '#core/server/utils/settings'
 
 export const INBOX_SETTINGS_NAMESPACE = 'inbox'
@@ -46,7 +47,7 @@ export function sanitizeGroundingUrls(value: unknown): string[] {
   for (const v of value) {
     if (typeof v !== 'string') continue
     const url = v.trim()
-    if (!/^https?:\/\//i.test(url) || seen.has(url)) continue
+    if (!/^https?:\/\//i.test(url) || !urlLooksPublic(url) || seen.has(url)) continue
     seen.add(url)
     out.push(url)
   }

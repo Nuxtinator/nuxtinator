@@ -13,7 +13,7 @@ import { FEEDBACK_SETTINGS_NAMESPACE, DEFAULT_NOTIFY_SETTING_KEY } from '../../.
 export default defineEventHandler(async (event) => {
   const body = await readBody(event) ?? {}
 
-  return withOrgPermission(event, 'feedback.write', async (tx, ctx) => {
+  return withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
     // The registered setting's `parse` sanitizes to a deduped user-id list, so
     // a malformed body can't corrupt the stored value.
     await setSetting(tx, FEEDBACK_SETTINGS_NAMESPACE, DEFAULT_NOTIFY_SETTING_KEY, body.user_ids)

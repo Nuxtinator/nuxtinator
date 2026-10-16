@@ -1,16 +1,19 @@
 import { db, sql } from '#core/server/utils/database'
 import { createUserAccount } from '#core/server/utils/accounts'
+import { isSelfRegistrationOpen } from '#core/server/utils/registration'
 import { acceptInvite, emitAcceptedMemberships, findInviteByToken, inviteState } from '#core/server/utils/invites'
 import { encryptSecret } from '#core/server/utils/secret-crypto'
-import { isPublicStorageConfigured, uploadToS3 } from '#core/server/utils/storage'
+import { deleteFromS3, isPublicStorageConfigured } from '#core/server/utils/storage'
+import { downloadAvatar, uploadAvatar } from '#core/server/utils/avatar'
+import { isAllowedAvatarUrl, isAvatarHostListed } from '#core/server/utils/avatar-image'
 import { logEvent } from '#core/server/utils/activity-logger'
-import type { SocialProfile, SocialProviderId } from './social-providers'
+import { getProviderConfig, type SocialProfile, type SocialProviderId } from './social-providers'
 import type { SocialIntent } from './social-flow'
 
 // What happens when a provider vouches for someone. Shared by the web
 // callback, the native token endpoint and the display-name step.
 
-export type SignInErrorCode = 'email_unverified' | 'unverified_account' | 'already_linked' | 'one_per_provider' | 'failed'
+export type SignInErrorCode = 'email_unverified' | 'unverified_account' | 'already_linked' | 'one_per_provider' | 'registration_closed' | 'invite_invalid' | 'failed'
 
 export type SignInOutcome
   = { kind: 'signed_in', userId: string, created: boolean, inviteAccepted: boolean }
@@ -32,6 +35,8 @@ export interface SignInInput {
   clientId: string | null
   refreshTokenEnc: string | null
   userAgent?: string
+  // Keeps background work (the avatar import) alive after the response.
+  waitUntil?: (promise: Promise<unknown>) => void
 }
 
 export function encryptRefreshToken(token: string | null): string | null {
@@ -117,7 +122,7 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
     if (await hasIdentityFor(input.userId, input.provider)) return { kind: 'error', code: 'one_per_provider' }
     await db.insertInto('user_identities').values(identityRow(input.userId, input)).execute()
     logLinked(input.userId, input)
-    await importAvatar(input.userId, profile.picture)
+    startAvatarImport(input, input.userId)
     return { kind: 'linked', userId: input.userId }
   }
 
@@ -142,27 +147,42 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
     if (await hasIdentityFor(existing.id, input.provider)) return { kind: 'error', code: 'one_per_provider' }
     await db.insertInto('user_identities').values(identityRow(existing.id, input)).execute()
     logLinked(existing.id, input)
-    await importAvatar(existing.id, profile.picture)
+    startAvatarImport(input, existing.id)
     return { kind: 'signed_in', userId: existing.id, created: false, inviteAccepted: false }
+  }
+
+  const invite = input.invite ? await findInviteByToken(db, input.invite) : null
+  const usableInvite = invite && inviteState(invite) === 'valid' ? invite : null
+  if (!usableInvite && !(await isSelfRegistrationOpen(db))) {
+    return { kind: 'error', code: input.invite ? 'invite_invalid' : 'registration_closed' }
   }
 
   const displayName = (input.displayName ?? profile.name ?? '').trim()
   if (displayName.length < 2) return { kind: 'needs_name' }
 
-  const invite = input.invite ? await findInviteByToken(db, input.invite) : null
-  const usableInvite = invite && inviteState(invite) === 'valid' ? invite : null
-
-  const { account, memberships } = await db.transaction().execute(async (trx) => {
-    const account = await createUserAccount(trx, {
-      email: profile.email!,
-      display_name: displayName,
-      passwordHash: null,
-      verified: true
-    }, input.userAgent)
-    await trx.insertInto('user_identities').values(identityRow(account.userId, input)).execute()
-    const memberships = usableInvite ? await acceptInvite(trx, usableInvite.id, account.userId) : []
-    return { account, memberships }
-  })
+  // createUserAccount re-checks the setting under its lock, so registration can
+  // still close between the check above and the insert.
+  let created
+  try {
+    created = await db.transaction().execute(async (trx) => {
+      const account = await createUserAccount(trx, {
+        email: profile.email!,
+        display_name: displayName,
+        passwordHash: null,
+        verified: true,
+        selfSignup: !usableInvite
+      }, input.userAgent)
+      await trx.insertInto('user_identities').values(identityRow(account.userId, input)).execute()
+      const memberships = usableInvite ? await acceptInvite(trx, usableInvite.id, account.userId) : []
+      return { account, memberships }
+    })
+  } catch (err) {
+    if ((err as { data?: { code?: string } }).data?.code === 'registration_closed') {
+      return { kind: 'error', code: 'registration_closed' }
+    }
+    throw err
+  }
+  const { account, memberships } = created
 
   try {
     await useNitroApp().hooks.callHook('user.created', { userId: account.userId, email: profile.email, viaInvite: !!usableInvite })
@@ -188,42 +208,54 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
     userAgent: input.userAgent,
     metadata: { provider: input.provider }
   })
-  await importAvatar(account.userId, profile.picture)
+  startAvatarImport(input, account.userId)
 
   return { kind: 'signed_in', userId: account.userId, created: true, inviteAccepted: !!usableInvite }
 }
 
-const AVATAR_MAX_BYTES = 2 * 1024 * 1024
+// Imports the provider's photo in the background so sign-in doesn't wait for it.
+function startAvatarImport(input: SignInInput, userId: string): void {
+  const photoHosts = getProviderConfig(input.provider)?.photoHosts ?? []
+  const work = importAvatar(userId, input.profile.picture, photoHosts)
+  input.waitUntil?.(work)
+}
 
-// Sets the user's avatar from the provider's photo, unless they already have
-// one. The image is copied to the app's public storage when S3 is configured;
-// otherwise the provider's URL is stored as-is.
-async function importAvatar(userId: string, pictureUrl: string | null): Promise<void> {
-  if (!pictureUrl || !/^https:\/\//.test(pictureUrl)) return
+// Sets an empty avatar from the provider's photo: copied to storage when it's
+// configured, otherwise the provider's URL. Called on account creation and linking.
+async function importAvatar(userId: string, pictureUrl: string | null, photoHosts: string[]): Promise<void> {
+  if (!pictureUrl) return
+  let url: URL
+  try {
+    url = new URL(pictureUrl)
+  } catch {
+    return
+  }
+  if (!isAllowedAvatarUrl(url) || !isAvatarHostListed(url.hostname, photoHosts)) {
+    console.warn(`[social-auth] photo host not allowed: ${url.host}`)
+    return
+  }
+  let uploadedKey: string | null = null
   try {
     const user = await db.selectFrom('users').select('avatar').where('id', '=', userId).executeTakeFirst()
     if (!user || user.avatar) return
 
     let avatar = pictureUrl
     if (isPublicStorageConfigured()) {
-      try {
-        const res = await fetch(pictureUrl)
-        const contentType = res.headers.get('content-type') || ''
-        if (res.ok && contentType.startsWith('image/')) {
-          const buf = Buffer.from(await res.arrayBuffer())
-          if (buf.length <= AVATAR_MAX_BYTES) {
-            const ext = contentType.split('/')[1]?.split(';')[0] || 'jpg'
-            const uploaded = await uploadToS3(buf, `avatar.${ext}`, contentType, 'public', 'avatars')
-            avatar = uploaded.url
-          }
-        }
-      } catch {
-        // The copy failed: keep the provider's URL.
+      const data = await downloadAvatar(pictureUrl, photoHosts)
+      const uploaded = data ? await uploadAvatar(data) : null
+      if (!uploaded?.ok) {
+        if (uploaded) console.warn(`[social-auth] photo not used: ${uploaded.reason}`)
+        return
       }
+      avatar = uploaded.url
+      uploadedKey = uploaded.key
     }
 
-    await db.updateTable('users').set({ avatar }).where('id', '=', userId).where('avatar', '=', '').execute()
+    const result = await db.updateTable('users').set({ avatar }).where('id', '=', userId).where('avatar', '=', '').executeTakeFirst()
+    // The avatar was set, or the user removed, in the meantime: drop this copy.
+    if (!Number(result.numUpdatedRows) && uploadedKey) await deleteFromS3(uploadedKey, 'public').catch(() => {})
   } catch (err) {
+    if (uploadedKey) await deleteFromS3(uploadedKey, 'public').catch(() => {})
     console.warn('[social-auth] avatar import failed:', (err as Error).message)
   }
 }

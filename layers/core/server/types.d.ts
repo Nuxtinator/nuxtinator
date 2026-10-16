@@ -30,6 +30,11 @@ interface CoreHookMap {
   'user.deleting': (p: {
     userId: string
   }) => void | Promise<void>
+  // Fired after the user row's deletion has committed, with the avatar it had.
+  'user.deleted': (p: {
+    userId: string
+    avatar: string
+  }) => void | Promise<void>
   'user.verified': (p: {
     userId: string
     email: string

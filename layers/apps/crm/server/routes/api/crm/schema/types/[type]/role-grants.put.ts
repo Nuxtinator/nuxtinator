@@ -4,13 +4,15 @@
 // means "inherit from the role's slugs". Role keys must name real roles
 // (static or custom; updateTypeRoleGrants only shape-checks), and 'admin' is
 // rejected outright: admins bypass the matrix, so a stored admin row would
-// be dead weight that misleads the next reader. Returns the refreshed GET
-// shape. Permission: crm.schema.manage.
+// be dead weight that misleads the next reader. A true entry the type doesn't
+// already store needs the caller to have that action on the type themselves.
+// Returns the refreshed GET shape. Permission: crm.schema.manage.
 
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
 import { validateRoleNames } from '#core/server/utils/rbac'
-import { buildRoleGrantsView, updateTypeRoleGrants } from '#crm/server'
+import { buildRoleGrantsView, CRM_RECORD_ACTIONS, getRecordType, resolveTypePermission, updateTypeRoleGrants } from '#crm/server'
+import type { CrmRecordAction } from '#crm/server'
 
 // Action names and per-role shapes are validated by updateTypeRoleGrants
 // (with per-entry error messages); zod only pins the outer contract.
@@ -33,6 +35,25 @@ export default defineEventHandler(async (event) => {
     const { valid, unknown } = await validateRoleNames(tx, roleKeys)
     if (!valid) {
       throw createError({ statusCode: 400, statusMessage: `Unknown role(s): ${unknown.join(', ')}` })
+    }
+
+    // Unknown types and actions are left to updateTypeRoleGrants' 404 / 400.
+    const existing = await getRecordType(tx, typeKey)
+    const newlyGranted = new Set<CrmRecordAction>()
+    if (existing && !existing.orphan) {
+      const stored = existing.roleGrants
+      for (const [role, actions] of Object.entries(parsed.data.grants)) {
+        for (const action of CRM_RECORD_ACTIONS) {
+          if (actions[action] === true && stored[role]?.[action] !== true) newlyGranted.add(action)
+        }
+      }
+    }
+    const missing: string[] = []
+    for (const action of newlyGranted) {
+      if (!(await resolveTypePermission(tx, ctx, typeKey, action))) missing.push(action)
+    }
+    if (missing.length > 0) {
+      throw createError({ statusCode: 403, statusMessage: `Cannot grant actions you don't hold on ${typeKey}: ${missing.join(', ')}` })
     }
 
     const type = await updateTypeRoleGrants(tx, ctx, typeKey, parsed.data.grants)

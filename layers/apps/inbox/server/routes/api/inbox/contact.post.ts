@@ -7,6 +7,7 @@
 // nothing about ownership; a click does). The submission is never lost to a
 // notification/courtesy failure — those are best-effort and swallowed.
 import { z } from 'zod'
+import { getClientIp } from '#core/server/utils/client-ip'
 
 const Body = z.object({
   email: z.string().email(),
@@ -43,7 +44,7 @@ export default defineEventHandler(async (event) => {
     source: 'contact_form',
     consent,
     country: inboxNormalizeCountry(parsed.data.country),
-    ip: getRequestIP(event, { xForwardedFor: true }) ?? null,
+    ip: getClientIp(event),
     userAgent: getHeader(event, 'user-agent') ?? null
   }))
 

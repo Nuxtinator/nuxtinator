@@ -73,7 +73,7 @@ const error = ref<string | null>(null)
 // Reject always asks (for an optional note); approve asks only when it would
 // overwrite changes made since the suggestion; withdraw asks when it covers
 // more than one section.
-const confirm = ref<{ action: Action, ids?: string[] } | null>(null)
+const confirm = ref<{ action: Action, ids?: string[], content?: string } | null>(null)
 const confirmOpen = computed({
   get: () => confirm.value !== null,
   set: (v) => { if (!v) confirm.value = null }
@@ -84,20 +84,20 @@ function targets(ids?: string[]): SuggestionItem[] {
   return ids ? pendingItems.value.filter(s => ids.includes(s.id)) : pendingItems.value
 }
 
-function request(action: Action, ids?: string[]) {
+function request(action: Action, ids?: string[], content?: string) {
   const items = targets(ids)
   const needsConfirm = action === 'reject'
     || (action === 'approve' && items.some(s => s.stale))
     || (action === 'withdraw' && items.length > 1)
   if (needsConfirm) {
     rejectNote.value = ''
-    confirm.value = { action, ids }
+    confirm.value = { action, ids, content }
   } else {
-    void run(action, ids)
+    void run(action, ids, content)
   }
 }
 
-async function run(action: Action, ids?: string[]) {
+async function run(action: Action, ids?: string[], content?: string) {
   busy.value = true
   error.value = null
   try {
@@ -109,7 +109,8 @@ async function run(action: Action, ids?: string[]) {
       : {
           action,
           ...(ids ? { suggestion_ids: ids } : {}),
-          ...(action === 'reject' && rejectNote.value.trim() ? { note: rejectNote.value.trim() } : {})
+          ...(action === 'reject' && rejectNote.value.trim() ? { note: rejectNote.value.trim() } : {}),
+          ...(action === 'approve' && content !== undefined ? { content } : {})
         }
     const res = await $fetch<{ set: SetDetail }>(url, { method: 'POST', body })
     if (data.value) data.value = { ...data.value, set: res.set }
@@ -242,7 +243,7 @@ const confirmCopy = computed(() => {
               :can-review="!!data?.can_review"
               :is-author="!!data?.is_author"
               :busy="busy"
-              @approve="request('approve', [s.id])"
+              @approve="(content?: string) => request('approve', [s.id], content)"
               @reject="request('reject', [s.id])"
               @withdraw="request('withdraw', [s.id])"
             />
@@ -257,7 +258,7 @@ const confirmCopy = computed(() => {
       :confirm-label="confirmCopy.label"
       :color="confirmCopy.color"
       :loading="busy"
-      @confirm="confirm && run(confirm.action, confirm.ids)"
+      @confirm="confirm && run(confirm.action, confirm.ids, confirm.content)"
     >
       <div v-if="confirm?.action === 'reject'" class="space-y-2">
         <p class="text-sm text-(--ui-text-muted)">

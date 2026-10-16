@@ -8,7 +8,9 @@ import type { HelpinatorLibraryRow, HelpinatorSourceRow } from './helpinator-lib
 
 type Tx = Transaction<Database>
 
-export function helpinatorAdminWidget(w: HelpinatorWidgetRow) {
+// `chatModelIds`: the chat models the org may use now (helpinatorChatModels),
+// to flag a stored pick that turns are falling back from.
+export function helpinatorAdminWidget(w: HelpinatorWidgetRow, chatModelIds: ReadonlySet<string>) {
   return {
     id: w.id,
     name: w.name,
@@ -23,6 +25,8 @@ export function helpinatorAdminWidget(w: HelpinatorWidgetRow) {
     appearance_defaults: HELPINATOR_DEFAULT_APPEARANCE,
     extra_instructions: w.extra_instructions,
     starter_questions: w.starter_questions,
+    chat_model: w.chat_model,
+    chat_model_unavailable: w.chat_model !== null && !chatModelIds.has(w.chat_model),
     created_at: w.created_at,
     updated_at: w.updated_at
   }

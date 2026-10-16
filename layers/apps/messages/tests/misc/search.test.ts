@@ -7,6 +7,8 @@ import {
   cleanupMessagesTestData,
   createMessagesOrgWith,
   createTestChannel,
+  createTestDm,
+  addMessagesMember,
   createTestItem,
   createTestComment,
   withOrgHeader
@@ -76,6 +78,28 @@ describe('GET /api/messages/search', () => {
     )
     expect(res.comments.map(r => r.id)).toContain(c.id)
     expect(res.items.map(r => r.id)).not.toContain(it.id)
+  })
+
+  it('returns DM items and comments only to the DM participants', async () => {
+    const { org, auth } = await createMessagesOrgWith(sql, ['admin'])
+    const a = await addMessagesMember(sql, org.id)
+    const b = await addMessagesMember(sql, org.id)
+    const outsider = await addMessagesMember(sql, org.id)
+    const dm = await createTestDm(sql, { org_id: org.id, created_by: a.user.id, other_user_id: b.user.id })
+    const it = await createTestItem(sql, { org_id: org.id, conversation_id: dm.id, author_id: a.user.id, body_md: 'banana salary' })
+    const c = await createTestComment(sql, { org_id: org.id, item_id: it.id, author_id: b.user.id, body_md: 'banana reply' })
+
+    type Res = { items: Array<{ id: string }>, comments: Array<{ id: string }> }
+    const asParticipant = await $fetch<Res>('/api/messages/search?q=banana', withOrgHeader(b.auth, org.slug))
+    expect(asParticipant.items.map(r => r.id)).toContain(it.id)
+    expect(asParticipant.comments.map(r => r.id)).toContain(c.id)
+
+    // Neither a plain member nor an org admin outside the DM sees it.
+    for (const caller of [outsider.auth, auth]) {
+      const res = await $fetch<Res>('/api/messages/search?q=banana', withOrgHeader(caller, org.slug))
+      expect(res.items).toEqual([])
+      expect(res.comments).toEqual([])
+    }
   })
 
   it('does not surface results from other orgs (RLS)', async () => {

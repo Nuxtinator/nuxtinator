@@ -99,6 +99,21 @@ export async function setHostSetting(
   await writeSetting(tx, 'core_host_settings', namespace, key, value)
 }
 
+// Drops the deployment-global override so reads fall back to the declared
+// default.
+export async function clearHostSetting(
+  tx: DbClient,
+  namespace: string,
+  key: string
+): Promise<void> {
+  requireSetting(namespace, key)
+  await tx
+    .deleteFrom('core_host_settings')
+    .where('namespace', '=', namespace)
+    .where('key', '=', key)
+    .execute()
+}
+
 // The two tables share one row shape; the scope helpers above differ only in
 // which one they hit.
 type SettingsTable = 'core_settings' | 'core_host_settings'
@@ -123,11 +138,12 @@ async function readSetting<T>(
 // The value is written as jsonb via a `::text::jsonb` cast: the intermediate
 // ::text stops postgres-js from JSON-encoding the already-stringified value a
 // SECOND time, which would store an array/object setting as a jsonb string
-// scalar instead of a real jsonb array/object. Read-then-write keeps this
-// mode-agnostic: `core_settings` is unique on `(namespace, key)` in single mode
-// but `(org_id, namespace, key)` in multi mode, so there's no single ON
-// CONFLICT target valid in both — and RLS already scopes the read/write to the
-// active org.
+// scalar instead of a real jsonb array/object. `core_host_settings` is always
+// unique on `(namespace, key)`, so it upserts. `core_settings` uses
+// read-then-write to stay mode-agnostic: it is unique on `(namespace, key)` in
+// single mode but `(org_id, namespace, key)` in multi mode, so there's no single
+// ON CONFLICT target valid in both — and RLS already scopes the read/write to
+// the active org.
 async function writeSetting(
   tx: DbClient,
   table: SettingsTable,
@@ -138,6 +154,15 @@ async function writeSetting(
   const def = requireSetting(namespace, key)
   const parsed = def.parse ? def.parse(value) : value
   const json = sql`${JSON.stringify(parsed ?? null)}::text::jsonb`
+
+  if (table === 'core_host_settings') {
+    await tx
+      .insertInto(table)
+      .values({ namespace, key, value: json })
+      .onConflict(oc => oc.columns(['namespace', 'key']).doUpdateSet({ value: json, updated_at: sql`now()` }))
+      .execute()
+    return
+  }
 
   const existing = await tx
     .selectFrom(table)

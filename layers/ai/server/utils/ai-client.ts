@@ -78,11 +78,12 @@ export async function isAiConfigured(tx: AiDbClient): Promise<boolean> {
 
 // Resolve the key and model for `feature` through the caller's tx. Pass the
 // result to `complete()` / `generate()` / `transcribe()` as `run` to make the
-// provider call after the transaction has committed.
-export async function resolveAiRun(tx: AiDbClient, feature: string): Promise<AiCompletionRun> {
+// provider call after the transaction has committed. `opts.model` overrides
+// the feature's model when the org may use it (see resolveFeatureModel).
+export async function resolveAiRun(tx: AiDbClient, feature: string, opts: { model?: string | null } = {}): Promise<AiCompletionRun> {
   // Warm the list so the synchronous capability lookups in buildBody see it.
   await loadModelList(tx)
-  const model = await resolveFeatureModel(tx, feature)
+  const model = await resolveFeatureModel(tx, feature, opts.model)
   if (process.env.VITEST) {
     const fallback = getAiFeatureKind(feature) === 'transcription' ? AI_TEST_FALLBACK_TRANSCRIPTION_MODEL : AI_TEST_FALLBACK_MODEL
     return { kind: 'completion', apiKey: 'test', model: model || fallback }
