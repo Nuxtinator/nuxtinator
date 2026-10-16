@@ -30,69 +30,52 @@ export default defineEventHandler(async (event) => {
 
     const isCrossProject = targetProjectId !== null && targetProjectId !== card.project_id
 
-    if (!isCrossProject) {
-      const updates: Record<string, any> = {
-        column_id: columnId,
-        last_moved_at: sql`now()`,
-        updated_at: sql`now()`
-      }
-      if (swimlaneId) updates.swimlane_id = swimlaneId
+    const updates: Record<string, any> = {
+      column_id: columnId,
+      last_moved_at: sql`now()`,
+      updated_at: sql`now()`
+    }
+    if (swimlaneId) updates.swimlane_id = swimlaneId
 
-      const updated = await tx
-        .updateTable('cards')
-        .set(updates)
-        .where('id', '=', id)
-        .returningAll()
-        .executeTakeFirst()
-
-      if (!updated) throw createError({ statusCode: 404, statusMessage: 'Card not found' })
-
-      await tx
-        .insertInto('card_column_history')
-        .values({ card_id: id, column_id: columnId })
+    // Moving to another project keeps the card's id, so its attachments,
+    // history and notification links follow it. The card lands in the given
+    // swimlane when that belongs to the target project, else the target's
+    // default swimlane. RLS keeps the target project inside the org.
+    if (isCrossProject) {
+      const lanes = await tx
+        .selectFrom('swimlanes')
+        .select(['id', 'is_default'])
+        .where('project_id', '=', targetProjectId)
         .execute()
-
-      logUpdate('cards', id, ctx.userId, { moved_to_column: columnId, moved_to_swimlane: swimlaneId || null })
-      return updated
+      if (lanes.length === 0) throw createError({ statusCode: 404, statusMessage: 'Project not found' })
+      const lane = lanes.find(l => l.id === swimlaneId) ?? lanes.find(l => l.is_default) ?? lanes[0]!
+      updates.project_id = targetProjectId
+      updates.swimlane_id = lane.id
     }
 
-    // Cross-project move (within the same org — RLS prevents reaching into a different org).
-    const inserted = await tx
-      .insertInto('cards')
-      .values({
-        project_id: targetProjectId,
-        swimlane_id: swimlaneId || card.swimlane_id,
-        column_id: columnId,
-        title: card.title,
-        description: card.description,
-        post_type: card.post_type,
-        post_meta: card.post_meta,
-        assignee: card.assignee,
-        priority: card.priority,
-        start_date: card.start_date as string | null | undefined,
-        due_date: card.due_date as string | null | undefined,
-        is_done: card.is_done,
-        testing_results: card.testing_results
-      })
+    const updated = await tx
+      .updateTable('cards')
+      .set(updates)
+      .where('id', '=', id)
       .returningAll()
-      .executeTakeFirstOrThrow()
+      .executeTakeFirst()
+
+    if (!updated) throw createError({ statusCode: 404, statusMessage: 'Card not found' })
 
     await tx
       .insertInto('card_column_history')
-      .values({ card_id: inserted.id, column_id: columnId })
+      .values({ card_id: id, column_id: columnId })
       .execute()
 
-    await tx.deleteFrom('cards').where('id', '=', id).execute()
-
-    logUpdate('cards', inserted.id, ctx.userId, {
-      cross_project: true,
-      old_card_id: id,
-      from_project_id: card.project_id,
-      to_project_id: targetProjectId,
-      from_column_id: card.column_id,
-      to_column_id: columnId
-    })
-
-    return inserted
+    logUpdate('cards', id, ctx.userId, isCrossProject
+      ? {
+          cross_project: true,
+          from_project_id: card.project_id,
+          to_project_id: targetProjectId,
+          from_column_id: card.column_id,
+          to_column_id: columnId
+        }
+      : { moved_to_column: columnId, moved_to_swimlane: swimlaneId || null })
+    return updated
   })
 })

@@ -58,6 +58,8 @@ interface DraftState {
   description: string
   is_done: boolean
   testing_results: string
+  column_id: string
+  project_id: string
   post_meta: Record<string, any>
 }
 
@@ -73,6 +75,8 @@ function makeDraft(c: Card | null): DraftState | null {
     description: c.description ?? '',
     is_done: !!c.is_done,
     testing_results: c.testing_results ?? '',
+    column_id: c.column_id ?? '',
+    project_id: c.project_id,
     post_meta: JSON.parse(JSON.stringify(c.post_meta ?? {}))
   }
 }
@@ -247,11 +251,17 @@ const assigneeOptions = computed<string[]>(() =>
     .filter((n): n is string => !!n)
 )
 
+// Status and project pickers; saving moves the card when either changes.
+const columnSelectItems = computed(() => props.columns.map(c => ({ label: c.name, value: c.id })))
+const projectSelectItems = computed(() => props.projects.map(p => ({ label: p.name, value: p.id })))
+
 // The phase picker only applies while a card sits in the DOING column.
 const currentColumnName = computed(() =>
   props.columns.find(c => c.id === props.card?.column_id)?.name ?? ''
 )
-const isDoing = computed(() => currentColumnName.value === DOING_COLUMN)
+const isDoing = computed(() =>
+  props.columns.find(c => c.id === draft.value?.column_id)?.name === DOING_COLUMN
+)
 const isArchived = computed(() => currentColumnName.value === 'ARCHIVE')
 const phaseSelectItems = PHASES.map(p => ({ label: p.label, value: p.value }))
 
@@ -389,6 +399,8 @@ function buildPatch(): Partial<Card> & { post_meta?: Record<string, any> } {
     due_date: d.due_date || null,
     is_done: d.is_done,
     testing_results: d.testing_results || null,
+    ...(d.column_id ? { column_id: d.column_id } : {}),
+    project_id: d.project_id,
     // Deep-merge: preserve any existing post_meta keys we didn't edit
     post_meta: {
       ...(props.card!.post_meta ?? {}),
@@ -825,6 +837,23 @@ async function handleCopyForAgent() {
             <h3 class="text-sm font-semibold text-(--ui-text-muted) uppercase tracking-wide">
               Coordination
             </h3>
+            <div class="grid grid-cols-2 gap-3">
+              <UFormField label="Status">
+                <USelect
+                  v-model="draft.column_id"
+                  :items="columnSelectItems"
+                  placeholder="-- Select --"
+                  class="w-full"
+                />
+              </UFormField>
+              <UFormField v-if="projectSelectItems.length" label="Project">
+                <USelect
+                  v-model="draft.project_id"
+                  :items="projectSelectItems"
+                  class="w-full"
+                />
+              </UFormField>
+            </div>
             <UFormField v-if="isDoing" label="Phase">
               <USelect
                 :model-value="getMeta('phase') || 'backlog'"
