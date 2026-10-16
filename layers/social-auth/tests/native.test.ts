@@ -10,6 +10,7 @@ import {
   googleIdToken,
   appleIdToken,
   socialEmail,
+  generateScopedTestToken,
   photoUrl,
   publicStorageConfigured,
   waitForAvatar,
@@ -125,12 +126,61 @@ describe('POST /api/social-auth/native', () => {
     expect(res.accessToken).toBeTruthy()
   })
 
-  it('links to an existing verified account with the same email', async () => {
+  it('links to an existing verified account with the same email once its password is entered', async () => {
     const user = await createTestUser(sql, { email: socialEmail() })
+    const sub = randomUUID()
+    const token = () => googleIdToken({ sub, email: user.email, name: 'Same Person' })
+    const linked = () => sql`SELECT 1 FROM user_identities WHERE user_id = ${user.id} AND provider = 'google'`
+
+    const asked = await nativeSignIn({ provider: 'google', idToken: token() }).catch(e => e)
+    expect(asked.statusCode).toBe(409)
+    expect(asked.data?.data?.needsPassword).toBe(true)
+    const wrong = await nativeSignIn({ provider: 'google', idToken: token(), password: 'not-the-password' }).catch(e => e)
+    expect(wrong.statusCode).toBe(401)
+    expect(await linked()).toHaveLength(0)
+
+    const res = await nativeSignIn({ provider: 'google', idToken: token(), password: user.password })
+    expect(res.created).toBe(false)
+    expect(res.accessToken).toBeTruthy()
+    expect(await linked()).toHaveLength(1)
+
+    // Linked now: later sign-ins need no password.
+    const again = await nativeSignIn({ provider: 'google', idToken: token() })
+    expect(again.accessToken).toBeTruthy()
+  })
+
+  it('the web flow\'s password step links the provider only with the right password', async () => {
+    const user = await createTestUser(sql, { email: socialEmail() })
+    const sub = randomUUID()
+    const pending = {
+      step: 'password',
+      provider: 'google',
+      profile: { subject: sub, email: user.email, emailVerified: true, name: 'Same Person', picture: null },
+      invite: null,
+      redirect: null,
+      clientId: TEST_GOOGLE_WEB_CLIENT,
+      refreshTokenEnc: null
+    }
+    const cookie = { cookie: `social_auth_pending=${generateScopedTestToken(user, 'social-auth-pending', { data: pending })}` }
+
+    const shown = await api<{ step: string, email: string }>('/api/social-auth/pending', { headers: cookie })
+    expect(shown).toMatchObject({ step: 'password', email: user.email })
+
+    const wrong = await api('/api/social-auth/complete', { method: 'POST', headers: cookie, body: { password: 'not-the-password' } }).catch(e => e)
+    expect(wrong.statusCode).toBe(401)
+    expect(await sql`SELECT 1 FROM user_identities WHERE subject = ${sub}`).toHaveLength(0)
+
+    await api('/api/social-auth/complete', { method: 'POST', headers: cookie, body: { password: user.password } })
+    const ids = await sql`SELECT user_id FROM user_identities WHERE subject = ${sub}`
+    expect(ids.map(r => r.user_id)).toEqual([user.id])
+  })
+
+  it('links to an existing verified account without a password straight away', async () => {
+    const user = await createTestUser(sql, { email: socialEmail() })
+    await sql`UPDATE users SET password = NULL WHERE id = ${user.id}`
     const res = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email: user.email, name: 'Same Person' }) })
     expect(res.created).toBe(false)
-    const ids = await sql`SELECT 1 FROM user_identities WHERE user_id = ${user.id} AND provider = 'google'`
-    expect(ids.length).toBe(1)
+    expect(await sql`SELECT 1 FROM user_identities WHERE user_id = ${user.id} AND provider = 'google'`).toHaveLength(1)
   })
 
   it('refuses to link to an account that never verified its email', async () => {
@@ -186,7 +236,7 @@ describe('POST /api/social-auth/native', () => {
   it('an existing account is asked to confirm the invite', async () => {
     const user = await createTestUser(sql, { email: socialEmail() })
     const invite = await createPendingInvite(sql, { email: null, display_name: 'test-social-link' })
-    const res = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email: user.email }), invite: invite.token })
+    const res = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email: user.email }), invite: invite.token, password: user.password })
     expect(res.inviteNeedsConfirmation).toBe(true)
   })
 
@@ -206,7 +256,7 @@ describe('POST /api/social-auth/native', () => {
       expect(expired.statusCode).toBe(410)
       expect(expired.data?.data?.code).toBe('invite_invalid')
 
-      const signedIn = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email: existing.email }) })
+      const signedIn = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email: existing.email }), password: existing.password })
       expect(signedIn.created).toBe(false)
 
       const invited = await nativeSignIn({ provider: 'google', idToken: googleIdToken({ sub: randomUUID(), email: socialEmail(), name: 'Invited' }), invite: invite.token })

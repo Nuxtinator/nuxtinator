@@ -54,6 +54,17 @@ export function sanitizeGroundingUrls(value: unknown): string[] {
   return out
 }
 
+// Whether the caller may change the inbound domain and contact address. In
+// multi mode they decide which org receives a domain's mail and whose address
+// replies come from, so only an operator admin (users.is_admin), who also sets
+// the domain up on the mail provider, may change them. Single mode has one
+// inbox, so its admins can.
+export async function inboxMailIdentityEditable(tx: DbClient, ctx: { orgId: string | null, userId: string }): Promise<boolean> {
+  if (!ctx.orgId) return true
+  const user = await tx.selectFrom('users').select('is_admin').where('id', '=', ctx.userId).executeTakeFirst()
+  return !!user?.is_admin
+}
+
 export interface InboxSettings {
   // Domain inbound mail is addressed to; matches recipient domains in the
   // webhook's org routing. One distinct (sub)domain per org.

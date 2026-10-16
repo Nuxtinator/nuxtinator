@@ -1,6 +1,7 @@
 // GET /api/inbox/settings — the org's inbox configuration, org-admin only
 // (the contact-form API key is a server-to-server secret; the same role gate
-// as conversation purge).
+// as conversation purge). `mailIdentityEditable` says whether the caller may
+// change the inbound domain and contact address.
 import { withOrgPermission } from '#tenant/server'
 
 export default defineEventHandler(async (event) => {
@@ -17,7 +18,8 @@ export default defineEventHandler(async (event) => {
       contactFormApiKey: s.contactFormApiKey,
       groundingSourceUrls: s.groundingSourceUrls,
       notifyUserIds: s.notifyUserIds,
-      autoCloseDays: s.autoCloseDays
+      autoCloseDays: s.autoCloseDays,
+      mailIdentityEditable: await inboxMailIdentityEditable(tx, ctx)
     }
   })
 })

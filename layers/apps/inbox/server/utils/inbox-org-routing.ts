@@ -88,6 +88,17 @@ export async function inboxResolveOrgForRecipientDomain(domain: string): Promise
   return undefined
 }
 
+// Whether an org scope other than `orgId` already routes mail for `domain`.
+export async function inboxDomainClaimedElsewhere(domain: string, orgId: string | null): Promise<boolean> {
+  const wanted = domain.toLowerCase()
+  for (const scope of await inboxListOrgScopes()) {
+    if (scope === orgId) continue
+    const settings = await inboxWithScopeTx(scope, tx => getInboxSettings(tx))
+    if (settings.inboundDomain === wanted) return true
+  }
+  return false
+}
+
 // Resolve which org a contact-form submission belongs to by matching the
 // presented API key against each scope's `contact_form_api_key` setting. Same
 // scope-scan shape as domain routing; returns undefined when no scope (or more

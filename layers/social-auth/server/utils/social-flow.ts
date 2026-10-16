@@ -3,7 +3,7 @@ import type { H3Event } from 'h3'
 import type { SocialProviderId, SocialProfile } from './social-providers'
 
 // Short-lived signed cookies that carry state across the provider redirect
-// and across the "what should we call you?" step. Both are JWTs signed with
+// and across the "what should we call you?" / "enter your password" step. Both are JWTs signed with
 // the app's jwtSecret and tagged with a `scope`, so core's session check
 // (which rejects scoped tokens) can never mistake one for a session.
 
@@ -23,6 +23,9 @@ export interface SocialFlow {
 }
 
 export interface PendingSignup {
+  // What the user still has to give: a display name for a new account, or
+  // the password of the existing account the provider is linking to.
+  step?: 'name' | 'password'
   provider: SocialProviderId
   profile: SocialProfile
   invite: string | null

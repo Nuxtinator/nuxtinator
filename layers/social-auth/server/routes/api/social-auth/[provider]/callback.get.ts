@@ -77,7 +77,9 @@ export default defineEventHandler(async (event) => {
       return fail(outcome.code)
 
     case 'needs_name':
+    case 'needs_password':
       setPendingSignup(event, {
+        step: outcome.kind === 'needs_name' ? 'name' : 'password',
         provider: cfg.id,
         profile,
         invite: flow.invite,
