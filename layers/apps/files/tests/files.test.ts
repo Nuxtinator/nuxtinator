@@ -245,6 +245,24 @@ describe('files layer', () => {
     expect(after.status).toBe(404)
   })
 
+  it('sends a signed-in visitor to the framed site page; ?bare=1 serves the HTML', async () => {
+    const { org, user, auth } = await createFilesOrgWith(sql)
+    const html = '<!doctype html><html><body><h1>Framed</h1></body></html>'
+    const { id } = await createTestSite(sql, { org_id: org.id, created_by: user.id, html })
+    const issued = await $fetch<{ share_token: string }>(
+      `/api/files/items/${id}/share`, { method: 'POST', ...withOrgHeader(auth, org.slug) }
+    )
+
+    const redirected = await fetch(`/files/site/${issued.share_token}`, { ...auth, redirect: 'manual' })
+    expect(redirected.status).toBe(302)
+    expect(redirected.headers.get('location')).toBe(`/files/public/${issued.share_token}`)
+
+    const bare = await fetch(`/files/site/${issued.share_token}?bare=1`, { ...auth, redirect: 'manual' })
+    expect(bare.status).toBe(200)
+    expect(bare.headers.get('content-security-policy')).toContain('sandbox')
+    expect(await bare.text()).toBe(html)
+  })
+
   it('site raw route 404s for a doc share token', async () => {
     const { org, user, auth } = await createFilesOrgWith(sql)
     const { id } = await createTestDoc(sql, { org_id: org.id, created_by: user.id })
