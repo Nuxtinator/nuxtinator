@@ -57,6 +57,9 @@ const librariesLabel = (w: HelpinatorWidget) => {
                 · {{ w.allowed_origins.length ? w.allowed_origins.join(', ') : 'no sites allowed yet' }}
               </p>
             </div>
+            <UBadge v-if="w.chat_model_unavailable" color="warning" variant="subtle" icon="i-lucide-triangle-alert">
+              Model unavailable
+            </UBadge>
             <UBadge :color="w.enabled && w.library_ids.length ? 'success' : 'neutral'" variant="subtle">
               {{ w.enabled && w.library_ids.length ? 'Live' : 'Off' }}
             </UBadge>

@@ -178,6 +178,7 @@ export async function sendTurn(widgetId: string, message: string, token?: string
 
 export interface AiFakeCall {
   kind: 'complete' | 'generate' | 'embed'
+  model: string
   system: unknown
   messages: Array<{ role: string, content: unknown }>
   tools: string[]

@@ -83,6 +83,11 @@ export interface HelpinatorWidget {
   appearance_defaults: HelpinatorAppearanceForm
   extra_instructions: string
   starter_questions: string[]
+  // Own chat model; null follows the org's choice.
+  chat_model: string | null
+  // The stored model is one the org can no longer use; turns fall back to the
+  // org's choice until it is changed.
+  chat_model_unavailable: boolean
   created_at: string
   updated_at: string
 }

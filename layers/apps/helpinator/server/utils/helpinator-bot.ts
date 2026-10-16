@@ -21,7 +21,7 @@
 // can read.
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
-import { isAiConfigured, resolveFeatureModel, type AiEmbeddingRun, type AiMessage, type AiTextPart, type AiTool, type AiToolHandler } from '#ai/server'
+import { getAllowedModels, isAiConfigured, resolveFeatureModel, type AiEmbeddingRun, type AiProviderModelInfo, type AiMessage, type AiTextPart, type AiTool, type AiToolHandler } from '#ai/server'
 import type { HelpinatorLibraryRow } from './helpinator-libraries'
 import type { HelpinatorScope } from './helpinator-guards'
 import { helpinatorSearch, helpinatorPageRef, helpinatorSectionRef, HELPINATOR_SEARCH_HITS, type HelpinatorSearchHit } from './helpinator-search'
@@ -35,16 +35,25 @@ export const HELPINATOR_CHAT_FEATURE = 'helpinator.chat'
 export const HELPINATOR_EMBEDDINGS_FEATURE = 'helpinator.embeddings'
 
 // Whether a chat turn can run: a key (org or host) AND a model resolved for
-// the chat feature. Under VITEST the ai layer's fake runs model-less, so only
-// the key check applies there.
-export async function helpinatorAiReady(tx: Tx): Promise<boolean> {
+// the chat feature, the widget's own `chatModel` first. Under VITEST the ai
+// layer's fake runs model-less, so only the key check applies there.
+export async function helpinatorAiReady(tx: Tx, chatModel?: string | null): Promise<boolean> {
   try {
     if (!(await isAiConfigured(tx))) return false
     if (process.env.VITEST) return true
-    return (await resolveFeatureModel(tx, HELPINATOR_CHAT_FEATURE)) !== ''
+    return (await resolveFeatureModel(tx, HELPINATOR_CHAT_FEATURE, chatModel)) !== ''
   } catch {
     return false
   }
+}
+
+// The chat models a widget may pick: the org's allowed set, chat kind only.
+export async function helpinatorChatModels(tx: Tx): Promise<AiProviderModelInfo[]> {
+  return (await getAllowedModels(tx)).filter(m => m.kind === 'chat')
+}
+
+export async function helpinatorChatModelIds(tx: Tx): Promise<Set<string>> {
+  return new Set((await helpinatorChatModels(tx)).map(m => m.id))
 }
 
 // Most recent stored messages sent to the model as history.

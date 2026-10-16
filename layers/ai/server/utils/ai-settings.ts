@@ -271,8 +271,10 @@ export async function resolveDefaultModel(tx: AiDbClient): Promise<string> {
 // The model a feature runs on for the active org: org feature choice → org
 // default → host feature choice → host default (chat features), or org feature
 // choice → host feature choice (transcription features), first one the org
-// may use. '' when nothing resolves; callers must not run model-less.
-export async function resolveFeatureModel(tx: AiDbClient, feature: string): Promise<string> {
+// may use. A caller's `override` (e.g. one record's own model pick) goes
+// first and, when the org may not use it, falls through to the rest. '' when
+// nothing resolves; callers must not run model-less.
+export async function resolveFeatureModel(tx: AiDbClient, feature: string, override?: string | null): Promise<string> {
   const [allowed, orgFeatures, orgDefault, hostFeatures, hostDefault] = await Promise.all([
     getAllowedModelIds(tx),
     getSetting<Record<string, string>>(tx, AI_SETTINGS_NAMESPACE, AI_SETTING_FEATURE_MODELS),
@@ -282,8 +284,8 @@ export async function resolveFeatureModel(tx: AiDbClient, feature: string): Prom
   ])
   const kind = getAiFeatureKind(feature)
   const candidates = kind === 'chat'
-    ? [orgFeatures[feature], orgDefault, hostFeatures[feature], hostDefault]
-    : [orgFeatures[feature], hostFeatures[feature]]
+    ? [override ?? undefined, orgFeatures[feature], orgDefault, hostFeatures[feature], hostDefault]
+    : [override ?? undefined, orgFeatures[feature], hostFeatures[feature]]
   return firstAllowed(candidates, new Set(allowed), kind)
 }
 

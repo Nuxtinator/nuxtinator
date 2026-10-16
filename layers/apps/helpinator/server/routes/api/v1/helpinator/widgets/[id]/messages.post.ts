@@ -97,7 +97,7 @@ export default defineEventHandler(async (event) => {
     // libraries, and the AI runs. Nothing below holds a DB connection while
     // waiting on the model; each read or write opens its own short tx.
     const prep = await helpinatorWithWidget(event, async (tx, widget, origin) => {
-      if (!widget.enabled || widget.library_ids.length === 0 || !(await helpinatorAiReady(tx))) {
+      if (!widget.enabled || widget.library_ids.length === 0 || !(await helpinatorAiReady(tx, widget.chat_model))) {
         throw createError({ statusCode: 503, statusMessage: 'The help assistant is unavailable right now.' })
       }
       // Serialise the cap check with the insert below (per widget), so
@@ -148,7 +148,7 @@ export default defineEventHandler(async (event) => {
         session: { token: token!, conversationId: conversation.id, reset },
         history,
         libraries,
-        chatRun: await resolveAiRun(tx, HELPINATOR_CHAT_FEATURE),
+        chatRun: await resolveAiRun(tx, HELPINATOR_CHAT_FEATURE, { model: widget.chat_model }),
         embedRun: await helpinatorEmbedRun(tx),
         handoffAvailable: await helpinatorHandoffAvailable(tx),
         scope: helpinatorScope(await helpinatorCurrentScope(tx))
