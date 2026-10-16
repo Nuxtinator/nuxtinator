@@ -39,7 +39,8 @@ Requires `@nuxtinator/context` and `@nuxtinator/ai`. `@nuxtinator/inbox`
   - a list of libraries it may use, one of them the default (its page index is
     part of every chat), and, for a portfolio default, a preloaded section
   - an allowed-origins list — exact origins, or `https://*.example.org` to
-    allow every subdomain (the bare domain needs its own entry)
+    allow every subdomain (the bare domain needs its own entry; shared hosts
+    like `*.github.io` are refused)
   - a daily message cap
   - optional extra instructions
   - up to six suggested questions, shown as clickable buttons under the

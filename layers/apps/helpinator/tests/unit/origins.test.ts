@@ -13,12 +13,14 @@ describe('helpinatorParseOriginEntry', () => {
     expect(helpinatorParseOriginEntry('https://*.Prayer.Tools')).toBe('https://*.prayer.tools')
     expect(helpinatorParseOriginEntry('https://*.prayer.tools/')).toBe('https://*.prayer.tools')
     expect(helpinatorParseOriginEntry('http://*.example.co.uk:8080')).toBe('http://*.example.co.uk:8080')
+    expect(helpinatorParseOriginEntry('https://*.ourorg.github.io')).toBe('https://*.ourorg.github.io')
   })
 
   it('rejects junk, other schemes and unsafe wildcards', () => {
     for (const raw of ['', 'nope', 'ftp://example.org', 'javascript:alert(1)', '*', 'https://*', 'https://*.org',
       'https://*.127.0.0.1', 'https://*.[::1]', 'https://*.*.example.org', 'https://a*.example.org',
-      'https://www.*.example.org', '*.example.org']) {
+      'https://www.*.example.org', '*.example.org', 'https://*.co.uk', 'https://*.github.io', 'https://*.vercel.app',
+      'https://*.x@helpinator-wildcard.evil.com', 'https://user:pw@example.org']) {
       expect(helpinatorParseOriginEntry(raw), raw).toBeNull()
     }
   })
