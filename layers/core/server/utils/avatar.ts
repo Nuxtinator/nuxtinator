@@ -1,7 +1,9 @@
+import type { H3Event } from 'h3'
 import { sql } from 'kysely'
 import { db } from './database'
 import { deleteFromS3, getPublicUrl, isPublicStorageConfigured, uploadToS3 } from './storage'
-import { AVATAR_FOLDER, AVATAR_MAX_BYTES, AVATAR_TYPES, avatarImageType, isAllowedAvatarUrl, isAvatarHostListed } from './avatar-image'
+import { AVATAR_FOLDER, AVATAR_MAX_BYTES, AVATAR_MAX_MB, AVATAR_TYPES, avatarImageType, avatarTypesText, isAllowedAvatarUrl, isAvatarHostListed } from './avatar-image'
+import { readBodyWithLimit } from './request-body'
 
 export type AvatarUpload = { ok: true, url: string, key: string } | { ok: false, reason: 'too_large' | 'unsupported' }
 
@@ -14,6 +16,47 @@ export async function uploadAvatar(data: Uint8Array): Promise<AvatarUpload> {
   const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data)
   const uploaded = await uploadToS3(buffer, `avatar.${AVATAR_TYPES[type].ext}`, type, 'public', AVATAR_FOLDER)
   return { ok: true, url: uploaded.url, key: uploaded.key }
+}
+
+// Room for the multipart boundaries and headers around the file.
+const MULTIPART_OVERHEAD = 16 * 1024
+const TOO_LARGE = `Image too large (max ${AVATAR_MAX_MB} MB)`
+
+// Uploads the image in a multipart request's `file` field to public storage.
+// Throws 501 without public storage, 400 without a file, 413/415 for a file
+// that is too large or not an accepted image.
+export async function uploadAvatarFromRequest(event: H3Event): Promise<{ url: string, key: string }> {
+  if (!isPublicStorageConfigured()) {
+    throw createError({ statusCode: 501, statusMessage: 'Avatar uploads are not available' })
+  }
+
+  const body = await readBodyWithLimit(event, AVATAR_MAX_BYTES + MULTIPART_OVERHEAD, TOO_LARGE)
+  // The web parser handles quoted boundaries and large parts, unlike h3's readMultipartFormData.
+  const form = await new Response(body as Uint8Array<ArrayBuffer>, { headers: { 'content-type': getHeader(event, 'content-type') || '' } })
+    .formData()
+    .catch(() => null)
+  const file = form?.get('file')
+  if (!(file instanceof Blob)) {
+    throw createError({ statusCode: 400, statusMessage: 'No image provided' })
+  }
+
+  const uploaded = await uploadAvatar(Buffer.from(await file.arrayBuffer()))
+  if (!uploaded.ok) {
+    throw uploaded.reason === 'too_large'
+      ? createError({ statusCode: 413, statusMessage: TOO_LARGE })
+      : createError({ statusCode: 415, statusMessage: `Use a ${avatarTypesText()} image` })
+  }
+  return { url: uploaded.url, key: uploaded.key }
+}
+
+// Sets an uploaded avatar as the user's, deleting the upload if that fails.
+export async function setUploadedAvatar(userId: string, uploaded: { url: string, key: string }): Promise<void> {
+  try {
+    await replaceAvatar(userId, uploaded.url)
+  } catch (err) {
+    await deleteFromS3(uploaded.key, 'public').catch(() => {})
+    throw err
+  }
 }
 
 const DOWNLOAD_TIMEOUT_MS = 5000

@@ -1,6 +1,7 @@
 import { getQuery } from 'h3'
 import { sql } from 'kysely'
 import { withOrgPermission } from '#tenant/server'
+import { canEditMember } from '../../../../../utils/member-edit'
 
 const SORTABLE_COLUMNS = ['display_name', 'email', 'status', 'joined_at'] as const
 type SortColumn = typeof SORTABLE_COLUMNS[number]
@@ -65,6 +66,12 @@ export default defineEventHandler(async (event) => {
         'memberships.created_at as joined_at',
         'users.email as email',
         'users.display_name as display_name',
+        'users.avatar as avatar',
+        'users.is_admin as is_admin',
+        eb => eb.selectFrom('memberships as all_memberships')
+          .select(eb2 => eb2.fn.countAll<string>().as('count'))
+          .whereRef('all_memberships.user_id', '=', 'users.id')
+          .as('membership_count'),
         'users.verified as verified'
       ])
       .where('memberships.org_id', '=', ctx.orgId)
@@ -77,6 +84,9 @@ export default defineEventHandler(async (event) => {
       .offset((page - 1) * pageSize)
       .execute()
 
+    const actorRow = await tx.selectFrom('users').select('is_admin').where('id', '=', ctx.userId).executeTakeFirst()
+    const actor = { isOperatorAdmin: !!actorRow?.is_admin, hasPermission: ctx.perms.has('org.members.edit_user') }
+
     const decorated = rows.map((r) => {
       const status: 'active' | 'not_verified' = r.verified ? 'active' : 'not_verified'
       return {
@@ -84,6 +94,8 @@ export default defineEventHandler(async (event) => {
         user_id: r.user_id,
         email: r.email,
         display_name: r.display_name,
+        avatar: r.avatar || null,
+        editable: canEditMember(actor, { isOperatorAdmin: r.is_admin, membershipCount: Number(r.membership_count) }),
         roles: r.roles,
         status,
         joined_at: r.joined_at
