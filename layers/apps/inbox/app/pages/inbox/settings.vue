@@ -17,6 +17,8 @@ interface InboxAdminSettings {
   groundingSourceUrls: string[]
   notifyUserIds: string[]
   autoCloseDays: number
+  // False for org admins in multi mode: only an operator sets these two.
+  mailIdentityEditable: boolean
 }
 
 const toast = useToast()
@@ -101,8 +103,9 @@ async function save() {
     const updated = await $fetch<InboxAdminSettings>('/api/inbox/settings', {
       method: 'PUT',
       body: {
-        inboundDomain: form.value.inboundDomain,
-        contactAddress: form.value.contactAddress,
+        ...(form.value.mailIdentityEditable
+          ? { inboundDomain: form.value.inboundDomain, contactAddress: form.value.contactAddress }
+          : {}),
         brandFromName: form.value.brandFromName,
         autoAckEnabled: form.value.autoAckEnabled,
         contactFormApiKey: form.value.contactFormApiKey,
@@ -115,10 +118,10 @@ async function save() {
     urlsText.value = updated.groundingSourceUrls.join('\n')
     toast.add({ title: 'Inbox settings saved', icon: 'i-lucide-save', color: 'success' })
   } catch (err) {
-    const e = err as { statusCode?: number, data?: { message?: string } }
+    const e = err as { statusCode?: number, data?: { statusMessage?: string } }
     toast.add({
       title: 'Save failed',
-      description: e.statusCode === 400 ? 'Check the domain and address formats.' : undefined,
+      description: e.data?.statusMessage || (e.statusCode === 400 ? 'Check the domain and address formats.' : undefined),
       color: 'error'
     })
   } finally {
@@ -171,15 +174,22 @@ function generateApiKey() {
           label="Inbound mail domain"
           description="The (sub)domain inbound mail arrives on, e.g. mail.example.com. Routes webhook mail to this organization."
         >
-          <UInput v-model="form.inboundDomain" placeholder="mail.example.com" class="w-full" />
+          <UInput v-model="form.inboundDomain" placeholder="mail.example.com" class="w-full" :disabled="!form.mailIdentityEditable" />
         </UFormField>
 
         <UFormField
           label="Shared contact address"
           description="The From identity for team replies and the base of contact+token reply addresses. Must live on the inbound domain."
         >
-          <UInput v-model="form.contactAddress" placeholder="contact@mail.example.com" class="w-full" />
+          <UInput v-model="form.contactAddress" placeholder="contact@mail.example.com" class="w-full" :disabled="!form.mailIdentityEditable" />
         </UFormField>
+
+        <p
+          v-if="!form.mailIdentityEditable"
+          class="text-sm text-(--ui-text-muted)"
+        >
+          The inbound domain and contact address are set by the platform operator, who also sets the domain up with the mail provider. Ask them to change these.
+        </p>
 
         <UFormField
           label="Brand From name"

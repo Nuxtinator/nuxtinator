@@ -1,7 +1,8 @@
 // Per-org inbox settings surface: an org admin reads and writes the
 // configuration through /api/inbox/settings, values persist as org-scoped
 // overrides, and a freshly set contact-form API key immediately routes
-// public submissions to the org. Non-admins are refused.
+// public submissions to the org. Non-admins are refused. Only an operator
+// admin changes the inbound domain and contact address.
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import { randomUUID } from 'node:crypto'
@@ -21,7 +22,8 @@ interface Settings {
 
 describe('inbox settings admin', () => {
   it('org admin reads + writes settings; a new API key routes the contact form to the org', async () => {
-    const { org, opts, domain } = await createInboxOrgWith(sql)
+    const { org, user, opts, domain } = await createInboxOrgWith(sql)
+    await sql`UPDATE users SET is_admin = true WHERE id = ${user.id}`
 
     const current = await $fetch<Settings>('/api/inbox/settings', opts)
     expect(current.inboundDomain).toBe(domain)
@@ -79,6 +81,26 @@ describe('inbox settings admin', () => {
       ...opts
     })
     expect(cleared.notifyUserIds).toEqual([])
+  })
+
+  it('only an operator changes the domain and address; the domain is unique and the address lives on it', async () => {
+    const a = await createInboxOrgWith(sql)
+    const b = await createInboxOrgWith(sql)
+    const put = (opts: typeof a.opts, body: Record<string, unknown>) =>
+      $fetch<Settings & { mailIdentityEditable: boolean }>('/api/inbox/settings', { method: 'PUT', body, ...opts })
+
+    // An org admin can't move the domain or address, but saving them unchanged is fine.
+    expect((await $fetch<{ mailIdentityEditable: boolean }>('/api/inbox/settings', b.opts)).mailIdentityEditable).toBe(false)
+    await expect(put(b.opts, { inboundDomain: a.domain })).rejects.toMatchObject({ statusCode: 403 })
+    await expect(put(b.opts, { contactAddress: `support@${a.domain}` })).rejects.toMatchObject({ statusCode: 403 })
+    const unchanged = await put(b.opts, { inboundDomain: b.domain, contactAddress: `contact@${b.domain}`, autoAckEnabled: false })
+    expect(unchanged.autoAckEnabled).toBe(false)
+
+    await sql`UPDATE users SET is_admin = true WHERE id = ${b.user.id}`
+    await expect(put(b.opts, { inboundDomain: a.domain, contactAddress: `contact@${a.domain}` })).rejects.toMatchObject({ statusCode: 409 })
+    await expect(put(b.opts, { contactAddress: `support@${a.domain}` })).rejects.toMatchObject({ statusCode: 400 })
+    const moved = await put(b.opts, { inboundDomain: `new.${b.domain}`, contactAddress: `help@new.${b.domain}` })
+    expect(moved).toMatchObject({ inboundDomain: `new.${b.domain}`, contactAddress: `help@new.${b.domain}`, mailIdentityEditable: true })
   })
 
   it('refuses non-admins (403) and malformed values (400)', async () => {
