@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useActiveOrg } from '#tenant'
+
 const { user } = useAuth()
 const config = useRuntimeConfig()
 
@@ -10,6 +12,8 @@ const orgSwitcher = config.public.tenancy ? resolveComponent('OrgSwitcher') : nu
 const { apps } = await useApps()
 const activeApp = useActiveApp(apps)
 const route = useRoute()
+const { slug } = useActiveOrg()
+const homePath = computed(() => launcherPath(slug.value))
 
 const accountAvatar = computed(() => user.value?.avatar ? { src: user.value.avatar, alt: user.value.display_name || user.value.email } : undefined)
 
@@ -52,7 +56,7 @@ watch(() => route.path, () => {
             v-if="orgSwitcher"
           />
           <NuxtLink
-            :to="launcherPath()"
+            :to="homePath"
             class="text-base font-semibold truncate"
           >
             {{ activeApp?.title || config.public.appName }}
@@ -85,7 +89,7 @@ watch(() => route.path, () => {
             v-if="orgSwitcher"
           />
           <NuxtLink
-            :to="launcherPath()"
+            :to="homePath"
             class="text-xl font-semibold hover:text-(--ui-text-muted) transition-colors truncate"
           >
             {{ config.public.appName }}
