@@ -296,7 +296,9 @@ async function togglePreview() {
               variant="subtle"
               icon="i-lucide-triangle-alert"
               title="This model is no longer available to your organization."
-              description="Until you choose another, this widget answers with the organization default."
+              :description="modelChoice.defaultModel
+                ? 'Until you choose another, this widget answers with the organization default.'
+                : 'The organization has no default model either, so this widget cannot answer until you choose another.'"
             />
 
             <UFormField label="Daily message limit" help="Visitor messages per 24 hours across all conversations on this widget. Protects your AI budget.">

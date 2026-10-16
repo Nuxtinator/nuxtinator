@@ -72,8 +72,9 @@ Requires `@nuxtinator/context` and `@nuxtinator/ai`. `@nuxtinator/inbox`
    `pgvector/pgvector:pg18` image, or `CREATE EXTENSION vector;` run by a
    superuser before the first boot — the migration creates it when it can).
 2. In AI settings, enable a chat model and pick an **embedding model**. The
-   chat feature is **Helpinator — help chat** (`helpinator.chat`), one model
-   for every widget in an org. Changing the embedding model later invalidates
+   chat feature is **Helpinator — help chat** (`helpinator.chat`), the org's
+   default for its widgets; a widget can pick its own from the org's enabled
+   chat models. Changing the embedding model later invalidates
    every index until it is re-embedded (a button on the same page does that).
 3. Go to `/helpinator/libraries` → **New library**. For a website library add
    the URLs to crawl; for a portfolio library pick a portfolio that holds
