@@ -136,4 +136,27 @@ describe('staff notification targeting', () => {
     const heldRows = (await notificationRows(convId)).filter(r => (r.title as string).startsWith('Held message from'))
     expect(heldRows.length).toBeGreaterThan(0)
   })
+
+  it('opening a conversation marks only the opener\'s notifications for it read', async () => {
+    const { org, user, opts, domain } = await createInboxOrgWith(sql)
+    const other = await createInboxUser(sql)
+    await addTestMembership(sql, { user_id: other.id, org_id: org.id, roles: ['admin'] })
+    const opened = await postInbound({ recipient: `hello@${domain}`, from: `A <${uniqueSender('open-a')}>` })
+    const untouched = await postInbound({ recipient: `hello@${domain}`, from: `B <${uniqueSender('open-b')}>` })
+    const link = `/inbox/${opened.body.conversation_id as string}`
+
+    const res = await $fetch<{ updated: number }>('/api/notifications/read', {
+      method: 'POST', body: { links: [link, `${link}?filter=open`] }, ...opts
+    })
+    expect(res.updated).toBe(1)
+
+    const rows = await sql<{ user_id: string, link: string, read: boolean }[]>`
+      SELECT user_id, link, read_at IS NOT NULL AS read FROM notifications
+      WHERE link IN (${link}, ${`/inbox/${untouched.body.conversation_id as string}`})
+    `
+    const read = (userId: string, l: string) => rows.find(r => r.user_id === userId && r.link === l)?.read
+    expect(read(user.id, link)).toBe(true)
+    expect(read(other.id, link)).toBe(false)
+    expect(read(user.id, `/inbox/${untouched.body.conversation_id as string}`)).toBe(false)
+  })
 })
