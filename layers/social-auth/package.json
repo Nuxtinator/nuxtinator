@@ -1,6 +1,6 @@
 {
   "name": "@nuxtinator/social-auth",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "description": "Sign in with Google and Sign in with Apple, for web and native apps",
