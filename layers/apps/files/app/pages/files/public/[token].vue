@@ -56,7 +56,7 @@ useHead({ title: computed(() => item.value?.kind === 'site' ? item.value.title :
 <template>
   <div v-if="item?.kind === 'site'" class="flex flex-col h-screen bg-(--ui-bg) text-(--ui-text)">
     <header class="flex items-center gap-2 h-11 px-3 shrink-0 border-b border-(--ui-border) bg-(--chrome-bg)">
-      <UButton to="/" icon="i-lucide-house" variant="ghost" color="neutral" size="sm">
+      <UButton :to="launcherPath()" icon="i-lucide-house" variant="ghost" color="neutral" size="sm">
         {{ config.public.appName }}
       </UButton>
       <UButton to="/files" icon="i-lucide-folder" variant="ghost" color="neutral" size="sm">

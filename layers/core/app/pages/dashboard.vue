@@ -1,28 +1,28 @@
 <script setup lang="ts">
+// The signed-in launcher. In multi-tenant mode the tenancy route guard sends
+// `/dashboard` to the active org's `/@<slug>/dashboard` before this renders.
 definePageMeta({
   middleware: 'auth'
 })
 
-// Hard-redirect away from /dashboard. Users land in either:
-//   * (single-tenant) home, since there are no orgs; or
-//   * the most recently active org (sticky cookie set by withOrgContext); or
-//   * /orgs (picker) when there's no last-active.
-onMounted(async () => {
-  if (!useRuntimeConfig().public.tenancy) {
-    await navigateTo('/')
-    return
-  }
-  const cookie = useCookie<string | null>('active-org-slug')
-  if (cookie.value) {
-    await navigateTo(`/@${cookie.value}/`)
-  } else {
-    await navigateTo('/orgs')
-  }
-})
+const { apps, pending } = await useApps()
 </script>
 
 <template>
-  <div class="text-sm text-(--ui-text-muted)">
-    Redirecting…
+  <div class="max-w-4xl mx-auto space-y-3">
+    <h1 class="text-lg font-semibold">
+      Apps
+    </h1>
+    <div
+      v-if="pending && apps.length === 0"
+      class="text-sm text-(--ui-text-muted)"
+    >
+      Loading...
+    </div>
+    <AppLauncherGrid
+      v-else
+      :apps="apps"
+      empty-text="No apps installed."
+    />
   </div>
 </template>

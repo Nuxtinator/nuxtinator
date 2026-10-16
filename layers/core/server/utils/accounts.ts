@@ -5,6 +5,7 @@ import { db, sql } from './database'
 import { logEvent } from './activity-logger'
 import { isSelfRegistrationEnabled } from './registration'
 import type { Database } from '#core/server/database/schema'
+import { launcherPath } from '#core/app/utils/launcher'
 
 // Advisory-lock key used to serialize concurrent account creation so the
 // first-user count check and insert can't interleave (ASCII 'reg1').
@@ -96,12 +97,12 @@ export async function createUserAccount(
 }
 
 // Where to send someone right after they sign in. In multi-tenant mode it
-// follows the user's memberships (exactly one → land in that org; else → the
-// org picker). In single-tenant mode there are no orgs, so land on home. The
-// orgs/memberships tables only exist when the tenancy layer is loaded, so the
-// query is gated on the tenancy flag.
+// follows the user's memberships (exactly one → land in that org's launcher;
+// else → the org picker). In single-tenant mode there are no orgs, so land on
+// the launcher. The orgs/memberships tables only exist when the tenancy layer
+// is loaded, so the query is gated on the tenancy flag.
 export async function postSignInRedirect(event: H3Event, userId: string): Promise<string> {
-  if (useRuntimeConfig(event).public.tenancy !== true) return '/'
+  if (useRuntimeConfig(event).public.tenancy !== true) return launcherPath()
 
   const memberships = await (db as any)
     .selectFrom('memberships')
@@ -111,7 +112,7 @@ export async function postSignInRedirect(event: H3Event, userId: string): Promis
     .execute() as Array<{ slug: string, suspended_at: Date | null }>
 
   const active = memberships.filter(m => !m.suspended_at)
-  return active.length === 1 ? `/@${active[0]!.slug}/` : '/orgs'
+  return active.length === 1 ? launcherPath(active[0]!.slug) : '/orgs'
 }
 
 // The user fields sign-in responses return to the client.

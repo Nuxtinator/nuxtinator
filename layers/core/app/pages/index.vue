@@ -3,14 +3,10 @@ const { user, authReady } = useAuth()
 const config = useRuntimeConfig()
 const registrationOpen = await useRegistrationOpen({ lazy: true })
 
-// Multi-tenant mode bounces an authed user into their last-active org (or the
-// org picker). Single-tenant mode has no orgs, so home is right here — show the
-// launcher hint below instead of redirecting.
+// Signed-in users belong on the launcher at /dashboard (in multi-tenant mode
+// the tenancy route guard forwards that into the active org or the picker).
 watch([authReady, user], ([r, u]) => {
-  if (r && u && config.public.tenancy) {
-    const cookie = useCookie<string | null>('active-org-slug')
-    navigateTo(cookie.value ? `/@${cookie.value}/` : '/orgs')
-  }
+  if (r && u) navigateTo(launcherPath())
 }, { immediate: true })
 </script>
 
@@ -43,12 +39,6 @@ watch([authReady, user], ([r, u]) => {
           </UButton>
         </div>
       </template>
-      <p
-        v-else-if="authReady && user"
-        class="text-(--ui-text-muted) max-w-lg mx-auto"
-      >
-        Choose an app from the menu to get started.
-      </p>
     </div>
   </div>
 </template>

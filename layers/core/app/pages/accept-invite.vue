@@ -97,7 +97,7 @@ async function handleAccept() {
       return
     }
     await checkAuth()
-    // Server picks the right landing page (single-org → /@<slug>/, multi → /orgs).
+    // Server picks the right landing page (single-org → /@<slug>/dashboard, multi → /orgs).
     await navigateTo(res?.redirect || '/orgs', { replace: true })
   } catch (err: any) {
     error.value = err?.data?.statusMessage || err?.data?.message || 'Failed to accept invitation. Please try again.'
@@ -115,7 +115,7 @@ async function handleJoin() {
       method: 'POST',
       body: { token: token.value }
     })
-    await navigateTo(res?.redirect || '/', { replace: true })
+    await navigateTo(res?.redirect || launcherPath(), { replace: true })
   } catch (err: any) {
     error.value = err?.data?.statusMessage || 'Failed to accept invitation. Please try again.'
   } finally {
