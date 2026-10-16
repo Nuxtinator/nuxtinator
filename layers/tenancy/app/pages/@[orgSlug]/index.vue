@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The org's home is its launcher at `/@<slug>/dashboard`.
 definePageMeta({
-  redirect: to => `/@${to.params.orgSlug}/dashboard`
+  redirect: to => ({ path: `/@${to.params.orgSlug}/dashboard`, query: to.query, hash: to.hash })
 })
 </script>
 

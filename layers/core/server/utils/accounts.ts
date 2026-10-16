@@ -4,6 +4,7 @@ import type { Transaction } from 'kysely'
 import { db, sql } from './database'
 import { logEvent } from './activity-logger'
 import type { Database } from '#core/server/database/schema'
+import { launcherPath } from '#core/app/utils/launcher'
 
 // Advisory-lock key used to serialize concurrent account creation so the
 // first-user count check and insert can't interleave (ASCII 'reg1').
@@ -92,7 +93,7 @@ export async function createUserAccount(
 // the launcher. The orgs/memberships tables only exist when the tenancy layer
 // is loaded, so the query is gated on the tenancy flag.
 export async function postSignInRedirect(event: H3Event, userId: string): Promise<string> {
-  if (useRuntimeConfig(event).public.tenancy !== true) return '/dashboard'
+  if (useRuntimeConfig(event).public.tenancy !== true) return launcherPath()
 
   const memberships = await (db as any)
     .selectFrom('memberships')
@@ -102,7 +103,7 @@ export async function postSignInRedirect(event: H3Event, userId: string): Promis
     .execute() as Array<{ slug: string, suspended_at: Date | null }>
 
   const active = memberships.filter(m => !m.suspended_at)
-  return active.length === 1 ? `/@${active[0]!.slug}/dashboard` : '/orgs'
+  return active.length === 1 ? launcherPath(active[0]!.slug) : '/orgs'
 }
 
 // The user fields sign-in responses return to the client.

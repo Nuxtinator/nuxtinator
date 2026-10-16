@@ -18,7 +18,7 @@ onBeforeUnmount(stop)
 <template>
   <aside class="flex-col items-center w-14 shrink-0 border-r border-(--ui-border) bg-neutral-200 dark:bg-neutral-950 py-3 gap-1">
     <NuxtLink
-      to="/dashboard"
+      :to="launcherPath()"
       class="flex items-center justify-center size-10 rounded-md transition-colors"
       :class="isHome
         ? 'bg-(--ui-bg-accented) text-(--ui-text)'

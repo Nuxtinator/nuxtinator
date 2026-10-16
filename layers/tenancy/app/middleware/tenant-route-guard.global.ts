@@ -29,6 +29,8 @@ const SYSTEM_PREFIXES = [
 
 function isSystemPath(p: string): boolean {
   if (p === '/') return true
+  // `/dashboard` itself is org-scoped; pages below it are not doubled under `/@:orgSlug`.
+  if (/^\/dashboard\/./.test(p)) return true
   for (const prefix of SYSTEM_PREFIXES) {
     if (p === prefix || p.startsWith(prefix + '/')) return true
   }

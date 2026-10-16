@@ -15,9 +15,9 @@ const activeOrg = computed(() => orgs.value.find(o => o.slug === slug.value) ?? 
 // If the current path isn't org-scoped, fall back to the new org's launcher.
 function pathForOrg(targetSlug: string): string {
   const m = route.path.match(/^\/@[^/]+(?:\/(.*))?$/)
-  if (!m) return `/@${targetSlug}/dashboard`
+  if (!m) return launcherPath(targetSlug)
   const rest = (m[1] || '').replace(/\/+$/, '')
-  if (!rest) return `/@${targetSlug}/dashboard`
+  if (!rest) return launcherPath(targetSlug)
   const firstSeg = rest.split('/')[0]!
   return `/@${targetSlug}/${firstSeg}`
 }

@@ -50,5 +50,5 @@ export default defineNuxtRouteMiddleware(async (to) => {
     : matchApp(apps, rest)
   if (!app) return
 
-  if (!app.enabled || !app.permitted) return navigateTo(`/@${slug}/dashboard`)
+  if (!app.enabled || !app.permitted) return navigateTo(launcherPath(slug))
 })

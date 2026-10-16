@@ -5,7 +5,7 @@ const config = useRuntimeConfig()
 // Signed-in users belong on the launcher at /dashboard (in multi-tenant mode
 // the tenancy route guard forwards that into the active org or the picker).
 watch([authReady, user], ([r, u]) => {
-  if (r && u) navigateTo('/dashboard')
+  if (r && u) navigateTo(launcherPath())
 }, { immediate: true })
 </script>
 

@@ -26,7 +26,7 @@ async function submit() {
       body: { display_name: displayName.value.trim() }
     })
     await checkAuth()
-    await navigateTo(res.redirect || '/', { replace: true })
+    await navigateTo(res.redirect || '/dashboard', { replace: true })
   } catch (err: any) {
     error.value = err?.data?.statusMessage || 'Could not finish signing up'
   } finally {

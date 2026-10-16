@@ -8,6 +8,7 @@ import { getSiteUrl } from '../../utils/site-url'
 import { createUserAccount } from '../../utils/accounts'
 import { startSession, nativeTokenFields } from '../../utils/sessions'
 import { useRuntimeConfig, createError } from '#imports'
+import { launcherPath } from '#core/app/utils/launcher'
 
 export default defineEventHandler(async (event) => {
   const { email, password, display_name } = await readBody(event)
@@ -58,8 +59,8 @@ export default defineEventHandler(async (event) => {
       requiresVerification: false,
       // Multi-tenant: first user has no orgs yet — land them on the picker,
       // where they create the first org via the host-admin endpoint. Single-
-      // tenant: no orgs exist, so land on home.
-      redirect: useRuntimeConfig(event).public.tenancy === true ? '/orgs' : '/',
+      // tenant: no orgs exist, so land on the launcher.
+      redirect: useRuntimeConfig(event).public.tenancy === true ? '/orgs' : launcherPath(),
       ...nativeTokenFields(event, tokens),
       user: {
         id: userId,

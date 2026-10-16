@@ -62,5 +62,5 @@ test('opening a disabled app\'s page redirects to the org home', async ({ page }
   ])
 
   await page.goto(`/@${org.slug}/messages`)
-  await expect(page).toHaveURL(new RegExp(`/@${org.slug}/?$`), { timeout: 5000 })
+  await expect(page).toHaveURL(new RegExp(`/@${org.slug}/dashboard$`), { timeout: 5000 })
 })

@@ -73,7 +73,7 @@ async function handleRegister() {
     if (result.success) {
       // First user is auto-logged-in by the server; skip the "check your email" UI.
       if (result.autoLoggedIn) {
-        await navigateTo('/dashboard', { replace: true })
+        await navigateTo(launcherPath(), { replace: true })
         return
       }
       success.value = true
