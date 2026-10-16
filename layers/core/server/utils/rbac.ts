@@ -12,52 +12,40 @@ import type { Permission } from '#core/app/utils/permissions'
 import { getAppStaticRole, getAppStaticRoleNames } from './roles-registry'
 import { getAllPermissions, isRegisteredPermission } from './permissions-registry'
 import { getDefaultGrants } from './default-grants-registry'
+import { getRoleOverlay } from './role-overlay-registry'
 
 type DbClient = Kysely<Database> | Transaction<Database>
 
 // Resolves a list of role names to the union of permissions they grant.
 //
-// Single-mode merge:
+// Each role's set is built from:
 //   1. Host static roles (`role-definitions.ts`) — empty by default.
 //   2. App-static roles (the runtime roles-registry).
 //   3. Custom roles (`custom_roles` DB).
 //   4. Default grants from layers (`default-grants-registry`).
-//
-// Multi-mode merge: the tenancy layer's plugin patches this function (or
-// supplies its own `defineTenantHandler` that does the per-org overlay) to
-// add tier 5 (per-org `org_role_overrides`) and to scope `custom_roles` to
-// the active org via RLS.
-//
-// `orgId` is null in single mode, ignored here. The per-org overlay lives in
-// the tenancy layer.
+// With an `orgId`, the registered role overlay (`role-overlay-registry`) then
+// adjusts each role's set for that org — the tenancy layer applies its
+// per-org `org_role_overrides` there — before the sets are unioned. In multi
+// mode RLS also scopes `custom_roles` to the active org.
 //
 // `admin` is special-cased to the union of every registered permission so
 // layer-contributed perms automatically reach admin without explicit grants.
 export async function getRolePermissions(
   client: DbClient,
   roleNames: readonly string[],
-  _orgId: string | null
+  orgId: string | null
 ): Promise<Set<Permission>> {
   if (roleNames.length === 0) return new Set()
 
-  const set = new Set<string>()
+  const perRole = new Map<string, Set<string>>()
   const customNames: string[] = []
 
   for (const roleName of roleNames) {
-    if (roleName === 'admin') {
-      for (const perm of getAllPermissions()) set.add(perm)
-      continue
-    }
+    if (roleName === 'admin') continue
 
-    const hostRole = getStaticRole(roleName)
-    if (hostRole) {
-      for (const perm of hostRole.permissions) set.add(perm)
-      continue
-    }
-
-    const appRole = getAppStaticRole(roleName)
-    if (appRole) {
-      for (const perm of appRole.permissions) set.add(perm)
+    const staticRole = getStaticRole(roleName) ?? getAppStaticRole(roleName)
+    if (staticRole) {
+      perRole.set(roleName, new Set(staticRole.permissions))
       continue
     }
 
@@ -70,21 +58,35 @@ export async function getRolePermissions(
     // table is global. Same query, both modes.
     const customRows = await client
       .selectFrom('custom_roles')
-      .select('permissions')
+      .select(['name', 'permissions'])
       .where('name', 'in', customNames)
       .execute()
     for (const row of customRows) {
+      const perms = perRole.get(row.name) ?? new Set<string>()
       for (const perm of row.permissions) {
-        if (isRegisteredPermission(perm)) set.add(perm)
+        if (isRegisteredPermission(perm)) perms.add(perm)
       }
+      perRole.set(row.name, perms)
     }
   }
 
   for (const roleName of roleNames) {
-    if (!isStaticRole(roleName) && roleName !== 'admin') continue
-    for (const perm of getDefaultGrants(roleName)) set.add(perm)
+    if (!isStaticRole(roleName) || roleName === 'admin') continue
+    const perms = perRole.get(roleName) ?? new Set<string>()
+    for (const perm of getDefaultGrants(roleName)) perms.add(perm)
+    perRole.set(roleName, perms)
   }
 
+  const overlay = getRoleOverlay()
+  if (orgId && overlay) await overlay(orgId, perRole)
+
+  const set = new Set<string>()
+  if (roleNames.includes('admin')) {
+    for (const perm of getAllPermissions()) set.add(perm)
+  }
+  for (const perms of perRole.values()) {
+    for (const perm of perms) set.add(perm)
+  }
   return set as Set<Permission>
 }
 
