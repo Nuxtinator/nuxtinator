@@ -1,8 +1,8 @@
 import bcrypt from 'bcrypt'
 import { db } from '../../utils/database'
-import { logRegisterAttempt } from '../../utils/activity-logger'
 import { sendTemplateEmail } from '#email'
-import { checkRateLimit, logRateLimitExceeded } from '../../utils/rate-limit'
+import { consumeRateLimit, logRateLimitExceeded } from '../../utils/rate-limit'
+import { getClientIp } from '../../utils/client-ip'
 import { readBody, getHeader, setResponseHeader } from 'h3'
 import { getSiteUrl } from '../../utils/site-url'
 import { createUserAccount } from '../../utils/accounts'
@@ -25,10 +25,10 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: 'Registration is closed', data: { code: 'registration_closed' } })
   }
 
-  // Check rate limit by IP
-  const clientIp = getHeader(event, 'x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  // Rate limit by client IP; counting and recording the attempt is one atomic step.
+  const clientIp = getClientIp(event)
   const userAgent = getHeader(event, 'user-agent') || undefined
-  const rateCheck = await checkRateLimit('REGISTER_ATTEMPT', 'ip', clientIp, 15 * 60 * 1000, 10)
+  const rateCheck = await consumeRateLimit('REGISTER_ATTEMPT', 'ip', clientIp, 15 * 60 * 1000, 10)
 
   if (!rateCheck.allowed) {
     logRateLimitExceeded(clientIp, '/api/auth/register', userAgent)
@@ -38,9 +38,6 @@ export default defineEventHandler(async (event) => {
       statusMessage: 'Too many registration attempts. Please try again later.'
     })
   }
-
-  // Log this registration attempt
-  logRegisterAttempt(clientIp, userAgent)
 
   // Hash password
   const hashedPassword = await bcrypt.hash(password, 12)

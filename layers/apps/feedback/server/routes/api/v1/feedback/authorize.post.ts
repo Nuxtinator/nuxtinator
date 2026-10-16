@@ -1,10 +1,11 @@
 /**
  * POST /api/v1/feedback/authorize — first leg of the widget sign-in flow.
  *
- * Called SAME-ORIGIN from the host's /feedback/connect page (so the host
- * `auth-token` cookie identifies the user; SameSite=lax blocks cross-site POSTs
- * from carrying it). Validates the project + redirect origin against the
- * project's allowlist, mints a long-lived access token, and stashes it
+ * Called SAME-ORIGIN from the host's /feedback/connect page after the user
+ * approves the sign-in (so the host session identifies the user; SameSite=lax
+ * blocks cross-site POSTs from carrying it — a widget bearer token is not
+ * accepted). Validates the project + redirect origin against the project's
+ * allowlist, mints an access token bound to the project, and stashes it
  * encrypted behind a single-use, short-lived authorization code. Returns the
  * code; the connect page redirects it to the embedding site, which exchanges it
  * at /api/v1/feedback/token.
@@ -13,10 +14,10 @@
  */
 import { readBody } from 'h3'
 import { withProjectOrgContext } from '#tenant/server'
-import { signScopedToken } from '#core/server/utils/auth'
+import { requireAuth } from '#core/server/utils/auth'
 import { encryptSecret } from '#core/server/utils/secret-crypto'
 import { db } from '#core/server/utils/database'
-import { requireWidgetAuthUser, WIDGET_TOKEN_SCOPE } from '../../../../utils/widget-auth'
+import { signWidgetToken } from '../../../../utils/widget-auth'
 import { enforceWidgetRateLimit, widgetClientIp } from '../../../../utils/rate-limit'
 import { widgetSha256Hex, randomUrlToken, isValidWidgetChallenge } from '../../../../utils/widget-crypto'
 import { originOf, isRedirectOriginAllowed } from '../../../../utils/widget-origins'
@@ -26,7 +27,7 @@ const CODE_TTL_MS = 60_000
 export default defineEventHandler(async (event) => {
   await enforceWidgetRateLimit(event, 'ratelimit.feedback.authorize', 'ip', widgetClientIp(event), 30, 60_000)
 
-  const authUser = requireWidgetAuthUser(event)
+  const authUser = requireAuth(event)
 
   const body = await readBody(event) ?? {}
   const projectId = typeof body.project_id === 'string' ? body.project_id : ''
@@ -59,11 +60,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: 'redirect origin not allowed for this project' })
   }
 
-  const token = signScopedToken(
-    { userId: authUser.userId, email: authUser.email, display_name: authUser.display_name },
-    WIDGET_TOKEN_SCOPE,
-    (useRuntimeConfig().feedbackTokenTtl as string) || '30d'
-  )
+  const token = signWidgetToken(authUser, projectId)
 
   const code = randomUrlToken(32)
   await db

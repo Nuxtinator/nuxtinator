@@ -1,11 +1,11 @@
 import { getRouterParam } from 'h3'
-import { withOrgContext } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
   if (!id) throw createError({ statusCode: 400, statusMessage: 'id required' })
 
-  return await withOrgContext(event, async (tx) => {
+  return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.read', async (tx) => {
     const card = await tx
       .selectFrom('cards')
       .selectAll()

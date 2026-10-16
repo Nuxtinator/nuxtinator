@@ -36,7 +36,7 @@ describe('inbox settings admin', () => {
         contactAddress: `contact@${newDomain}`,
         autoAckEnabled: false,
         contactFormApiKey: apiKey,
-        groundingSourceUrls: ['https://example.com/help', 'not-a-url']
+        groundingSourceUrls: ['https://example.com/help', 'not-a-url', 'http://169.254.169.254/latest/meta-data/', 'http://10.0.0.5:5432/']
       },
       ...opts
     })
@@ -44,7 +44,7 @@ describe('inbox settings admin', () => {
     expect(updated.contactAddress).toBe(`contact@${newDomain}`)
     expect(updated.autoAckEnabled).toBe(false)
     expect(updated.contactFormApiKey).toBe(apiKey)
-    // The registered parse sanitizes on write — non-http entries drop.
+    // The registered parse sanitizes on write — non-http and private-address entries drop.
     expect(updated.groundingSourceUrls).toEqual(['https://example.com/help'])
 
     // Onboarding loop closes: the key set through the API gates and routes

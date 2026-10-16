@@ -8,7 +8,7 @@ import { getSetting } from '#core/server/utils/settings-store'
 import { FEEDBACK_SETTINGS_NAMESPACE, DEFAULT_NOTIFY_SETTING_KEY } from '../../../utils/notify-recipients'
 
 export default defineEventHandler(event =>
-  withOrgPermission(event, 'feedback.read', async (tx) => {
+  withOrgPermission(event, { appId: 'feedback' }, 'feedback.read', async (tx) => {
     const userIds = await getSetting<string[]>(tx, FEEDBACK_SETTINGS_NAMESPACE, DEFAULT_NOTIFY_SETTING_KEY)
     return { user_ids: userIds }
   })

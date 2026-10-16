@@ -18,8 +18,8 @@ import type { Database } from '#core/server/database/schema'
 import { isMigrationHeldBack } from '#core/server/utils/migration-status'
 import { embed, chunkMarkdown, vectorSql, resolveEmbeddingModel, resolveAiEmbedRun, type AiEmbeddingRun, type AiReindexer, type AiReindexProgress } from '#ai/server'
 import type { HelpinatorSourceRow } from './helpinator-libraries'
-import { helpinatorNormalizeUrl } from './helpinator-libraries'
-import { helpinatorSafeFetch } from './helpinator-safe-fetch'
+import { helpinatorNormalizeUrl, helpinatorCrawlAllowsPrivate } from './helpinator-libraries'
+import { safeFetch } from '#core/server/utils/safe-fetch'
 import { helpinatorExtractFrom, helpinatorParseDom, type HelpinatorDomNode } from './helpinator-extract'
 import { helpinatorScope, type HelpinatorScope } from './helpinator-guards'
 import { helpinatorEmbedRun } from './helpinator-search'
@@ -109,11 +109,12 @@ export function helpinatorContentHash(title: string, markdown: string): string {
 
 // `maxMb` is the entry's per-page cap (`max_page_mb`).
 async function fetchHtml(url: string, maxMb: number): Promise<{ status: number, html: string | null, finalUrl: string, tooLarge: boolean }> {
-  const res = await helpinatorSafeFetch(url, {
+  const res = await safeFetch(url, {
     headers: { 'user-agent': HELPINATOR_CRAWL_USER_AGENT, 'accept': 'text/html,application/xhtml+xml' },
     timeoutMs: FETCH_TIMEOUT_MS,
     maxBytes: maxMb * MB,
-    wantBody: (status, type) => status >= 200 && status < 300 && /text\/html|application\/xhtml/i.test(type)
+    wantBody: (status, type) => status >= 200 && status < 300 && /text\/html|application\/xhtml/i.test(type),
+    allowPrivate: helpinatorCrawlAllowsPrivate()
   })
   return { status: res.status, html: res.body, finalUrl: res.finalUrl, tooLarge: res.tooLarge }
 }
@@ -121,11 +122,12 @@ async function fetchHtml(url: string, maxMb: number): Promise<{ status: number, 
 async function robotsFor(start: URL): Promise<{ isAllowed: (url: string) => boolean }> {
   const robotsUrl = `${start.origin}/robots.txt`
   try {
-    const res = await helpinatorSafeFetch(robotsUrl, {
+    const res = await safeFetch(robotsUrl, {
       headers: { 'user-agent': HELPINATOR_CRAWL_USER_AGENT },
       timeoutMs: FETCH_TIMEOUT_MS,
       maxBytes: MAX_ROBOTS_BYTES,
-      wantBody: status => status >= 200 && status < 300
+      wantBody: status => status >= 200 && status < 300,
+      allowPrivate: helpinatorCrawlAllowsPrivate()
     })
     if (res.body === null) return { isAllowed: () => true }
     const parsed = robotsParser(robotsUrl, res.body)

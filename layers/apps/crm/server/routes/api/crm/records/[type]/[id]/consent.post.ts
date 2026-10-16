@@ -15,6 +15,7 @@ import { assertRecordVisible, requireRecordType } from '../../../../../../utils/
 import { grantConsent, revokeConsent, getConsentState } from '../../../../../../utils/consent'
 import { isSuppressed } from '../../../../../../utils/suppression'
 import { recordCrmActivity } from '../../../../../../utils/crm-activity'
+import { getClientIp } from '#core/server/utils/client-ip'
 
 const Body = z.object({
   channelId: z.string().uuid(),
@@ -59,7 +60,7 @@ export default defineEventHandler(async (event) => {
       channelId: body.channelId,
       purpose: body.purpose,
       source: body.source,
-      ip: getRequestIP(event, { xForwardedFor: true }) ?? null,
+      ip: getClientIp(event),
       userAgent: getHeader(event, 'user-agent') ?? null,
       captureMeta: body.note ? { note: body.note } : undefined
     }

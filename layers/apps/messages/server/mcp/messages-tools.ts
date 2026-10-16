@@ -24,7 +24,7 @@ import { extractMentions } from '../utils/markdown-mentions'
 import { fanoutMentions } from '../utils/mention-fanout'
 import { notifyMessages } from '../utils/notification-creator'
 import { getDmMemberIds } from '../utils/dm-members'
-import { requireConversationAccess, loadConversation } from '../utils/conversation-access'
+import { requireConversationAccess, loadConversation, accessibleConversationIds } from '../utils/conversation-access'
 import {
   validateMcpMarkdown,
   MAX_ITEM_BODY_BYTES,
@@ -290,7 +290,7 @@ export const readItemTool = defineMcpTool({
 export const searchTool = defineMcpTool({
   name: 'messages_search',
   title: 'Search Messages',
-  description: 'Postgres full-text search over messages items + comments in the active org.',
+  description: 'Postgres full-text search over messages items + comments in the active org, limited to channels and your own DMs.',
   scope: 'messages.read',
   input: z.object({
     org: orgInput,
@@ -314,6 +314,7 @@ export const searchTool = defineMcpTool({
           sql<string>`ts_headline('english', coalesce(i.body_md, ''), ${tsQuery}, 'MaxWords=30,MinWords=10')`.as('headline')
         ])
         .where('i.deleted_at', 'is', null)
+        .where('i.conversation_id', 'in', accessibleConversationIds(tx, ctx.auth.userId))
         .where(sql<boolean>`i.body_tsv @@ ${tsQuery}`)
         .orderBy(sql`ts_rank(i.body_tsv, ${tsQuery})`, 'desc')
         .limit(limit)
@@ -333,6 +334,7 @@ export const searchTool = defineMcpTool({
         ])
         .where('c.deleted_at', 'is', null)
         .where('i.deleted_at', 'is', null)
+        .where('i.conversation_id', 'in', accessibleConversationIds(tx, ctx.auth.userId))
         .where(sql<boolean>`c.body_tsv @@ ${tsQuery}`)
         .orderBy(sql`ts_rank(c.body_tsv, ${tsQuery})`, 'desc')
         .limit(limit)

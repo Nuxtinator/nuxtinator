@@ -15,12 +15,14 @@ import {
   parseRedirectUri,
   matchesRegisteredRedirect,
   filterScopesByPermissions,
+  getAdvertisedScopes,
   hasAnyPermissionScope,
   isScopeSubset,
   parseScopeString
 } from '../../utils/oauth-validation'
 import { logOauthEvent, OAUTH_EVENTS } from '../../utils/oauth-audit'
 import type { H3Event } from 'h3'
+import { getClientIp } from '#core/server/utils/client-ip'
 
 function sendHtmlError(event: H3Event, status: number, title: string, message: string): string {
   setResponseStatus(event, status)
@@ -30,7 +32,7 @@ function sendHtmlError(event: H3Event, status: number, title: string, message: s
 
 export default defineEventHandler(async (event) => {
   const cfg = getOauthConfig()
-  const ip = getRequestIP(event, { xForwardedFor: true }) || 'unknown'
+  const ip = getClientIp(event)
   const userAgent = getHeader(event, 'user-agent') || undefined
 
   // Counts and records in one locked step, so parallel requests can't all pass.
@@ -142,8 +144,12 @@ export default defineEventHandler(async (event) => {
   }
 
   // Scope: requested must be subset of client cap, then intersect with user RBAC.
+  // A dynamically registered client chose its own scope at registration and
+  // could re-register for any advertised scope, so its cap is the advertised
+  // set. Otherwise every scope added after it registered (a new layer's tools)
+  // would fail it with invalid_scope. Admin-registered clients keep their cap.
   const requestedScopes = parseScopeString(scopeParam)
-  const clientCap = parseScopeString(client.scope)
+  const clientCap = client.dynamic ? getAdvertisedScopes() : parseScopeString(client.scope)
   if (requestedScopes.length === 0 || !isScopeSubset(requestedScopes, clientCap)) {
     await sendRedirect(event, errRedirect('invalid_scope', 'Requested scope is empty or not permitted for this client'))
     return

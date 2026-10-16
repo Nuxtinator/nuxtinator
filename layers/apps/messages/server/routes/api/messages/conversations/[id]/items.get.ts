@@ -2,7 +2,7 @@
 // Paginated descending list of items, including reaction summaries and the
 // caller's own tags / star state per item.
 
-import { withOrgContext } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 import { generateSignedUrl } from '#core/server/utils/storage'
 import { requireConversationAccess } from '../../../../../utils/conversation-access'
 
@@ -10,7 +10,7 @@ const DEFAULT_LIMIT = 30
 const MAX_LIMIT = 100
 
 export default defineEventHandler(async (event) => {
-  return await withOrgContext(event, { appId: 'messages' }, async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'messages' }, 'messages.read', async (tx, ctx) => {
     const conversationId = getRouterParam(event, 'id')!
     const conv = await requireConversationAccess(tx, ctx.userId, conversationId)
 

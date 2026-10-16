@@ -1,5 +1,5 @@
 import { getQuery } from 'h3'
-import { withOrgContext } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
@@ -15,7 +15,7 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  return await withOrgContext(event, async (tx) => {
+  return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.read', async (tx) => {
     let q = tx.selectFrom('cards').selectAll()
 
     q = q.where('project_id', '=', projectId)

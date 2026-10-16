@@ -12,6 +12,7 @@ import {
   OFFLINE_ACCESS_SCOPE
 } from '../../utils/oauth-validation'
 import { logOauthEvent, OAUTH_EVENTS } from '../../utils/oauth-audit'
+import { getClientIp } from '#core/server/utils/client-ip'
 
 const MAX_BODY_SIZE = 4 * 1024
 const MAX_CLIENT_NAME = 256
@@ -99,7 +100,7 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const ip = getRequestIP(event, { xForwardedFor: true }) || 'unknown'
+  const ip = getClientIp(event)
   const userAgent = getHeader(event, 'user-agent') || undefined
 
   const rate = await checkRateLimit(OAUTH_EVENTS.CLIENT_REGISTERED, 'ip', ip, 60 * 60 * 1000, 20)

@@ -9,11 +9,16 @@
 // visitor's auth cookie — uploaded HTML can't call /api/* as whoever opens
 // the link. Never add `allow-same-origin` here.
 //
+// A signed-in visitor is redirected to /files/public/:token, which frames this
+// route under an app nav bar (with the feedback widget). `?bare=1` serves the
+// HTML regardless; the frame and the bar's "open without bar" link use it.
+//
 // Org resolution mirrors /api/files/public/:token — `withRecordOrgContext`
 // resolves the org from the share token itself (BYPASSRLS lookup + GUC in
 // multi mode, plain transaction in single mode).
 
 import { withRecordOrgContext } from '#tenant/server'
+import { getAuthUser } from '#core/server/utils/auth'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -37,6 +42,11 @@ export default defineEventHandler(async (event) => {
 
       if (!item || item.kind !== 'site') {
         throw createError({ statusCode: 404, statusMessage: 'Link not found.' })
+      }
+
+      if (!getQuery(event).bare && getAuthUser(event)) {
+        setHeader(event, 'Cache-Control', 'no-store')
+        return sendRedirect(event, `/files/public/${token}`, 302)
       }
 
       setHeader(event, 'Content-Type', 'text/html; charset=utf-8')

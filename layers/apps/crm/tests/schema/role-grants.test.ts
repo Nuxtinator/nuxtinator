@@ -119,6 +119,31 @@ describe('role-grants routes', () => {
     expect(listed.total).toBe(0)
   })
 
+  it('PUT by a non-admin can only add true rows for actions the caller holds', async () => {
+    const { org, auth } = await createCrmOrgWith(sql, ['admin'])
+    const designer = await addCrmMember(sql, org.id, ['member'])
+    await $fetch('/api/crm/schema/user-grants', {
+      method: 'POST',
+      body: { userId: designer.user.id, permission: 'crm.schema.manage' },
+      ...withOrgHeader(auth, org.slug)
+    })
+    const designerOpts = withOrgHeader(designer.auth, org.slug)
+    const viewer = await createCustomRole(sql, org.id, [])
+    const other = await createCustomRole(sql, org.id, [])
+
+    // Member's own slugs carry read but not view_all.
+    const escalate = await putGrants(designerOpts, { member: { view_all: true } }).catch(e => e)
+    expect(escalate.statusCode).toBe(403)
+    expect((await putGrants(designerOpts, { [viewer]: { read: true } })).grants).toEqual({ [viewer]: { read: true } })
+
+    // A true row stored by an admin may be kept, but not copied to another role.
+    await putGrants(withOrgHeader(auth, org.slug), { [viewer]: { view_all: true } })
+    const kept = await putGrants(designerOpts, { [viewer]: { view_all: true }, member: { update: false } })
+    expect(kept.grants).toEqual({ [viewer]: { view_all: true }, member: { update: false } })
+    const copied = await putGrants(designerOpts, { [viewer]: { view_all: true }, [other]: { view_all: true } }).catch(e => e)
+    expect(copied.statusCode).toBe(403)
+  })
+
   it('PUT validates role names and rejects admin rows', async () => {
     const { org, auth } = await createCrmOrgWith(sql, ['admin'])
     const opts = withOrgHeader(auth, org.slug)

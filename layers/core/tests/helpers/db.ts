@@ -61,7 +61,7 @@ export async function closeTestDatabases(): Promise<void> {
 // uses an x-forwarded-for of `test-<uuid>` so the IP rows are easy to find.
 export async function cleanupCoreTestData(sql: ReturnType<typeof postgres>): Promise<void> {
   await sql`DELETE FROM activity_logs WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'test-core-%@example.com' OR email LIKE 'test-tenancy-%@example.com')`
-  await sql`DELETE FROM activity_logs WHERE event_type IN ('REGISTER_ATTEMPT', 'LOGIN_FAILED', 'RATE_LIMIT_EXCEEDED') AND (metadata->>'ip' LIKE 'test-%' OR metadata->>'email' LIKE 'test-%@example.com')`
+  await sql`DELETE FROM activity_logs WHERE event_type IN ('REGISTER_ATTEMPT', 'LOGIN_FAILED', 'LOGIN_ATTEMPT', 'PASSWORD_RESET_REQUEST', 'RATE_LIMIT_EXCEEDED') AND (metadata->>'ip' LIKE 'test-%' OR metadata->>'email' LIKE 'test-%@example.com')`
   await sql`DELETE FROM password_reset_requests WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'test-core-%@example.com')`
   await sql`DELETE FROM invites WHERE email LIKE 'test-core-%@example.com' OR (email IS NULL AND display_name LIKE 'test-core-%') OR accepted_by IN (SELECT id FROM users WHERE email LIKE 'test-core-%@example.com')`
   await sql`DELETE FROM users WHERE email LIKE 'test-core-%@example.com'`

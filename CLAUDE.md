@@ -257,6 +257,7 @@ When [layers/tenancy/](layers/tenancy/) is in `extends:`:
 - DB role split: `host_admin` (BYPASSRLS, exposed as `adminDb` from `#tenant/admin-db`, used by migrations + `/api/admin/orgs/...` endpoints) and `app_user` (RLS-enforced, the default `db` from [layers/core/server/utils/database.ts](layers/core/server/utils/database.ts)). Single deploys use only `DATABASE_URL`; multi deploys add `APP_DATABASE_URL`.
 - Nitro middleware reads `X-Active-Org` header (or path parameter for `/api/o/<slug>/...` and `/admin/orgs/:id/...` routes) and writes `event.context.{orgId,orgSlug,orgName,orgRoles}`. Does NOT set the GUC — `defineTenantHandler` does that inside its transaction.
 - Operator admin (`users.is_admin`) lives in core in both modes. The thing tenancy adds on top is BYPASSRLS for cross-org reach.
+- **Isolation invariant:** every row visible inside a tenant transaction belongs to the active org, so `ctx.perms` (the user's permissions in that org) is always checked against that org's rows. RLS policies are therefore exactly `org_id = current org` — never `OR visibility = 'public'` or similar; reach another org's row through `withRecordOrgContext`, which sets the GUC to the row's own org. [policy-invariant.test.ts](layers/tenancy/tests/rls/policy-invariant.test.ts) enforces this for every layer's migrations, and [rls-guard.ts](layers/tenancy/server/utils/rls-guard.ts) refuses requests when `db`'s role bypasses RLS.
 
 ### Migrations
 

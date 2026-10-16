@@ -439,19 +439,40 @@ async function onCardDrop(payload: {
     await loadAll()
   }
 }
+// Saves the panel's edits, then moves the card when its status or project
+// changed, so the move endpoint records the column history.
+async function persistCard(card: Card, patch: Partial<Card>): Promise<Card> {
+  const { column_id: columnId, project_id: projectId, ...fields } = patch
+  let saved = await $fetch<Card>(`/api/feedback/cards/${card.id}`, {
+    method: 'PATCH',
+    body: fields
+  })
+  const targetColumn = columnId || saved.column_id
+  const targetProject = projectId || saved.project_id
+  if (targetColumn && (targetColumn !== saved.column_id || targetProject !== saved.project_id)) {
+    saved = await $fetch<Card>(`/api/feedback/cards/${card.id}/move`, {
+      method: 'PATCH',
+      body: { column_id: targetColumn, swimlane_id: saved.swimlane_id, project_id: targetProject }
+    })
+  }
+  return saved
+}
+
 async function onSaveCard(patch: Partial<Card>) {
   if (!activeCard.value) return
   try {
-    const updated = await $fetch<Card>(`/api/feedback/cards/${activeCard.value.id}`, {
-      method: 'PATCH',
-      body: patch
-    })
+    const updated = await persistCard(activeCard.value, patch)
     const i = cards.value.findIndex(c => c.id === updated.id)
     if (i >= 0) cards.value.splice(i, 1, updated)
     cardPanelOpen.value = false
   } catch (e: any) {
     toast.add({ title: 'Save failed', description: e?.data?.statusMessage, color: 'error' })
   }
+}
+// The panel keeps its open card and draft; only the board's copy is refreshed.
+function onCardReplied(updated: Card) {
+  const i = cards.value.findIndex(c => c.id === updated.id)
+  if (i >= 0) cards.value.splice(i, 1, updated)
 }
 async function onDeleteCard(cardId: string) {
   try {
@@ -500,10 +521,7 @@ async function onArchiveCard(patch: Partial<Card>) {
   const card = activeCard.value
   if (!card) return
   try {
-    const saved = await $fetch<Card>(`/api/feedback/cards/${card.id}`, {
-      method: 'PATCH',
-      body: patch
-    })
+    const saved = await persistCard(card, patch)
     const i = cards.value.findIndex(c => c.id === saved.id)
     if (i >= 0) cards.value.splice(i, 1, saved)
     cardPanelOpen.value = false
@@ -802,6 +820,7 @@ async function onReorderProjects(payload: { orderedIds: string[] }) {
       @save="onSaveCard"
       @delete="onDeleteCard"
       @archive="onArchiveCard"
+      @replied="onCardReplied"
     />
 
     <UModal v-model:open="projectModalOpen" :title="projectForm.mode === 'create' ? 'New project' : 'Project settings'">

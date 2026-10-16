@@ -1,4 +1,4 @@
-// The crawler's fetch resolves a host once, checks it, and connects to what
+// safeFetch resolves a host once, checks it, and connects to what
 // it checked (no second lookup a DNS-rebinding host could answer differently).
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -14,7 +14,7 @@ vi.mock('node:dns/promises', async (orig) => {
   return { ...real, lookup, default: { ...real, lookup } }
 })
 
-const { helpinatorSafeFetch, HelpinatorBlockedUrl } = await import('../../server/utils/helpinator-safe-fetch')
+const { safeFetch, SafeFetchBlockedUrl } = await import('../../server/utils/safe-fetch')
 
 let server: Server
 let port: number
@@ -37,11 +37,11 @@ beforeEach(() => {
 
 const opts = { headers: {}, timeoutMs: 5000, maxBytes: 10_000 }
 
-describe('helpinatorSafeFetch address pinning', () => {
+describe('safeFetch address pinning', () => {
   it('connects to the address it checked, resolving once, with the original Host', async () => {
     // A second answer would be the rebinding one; it must never be asked for.
     answers.next = [['127.0.0.1'], ['10.0.0.1']]
-    const res = await helpinatorSafeFetch(`http://rebind.test:${port}/`, opts)
+    const res = await safeFetch(`http://rebind.test:${port}/`, opts)
     expect(res.status).toBe(200)
     expect(res.body).toContain('hi')
     expect(answers.calls).toBe(1)
@@ -50,13 +50,13 @@ describe('helpinatorSafeFetch address pinning', () => {
 
   it('refuses a host whose answer is private, without connecting', async () => {
     answers.next = [['10.0.0.1']]
-    await expect(helpinatorSafeFetch(`http://rebind.test:${port}/`, opts)).rejects.toBeInstanceOf(HelpinatorBlockedUrl)
+    await expect(safeFetch(`http://rebind.test:${port}/`, opts)).rejects.toBeInstanceOf(SafeFetchBlockedUrl)
     expect(seenHosts).toEqual([])
   })
 
   it('refuses when any of several answers is private', async () => {
     answers.next = [['127.0.0.1', '169.254.169.254']]
-    await expect(helpinatorSafeFetch(`http://rebind.test:${port}/`, opts)).rejects.toBeInstanceOf(HelpinatorBlockedUrl)
+    await expect(safeFetch(`http://rebind.test:${port}/`, opts)).rejects.toBeInstanceOf(SafeFetchBlockedUrl)
     expect(seenHosts).toEqual([])
   })
 })

@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt'
 import { db } from '../../utils/database'
-import { checkRateLimit, logRateLimitExceeded } from '../../utils/rate-limit'
+import { checkRateLimit, consumeRateLimit, logRateLimitExceeded } from '../../utils/rate-limit'
 import { markReauthenticated } from '../../utils/sessions'
 
 // Step-up with the account password: marks this session as recently
@@ -16,7 +16,10 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Password is required' })
   }
 
-  const rateCheck = await checkRateLimit('REAUTH_FAILED', 'user', user.userId, 15 * 60 * 1000, 5)
+  // 5 failures, plus 10 attempts reserved atomically so concurrent requests
+  // can't all pass before their failures are logged.
+  const attempts = await consumeRateLimit('REAUTH_ATTEMPT', 'user', user.userId, 15 * 60 * 1000, 10)
+  const rateCheck = attempts.allowed ? await checkRateLimit('REAUTH_FAILED', 'user', user.userId, 15 * 60 * 1000, 5) : attempts
   if (!rateCheck.allowed) {
     logRateLimitExceeded(user.userId, '/api/auth/reauth', userAgent)
     setResponseHeader(event, 'Retry-After', rateCheck.retryAfterSeconds!)

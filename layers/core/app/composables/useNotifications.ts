@@ -7,6 +7,7 @@
 // it only runs when there's an active org (the feed endpoint 404s without one,
 // e.g. on the org picker).
 
+import type { RouteLocationNormalized } from 'vue-router'
 import { useActiveOrg } from '#tenant'
 
 export interface NotificationActor {
@@ -40,6 +41,15 @@ interface CountsResponse {
 // Module-level so polling is a singleton across all mounts.
 let interval: ReturnType<typeof setInterval> | null = null
 let subscribers = 0
+let removeRouteHook: (() => void) | null = null
+
+// The naive (un-prefixed) forms of a route that a notification link can take:
+// the bare path, and the path with its query.
+function visitedLinks(to: RouteLocationNormalized): string[] {
+  const path = to.path.replace(/^\/@[^/]+/, '') || '/'
+  const query = to.fullPath.slice(to.path.length).split('#')[0]
+  return [...new Set([path, path + query])]
+}
 
 export function useNotifications() {
   const items = useState<Notification[]>('notifications:items', () => [])
@@ -93,12 +103,32 @@ export function useNotifications() {
     await refresh()
   }
 
+  // Opening a notification's target by any route, not only from the bell,
+  // marks it read.
+  async function markVisitedRead(to: RouteLocationNormalized) {
+    if (unreadCount.value === 0 || (tenancyOn && !to.params.orgSlug)) return
+    const res = await $fetch<{ updated: number }>('/api/notifications/read', {
+      method: 'POST',
+      body: { links: visitedLinks(to) }
+    })
+    if (res.updated > 0) await refresh()
+  }
+
   // Re-fetch when the active org changes (multi-tenant org switch).
   watch(slug, () => refresh())
 
+  const router = useRouter()
+
   function start() {
-    refresh()
+    const loaded = refresh()
     subscribers++
+    if (!removeRouteHook) {
+      removeRouteHook = router.afterEach((to, _from, failure) => {
+        if (!failure) markVisitedRead(to).catch(() => {})
+      })
+      // The page that was open before the hook existed.
+      loaded.then(() => markVisitedRead(router.currentRoute.value)).catch(() => {})
+    }
     if (interval) return
     interval = setInterval(refresh, 30_000)
   }
@@ -108,6 +138,10 @@ export function useNotifications() {
     if (subscribers === 0 && interval) {
       clearInterval(interval)
       interval = null
+    }
+    if (subscribers === 0 && removeRouteHook) {
+      removeRouteHook()
+      removeRouteHook = null
     }
   }
 

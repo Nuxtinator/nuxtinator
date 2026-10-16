@@ -1,9 +1,9 @@
-// Outbound fetches for the crawler. Source URLs come from org admins (in
-// multi-tenant mode, customers), so a plain fetch would let them read
-// loopback, private-network and cloud-metadata addresses through the stored
-// pages. Every hop refuses non-public addresses; redirects are followed by
-// hand so each target is checked too; bodies are read as a stream and cut off
-// at a byte cap.
+// Outbound fetches of URLs that org admins configure (in multi-tenant mode,
+// customers), e.g. helpinator's crawler and inbox grounding pages. A plain
+// fetch would let them read loopback, private-network and cloud-metadata
+// addresses through the stored content. Every hop refuses non-public
+// addresses; redirects are followed by hand so each target is checked too;
+// bodies are read as a stream and cut off at a byte cap.
 //
 // The check runs inside the socket's own DNS lookup (node:http's `lookup`
 // hook, honoured by Bun too), and the socket connects to the addresses that
@@ -11,10 +11,10 @@
 // answer public for the check and private for the connect. TLS still
 // verifies the certificate against the URL's hostname (SNI is the hostname).
 //
-// `HELPINATOR_CRAWL_ALLOW_PRIVATE=true` lifts the check (local development
-// against a site on your own machine). Under VITEST loopback is allowed so the
-// suite's in-process fixture site works; every other private range stays
-// blocked there too.
+// The `allowPrivate` option lifts the check (local development against a site
+// on your own machine). Under VITEST loopback is allowed so the suite's
+// in-process fixture site works; every other private range stays blocked
+// there too.
 import { lookup } from 'node:dns/promises'
 import http from 'node:http'
 import https from 'node:https'
@@ -24,7 +24,7 @@ import zlib from 'node:zlib'
 
 const MAX_REDIRECTS = 5
 
-export class HelpinatorBlockedUrl extends Error {}
+export class SafeFetchBlockedUrl extends Error {}
 
 function ipv4Octets(ip: string): number[] | null {
   const parts = ip.split('.')
@@ -91,7 +91,7 @@ function publicV6(g: number[]): boolean {
 }
 
 // Whether `ip` is a globally routable unicast address. Pure — exported for tests.
-export function helpinatorIsPublicAddress(ip: string): boolean {
+export function isPublicAddress(ip: string): boolean {
   const kind = isIP(ip)
   if (kind === 4) {
     const o = ipv4Octets(ip)
@@ -104,14 +104,10 @@ export function helpinatorIsPublicAddress(ip: string): boolean {
   return false
 }
 
-function allowPrivate(): boolean {
-  return process.env.HELPINATOR_CRAWL_ALLOW_PRIVATE === 'true'
-}
-
-function addressAllowed(ip: string): boolean {
-  if (allowPrivate()) return true
+function addressAllowed(ip: string, allowPrivate: boolean): boolean {
+  if (allowPrivate) return true
   if (process.env.VITEST && isLoopback(ip)) return true
-  return helpinatorIsPublicAddress(ip)
+  return isPublicAddress(ip)
 }
 
 function bareHost(u: URL): string {
@@ -121,12 +117,12 @@ function bareHost(u: URL): string {
 // Synchronous pre-check for admin input: rejects hosts that are obviously
 // internal (IP literals in private ranges, localhost) before anything is
 // stored. Hostnames are only fully checked at fetch time.
-export function helpinatorUrlLooksPublic(raw: string): boolean {
-  if (allowPrivate()) return true
+export function urlLooksPublic(raw: string, allowPrivate = false): boolean {
+  if (allowPrivate) return true
   try {
     const u = new URL(raw)
     const host = bareHost(u).toLowerCase()
-    if (isIP(host)) return addressAllowed(host)
+    if (isIP(host)) return addressAllowed(host, false)
     if (host === 'localhost' || host.endsWith('.localhost')) return !!process.env.VITEST
     return true
   } catch {
@@ -136,41 +132,41 @@ export function helpinatorUrlLooksPublic(raw: string): boolean {
 
 // Protocol and IP-literal check. A literal never goes through `lookup`, so it
 // is judged here; hostnames are judged by `checkedLookup` at connect time.
-function assertFetchableUrl(u: URL): void {
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new HelpinatorBlockedUrl('Only http(s) URLs can be crawled')
+function assertFetchableUrl(u: URL, allowPrivate: boolean): void {
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new SafeFetchBlockedUrl('Only http(s) URLs can be fetched')
   const host = bareHost(u)
-  if (isIP(host) && !addressAllowed(host)) throw new HelpinatorBlockedUrl(`${host} is not a public address`)
+  if (isIP(host) && !addressAllowed(host, allowPrivate)) throw new SafeFetchBlockedUrl(`${host} is not a public address`)
 }
 
 // Resolve once and refuse unless every address is allowed. Returns the
 // addresses the socket should connect to.
-async function resolveAllowed(hostname: string, family: number | undefined): Promise<{ address: string, family: number }[]> {
+async function resolveAllowed(hostname: string, family: number | undefined, allowPrivate: boolean): Promise<{ address: string, family: number }[]> {
   let addresses: { address: string, family: number }[]
   try {
     addresses = await lookup(hostname, { all: true, verbatim: true })
   } catch {
-    throw new HelpinatorBlockedUrl(`Could not resolve ${hostname}`)
+    throw new SafeFetchBlockedUrl(`Could not resolve ${hostname}`)
   }
-  if (addresses.length === 0 || !addresses.every(a => addressAllowed(a.address))) {
-    throw new HelpinatorBlockedUrl(`${hostname} is not a public address`)
+  if (addresses.length === 0 || !addresses.every(a => addressAllowed(a.address, allowPrivate))) {
+    throw new SafeFetchBlockedUrl(`${hostname} is not a public address`)
   }
   const wanted = family === 4 || family === 6 ? addresses.filter(a => a.family === family) : addresses
-  if (wanted.length === 0) throw new HelpinatorBlockedUrl(`Could not resolve ${hostname}`)
+  if (wanted.length === 0) throw new SafeFetchBlockedUrl(`Could not resolve ${hostname}`)
   return wanted
 }
 
-function request(u: URL, headers: Record<string, string>, signal: AbortSignal): Promise<http.IncomingMessage> {
+function request(u: URL, headers: Record<string, string>, signal: AbortSignal, allowPrivate: boolean): Promise<http.IncomingMessage> {
   return new Promise((resolve, reject) => {
     // The socket's own DNS lookup: it connects to what passed the check. The
-    // HelpinatorBlockedUrl is kept so the caller gets it, not a socket error.
-    let blocked: HelpinatorBlockedUrl | null = null
+    // SafeFetchBlockedUrl is kept so the caller gets it, not a socket error.
+    let blocked: SafeFetchBlockedUrl | null = null
     const checkedLookup: LookupFunction = (hostname, options, callback) => {
-      resolveAllowed(hostname, options.family as number | undefined).then(
+      resolveAllowed(hostname, options.family as number | undefined, allowPrivate).then(
         (addrs) => {
           if (options.all) callback(null, addrs)
           else callback(null, addrs[0]!.address, addrs[0]!.family)
         },
-        (err: HelpinatorBlockedUrl) => {
+        (err: SafeFetchBlockedUrl) => {
           blocked = err
           callback(err, '', 0)
         }
@@ -197,7 +193,7 @@ function bodyStream(res: http.IncomingMessage): Readable {
   return decoder ? pipeline(res, decoder(), () => {}) : res
 }
 
-export interface HelpinatorFetched {
+export interface SafeFetched {
   status: number
   contentType: string
   finalUrl: string
@@ -209,20 +205,27 @@ export interface HelpinatorFetched {
 
 // GET `url`, following up to MAX_REDIRECTS redirects, each target checked.
 // `wantBody(status, contentType)` decides whether the body is read at all.
-export async function helpinatorSafeFetch(
+export async function safeFetch(
   url: string,
-  opts: { headers: Record<string, string>, timeoutMs: number, maxBytes: number, wantBody?: (status: number, contentType: string) => boolean }
-): Promise<HelpinatorFetched> {
+  opts: {
+    headers: Record<string, string>
+    timeoutMs: number
+    maxBytes: number
+    wantBody?: (status: number, contentType: string) => boolean
+    allowPrivate?: boolean
+  }
+): Promise<SafeFetched> {
+  const allowPrivate = opts.allowPrivate ?? false
   const signal = AbortSignal.timeout(opts.timeoutMs)
   let current = new URL(url)
   for (let hop = 0; ; hop++) {
-    assertFetchableUrl(current)
-    const res = await request(current, opts.headers, signal)
+    assertFetchableUrl(current, allowPrivate)
+    const res = await request(current, opts.headers, signal, allowPrivate)
     const status = res.statusCode ?? 0
     const location = res.headers.location
     if (status >= 300 && status < 400 && location) {
       res.destroy()
-      if (hop >= MAX_REDIRECTS) throw new HelpinatorBlockedUrl('Too many redirects')
+      if (hop >= MAX_REDIRECTS) throw new SafeFetchBlockedUrl('Too many redirects')
       current = new URL(location, current)
       continue
     }

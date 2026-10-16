@@ -40,6 +40,24 @@ export async function userCanAccessConversation(
   return !!member
 }
 
+// Ids of every conversation the user can see, as a subquery for
+// `.where('<alias>.conversation_id', 'in', ...)` in queries spanning many
+// conversations. Same rule as userCanAccessConversation.
+export function accessibleConversationIds(tx: Transaction<Database>, userId: string) {
+  return tx
+    .selectFrom('messages_conversations as conv')
+    .select('conv.id')
+    .where(eb => eb.or([
+      eb('conv.kind', '=', 'channel'),
+      eb.exists(
+        eb.selectFrom('messages_conversation_members as m')
+          .select('m.user_id')
+          .whereRef('m.conversation_id', '=', 'conv.id')
+          .where('m.user_id', '=', userId)
+      )
+    ]))
+}
+
 export async function requireConversationAccess(
   tx: Transaction<Database>,
   userId: string,

@@ -30,6 +30,16 @@ function linkUrl(p: Methods['providers'][number]): string {
   return `${p.startPath}?${params.toString()}`
 }
 
+// Linking leaves the page, so confirm identity first; the server checks it too.
+async function link(p: Methods['providers'][number]) {
+  try {
+    await withReauth(() => $fetch('/api/auth/recent'))
+  } catch {
+    return
+  }
+  window.location.assign(linkUrl(p))
+}
+
 async function unlink(id: string) {
   unlinking.value = id
   try {
@@ -72,8 +82,7 @@ async function unlink(id: string) {
         v-else
         color="neutral"
         variant="outline"
-        :to="linkUrl(p)"
-        external
+        @click="link(p)"
       >
         Link
       </UButton>
