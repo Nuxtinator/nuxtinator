@@ -473,6 +473,39 @@ const handleSendPasswordReset = async () => {
   }
 }
 
+const hostAdminModalOpen = ref(false)
+const savingHostAdmin = ref(false)
+
+const handleSetHostAdmin = async () => {
+  if (!selectedUser.value) return
+  savingHostAdmin.value = true
+  try {
+    const userId = selectedUser.value.id
+    const next = !selectedUser.value.is_admin
+    await $fetch(`/api/admin/users/${userId}/host-admin`, { method: 'PUT', body: { is_admin: next } })
+
+    if (data.value) {
+      data.value = {
+        ...data.value,
+        rows: data.value.rows.map(r => r.id === userId ? { ...r, is_admin: next } : r)
+      }
+    }
+    if (selectedUser.value?.id === userId) {
+      selectedUser.value = { ...selectedUser.value, is_admin: next }
+    }
+    hostAdminModalOpen.value = false
+    toast.add({ title: next ? 'Host admin granted' : 'Host admin removed', color: 'success' })
+  } catch (err: unknown) {
+    toast.add({
+      title: 'Update failed',
+      description: (err as { data?: { statusMessage?: string }, message?: string } | null)?.data?.statusMessage || (err as { message?: string } | null)?.message || 'Failed to update host admin access',
+      color: 'error'
+    })
+  } finally {
+    savingHostAdmin.value = false
+  }
+}
+
 // ---------- org memberships (slideover) ----------
 type Membership = AdminUserRow['orgs'][number]
 
@@ -832,6 +865,47 @@ const handleDelete = async () => {
             </div>
           </section>
 
+          <hr class="border-(--ui-border)">
+
+          <section class="space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <h3 class="font-medium">
+                Host admin
+              </h3>
+              <UBadge
+                v-if="selectedUser.is_admin"
+                color="warning"
+                variant="subtle"
+                size="lg"
+              >
+                Host admin
+              </UBadge>
+            </div>
+            <p class="text-sm text-(--ui-text-muted)">
+              Host admins manage every user and host setting.
+            </p>
+            <UButton
+              :color="selectedUser.is_admin ? 'error' : 'primary'"
+              variant="outline"
+              :disabled="(selectedUser.is_admin && isSelf) || (!selectedUser.is_admin && !selectedUser.verified)"
+              @click="hostAdminModalOpen = true"
+            >
+              {{ selectedUser.is_admin ? 'Remove host admin' : 'Make host admin' }}
+            </UButton>
+            <p
+              v-if="selectedUser.is_admin && isSelf"
+              class="text-xs text-(--ui-text-muted)"
+            >
+              You cannot remove your own host admin access.
+            </p>
+            <p
+              v-else-if="!selectedUser.is_admin && !selectedUser.verified"
+              class="text-xs text-(--ui-text-muted)"
+            >
+              Verify the user before making them a host admin.
+            </p>
+          </section>
+
           <template v-if="tenancyEnabled">
             <hr class="border-(--ui-border)">
 
@@ -1160,6 +1234,45 @@ const handleDelete = async () => {
             </UButton>
           </div>
         </form>
+      </template>
+    </UModal>
+
+    <UModal v-model:open="hostAdminModalOpen">
+      <template #content>
+        <div
+          v-if="selectedUser"
+          class="p-6 space-y-4"
+        >
+          <h2 class="text-lg font-semibold">
+            {{ selectedUser.is_admin ? 'Remove host admin?' : 'Make host admin?' }}
+          </h2>
+          <p class="text-sm">
+            <template v-if="selectedUser.is_admin">
+              {{ selectedUser.display_name || selectedUser.email }} will lose access to the
+              admin area.
+            </template>
+            <template v-else>
+              {{ selectedUser.display_name || selectedUser.email }} will get full control of
+              this deployment, including every user and host setting.
+            </template>
+          </p>
+          <div class="flex gap-2 justify-end">
+            <UButton
+              variant="ghost"
+              :disabled="savingHostAdmin"
+              @click="hostAdminModalOpen = false"
+            >
+              Cancel
+            </UButton>
+            <UButton
+              :color="selectedUser.is_admin ? 'error' : 'primary'"
+              :loading="savingHostAdmin"
+              @click="handleSetHostAdmin"
+            >
+              {{ selectedUser.is_admin ? 'Remove' : 'Make host admin' }}
+            </UButton>
+          </div>
+        </div>
       </template>
     </UModal>
 
