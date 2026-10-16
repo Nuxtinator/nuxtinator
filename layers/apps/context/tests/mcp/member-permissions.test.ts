@@ -82,6 +82,41 @@ describe('MCP access for org members without host-level roles', () => {
     expect(html).toContain('Stay connected')
   })
 
+  it('/oauth/authorize lets a dynamic client request scopes advertised after it registered', async () => {
+    const { user, orgA } = await setupMember()
+    const metaRes = await fetch(nuxtUrl('/.well-known/oauth-protected-resource'))
+    const meta = await metaRes.json() as { resource: string }
+    const redirectUri = 'http://localhost:9999/callback'
+
+    async function authorize(dynamic: boolean): Promise<string> {
+      const clientId = `test-context-${randomBytes(8).toString('hex')}`
+      await sql`
+        INSERT INTO oauth_clients (client_id, client_name, redirect_uris, scope, dynamic)
+        VALUES (${clientId}, 'test-context cap client', ${[redirectUri]}, 'context.read offline_access', ${dynamic})
+      `
+      const params = new URLSearchParams({
+        response_type: 'code',
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        scope: 'context.read context.write offline_access',
+        state: 'xyz',
+        code_challenge: createHash('sha256').update(randomBytes(32).toString('base64url')).digest('base64url'),
+        code_challenge_method: 'S256',
+        resource: meta.resource
+      })
+      const res = await fetch(nuxtUrl(`/oauth/authorize?${params}`), {
+        redirect: 'manual',
+        headers: { cookie: `${getAuthHeaders(user).headers.cookie}; active-org-slug=${orgA.slug}` }
+      })
+      return res.headers.get('location') ?? ''
+    }
+
+    const dynamicLocation = await authorize(true)
+    expect(dynamicLocation).not.toContain('error=invalid_scope')
+    expect(dynamicLocation).toContain('/oauth/consent?request_id=')
+    expect(await authorize(false)).toContain('error=invalid_scope')
+  })
+
   it('tools/call passes the permission gate for the org the member belongs to', async () => {
     const { user, orgA } = await setupMember()
     await createTestPortfolio(sql, { org_id: orgA.id, name: 'Member Reads' })
