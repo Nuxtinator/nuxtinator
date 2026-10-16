@@ -1,20 +1,31 @@
 <script setup lang="ts">
-import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { renderContextSectionMarkdown } from '../../utils/section-markdown'
 
 const props = defineProps<{ content: string }>()
 defineEmits<{ 'select-anchor': [start: number, end: number, quote: string] }>()
 
 const html = computed(() => {
   if (typeof window === 'undefined') return ''
-  const raw = marked.parse(props.content ?? '', { async: false }) as string
-  return DOMPurify.sanitize(raw)
+  return DOMPurify.sanitize(renderContextSectionMarkdown(props.content ?? ''))
 })
+
+// Content renders after the route has settled, so the browser's own jump to
+// the URL's #heading never finds it; scroll once the heading exists.
+const route = useRoute()
+const body = ref<HTMLElement | null>(null)
+watch([html, () => route.hash], async () => {
+  if (!route.hash) return
+  await nextTick()
+  const id = decodeURIComponent(route.hash.slice(1))
+  const target = body.value?.querySelector(`[id="${CSS.escape(id)}"]`)
+  target?.scrollIntoView({ block: 'start' })
+}, { immediate: true })
 </script>
 
 <template>
   <div class="p-4">
-    <div class="markdown-body" v-html="html" />
+    <div ref="body" class="markdown-body" v-html="html" />
   </div>
 </template>
 
@@ -33,6 +44,7 @@ const html = computed(() => {
 .markdown-body :deep(h5),
 .markdown-body :deep(h6) {
   font-weight: 600;
+  scroll-margin-top: 1rem;
   margin: 1.25rem 0 0.5rem;
   line-height: 1.3;
 }
