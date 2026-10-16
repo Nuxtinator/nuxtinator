@@ -64,7 +64,7 @@ export async function createSuggestionSet(
 }
 
 async function supersedeOwnPending(tx: Tx, portfolioId: string, key: string, authorId: string): Promise<void> {
-  await tx
+  const superseded = await tx
     .updateTable('context_suggestions')
     .set({ status: 'superseded', decided_at: sql<Date>`now()` })
     .where('portfolio_id', '=', portfolioId)
@@ -74,7 +74,9 @@ async function supersedeOwnPending(tx: Tx, portfolioId: string, key: string, aut
       .selectFrom('context_suggestion_sets')
       .select('id')
       .where('author_id', '=', authorId))
+    .returning('set_id')
     .execute()
+  for (const setId of new Set(superseded.map(r => r.set_id))) await resolveSetNotifications(tx, setId)
 }
 
 async function insertSuggestion(tx: Tx, setId: string, portfolioId: string, item: NewSuggestion): Promise<string> {
@@ -98,6 +100,25 @@ async function insertSuggestion(tx: Tx, setId: string, portfolioId: string, item
 
 export function suggestionSetLink(setId: string): string {
   return `/context/suggestions/${setId}`
+}
+
+// Once nothing in a set is pending there is nothing left to review, so every
+// reviewer's notification about it is marked read, not just the decider's.
+async function resolveSetNotifications(tx: Tx, setId: string): Promise<void> {
+  const pending = await tx
+    .selectFrom('context_suggestions')
+    .select('id')
+    .where('set_id', '=', setId)
+    .where('status', '=', 'pending')
+    .executeTakeFirst()
+  if (pending) return
+  await tx
+    .updateTable('notifications')
+    .set({ read_at: sql<Date>`now()` })
+    .where('app_id', '=', 'context')
+    .where('link', '=', suggestionSetLink(setId))
+    .where('read_at', 'is', null)
+    .execute()
 }
 
 // Users in the active org (every user in single mode) holding `perm` through
@@ -446,6 +467,7 @@ export async function decideSuggestions(
       .execute()
     decided.push({ id: t.id, portfolio_id: t.portfolio_id, section_key: t.section_key, ...written })
   }
+  await resolveSetNotifications(tx, setId)
   return decided
 }
 
@@ -469,6 +491,7 @@ export async function withdrawSuggestions(
     .set({ status: 'withdrawn', decided_by: userId, decided_at: sql<Date>`now()` })
     .where('id', 'in', targets.map(t => t.id))
     .execute()
+  await resolveSetNotifications(tx, setId)
   return targets.map(t => t.id)
 }
 

@@ -401,6 +401,38 @@ describe('context suggest mode', () => {
     expect(rows.map(r => [r.link === `/context/suggestions/${setA}`, r.read])).toEqual([[true, true], [false, false]])
   })
 
+  it('once nothing in a set is pending, every reviewer\'s notification about it is read', async () => {
+    const { org, admin, adminAuth, portfolio, token } = await setup()
+    const { user: reviewer } = await addContextMember(sql, org.id, ['admin'])
+    await seedTestSection(sql, { portfolio_id: portfolio.id, section_key: 'vision-and-values', content: 'V.', last_edited_by: admin.id })
+    const res = await callMcpTool(token, 'bulk_update_sections', {
+      org: org.slug,
+      portfolio_id: portfolio.id,
+      updates: [
+        { section_key: 'identity', content: 'A.' },
+        { section_key: 'vision-and-values', content: 'B.' }
+      ]
+    })
+    expect(res.isError, res.content[0]?.text).toBeFalsy()
+    const setId = res.structuredContent?.suggestion_set_id as string
+    const [first, second] = await suggestions(setId)
+
+    const readByUser = async () => new Map((await sql<{ user_id: string, read: boolean }[]>`
+      SELECT user_id, read_at IS NOT NULL AS read FROM notifications
+      WHERE link = ${`/context/suggestions/${setId}`}
+    `).map(r => [r.user_id, r.read]))
+
+    await $fetch(`/api/context/suggestions/${setId}/decide`, {
+      method: 'POST', body: { action: 'approve', suggestion_ids: [first!.id] }, ...withOrgHeader(adminAuth, org.slug)
+    })
+    expect(await readByUser()).toEqual(new Map([[admin.id, false], [reviewer.id, false]]))
+
+    await $fetch(`/api/context/suggestions/${setId}/decide`, {
+      method: 'POST', body: { action: 'reject', suggestion_ids: [second!.id] }, ...withOrgHeader(adminAuth, org.slug)
+    })
+    expect(await readByUser()).toEqual(new Map([[admin.id, true], [reviewer.id, true]]))
+  })
+
   it('a failing bulk call leaves no suggestion behind', async () => {
     const { org, portfolio, token } = await setup()
     const res = await callMcpTool(token, 'bulk_update_sections', {
