@@ -3,7 +3,7 @@ import { readBody, getHeader } from 'h3'
 import { db } from '../../utils/database'
 import { logEvent, logLogin } from '../../utils/activity-logger'
 import { createUserAccount, postSignInRedirect } from '../../utils/accounts'
-import { acceptInvite, emitAcceptedMemberships, findInviteByToken, inviteState } from '../../utils/invites'
+import { acceptInvite, emitAcceptedMemberships, emitInviteAccepted, findInviteByToken, inviteState } from '../../utils/invites'
 import { startSession, nativeTokenFields } from '../../utils/sessions'
 import { getSiteUrl } from '../../utils/site-url'
 import { sendTemplateEmail } from '#email'
@@ -44,6 +44,7 @@ export default defineEventHandler(async (event) => {
   if (authUser && typeof body?.password !== 'string') {
     const memberships = await db.transaction().execute(trx => acceptInvite(trx, invite.id, authUser.userId))
     await emitAcceptedMemberships(memberships, authUser.userId, invite.invited_by)
+    await emitInviteAccepted(invite.id, authUser.userId, invite.invited_by)
 
     await logEvent({
       eventType: 'invite_accepted',
@@ -96,6 +97,7 @@ export default defineEventHandler(async (event) => {
     console.warn('[hook user.created] handler threw:', err)
   }
   await emitAcceptedMemberships(memberships, account.userId, invite.invited_by)
+  await emitInviteAccepted(invite.id, account.userId, invite.invited_by)
 
   await logEvent({
     eventType: 'invite_accepted',

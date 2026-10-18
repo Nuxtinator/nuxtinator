@@ -8,7 +8,7 @@ export default defineEventHandler(async (event) => {
     if (!appId) throw createError({ statusCode: 400, statusMessage: 'appId required' })
 
     const app = await getApp(tx, appId)
-    if (!app?.installed) throw createError({ statusCode: 404, statusMessage: 'App not found' })
+    if (!app?.installed || app.scope === 'user') throw createError({ statusCode: 404, statusMessage: 'App not found' })
     if (app.status === 'disabled') {
       throw createError({ statusCode: 409, statusMessage: 'App is disabled at the host level' })
     }

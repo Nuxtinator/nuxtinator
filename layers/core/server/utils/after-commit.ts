@@ -3,7 +3,7 @@
 // request's whole transaction. `afterCommit(tx, fn)` queues `fn` to run once
 // `tx` has committed — before the response goes out, so a client that reads
 // right after still sees its effects. `fn` gets a `TxScope` for opening short
-// transactions scoped to the same org as `tx`.
+// transactions scoped to the same org (and personal-app user) as `tx`.
 //
 // The tenant kernels open their transactions through `runTransaction`, which
 // tracks them. For a transaction opened any other way `fn` runs immediately
@@ -18,18 +18,23 @@ export type TxScope = <T>(fn: (tx: Tx) => Promise<T>) => Promise<T>
 
 const pending = new WeakMap<Tx, (() => Promise<void>)[]>()
 
-// Short transactions on the default (RLS) client, with `orgId` as the GUC.
-export function txScopeFor(orgId: string | null): TxScope {
+// Short transactions on the default (RLS) client, with `orgId` as the org GUC
+// and `userId` as the personal-app user GUC (`app.current_user`).
+export function txScopeFor(orgId: string | null, userId: string | null = null): TxScope {
   return async fn => await db.transaction().execute(async (tx) => {
     if (orgId) await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
+    if (userId) await sql`select set_config('app.current_user', ${userId}, true)`.execute(tx)
     return await fn(tx)
   })
 }
 
-// A TxScope for the org `tx` is scoped to (none in single mode).
+// A TxScope for the org and personal-app user `tx` is scoped to.
 export async function txScopeOf(tx: Tx): Promise<TxScope> {
-  const res = await sql<{ org: string | null }>`select nullif(current_setting('app.current_org', true), '') as org`.execute(tx)
-  return txScopeFor(res.rows[0]?.org ?? null)
+  const res = await sql<{ org: string | null, usr: string | null }>`
+    select nullif(current_setting('app.current_org', true), '') as org,
+           nullif(current_setting('app.current_user', true), '') as usr
+  `.execute(tx)
+  return txScopeFor(res.rows[0]?.org ?? null, res.rows[0]?.usr ?? null)
 }
 
 export async function afterCommit(tx: Tx, fn: (scope: TxScope) => Promise<void>): Promise<void> {

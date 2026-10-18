@@ -72,7 +72,8 @@ describe('POST /api/auth/accept-invite', () => {
     expect(res.status).toBe(200)
     const data = await res.json()
     expect(data.success).toBe(true)
-    expect(data.redirect).toBe('/orgs')
+    // No orgs: lands on the org-less launcher, which lists personal apps.
+    expect(data.redirect).toBe('/dashboard')
 
     const setCookie = res.headers.get('set-cookie') || ''
     expect(setCookie).toMatch(/auth-token=/)

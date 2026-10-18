@@ -1,12 +1,12 @@
 // GET /api/list-of-100/contacts/:id/history
 // Returns the rhythm timeline for one contact — MARK_CONTACTED / MARK_PRAYED
 // events from `activity_logs`. Filtered by the caller's user_id and the
-// contact id; RLS handles org isolation.
+// contact id.
 
-import { withOrgPermission } from '#tenant/server'
+import { withUserPermission } from '#core/server/utils/personal-apps'
 
 export default defineEventHandler(async (event) => {
-  return await withOrgPermission(event, { appId: 'list-of-100' }, 'list-of-100.read', async (tx, ctx) => {
+  return await withUserPermission(event, { appId: 'list-of-100' }, 'list-of-100.read', async (tx, ctx) => {
     const id = getRouterParam(event, 'id')
     if (!id) throw createError({ statusCode: 400, statusMessage: 'Missing id' })
 

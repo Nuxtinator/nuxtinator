@@ -37,11 +37,16 @@ function isSystemPath(p: string): boolean {
   return false
 }
 
-export default defineNuxtRouteMiddleware((to, from) => {
+export default defineNuxtRouteMiddleware(async (to, from) => {
   const path = to.path
 
-  // Already in an org-prefixed route — nothing to do.
-  if (path.startsWith('/@')) return
+  // Already in an org-prefixed route — nothing to do, unless it names a
+  // personal app, which has no org-prefixed route: drop the prefix.
+  if (path.startsWith('/@')) {
+    const rest = path.replace(/^\/@[^/]+/, '') || '/'
+    if (isPersonalAppPath(rest)) return navigateTo({ path: rest, query: to.query, hash: to.hash })
+    return
+  }
   // A page can opt out of org-prefixing by setting `tenantExempt: true` in its
   // `definePageMeta` — the per-page equivalent of SYSTEM_PREFIXES, so a layer
   // exempts its own public route without editing this file.
@@ -55,6 +60,8 @@ export default defineNuxtRouteMiddleware((to, from) => {
   }
   // System route — pass.
   if (isSystemPath(path)) return
+  // Personal apps are the same in every org, so their pages stay at the bare path.
+  if (isPersonalAppPath(path)) return
 
   // The user is currently inside an org? Rewrite the destination to keep them there.
   const fromSlug = (from.params.orgSlug as string | undefined)
@@ -69,6 +76,11 @@ export default defineNuxtRouteMiddleware((to, from) => {
     return navigateTo({ path: `/@${cookie.value}${path}`, query: to.query, hash: to.hash })
   }
 
-  // No org at all — send to picker.
+  // No org selected. A user with no memberships at all gets the bare launcher,
+  // which lists their personal apps; everyone else picks an org.
+  if (path === '/dashboard') {
+    const res = await $fetch<{ orgs: unknown[] }>('/api/orgs').catch(() => null)
+    if (res?.orgs.length === 0) return
+  }
   return navigateTo('/orgs')
 })

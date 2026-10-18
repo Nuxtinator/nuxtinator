@@ -1,6 +1,6 @@
 import { withOrgPermission } from '#tenant/server'
 import { getAllPermissions, getPermissionMeta } from '#core/server/utils/permissions-registry'
-import { getRegisteredApps } from '#core/server/utils/app-registry'
+import { getPersonalAppPermissionSlugs, getRegisteredApps } from '#core/server/utils/app-registry'
 
 // Org-scoped variant of `/api/admin/permissions`. Returns the full set of
 // runtime-registered permissions for the role / override pickers. Layer
@@ -11,7 +11,9 @@ import { getRegisteredApps } from '#core/server/utils/app-registry'
 // org permissions first, then apps in launcher order.
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, 'org.roles.read', async () => {
-    const perms = getAllPermissions()
+    // Personal-app permissions come from the app being on for a user, never a role.
+    const personal = getPersonalAppPermissionSlugs()
+    const perms = getAllPermissions().filter(p => !personal.has(p))
     const apps = getRegisteredApps()
     const groupOf = (perm: string) => perm.split('.')[0]!
 

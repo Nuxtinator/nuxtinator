@@ -66,6 +66,15 @@ interface CoreHookMap {
     orgId: string
     appId: string
   }) => void | Promise<void>
+  // An invite was accepted, after its orgs and personal apps were granted.
+  // `appIds` are the personal apps it carried. `inviteId` is null when the
+  // invited address already had an account, which was attached directly.
+  'invite.accepted': (p: {
+    inviteId: string | null
+    userId: string
+    invitedByUserId: string | null
+    appIds: string[]
+  }) => void | Promise<void>
 }
 
 // Nitro publishes the hook map under several entry points across versions

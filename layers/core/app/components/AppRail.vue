@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { useActiveOrg } from '#tenant'
 
-const { apps } = await useApps()
+const { apps, orgApps, personalApps } = await useApps()
 const activeApp = useActiveApp(apps)
+// Org apps first, then personal apps after a divider.
+const sections = computed(() => [orgApps.value, personalApps.value].filter(list => list.length > 0))
 const route = useRoute()
 const { isHostAdmin } = usePermissions()
 const isHome = computed(() => /^\/(@[^/]+\/)?dashboard\/?$/.test(route.path))
@@ -35,26 +37,34 @@ onBeforeUnmount(stop)
         class="size-5"
       />
     </NuxtLink>
-    <div class="w-8 border-t border-(--ui-border) my-1" />
-    <NuxtLink
-      v-for="app in apps"
-      :key="app.id"
-      :to="app.path"
-      class="relative flex flex-col items-center justify-center size-10 rounded-md transition-colors"
-      :class="activeApp?.id === app.id
-        ? 'bg-(--ui-bg-accented) text-(--ui-text)'
-        : 'text-(--ui-text-muted) hover:bg-(--ui-bg-accented) hover:text-(--ui-text)'"
-      :title="app.title"
-      :aria-label="app.title"
+    <template
+      v-for="(list, i) in sections"
+      :key="i"
     >
-      <AppIcon :name="app.icon" class="size-5 text-[11px]" />
-      <span
-        v-if="byApp[app.id]"
-        class="rail-badge"
+      <div class="w-8 border-t border-(--ui-border) my-1" />
+      <NuxtLink
+        v-for="app in list"
+        :key="app.id"
+        :to="app.path"
+        class="relative flex flex-col items-center justify-center size-10 rounded-md transition-colors"
+        :class="activeApp?.id === app.id
+          ? 'bg-(--ui-bg-accented) text-(--ui-text)'
+          : 'text-(--ui-text-muted) hover:bg-(--ui-bg-accented) hover:text-(--ui-text)'"
+        :title="app.scope === 'user' ? `${app.title} (personal)` : app.title"
+        :aria-label="app.title"
       >
-        {{ byApp[app.id]! > 99 ? '99+' : byApp[app.id] }}
-      </span>
-    </NuxtLink>
+        <AppIcon
+          :name="app.icon"
+          class="size-5 text-[11px]"
+        />
+        <span
+          v-if="byApp[app.id]"
+          class="rail-badge"
+        >
+          {{ byApp[app.id]! > 99 ? '99+' : byApp[app.id] }}
+        </span>
+      </NuxtLink>
+    </template>
     <div
       v-if="orgSettingsLink || isHostAdmin"
       class="mt-auto flex flex-col items-center gap-1"

@@ -1,7 +1,8 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { Kysely, Transaction } from 'kysely'
-import { sql } from './database'
+import { db, sql } from './database'
 import { getSiteUrl } from './site-url'
+import { getRegisteredApp } from './app-registry'
 import type { Database } from '#core/server/database/schema'
 
 // Invitations live in `invites`, never in `users`: the user row is created
@@ -9,7 +10,8 @@ import type { Database } from '#core/server/database/schema'
 // email) or has none (a single-use link the inviter shares). In multi-tenant
 // mode `invite_orgs` (tenancy layer) holds the orgs and roles it grants; those
 // tables only exist when the tenancy layer is loaded, so every query that
-// touches them is gated on the tenancy flag.
+// touches them is gated on the tenancy flag. `invite_apps` (core, both modes)
+// holds the personal apps it grants.
 
 type Executor = Kysely<Database> | Transaction<Database>
 
@@ -56,6 +58,8 @@ export async function createInvite(
     display_name: string | null
     invitedBy: string | null
     orgs: InviteOrgAttachment[]
+    // Personal app ids the invite turns on for whoever accepts it.
+    apps?: string[]
   }
 ): Promise<{ id: string, token: string, url: string, expiresAt: Date }> {
   const id = randomUUID()
@@ -79,6 +83,13 @@ export async function createInvite(
       .insertInto('invite_orgs')
       .values(input.orgs.map(o => ({ invite_id: id, org_id: o.orgId, roles: o.roles })))
       .execute()
+  }
+
+  const apps = [...new Set(input.apps ?? [])]
+  if (apps.length > 0) {
+    // The catalog rows are normally seeded on first request; make sure the FK holds.
+    await executor.insertInto('apps').values(apps.map(appId => ({ id: appId }))).onConflict(oc => oc.column('id').doNothing()).execute()
+    await executor.insertInto('invite_apps').values(apps.map(appId => ({ invite_id: id, app_id: appId }))).execute()
   }
 
   return { id, token, url: buildInviteUrl(token), expiresAt }
@@ -153,6 +164,28 @@ export async function getInviteOrgs(
   return out
 }
 
+// Personal apps an invite grants, keyed by invite id. Titles come from the
+// registry; an app whose layer is gone shows its id.
+export async function getInviteApps(
+  executor: Executor,
+  inviteIds: string[]
+): Promise<Map<string, Array<{ id: string, title: string }>>> {
+  const out = new Map<string, Array<{ id: string, title: string }>>()
+  if (inviteIds.length === 0) return out
+  const rows = await executor
+    .selectFrom('invite_apps')
+    .select(['invite_id', 'app_id'])
+    .where('invite_id', 'in', inviteIds)
+    .execute()
+  for (const r of rows) {
+    const list = out.get(r.invite_id) ?? []
+    list.push({ id: r.app_id, title: getRegisteredApp(r.app_id)?.title ?? r.app_id })
+    out.set(r.invite_id, list)
+  }
+  for (const list of out.values()) list.sort((a, b) => a.title.localeCompare(b.title))
+  return out
+}
+
 export interface AcceptedMembership {
   membershipId: string
   orgId: string
@@ -160,9 +193,10 @@ export interface AcceptedMembership {
   created: boolean
 }
 
-// Marks the invite accepted by `userId` and grants its orgs. If the user is
-// already in one of those orgs, the invite's roles are added to the ones they
-// have. Throws 410 when the invite was accepted concurrently or has expired.
+// Marks the invite accepted by `userId` and grants its orgs and personal apps.
+// If the user is already in one of those orgs, the invite's roles are added to
+// the ones they have. Throws 410 when the invite was accepted concurrently or
+// has expired.
 export async function acceptInvite(
   trx: Transaction<Database>,
   inviteId: string,
@@ -179,6 +213,15 @@ export async function acceptInvite(
   if (Number(claimed.numUpdatedRows ?? 0) === 0) {
     throw createError({ statusCode: 410, statusMessage: 'Invitation has already been used or has expired' })
   }
+
+  await sql`
+    INSERT INTO user_apps (user_id, app_id, granted_by)
+    SELECT ${userId}, ia.app_id, i.invited_by
+      FROM invite_apps ia
+      JOIN invites i ON i.id = ia.invite_id
+     WHERE ia.invite_id = ${inviteId}
+    ON CONFLICT (user_id, app_id) DO NOTHING
+  `.execute(trx)
 
   if (!tenancyEnabled()) return []
 
@@ -212,5 +255,32 @@ export async function emitAcceptedMemberships(memberships: AcceptedMembership[],
     } catch (err) {
       console.warn('[hook membership.created] handler threw:', err)
     }
+  }
+}
+
+// Fires `invite.accepted` once the accepting transaction has committed, for
+// layers that act on an accepted invite (e.g. connecting the inviter and the
+// new user in a personal app).
+export async function emitInviteAccepted(inviteId: string, userId: string, invitedBy: string | null) {
+  try {
+    const apps = (await getInviteApps(db, [inviteId])).get(inviteId) ?? []
+    await useNitroApp().hooks.callHook('invite.accepted', {
+      inviteId,
+      userId,
+      invitedByUserId: invitedBy,
+      appIds: apps.map(a => a.id)
+    })
+  } catch (err) {
+    console.warn('[hook invite.accepted] handler threw:', err)
+  }
+}
+
+// Fires `invite.accepted` (with no invite id) when an invite to an address
+// that already has an account attaches that user directly.
+export async function emitInviteAttached(userId: string, invitedBy: string | null, appIds: string[]) {
+  try {
+    await useNitroApp().hooks.callHook('invite.accepted', { inviteId: null, userId, invitedByUserId: invitedBy, appIds })
+  } catch (err) {
+    console.warn('[hook invite.accepted] handler threw:', err)
   }
 }

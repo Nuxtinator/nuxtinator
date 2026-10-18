@@ -171,6 +171,22 @@ export interface InvitesTable {
   accepted_by: string | null
 }
 
+// A host admin's grant of a personal app to one user. See migration
+// 015_create_user_apps.
+export interface UserAppsTable {
+  id: Generated<string>
+  user_id: string
+  app_id: string
+  granted_by: string | null
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
+// A personal app an invite grants once accepted.
+export interface InviteAppsTable {
+  invite_id: string
+  app_id: string
+}
+
 export type NotificationEmailMode = 'immediate' | 'digest' | 'none'
 
 export interface NotificationsTable {
@@ -202,6 +218,8 @@ export interface CoreDatabase {
   user_permission_grants: UserPermissionGrantsTable
   sessions: SessionsTable
   invites: InvitesTable
+  user_apps: UserAppsTable
+  invite_apps: InviteAppsTable
 }
 
 // The full schema Kysely sees: core tables plus whatever optional layers

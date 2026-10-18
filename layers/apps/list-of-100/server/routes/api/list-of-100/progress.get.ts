@@ -4,10 +4,10 @@
 // /api/list-of-100/contacts.
 
 import { sql } from 'kysely'
-import { withOrgPermission } from '#tenant/server'
+import { withUserPermission } from '#core/server/utils/personal-apps'
 
 export default defineEventHandler(async (event) => {
-  return await withOrgPermission(event, { appId: 'list-of-100' }, 'list-of-100.read', async (tx, ctx) => {
+  return await withUserPermission(event, { appId: 'list-of-100' }, 'list-of-100.read', async (tx, ctx) => {
     const row = await tx
       .selectFrom('list_of_100_contacts')
       .where('user_id', '=', ctx.userId)

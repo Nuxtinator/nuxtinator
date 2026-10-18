@@ -25,7 +25,7 @@ describe('POST /api/list-of-100/contacts/:id/mark-contacted', () => {
 
   it('bumps last_contacted_at and writes a MARK_CONTACTED activity row', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
-    const c = await createTestContact(sql, { user_id: user.id, org_id: org.id, name: 'Dana' })
+    const c = await createTestContact(sql, { user_id: user.id, name: 'Dana' })
 
     const res = await $fetch<{ contact: { id: string, last_contacted_at: string | null } }>(
       `/api/list-of-100/contacts/${c.id}/mark-contacted`,
@@ -53,7 +53,7 @@ describe('POST /api/list-of-100/contacts/:id/mark-contacted', () => {
   it('returns 404 for a contact owned by someone else (owner-only)', async () => {
     const { org, auth } = await createListOf100OrgWith(sql, ['admin'])
     const other = await addListOf100Member(sql, org.id, ['admin'])
-    const theirs = await createTestContact(sql, { user_id: other.user.id, org_id: org.id })
+    const theirs = await createTestContact(sql, { user_id: other.user.id })
 
     const err = await $fetch(`/api/list-of-100/contacts/${theirs.id}/mark-contacted`, {
       method: 'POST', ...withOrgHeader(auth, org.slug)
@@ -83,7 +83,7 @@ describe('POST /api/list-of-100/contacts/:id/mark-prayed', () => {
 
   it('bumps last_prayed_at and writes a MARK_PRAYED activity row', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
-    const c = await createTestContact(sql, { user_id: user.id, org_id: org.id, name: 'Eli' })
+    const c = await createTestContact(sql, { user_id: user.id, name: 'Eli' })
 
     const res = await $fetch<{ contact: { last_prayed_at: string | null } }>(
       `/api/list-of-100/contacts/${c.id}/mark-prayed`,
@@ -106,7 +106,7 @@ describe('POST /api/list-of-100/contacts/:id/mark-prayed', () => {
   it('returns 404 for a contact owned by someone else', async () => {
     const { org, auth } = await createListOf100OrgWith(sql, ['admin'])
     const other = await addListOf100Member(sql, org.id, ['admin'])
-    const theirs = await createTestContact(sql, { user_id: other.user.id, org_id: org.id })
+    const theirs = await createTestContact(sql, { user_id: other.user.id })
 
     const err = await $fetch(`/api/list-of-100/contacts/${theirs.id}/mark-prayed`, {
       method: 'POST', ...withOrgHeader(auth, org.slug)
@@ -121,7 +121,7 @@ describe('GET /api/list-of-100/contacts/:id/history', () => {
 
   it('returns the caller\'s MARK_CONTACTED + MARK_PRAYED events for the contact, newest first', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
-    const c = await createTestContact(sql, { user_id: user.id, org_id: org.id })
+    const c = await createTestContact(sql, { user_id: user.id })
 
     const oldest = new Date('2025-01-01T10:00:00Z')
     const middle = new Date('2025-02-01T10:00:00Z')
@@ -143,7 +143,7 @@ describe('GET /api/list-of-100/contacts/:id/history', () => {
 
   it('excludes non-mark events for the contact (CREATE / UPDATE etc.)', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
-    const c = await createTestContact(sql, { user_id: user.id, org_id: org.id })
+    const c = await createTestContact(sql, { user_id: user.id })
 
     // logCreate-style row.
     await sql`
@@ -163,7 +163,7 @@ describe('GET /api/list-of-100/contacts/:id/history', () => {
   it('returns 404 for a contact owned by another user — even when activity rows exist', async () => {
     const { org, auth } = await createListOf100OrgWith(sql, ['admin'])
     const other = await addListOf100Member(sql, org.id, ['admin'])
-    const theirs = await createTestContact(sql, { user_id: other.user.id, org_id: org.id })
+    const theirs = await createTestContact(sql, { user_id: other.user.id })
     await createTestRhythmEvent(sql, { user_id: other.user.id, record_id: theirs.id, event_type: 'MARK_PRAYED' })
 
     const err = await $fetch(`/api/list-of-100/contacts/${theirs.id}/history`, {
@@ -174,7 +174,7 @@ describe('GET /api/list-of-100/contacts/:id/history', () => {
 
   it('returns an empty array for a contact with no rhythm events', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
-    const c = await createTestContact(sql, { user_id: user.id, org_id: org.id })
+    const c = await createTestContact(sql, { user_id: user.id })
 
     const res = await $fetch<{ events: unknown[] }>(`/api/list-of-100/contacts/${c.id}/history`, {
       ...withOrgHeader(auth, org.slug)

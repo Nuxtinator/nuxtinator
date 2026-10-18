@@ -4,7 +4,7 @@
 
 import { z } from 'zod'
 import { sql } from 'kysely'
-import { withOrgPermission } from '#tenant/server'
+import { withUserPermission } from '#core/server/utils/personal-apps'
 import { logUpdate } from '#core/server/utils/activity-logger'
 
 const Body = z.object({
@@ -16,7 +16,7 @@ const Body = z.object({
 })
 
 export default defineEventHandler(async (event) => {
-  return await withOrgPermission(event, { appId: 'list-of-100' }, 'list-of-100.write', async (tx, ctx) => {
+  return await withUserPermission(event, { appId: 'list-of-100' }, 'list-of-100.write', async (tx, ctx) => {
     const id = getRouterParam(event, 'id')
     if (!id) throw createError({ statusCode: 400, statusMessage: 'Missing id' })
 

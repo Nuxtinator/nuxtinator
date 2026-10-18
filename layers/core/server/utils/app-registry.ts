@@ -34,7 +34,20 @@ export interface AppEntry {
   //   'host_controlled' — multi mode: only a host admin turns it on per org;
   //                 single mode treats it as 'disabled'
   //   'disabled'  — off everywhere
+  // For a personal app (`scope: 'user'`), 'default' is on for every signed-in
+  // user, and 'available' / 'host_controlled' are on only for users a host
+  // admin granted it to.
   defaultStatus?: 'available' | 'default' | 'disabled' | 'host_controlled'
+  // 'org' (default): the app's data belongs to an org and it is turned on per
+  // org. 'user': a personal app — its data belongs to each user, it is the
+  // same in every org, and it is turned on per user (see personal-apps.ts).
+  // A personal layer also maps its id to its path under
+  // `runtimeConfig.public.personalApps` so routing can tell its pages apart
+  // at build time.
+  scope?: 'org' | 'user'
+  // Personal apps only: the permissions a user holds while the app is on for
+  // them. Personal apps take no permissions from roles.
+  permissions?: string[]
 }
 
 const _apps = new Map<string, AppEntry>()
@@ -55,6 +68,16 @@ export function getRegisteredApps(): AppEntry[] {
 
 export function getRegisteredApp(id: string): AppEntry | null {
   return _apps.get(id) ?? null
+}
+
+// Permissions owned by personal apps. Roles never grant these: a user holds
+// them only while the app is on for them (see personal-apps.ts).
+export function getPersonalAppPermissionSlugs(): Set<string> {
+  const out = new Set<string>()
+  for (const app of _apps.values()) {
+    if (app.scope === 'user') for (const p of app.permissions ?? []) out.add(p)
+  }
+  return out
 }
 
 export function __resetAppRegistryForTests(): void {

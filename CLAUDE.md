@@ -239,6 +239,16 @@ Live examples:
 
 When adding a new settings surface (e.g. custom roles, per-org branding, host-level feature flags): write a `<thing>-settings.ts` file with one `defineSettings` call, export the reader, and have endpoints call it. Don't put the DB read in the endpoint; don't do the merge inline.
 
+### Personal apps (user-scoped layers)
+
+An app layer whose data belongs to each user instead of an org registers with `registerApp({ scope: 'user', permissions: [...] })` and maps its id to its path under `runtimeConfig.public.personalApps` in its own `nuxt.config.ts`. Same behaviour in single and multi mode ([layers/core/server/utils/personal-apps.ts](layers/core/server/utils/personal-apps.ts)):
+
+- **Access is per user, not per org.** `apps.status` `'default'` = every signed-in user; `'available'`/`'host_controlled'` = only users with a `user_apps` grant (host admin sets it on `/admin/users` or in an invite, via `invite_apps`). While the app is on, the user holds every permission in `permissions`; roles grant nothing. Personal apps never appear in org feeds, `org_apps` or org settings.
+- **Handlers** use `withUserPermission(event, { appId }, perm, fn)` / `withUserContext` / `defineUserHandler` from `#core/server/utils/personal-apps`; bearer routes call `runInUserTransaction(userId, { appId }, fn)` after `requireBearerScope`. They 410 when the app isn't on for the caller and set the `app.current_user` GUC — never `app.current_org`.
+- **Tables** have no `org_id` and no `_T` migration. RLS keys on `user_id = nullif(current_setting('app.current_user', true), '')::uuid`; sharing policies may widen that but must still reference `app.current_user` (the RLS invariant test enforces it).
+- **Pages** live at their bare path in every org: tenancy doesn't double them under `/@:orgSlug` and redirects `/@<slug>/<personal path>` to the bare one. The launcher lists them under "Personal"; their nav comes from `/api/_personal-nav`.
+- `invite.accepted` fires after any invite is accepted, and with `inviteId: null` when an invite to an existing account attaches it directly, for layers that act on it.
+
 ### App-layer page paths — write single-tenant shape
 
 App layer pages live at `app/pages/<appId>/...` and routes mount at `server/routes/api/<appId>/...`. App authors do **not** prefix paths with `/@:orgSlug/...`.

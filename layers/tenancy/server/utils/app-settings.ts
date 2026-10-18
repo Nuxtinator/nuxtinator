@@ -44,10 +44,11 @@ interface OrgAppRow {
 export const getOrgApps = defineSettings<AppCatalogEntry, OrgAppRow, OrgAppEntry>({
   // Defaults = the catalog merge, filtered to installed apps only. An
   // uninstalled orphan row can't be org-enabled, so it's not even worth
-  // surfacing to org-level callers.
+  // surfacing to org-level callers. Personal apps are turned on per user,
+  // never per org (see core's personal-apps.ts), so they're left out too.
   loadDefaults: async (tx) => {
     const catalog = await getApps(tx)
-    return catalog.filter(a => a.installed)
+    return catalog.filter(a => a.installed && a.scope !== 'user')
   },
   loadOverrides: async (tx, ctx) => {
     if (!ctx.orgId) throw new Error('getOrgApps requires ctx.orgId')

@@ -41,6 +41,7 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
 
 - **Headers and sidebars use `bg-(--chrome-bg)`**: `--ui-bg-elevated` in light mode; in dark mode a midpoint between neutral-800 and neutral-900, one tone darker than elevated and slightly lighter than the page. Applies to the top bars in `layouts/default.vue` and `layouts/admin.vue`, `AppSidebar` and `SidebarPanel`.
 - **The app rail** stays `bg-neutral-200 dark:bg-neutral-950`.
+- **Personal apps sit after org apps.** The rail separates them with the same plain divider it uses under the home icon (it's too narrow for a label); the launcher popover uses `<USeparator label="Personal">`; dashboards use a "Personal" heading. On a personal app's pages the rail and org switcher keep showing the last active org, so leaving the app returns to it.
 - **The theme toggle sits in the top bar** between the notification bell and the profile icon, in both the desktop and mobile headers (`<ThemeToggle size="sm" />`).
 
 ## Settings pages

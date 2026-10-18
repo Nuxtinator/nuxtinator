@@ -1,9 +1,9 @@
 import { db } from '#core/server/utils/database'
 import { requireOperatorAdmin } from '#tenant/server'
-import { getInviteOrgs, inviteState } from '../../../utils/invites'
+import { getInviteApps, getInviteOrgs, inviteState } from '../../../utils/invites'
 
 // Host admin: every invite that hasn't been accepted, newest first, with the
-// orgs each one grants.
+// orgs and personal apps each one grants.
 export default defineEventHandler(async (event) => {
   await requireOperatorAdmin(event)
 
@@ -24,13 +24,15 @@ export default defineEventHandler(async (event) => {
     .execute()
 
   const orgs = await getInviteOrgs(db, rows.map(r => r.id))
+  const apps = await getInviteApps(db, rows.map(r => r.id))
 
   return {
     invites: rows.map(({ accepted_at, ...r }) => ({
       ...r,
       kind: r.email ? 'email' : 'link',
       status: inviteState({ accepted_at, expires_at: r.expires_at }),
-      orgs: orgs.get(r.id) ?? []
+      orgs: orgs.get(r.id) ?? [],
+      apps: apps.get(r.id) ?? []
     }))
   }
 })

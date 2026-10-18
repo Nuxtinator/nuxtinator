@@ -11,6 +11,9 @@ const orgSwitcher = config.public.tenancy ? resolveComponent('OrgSwitcher') : nu
 
 const { apps } = await useApps()
 const activeApp = useActiveApp(apps)
+// The app whose nav the layout's sidebar shows. In multi-tenant mode app pages
+// bring their own sidebar, personal apps included, so the layout shows none.
+const sidebarApp = computed(() => config.public.tenancy ? null : activeApp.value)
 const route = useRoute()
 const { slug } = useActiveOrg()
 const homePath = computed(() => launcherPath(slug.value))
@@ -43,7 +46,7 @@ watch(() => route.path, () => {
             @click="mobileRailOpen = true"
           />
           <UButton
-            v-if="activeApp"
+            v-if="sidebarApp"
             icon="i-lucide-menu"
             variant="ghost"
             color="neutral"
@@ -116,12 +119,12 @@ watch(() => route.path, () => {
         <AppRail class="hidden sm:flex sticky top-[49px] h-[calc(100vh-49px)] lg:top-[57px] lg:h-[calc(100vh-57px)]" />
 
         <aside
-          v-if="activeApp"
+          v-if="sidebarApp"
           class="hidden lg:flex w-64 shrink-0 border-r border-(--ui-border) sticky top-[57px] h-[calc(100vh-57px)]"
         >
           <AppSidebar
-            :key="activeApp.id"
-            :app="activeApp"
+            :key="sidebarApp.id"
+            :app="sidebarApp"
             class="w-full"
           />
         </aside>
@@ -144,15 +147,15 @@ watch(() => route.path, () => {
 
       <!-- Mobile sidebar drawer -->
       <USlideover
-        v-if="activeApp"
+        v-if="sidebarApp"
         v-model:open="mobileSidebarOpen"
         side="left"
         :ui="{ content: 'max-w-xs' }"
       >
         <template #content>
           <AppSidebar
-            :key="activeApp.id"
-            :app="activeApp"
+            :key="sidebarApp.id"
+            :app="sidebarApp"
           />
         </template>
       </USlideover>
