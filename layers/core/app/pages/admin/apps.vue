@@ -4,7 +4,7 @@ definePageMeta({
   middleware: ['auth', 'admin']
 })
 
-type AppStatus = 'disabled' | 'available' | 'default'
+type AppStatus = 'disabled' | 'available' | 'default' | 'host_controlled'
 
 interface AdminApp {
   id: string
@@ -29,9 +29,10 @@ const { data, pending, refresh } = await useFetch<{ apps: AdminApp[] }>(
 )
 const apps = computed(() => data.value?.apps ?? [])
 
-const STATUS_OPTIONS: { value: AppStatus, label: string, description: string, color: 'success' | 'neutral' | 'error', icon: string }[] = [
+const STATUS_OPTIONS: { value: AppStatus, label: string, description: string, color: 'success' | 'neutral' | 'warning' | 'error', icon: string }[] = [
   { value: 'default', label: 'Enabled for all', description: 'On for every org; an org admin can turn it off.', color: 'success', icon: 'i-lucide-circle-check' },
   { value: 'available', label: 'Available to all', description: 'Off until an org admin turns it on.', color: 'neutral', icon: 'i-lucide-circle-dashed' },
+  { value: 'host_controlled', label: 'Host controlled', description: 'Off for every org until a host admin turns it on per org; org admins can\'t change it.', color: 'warning', icon: 'i-lucide-lock' },
   { value: 'disabled', label: 'Disabled', description: 'Hidden from every org.', color: 'error', icon: 'i-lucide-circle-x' }
 ]
 const statusMeta = (s: AppStatus) => STATUS_OPTIONS.find(o => o.value === s) ?? STATUS_OPTIONS[1]!
@@ -203,16 +204,17 @@ const onRemove = async () => {
         <!-- Single-tenant: a plain on/off switch. "On" stores `default` (shown
              in the launcher); "off" stores `disabled` (hidden). The `available`
              tier is multi-tenant-only (it means "org admin must opt in"), so it
-             isn't offered here. -->
+             isn't offered here. `host_controlled` is multi-tenant-only too and
+             reads as off. -->
         <div
           v-else-if="!tenancyEnabled"
           class="flex items-center gap-2 shrink-0"
         >
           <span class="text-sm text-(--ui-text-muted)">
-            {{ app.status === 'disabled' ? 'Disabled' : 'Enabled' }}
+            {{ app.status === 'disabled' || app.status === 'host_controlled' ? 'Disabled' : 'Enabled' }}
           </span>
           <USwitch
-            :model-value="app.status !== 'disabled'"
+            :model-value="app.status !== 'disabled' && app.status !== 'host_controlled'"
             size="lg"
             @update:model-value="(v: boolean) => onSetStatus(app, v ? 'default' : 'disabled')"
           />
@@ -272,7 +274,7 @@ const onRemove = async () => {
     <USlideover
       v-model:open="orgsOpen"
       :title="orgsApp ? `${orgsApp.title} — orgs` : ''"
-      description="Turn this app on or off per org. Changes made here are marked as set by the host, and org admins can't change them."
+      description="Turn this app on or off per org. Changes made here are marked as set by the host. Org admins can change them unless the app is host controlled."
     >
       <template #body>
         <div

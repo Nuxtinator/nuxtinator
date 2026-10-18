@@ -7,8 +7,11 @@
 //   1. Registry default       — layer's `registerApp({ defaultStatus })`
 //   2. Host-admin override    — `apps.status` (set via /admin/apps)
 //                               'default' = on for orgs without a row,
-//                               'available' = off until the org enables it
-//   3. Org-admin override     — `org_apps.enabled` (set via /@<org>/settings/apps)
+//                               'available' = off until the org enables it,
+//                               'host_controlled' = off until a host admin
+//                               enables it; org admins can't change it
+//   3. Per-org override       — `org_apps.enabled` (set via /@<org>/settings/apps,
+//                               or by a host admin via /admin/apps)
 //
 // `getApps` resolves (1) and (2). `getOrgApps` adds (3). The downstream
 // helpers (`getOrgEnabledApps`, `isAppEnabledForOrg`) filter off its
@@ -25,7 +28,8 @@ export interface OrgAppEntry extends AppCatalogEntry {
   // null when no explicit row exists and the answer derives from the
   // catalog status alone.
   source: OrgAppSource | null
-  // Host has disabled the app catalog-wide — org admin can't override.
+  // Org admin can't change it: the host has disabled the app catalog-wide
+  // or made it host-controlled.
   lockedByHost: boolean
   // Catalog-level status surfaced for UI tooltips ("Default: available").
   globalStatus: AppStatus
@@ -57,7 +61,7 @@ export const getOrgApps = defineSettings<AppCatalogEntry, OrgAppRow, OrgAppEntry
   keyOf: app => app.id,
   merge: (app, orgRow) => {
     const a = app!
-    const lockedByHost = a.status === 'disabled'
+    const lockedByHost = a.status === 'disabled' || a.status === 'host_controlled'
     const enabled = resolveOrgAppEnabled(a.status, orgRow)
     return {
       ...a,

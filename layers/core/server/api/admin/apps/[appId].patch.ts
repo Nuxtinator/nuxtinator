@@ -11,20 +11,24 @@ import { getApp } from '../../../utils/app-settings'
 //     `org_apps(enabled=true, source='auto')`. Fire `app.enabled` per row.
 //     This makes layer hooks see "this app turned on" for orgs that
 //     previously inherited 'available'=off, matching the user-visible flip.
-//   * default → available: for every org without an explicit row, INSERT
-//     `org_apps(enabled=true, source='auto')` (no hook — the app was already
-//     on). Existing orgs keep the app; new orgs after the flip must opt in.
+//   * default → available / host_controlled: for every org without an
+//     explicit row, INSERT `org_apps(enabled=true, source='auto')` (no hook —
+//     the app was already on). Existing orgs keep the app; new orgs after the
+//     flip must opt in (available) or be turned on by a host admin
+//     (host_controlled).
+//   * available ↔ host_controlled: no row changes. Orgs with an enabled row
+//     keep the app; the rest stay off.
 //   * anything → disabled: no row changes. Status alone gates.
 //   * disabled → default: same as available → default.
-//   * disabled → available: no row changes.
+//   * disabled → available / host_controlled: no row changes.
 export default defineEventHandler(async (event) => {
   const { userId } = await requireOperatorAdmin(event)
   const appId = getRouterParam(event, 'appId')
   if (!appId) throw createError({ statusCode: 400, statusMessage: 'appId required' })
   const body = await readBody(event)
   const status = body?.status
-  if (status !== 'disabled' && status !== 'available' && status !== 'default') {
-    throw createError({ statusCode: 400, statusMessage: 'status must be disabled | available | default' })
+  if (status !== 'disabled' && status !== 'available' && status !== 'default' && status !== 'host_controlled') {
+    throw createError({ statusCode: 400, statusMessage: 'status must be disabled | available | default | host_controlled' })
   }
 
   const existing = await getApp(db, appId)
@@ -40,7 +44,7 @@ export default defineEventHandler(async (event) => {
 
   const now = new Date().toISOString()
   const flipsToDefault = status === 'default' && oldStatus !== 'default'
-  const keepsExistingOrgs = oldStatus === 'default' && status === 'available'
+  const keepsExistingOrgs = oldStatus === 'default' && (status === 'available' || status === 'host_controlled')
   let materializedOrgIds: string[] = []
 
   await db.transaction().execute(async (trx) => {

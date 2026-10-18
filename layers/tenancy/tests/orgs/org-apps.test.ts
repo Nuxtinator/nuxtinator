@@ -1,5 +1,5 @@
 // Org-side app enable/disable. Marks org_apps row with source='org_admin' so
-// the host UI can distinguish org-driven from host-forced state.
+// the host UI can distinguish org-driven from host-set state.
 import { describe, it, expect, afterEach, afterAll } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import {

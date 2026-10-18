@@ -92,6 +92,47 @@ describe('app catalog status across orgs', () => {
     expect(after.source).toBe('host')
   })
 
+  it('host controlled: hidden and off until the host turns it on, then locked for the org admin', async () => {
+    const { user, auth } = await createOperatorAdmin(sql)
+    await setStatus('host_controlled')
+    const org = await createOrg(auth, user.id)
+    const orgAuth = withOrgHeader(auth, org.slug)
+
+    expect(await org.orgApp()).toBeUndefined()
+    const enableErr = await $fetch(`/api/o/${org.slug}/apps/${APP_ID}/enable`, { method: 'POST', ...orgAuth }).catch(e => e)
+    expect(enableErr.statusCode).toBe(409)
+
+    await $fetch(`/api/admin/orgs/${org.id}/apps/${APP_ID}/enable`, { method: 'POST', ...auth })
+    const after = await org.orgApp()
+    expect(after.enabled).toBe(true)
+    expect(after.lockedByHost).toBe(true)
+
+    const disableErr = await $fetch(`/api/o/${org.slug}/apps/${APP_ID}/disable`, { method: 'POST', ...orgAuth }).catch(e => e)
+    expect(disableErr.statusCode).toBe(409)
+  })
+
+  it('switching from enabled for all to host controlled keeps the app on for existing orgs', async () => {
+    const { user, auth } = await createOperatorAdmin(sql)
+    await setStatus('default')
+    const org = await createOrg(auth, user.id)
+    await sql`DELETE FROM org_apps WHERE org_id = ${org.id} AND app_id = ${APP_ID}`
+
+    await $fetch(`/api/admin/apps/${APP_ID}`, { method: 'PATCH', body: { status: 'host_controlled' }, ...auth })
+    expect((await org.orgApp()).enabled).toBe(true)
+  })
+
+  it('a host-set row on an available app stays changeable by the org admin', async () => {
+    const { user, auth } = await createOperatorAdmin(sql)
+    await setStatus('available')
+    const org = await createOrg(auth, user.id)
+
+    await $fetch(`/api/admin/orgs/${org.id}/apps/${APP_ID}/enable`, { method: 'POST', ...auth })
+    expect((await org.orgApp()).lockedByHost).toBe(false)
+
+    await $fetch(`/api/o/${org.slug}/apps/${APP_ID}/disable`, { method: 'POST', ...withOrgHeader(auth, org.slug) })
+    expect((await org.orgApp()).enabled).toBe(false)
+  })
+
   it('DELETE /api/admin/apps/:appId purges an uninstalled app, refuses an installed one', async () => {
     const { auth } = await createOperatorAdmin(sql)
     const orphanId = `test-tenancy-orphan-${randomUUID().slice(0, 8)}`

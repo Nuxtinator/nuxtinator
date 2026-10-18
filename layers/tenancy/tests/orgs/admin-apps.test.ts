@@ -1,5 +1,5 @@
-// Host-admin app force-enable / force-disable. Marks the org_apps row with
-// source='host' so the org-side UI can display "Forced by host admin".
+// Host-admin per-org app enable / disable. Marks the org_apps row with
+// source='host' so both admin UIs can show who set it.
 import { describe, it, expect, afterEach, afterAll } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import { randomUUID } from 'node:crypto'

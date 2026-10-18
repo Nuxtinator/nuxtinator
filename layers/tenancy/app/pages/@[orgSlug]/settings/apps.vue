@@ -12,7 +12,7 @@ interface OrgApp {
   title: string
   description?: string
   icon?: string
-  globalStatus: 'disabled' | 'available' | 'default'
+  globalStatus: 'disabled' | 'available' | 'default' | 'host_controlled'
   enabled: boolean
   source: 'auto' | 'org_admin' | 'host' | null
   lockedByHost: boolean
@@ -86,18 +86,20 @@ const onToggle = async (app: OrgApp) => {
                 {{ app.description }}
               </div>
               <div class="text-xs text-(--ui-text-muted) mt-1">
-                {{ app.lockedByHost
-                  ? 'Disabled by host'
-                  : app.source === 'host'
-                    ? `Forced ${app.enabled ? 'on' : 'off'} by host`
-                    : `Default: ${app.globalStatus}`
+                {{ app.globalStatus === 'host_controlled'
+                  ? 'Managed by host'
+                  : app.lockedByHost
+                    ? 'Disabled by host'
+                    : app.source === 'host'
+                      ? 'Set by host'
+                      : `Default: ${app.globalStatus}`
                 }}
               </div>
             </div>
           </div>
           <USwitch
             :model-value="app.enabled"
-            :disabled="app.lockedByHost || app.source === 'host'"
+            :disabled="app.lockedByHost"
             @update:model-value="() => onToggle(app)"
           />
         </li>

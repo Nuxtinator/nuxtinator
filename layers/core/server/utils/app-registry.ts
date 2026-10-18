@@ -31,8 +31,10 @@ export interface AppEntry {
   // host admin enables it.
   //   'default'   — enabled: single mode shows it; every org has it on
   //   'available' — multi mode: each org admin can turn it on
+  //   'host_controlled' — multi mode: only a host admin turns it on per org;
+  //                 single mode treats it as 'disabled'
   //   'disabled'  — off everywhere
-  defaultStatus?: 'available' | 'default' | 'disabled'
+  defaultStatus?: 'available' | 'default' | 'disabled' | 'host_controlled'
 }
 
 const _apps = new Map<string, AppEntry>()

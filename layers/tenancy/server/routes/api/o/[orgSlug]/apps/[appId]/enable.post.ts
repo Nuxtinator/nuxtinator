@@ -12,6 +12,9 @@ export default defineEventHandler(async (event) => {
     if (app.status === 'disabled') {
       throw createError({ statusCode: 409, statusMessage: 'App is disabled at the host level' })
     }
+    if (app.status === 'host_controlled') {
+      throw createError({ statusCode: 409, statusMessage: 'App is managed by the host' })
+    }
 
     const now = new Date().toISOString()
     await tx

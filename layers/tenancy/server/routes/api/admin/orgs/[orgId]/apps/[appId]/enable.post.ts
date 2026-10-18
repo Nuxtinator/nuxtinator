@@ -2,8 +2,9 @@ import { getRouterParam } from 'h3'
 import { adminDb as db } from '#tenant/admin-db'
 import { requireHostAdmin } from '#tenant/server'
 
-// Host admin force-enables an app for one org. Marked source='host' so the
-// org-side UI can show "Forced on by host".
+// Host admin turns an app on for one org. Marked source='host' so both admin
+// UIs can show who set it. Org admins can still change it unless the app is
+// host-controlled.
 export default defineEventHandler(async (event) => {
   await requireHostAdmin(event)
   const orgId = getRouterParam(event, 'orgId')

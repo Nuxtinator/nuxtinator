@@ -78,7 +78,7 @@ export interface CustomRolesTable extends NuxtinatorCustomRolesColumns {
   permissions: Generated<string[]>
 }
 
-export type AppStatus = 'disabled' | 'available' | 'default'
+export type AppStatus = 'disabled' | 'available' | 'default' | 'host_controlled'
 
 export interface AppsTable {
   id: string
