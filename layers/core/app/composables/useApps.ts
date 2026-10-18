@@ -50,6 +50,16 @@ export async function useApps() {
     key: 'org-apps'
   })
 
+  // On a personal page the org comes from the last-active-org cookie. If that
+  // org is gone for the user (they left it, it was renamed), forget it.
+  const lastOrg = useCookie<string | null>('active-org-slug')
+  watch(error, (err) => {
+    if (slug.value || !chromeOrg.value) return
+    if ((err as { statusCode?: number } | null)?.statusCode === 404) {
+      lastOrg.value = null
+    }
+  })
+
   const personalUrl = computed(() => (user.value ? '/api/_personal-apps' : ''))
   const { data: personalData, refresh: refreshPersonal } = await useFetch<AppsResponse>(personalUrl, {
     default: () => ({ apps: [] as AppEntry[] }),

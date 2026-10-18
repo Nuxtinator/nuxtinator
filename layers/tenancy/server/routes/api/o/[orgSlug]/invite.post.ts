@@ -3,7 +3,7 @@ import { getHeader } from 'h3'
 import { withOrgPermission } from '#tenant/server'
 import { validateRoleNames, getRolePermissions } from '#core/server/utils/rbac'
 import { logEvent } from '#core/server/utils/activity-logger'
-import { createInvite, findPendingInvite } from '#core/server/utils/invites'
+import { createInvite, emitInviteAttached, findPendingInvite } from '#core/server/utils/invites'
 import { sendTemplateEmail } from '#email'
 import { adminDb } from '#tenant/admin-db'
 
@@ -163,6 +163,7 @@ export default defineEventHandler(async (event) => {
         createdByUserId: ctx.userId
       })
     } catch (err) { console.warn('[hook membership.created]', err) }
+    await emitInviteAttached(userId, ctx.userId, [])
 
     logEvent({
       eventType: 'org_invite_attached',

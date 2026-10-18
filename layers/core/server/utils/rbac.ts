@@ -13,6 +13,7 @@ import { getAppStaticRole, getAppStaticRoleNames } from './roles-registry'
 import { getAllPermissions, isRegisteredPermission } from './permissions-registry'
 import { getDefaultGrants } from './default-grants-registry'
 import { getRoleOverlay } from './role-overlay-registry'
+import { getPersonalAppPermissionSlugs } from './app-registry'
 
 type DbClient = Kysely<Database> | Transaction<Database>
 
@@ -30,6 +31,7 @@ type DbClient = Kysely<Database> | Transaction<Database>
 //
 // `admin` is special-cased to the union of every registered permission so
 // layer-contributed perms automatically reach admin without explicit grants.
+// Personal-app permissions are never role permissions, so they're dropped.
 export async function getRolePermissions(
   client: DbClient,
   roleNames: readonly string[],
@@ -87,6 +89,7 @@ export async function getRolePermissions(
   for (const perms of perRole.values()) {
     for (const perm of perms) set.add(perm)
   }
+  for (const perm of getPersonalAppPermissionSlugs()) set.delete(perm)
   return set as Set<Permission>
 }
 

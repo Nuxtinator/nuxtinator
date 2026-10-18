@@ -274,3 +274,13 @@ export async function emitInviteAccepted(inviteId: string, userId: string, invit
     console.warn('[hook invite.accepted] handler threw:', err)
   }
 }
+
+// Fires `invite.accepted` (with no invite id) when an invite to an address
+// that already has an account attaches that user directly.
+export async function emitInviteAttached(userId: string, invitedBy: string | null, appIds: string[]) {
+  try {
+    await useNitroApp().hooks.callHook('invite.accepted', { inviteId: null, userId, invitedByUserId: invitedBy, appIds })
+  } catch (err) {
+    console.warn('[hook invite.accepted] handler threw:', err)
+  }
+}

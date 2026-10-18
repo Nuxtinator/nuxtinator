@@ -6,7 +6,7 @@ import { requireAuth } from '../../../utils/auth'
 import { validateRoleNames } from '../../../utils/rbac'
 import { logEvent } from '../../../utils/activity-logger'
 import { sendTemplateEmail } from '#email'
-import { createInvite, findPendingInvite } from '../../../utils/invites'
+import { createInvite, emitInviteAttached, findPendingInvite } from '../../../utils/invites'
 import { getApps } from '../../../utils/app-settings'
 import { setUserAppGrant } from '../../../utils/personal-apps'
 
@@ -226,6 +226,7 @@ export default defineEventHandler(async (event) => {
       console.warn('[hook membership.created] handler threw:', err)
     }
   }
+  await emitInviteAttached(userId, hostAdminId, apps)
 
   logEvent({
     eventType: 'invite_attached_multi',

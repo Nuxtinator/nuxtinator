@@ -103,3 +103,35 @@ describe('personal app grants', () => {
     expect(await hasGrant(sql, user.id)).toBe(true)
   })
 })
+
+describe('GET /api/admin/apps/:appId/users', () => {
+  const sql = getHostAdminDb()
+  afterEach(async () => { await cleanupListOf100TestData(sql) })
+
+  it('lists users with granted ones first and filters by search', async () => {
+    const admin = await createListOf100User(sql, { is_admin: true, grant: false, display_name: 'Zed Admin' })
+    const granted = await createListOf100User(sql, { display_name: 'Zz Granted' })
+    const other = await createListOf100User(sql, { grant: false, display_name: 'Aa Other' })
+    const auth = getAuthHeaders(admin)
+
+    const res = await $fetch<{ users: { id: string, granted: boolean, enabled: boolean }[] }>('/api/admin/apps/list-of-100/users', {
+      query: { q: 'test-list-of-100-' }, ...auth
+    })
+    const ids = res.users.map(u => u.id)
+    expect(ids.indexOf(granted.id)).toBeLessThan(ids.indexOf(other.id))
+    expect(res.users.find(u => u.id === granted.id)).toMatchObject({ granted: true, enabled: true })
+    expect(res.users.find(u => u.id === other.id)).toMatchObject({ granted: false, enabled: false })
+
+    const filtered = await $fetch<{ users: { id: string }[] }>('/api/admin/apps/list-of-100/users', {
+      query: { q: other.email }, ...auth
+    })
+    expect(filtered.users.map(u => u.id)).toEqual([other.id])
+  })
+
+  it('404s for an org app and 403s for non-admins', async () => {
+    const admin = await createListOf100User(sql, { is_admin: true, grant: false })
+    const user = await createListOf100User(sql)
+    expect((await $fetch('/api/admin/apps/messages/users', getAuthHeaders(admin)).catch(e => e)).statusCode).toBe(404)
+    expect((await $fetch('/api/admin/apps/list-of-100/users', getAuthHeaders(user)).catch(e => e)).statusCode).toBe(403)
+  })
+})

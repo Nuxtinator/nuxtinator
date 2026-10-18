@@ -40,17 +40,23 @@ describe('list-of-100 access gate', () => {
     }
   })
 
+  it('org roles never carry its permissions, even the admin role', async () => {
+    const user = await createListOf100User(sql)
+    const org = await createListOf100Org(sql)
+    await addTestMembership(sql, { user_id: user.id, org_id: org.id, roles: ['admin'] })
+    const res = await $fetch<{ perms: string[] }>(`/api/o/${org.slug}/_perms`, getAuthHeaders(user))
+    expect(res.perms.filter(p => p.startsWith('list-of-100.'))).toEqual([])
+  })
+
   it('the personal-apps feed lists the app only for granted users', async () => {
     const granted = await createListOf100User(sql)
     const notGranted = await createListOf100User(sql, { grant: false })
 
-    const yes = await $fetch<{ apps: { id: string }[], perms: string[] }>('/api/_personal-apps', getAuthHeaders(granted))
+    const yes = await $fetch<{ apps: { id: string }[] }>('/api/_personal-apps', getAuthHeaders(granted))
     expect(yes.apps.map(a => a.id)).toContain('list-of-100')
-    expect(yes.perms).toEqual(expect.arrayContaining(['list-of-100.access', 'list-of-100.read', 'list-of-100.write']))
 
-    const no = await $fetch<{ apps: { id: string }[], perms: string[] }>('/api/_personal-apps', getAuthHeaders(notGranted))
+    const no = await $fetch<{ apps: { id: string }[] }>('/api/_personal-apps', getAuthHeaders(notGranted))
     expect(no.apps.map(a => a.id)).not.toContain('list-of-100')
-    expect(no.perms).not.toContain('list-of-100.read')
   })
 
   it('status \'default\' turns it on for users without a grant', async () => {

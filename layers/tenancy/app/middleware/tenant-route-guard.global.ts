@@ -37,7 +37,7 @@ function isSystemPath(p: string): boolean {
   return false
 }
 
-export default defineNuxtRouteMiddleware((to, from) => {
+export default defineNuxtRouteMiddleware(async (to, from) => {
   const path = to.path
 
   // Already in an org-prefixed route — nothing to do, unless it names a
@@ -76,8 +76,11 @@ export default defineNuxtRouteMiddleware((to, from) => {
     return navigateTo({ path: `/@${cookie.value}${path}`, query: to.query, hash: to.hash })
   }
 
-  // No org at all. The bare launcher lists personal apps (and links to the
-  // org picker); anything else goes to the picker.
-  if (path === '/dashboard') return
+  // No org selected. A user with no memberships at all gets the bare launcher,
+  // which lists their personal apps; everyone else picks an org.
+  if (path === '/dashboard') {
+    const res = await $fetch<{ orgs: unknown[] }>('/api/orgs').catch(() => null)
+    if (res?.orgs.length === 0) return
+  }
   return navigateTo('/orgs')
 })

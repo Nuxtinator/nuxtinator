@@ -70,6 +70,16 @@ export function getRegisteredApp(id: string): AppEntry | null {
   return _apps.get(id) ?? null
 }
 
+// Permissions owned by personal apps. Roles never grant these: a user holds
+// them only while the app is on for them (see personal-apps.ts).
+export function getPersonalAppPermissionSlugs(): Set<string> {
+  const out = new Set<string>()
+  for (const app of _apps.values()) {
+    if (app.scope === 'user') for (const p of app.permissions ?? []) out.add(p)
+  }
+  return out
+}
+
 export function __resetAppRegistryForTests(): void {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('__resetAppRegistryForTests is not callable in production')

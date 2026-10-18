@@ -4,12 +4,47 @@
 // "org_id = active org". Reaching rows of another org goes through
 // `withRecordOrgContext`, never a wider policy. The one other shape allowed is
 // a personal-app policy: on a table with no org_id, keyed on the
-// `app.current_user` setting (see core's personal-apps.ts).
+// `app.current_user` setting (see core's personal-apps.ts). Each top-level OR
+// branch of it must test a session setting, so a branch like `true` can't
+// widen it to every row.
 import { describe, it, expect } from 'vitest'
 import { getHostAdminDb, getAppUserDb } from '../helpers'
 
 const ACTIVE_ORG = `(org_id = (NULLIF(current_setting('app.current_org'::text, true), ''::text))::uuid)`
 const CURRENT_USER = `current_setting('app.current_user'::text, true)`
+const ANY_SETTING = `current_setting('app.`
+
+// The top-level OR branches of a deparsed policy expression.
+function orBranches(expr: string): string[] {
+  let e = expr.trim()
+  const wrapsWhole = (s: string) => {
+    if (!s.startsWith('(') || !s.endsWith(')')) return false
+    let depth = 0
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === '(') depth++
+      else if (s[i] === ')') depth--
+      if (depth === 0 && i < s.length - 1) return false
+    }
+    return true
+  }
+  while (wrapsWhole(e)) e = e.slice(1, -1).trim()
+  const out: string[] = []
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < e.length; i++) {
+    if (e[i] === '(') depth++
+    else if (e[i] === ')') depth--
+    else if (depth === 0 && e.startsWith(' OR ', i)) {
+      out.push(e.slice(start, i))
+      start = i + 4
+    }
+  }
+  out.push(e.slice(start))
+  return out
+}
+
+const keyedOnUser = (expr: string) =>
+  expr.includes(CURRENT_USER) && orBranches(expr).every(b => b.includes(ANY_SETTING))
 
 // org_id tables read outside any org context, filtered by org_id in code.
 const NO_RLS = new Set([
@@ -41,8 +76,8 @@ describe('RLS policy invariant', () => {
     const userScoped = (p: typeof policies[number]) =>
       !orgTables.has(p.tablename)
       && (p.qual !== null || p.with_check !== null)
-      && (p.qual === null || p.qual.includes(CURRENT_USER))
-      && (p.with_check === null || p.with_check.includes(CURRENT_USER))
+      && (p.qual === null || keyedOnUser(p.qual))
+      && (p.with_check === null || keyedOnUser(p.with_check))
     const wider = policies
       .filter(p => !orgScoped(p) && !userScoped(p))
       .map(p => `${p.tablename}.${p.policyname}: USING ${p.qual} WITH CHECK ${p.with_check}`)

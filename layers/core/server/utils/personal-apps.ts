@@ -81,17 +81,18 @@ export async function isPersonalAppEnabledForUser(client: DbClient, userId: stri
 // them. The tenant kernels union this into the across-orgs and per-request
 // sets, so OAuth consent, bearer scopes and MCP see personal-app permissions.
 export async function getPersonalAppPermissions(client: DbClient, userId: string): Promise<Set<Permission>> {
+  return permissionsOfApps(await getUserEnabledApps(client, userId))
+}
+
+// The permissions a set of enabled personal apps grants.
+export function permissionsOfApps(apps: UserAppEntry[]): Set<Permission> {
   const perms = new Set<Permission>()
-  for (const app of await getUserEnabledApps(client, userId)) {
+  for (const app of apps) {
     for (const p of app.permissions) {
       if (isRegisteredPermission(p)) perms.add(p as Permission)
     }
   }
   return perms
-}
-
-export function isPersonalAppId(appId: string, catalog: AppCatalogEntry[]): boolean {
-  return catalog.some(a => a.id === appId && a.scope === 'user')
 }
 
 // Turns a personal app on (or off) for one user. A no-op when nothing changes.
@@ -134,12 +135,12 @@ export async function runInUserTransaction<T>(
   fn: UserHandler<T>
 ): Promise<T> {
   return await runTransaction(db, async (tx) => {
-    if (!await isPersonalAppEnabledForUser(tx, userId, opts.appId)) {
+    const enabled = await getUserEnabledApps(tx, userId)
+    if (!enabled.some(a => a.id === opts.appId)) {
       throw createError({ statusCode: 410, statusMessage: `App "${opts.appId}" is not enabled for you.` })
     }
     await sql`select set_config('app.current_user', ${userId}, true)`.execute(tx)
-    const perms = await getPersonalAppPermissions(tx, userId)
-    return await fn(tx, { userId, perms })
+    return await fn(tx, { userId, perms: permissionsOfApps(enabled) })
   })
 }
 

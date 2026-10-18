@@ -247,7 +247,7 @@ An app layer whose data belongs to each user instead of an org registers with `r
 - **Handlers** use `withUserPermission(event, { appId }, perm, fn)` / `withUserContext` / `defineUserHandler` from `#core/server/utils/personal-apps`; bearer routes call `runInUserTransaction(userId, { appId }, fn)` after `requireBearerScope`. They 410 when the app isn't on for the caller and set the `app.current_user` GUC — never `app.current_org`.
 - **Tables** have no `org_id` and no `_T` migration. RLS keys on `user_id = nullif(current_setting('app.current_user', true), '')::uuid`; sharing policies may widen that but must still reference `app.current_user` (the RLS invariant test enforces it).
 - **Pages** live at their bare path in every org: tenancy doesn't double them under `/@:orgSlug` and redirects `/@<slug>/<personal path>` to the bare one. The launcher lists them under "Personal"; their nav comes from `/api/_personal-nav`.
-- `invite.accepted` fires after any invite is accepted, for layers that act on it.
+- `invite.accepted` fires after any invite is accepted, and with `inviteId: null` when an invite to an existing account attaches it directly, for layers that act on it.
 
 ### App-layer page paths — write single-tenant shape
 
