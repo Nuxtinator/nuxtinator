@@ -63,7 +63,7 @@ export default defineEventHandler(async (event) => {
       // Seed every 'default' app so the per-org bootstrap hook
       // (`app.enabled`) fires for each app the new org starts with.
       const defaultApps = (await getApps(trx))
-        .filter(a => a.installed && a.created_at !== null && a.status === 'default')
+        .filter(a => a.installed && a.created_at !== null && a.status === 'default' && a.scope !== 'user')
       if (defaultApps.length > 0) {
         await trx
           .insertInto('org_apps')

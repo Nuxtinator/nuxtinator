@@ -21,6 +21,9 @@ import { getApp } from '../../../utils/app-settings'
 //   * anything → disabled: no row changes. Status alone gates.
 //   * disabled → default: same as available → default.
 //   * disabled → available / host_controlled: no row changes.
+//   * personal apps (`scope: 'user'`): no org rows, ever. 'default' turns the
+//     app on for every user; 'available' / 'host_controlled' leave it on only
+//     for users with a `user_apps` grant.
 export default defineEventHandler(async (event) => {
   const { userId } = await requireOperatorAdmin(event)
   const appId = getRouterParam(event, 'appId')
@@ -40,7 +43,8 @@ export default defineEventHandler(async (event) => {
   // Per-org materialization (orgs/org_apps) is multi-tenant only — those tables
   // exist when the tenancy layer is loaded. In single-tenant mode the app status
   // alone gates visibility, so the status update is all there is to do.
-  const tenancyEnabled = useRuntimeConfig(event).public.tenancy === true
+  // Personal apps have no org rows in either mode.
+  const materializesOrgs = useRuntimeConfig(event).public.tenancy === true && existing.scope !== 'user'
 
   const now = new Date().toISOString()
   const flipsToDefault = status === 'default' && oldStatus !== 'default'
@@ -54,7 +58,7 @@ export default defineEventHandler(async (event) => {
       .onConflict(oc => oc.column('id').doUpdateSet({ status, updated_at: now }))
       .execute()
 
-    if ((flipsToDefault || keepsExistingOrgs) && tenancyEnabled) {
+    if ((flipsToDefault || keepsExistingOrgs) && materializesOrgs) {
       // Find orgs with no row for this app; insert auto rows for each.
       const orgs = await (trx as any)
         .selectFrom('orgs')

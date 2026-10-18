@@ -22,6 +22,7 @@ interface InviteInfo {
   display_name: string
   inviter_name: string | null
   orgs: Array<{ slug: string, name: string }>
+  apps: Array<{ id: string, title: string }>
 }
 
 const info = ref<InviteInfo | null>(null)
@@ -32,7 +33,7 @@ const verificationSent = ref(false)
 const inviteState = ref<'loading' | 'valid' | 'invalid' | 'expired'>('loading')
 
 const joiningWhat = computed(() => {
-  const names = info.value?.orgs.map(o => o.name) ?? []
+  const names = [...(info.value?.orgs.map(o => o.name) ?? []), ...(info.value?.apps.map(a => a.title) ?? [])]
   return names.length ? names.join(', ') : 'this workspace'
 })
 
@@ -273,7 +274,7 @@ async function useDifferentAccount() {
         />
 
         <p
-          v-if="info?.orgs.length"
+          v-if="info?.orgs.length || info?.apps.length"
           class="text-(--ui-text-muted)"
         >
           You've been invited to join <strong>{{ joiningWhat }}</strong>.

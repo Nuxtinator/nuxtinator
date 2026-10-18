@@ -22,14 +22,28 @@ export * from '@nuxtinator/tenancy/test-helpers'
 
 // All seeded users / orgs are tagged with `test-list-of-100-` so per-layer
 // cleanup can be aggressive without trampling sibling-layer fixtures.
+//
+// List of 100 is a personal app that is invite-only by default, so seeded
+// users get a `user_apps` grant unless `grant: false`.
 export async function createListOf100User(
   sql: ReturnType<typeof postgres>,
-  opts: Parameters<typeof createTestUser>[1] = {}
+  opts: Parameters<typeof createTestUser>[1] & { grant?: boolean } = {}
 ): Promise<TestUser> {
-  return createTestUser(sql, {
-    ...opts,
-    email: opts.email ?? `test-list-of-100-${randomUUID().slice(0, 8)}@example.com`
+  const { grant = true, ...userOpts } = opts
+  const user = await createTestUser(sql, {
+    ...userOpts,
+    email: userOpts.email ?? `test-list-of-100-${randomUUID().slice(0, 8)}@example.com`
   })
+  if (grant) await grantListOf100(sql, user.id)
+  return user
+}
+
+export async function grantListOf100(sql: ReturnType<typeof postgres>, userId: string): Promise<void> {
+  await sql`INSERT INTO apps (id) VALUES ('list-of-100') ON CONFLICT (id) DO NOTHING`
+  await sql`
+    INSERT INTO user_apps (user_id, app_id) VALUES (${userId}, 'list-of-100')
+    ON CONFLICT (user_id, app_id) DO NOTHING
+  `
 }
 
 export async function createListOf100Org(
@@ -69,7 +83,6 @@ export async function addListOf100Member(
 export interface SeededContact {
   id: string
   user_id: string
-  org_id: string
   name: string
   relationship: string
   faith_status: string
@@ -77,14 +90,11 @@ export interface SeededContact {
 
 // Seed a contact row directly via host_admin (BYPASSRLS). Useful when the test
 // under test is the GET/PATCH/DELETE flow and the POST route isn't what's
-// exercised. Multi-tenant mode requires `org_id` on every row — supplied here
-// so the RLS policy lets the row through when the spawned Nuxt server reads
-// it inside a `defineTenantHandler` txn.
+// exercised.
 export async function createTestContact(
   sql: ReturnType<typeof postgres>,
   opts: {
     user_id: string
-    org_id: string
     name?: string
     relationship?: 'family' | 'friend' | 'coworker' | 'neighbor' | 'classmate' | 'other'
     faith_status?: 'believer' | 'non_believer' | 'unknown'
@@ -105,13 +115,13 @@ export async function createTestContact(
 
   await sql`
     INSERT INTO list_of_100_contacts
-      (id, user_id, name, relationship, faith_status, notes, last_contacted_at, last_prayed_at, sort_order, org_id)
+      (id, user_id, name, relationship, faith_status, notes, last_contacted_at, last_prayed_at, sort_order)
     VALUES (
       ${id}, ${opts.user_id}, ${name}, ${relationship}, ${faith_status},
-      ${notes}, ${last_contacted_at}, ${last_prayed_at}, ${sort_order}, ${opts.org_id}
+      ${notes}, ${last_contacted_at}, ${last_prayed_at}, ${sort_order}
     )
   `
-  return { id, user_id: opts.user_id, org_id: opts.org_id, name, relationship, faith_status }
+  return { id, user_id: opts.user_id, name, relationship, faith_status }
 }
 
 // Seed an activity_logs row (MARK_CONTACTED / MARK_PRAYED) directly. The
@@ -169,7 +179,8 @@ export async function cleanupListOf100TestData(sql: ReturnType<typeof postgres>)
   await sql`DELETE FROM custom_roles WHERE name LIKE 'test-list-of-100-%'`
 
   // Drop layer-prefixed orgs (cascades wipe memberships, org_apps, role
-  // overrides, AND the org-scoped contacts via the contacts.org_id FK).
+  // overrides) and users (cascades wipe their `user_apps` grants).
+  await sql`DELETE FROM invites WHERE email LIKE 'test-list-of-100-%@example.com'`
   await sql`DELETE FROM orgs WHERE slug LIKE 'test-list-of-100-%'`
   await sql`DELETE FROM users WHERE email LIKE 'test-list-of-100-%@example.com'`
 }

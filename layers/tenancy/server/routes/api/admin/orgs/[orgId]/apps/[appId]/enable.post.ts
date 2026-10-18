@@ -1,6 +1,7 @@
 import { getRouterParam } from 'h3'
 import { adminDb as db } from '#tenant/admin-db'
 import { requireHostAdmin } from '#tenant/server'
+import { getApp } from '#core/server/utils/app-settings'
 
 // Host admin turns an app on for one org. Marked source='host' so both admin
 // UIs can show who set it. Org admins can still change it unless the app is
@@ -13,6 +14,10 @@ export default defineEventHandler(async (event) => {
 
   const app = await db.selectFrom('apps').select('id').where('id', '=', appId).executeTakeFirst()
   if (!app) throw createError({ statusCode: 404, statusMessage: 'App not found' })
+  // Personal apps are turned on per user, never per org.
+  if ((await getApp(db, appId))?.scope === 'user') {
+    throw createError({ statusCode: 409, statusMessage: 'Personal apps are turned on per user' })
+  }
 
   const now = new Date().toISOString()
   await db

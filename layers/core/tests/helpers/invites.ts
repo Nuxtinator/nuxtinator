@@ -19,6 +19,8 @@ export async function createPendingInvite(
     display_name?: string
     expiresInMs?: number
     invitedBy?: string
+    // Personal app ids the invite grants.
+    apps?: string[]
   } = {}
 ): Promise<PendingInvite> {
   const inviteId = randomUUID()
@@ -33,6 +35,10 @@ export async function createPendingInvite(
     INSERT INTO invites (id, token_hash, email, display_name, invited_by, expires_at)
     VALUES (${inviteId}, ${tokenHash}, ${email}, ${display_name}, ${opts.invitedBy ?? null}, ${expiresAt})
   `
+  for (const appId of opts.apps ?? []) {
+    await sql`INSERT INTO apps (id) VALUES (${appId}) ON CONFLICT (id) DO NOTHING`
+    await sql`INSERT INTO invite_apps (invite_id, app_id) VALUES (${inviteId}, ${appId})`
+  }
 
   return { inviteId, email, display_name, token, expiresAt }
 }

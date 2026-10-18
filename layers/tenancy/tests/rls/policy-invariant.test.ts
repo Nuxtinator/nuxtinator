@@ -2,11 +2,14 @@
 // transaction belongs to the active org. These assertions hold every layer's
 // migrations to that: RLS on every org_id table, and every policy is exactly
 // "org_id = active org". Reaching rows of another org goes through
-// `withRecordOrgContext`, never a wider policy.
+// `withRecordOrgContext`, never a wider policy. The one other shape allowed is
+// a personal-app policy: on a table with no org_id, keyed on the
+// `app.current_user` setting (see core's personal-apps.ts).
 import { describe, it, expect } from 'vitest'
 import { getHostAdminDb, getAppUserDb } from '../helpers'
 
 const ACTIVE_ORG = `(org_id = (NULLIF(current_setting('app.current_org'::text, true), ''::text))::uuid)`
+const CURRENT_USER = `current_setting('app.current_user'::text, true)`
 
 // org_id tables read outside any org context, filtered by org_id in code.
 const NO_RLS = new Set([
@@ -26,10 +29,35 @@ describe('RLS policy invariant', () => {
       where schemaname = 'public'
     `
     expect(policies.length).toBeGreaterThan(0)
+    const orgTables = new Set((await sql<{ relname: string }[]>`
+      select c.relname
+      from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+      join pg_attribute a on a.attrelid = c.oid and a.attname = 'org_id' and not a.attisdropped
+      where n.nspname = 'public'
+    `).map(t => t.relname))
+    const orgScoped = (p: typeof policies[number]) =>
+      p.qual === ACTIVE_ORG && (p.with_check === null || p.with_check === ACTIVE_ORG)
+    const userScoped = (p: typeof policies[number]) =>
+      !orgTables.has(p.tablename)
+      && (p.qual !== null || p.with_check !== null)
+      && (p.qual === null || p.qual.includes(CURRENT_USER))
+      && (p.with_check === null || p.with_check.includes(CURRENT_USER))
     const wider = policies
-      .filter(p => p.qual !== ACTIVE_ORG || (p.with_check !== null && p.with_check !== ACTIVE_ORG))
+      .filter(p => !orgScoped(p) && !userScoped(p))
       .map(p => `${p.tablename}.${p.policyname}: USING ${p.qual} WITH CHECK ${p.with_check}`)
     expect(wider).toEqual([])
+  })
+
+  it('every table with a policy has row-level security', async () => {
+    const tables = await sql<{ relname: string }[]>`
+      select distinct c.relname
+      from pg_policies p
+      join pg_class c on c.relname = p.tablename
+      join pg_namespace n on n.oid = c.relnamespace and n.nspname = p.schemaname
+      where p.schemaname = 'public' and not c.relrowsecurity
+    `
+    expect(tables.map(t => t.relname)).toEqual([])
   })
 
   it('every table with an org_id column has row-level security', async () => {

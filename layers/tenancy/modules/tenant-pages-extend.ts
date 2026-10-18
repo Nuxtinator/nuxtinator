@@ -11,6 +11,8 @@ import type { NuxtPage } from 'nuxt/schema'
 //   - System routes: /admin, /account, /login, /register, /reset-password,
 //     /accept-invite, /orgs, /. These are global; no slug needed.
 //   - /dashboard: the tenancy layer ships its own `/@:orgSlug/dashboard`.
+//   - Personal apps (`runtimeConfig.public.personalApps`): the same in every
+//     org, so they only live at their bare path.
 //   - 404 / catch-alls.
 //
 // The original (un-prefixed) route stays in the table; the router guard
@@ -28,11 +30,11 @@ const SYSTEM_PREFIXES = [
   '/kitchen'
 ]
 
-function shouldDouble(p: NuxtPage): boolean {
+function shouldDouble(p: NuxtPage, personalPaths: string[]): boolean {
   if (!p.path) return false
   if (p.path === '/') return false
   if (p.path.startsWith('/@:orgSlug')) return false
-  for (const prefix of SYSTEM_PREFIXES) {
+  for (const prefix of [...SYSTEM_PREFIXES, ...personalPaths]) {
     if (p.path === prefix || p.path.startsWith(prefix + '/')) return false
   }
   return true
@@ -41,10 +43,12 @@ function shouldDouble(p: NuxtPage): boolean {
 export default defineNuxtModule({
   meta: { name: 'tenancy/pages-extend' },
   setup(_, nuxt) {
+    const personalApps = (nuxt.options.runtimeConfig.public.personalApps ?? {}) as Record<string, string>
+    const personalPaths = Object.values(personalApps)
     nuxt.hook('pages:extend', (pages) => {
       const additions: NuxtPage[] = []
       for (const p of pages) {
-        if (!shouldDouble(p)) continue
+        if (!shouldDouble(p, personalPaths)) continue
         additions.push({
           ...p,
           path: `/@:orgSlug${p.path}`,

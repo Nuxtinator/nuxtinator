@@ -98,8 +98,9 @@ export async function createUserAccount(
 
 // Where to send someone right after they sign in. In multi-tenant mode it
 // follows the user's memberships (exactly one → land in that org's launcher;
-// else → the org picker). In single-tenant mode there are no orgs, so land on
-// the launcher. The orgs/memberships tables only exist when the tenancy layer
+// none → the org-less launcher, which lists their personal apps; else → the
+// org picker). In single-tenant mode there are no orgs, so land on the
+// launcher. The orgs/memberships tables only exist when the tenancy layer
 // is loaded, so the query is gated on the tenancy flag.
 export async function postSignInRedirect(event: H3Event, userId: string): Promise<string> {
   if (useRuntimeConfig(event).public.tenancy !== true) return launcherPath()
@@ -111,6 +112,7 @@ export async function postSignInRedirect(event: H3Event, userId: string): Promis
     .where('memberships.user_id', '=', userId)
     .execute() as Array<{ slug: string, suspended_at: Date | null }>
 
+  if (memberships.length === 0) return launcherPath()
   const active = memberships.filter(m => !m.suspended_at)
   return active.length === 1 ? launcherPath(active[0]!.slug) : '/orgs'
 }

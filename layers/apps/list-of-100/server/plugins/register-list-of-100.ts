@@ -1,16 +1,13 @@
 import { registerPermissions } from '#core/server/utils/permissions-registry'
-import { registerDefaultGrants } from '#core/server/utils/default-grants-registry'
 import { registerApp } from '#core/server/utils/app-registry'
 import { registerNavItem } from '#core/server/utils/nav-registry'
 import {
   LIST_OF_100_PERMISSIONS,
-  LIST_OF_100_PERMISSION_META,
-  LIST_OF_100_DEFAULT_GRANTS
+  LIST_OF_100_PERMISSION_META
 } from '../../app/utils/permissions'
 
 export default defineNitroPlugin(() => {
   registerPermissions(LIST_OF_100_PERMISSIONS, LIST_OF_100_PERMISSION_META)
-  registerDefaultGrants('list-of-100', LIST_OF_100_DEFAULT_GRANTS)
 
   registerApp({
     id: 'list-of-100',
@@ -19,7 +16,11 @@ export default defineNitroPlugin(() => {
     icon: '100',
     description: 'Steward the 100 relationships God has put in your life.',
     requiredPermission: 'list-of-100.access',
-    defaultStatus: 'available',
+    // Personal app: each user's own list, the same in every org. On only for
+    // users a host admin turns it on for until the host sets it to everyone.
+    scope: 'user',
+    permissions: [...LIST_OF_100_PERMISSIONS],
+    defaultStatus: 'host_controlled',
     order: 30
   })
 

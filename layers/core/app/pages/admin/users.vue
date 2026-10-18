@@ -103,6 +103,22 @@ const { data: staticRolesData } = tenancyEnabled.value
   : { data: ref<{ roles: StaticRole[] }>({ roles: [] }) }
 const staticRoles = computed(() => staticRolesData.value?.roles ?? [])
 
+// Personal apps (both modes). The invite form lists the invite-only ones;
+// apps on for everyone need no grant.
+interface AdminPersonalApp {
+  id: string
+  title: string
+  icon?: string
+  status: 'disabled' | 'available' | 'default' | 'host_controlled'
+  scope: 'org' | 'user'
+  installed: boolean
+}
+const { data: appsData } = await useFetch<{ apps: AdminPersonalApp[] }>('/api/admin/apps', {
+  default: () => ({ apps: [] })
+})
+const invitablePersonalApps = computed(() => (appsData.value?.apps ?? [])
+  .filter(a => a.scope === 'user' && a.installed && (a.status === 'host_controlled' || a.status === 'available')))
+
 interface AttachmentDraft {
   orgId: string
   roles: string
@@ -115,6 +131,7 @@ const createdLink = ref('')
 const inviteEmail = ref('')
 const inviteDisplayName = ref('')
 const inviteAttachments = ref<AttachmentDraft[]>([])
+const inviteApps = ref<string[]>([])
 const inviting = ref(false)
 const inviteError = ref('')
 
@@ -124,8 +141,15 @@ const openInvite = () => {
   inviteEmail.value = ''
   inviteDisplayName.value = ''
   inviteAttachments.value = []
+  inviteApps.value = []
   inviteError.value = ''
   inviteOpen.value = true
+}
+
+const toggleInviteApp = (appId: string) => {
+  inviteApps.value = inviteApps.value.includes(appId)
+    ? inviteApps.value.filter(id => id !== appId)
+    : [...inviteApps.value, appId]
 }
 
 const toggleAttachment = (orgId: string) => {
@@ -148,10 +172,11 @@ const rolesFor = (orgId: string) =>
 const canSubmitInvite = computed(() => {
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteEmail.value.trim())
   if (inviteMode.value === 'email' && !emailOk) return false
-  // Org attachments only required when tenancy is loaded.
+  // Org attachments only required when tenancy is loaded, unless the invite
+  // carries a personal app.
   if (!tenancyEnabled.value) return true
-  return inviteAttachments.value.length > 0
-    && inviteAttachments.value.every(a => a.roles.split(',').map(s => s.trim()).filter(Boolean).length > 0)
+  const rolesOk = inviteAttachments.value.every(a => a.roles.split(',').map(s => s.trim()).filter(Boolean).length > 0)
+  return rolesOk && (inviteAttachments.value.length > 0 || inviteApps.value.length > 0)
 })
 
 const submitInvite = async () => {
@@ -168,7 +193,8 @@ const submitInvite = async () => {
         attachments: inviteAttachments.value.map(a => ({
           orgId: a.orgId,
           roles: a.roles.split(',').map(s => s.trim()).filter(Boolean)
-        }))
+        })),
+        apps: inviteApps.value
       }
     })
     await Promise.all([refresh(), refreshInvites()])
@@ -197,6 +223,7 @@ interface PendingInvite {
   expires_at: string
   status: 'valid' | 'expired'
   orgs: { id: string, slug: string, name: string, roles: string[] }[]
+  apps: { id: string, title: string }[]
 }
 
 const { data: invitesData, refresh: refreshInvites } = await useFetch<{ invites: PendingInvite[] }>('/api/admin/invites', {
@@ -644,6 +671,50 @@ watch(selectedUser, (next, prev) => {
   }
 })
 
+// ---------- personal apps (slideover) ----------
+interface UserPersonalApp {
+  id: string
+  title: string
+  icon?: string
+  status: AdminPersonalApp['status']
+  enabled: boolean
+  granted: boolean
+}
+const userApps = ref<UserPersonalApp[]>([])
+const togglingAppId = ref<string | null>(null)
+
+const loadUserApps = async (userId: string) => {
+  userApps.value = []
+  try {
+    const res = await $fetch<{ apps: UserPersonalApp[] }>(`/api/admin/users/${userId}/apps`)
+    if (selectedUser.value?.id === userId) userApps.value = res.apps.filter(a => a.status !== 'disabled')
+  } catch {
+    // The section stays empty; toggling reports its own errors.
+  }
+}
+
+const handleToggleUserApp = async (app: UserPersonalApp, granted: boolean) => {
+  if (!selectedUser.value) return
+  const userId = selectedUser.value.id
+  togglingAppId.value = app.id
+  try {
+    await $fetch(`/api/admin/users/${userId}/apps/${app.id}`, { method: 'PUT', body: { granted } })
+    await loadUserApps(userId)
+  } catch (err: unknown) {
+    toast.add({
+      title: 'Update failed',
+      description: (err as { data?: { statusMessage?: string }, message?: string } | null)?.data?.statusMessage || (err as { message?: string } | null)?.message || 'Failed to update app access',
+      color: 'error'
+    })
+  } finally {
+    togglingAppId.value = null
+  }
+}
+
+watch(() => selectedUser.value?.id, (id) => {
+  if (id) void loadUserApps(id)
+})
+
 const deleteModalOpen = ref(false)
 const deleting = ref(false)
 
@@ -753,6 +824,7 @@ const handleDelete = async () => {
             </div>
             <div class="text-xs text-(--ui-text-muted) truncate">
               <span v-if="inv.orgs.length">{{ inv.orgs.map(o => o.name).join(', ') }} · </span>
+              <span v-if="inv.apps?.length">{{ inv.apps.map(a => a.title).join(', ') }} · </span>
               <span v-if="inv.inviter_name">by {{ inv.inviter_name }} · </span>
               expires {{ formatDate(inv.expires_at) }}
             </div>
@@ -1059,6 +1131,46 @@ const handleDelete = async () => {
             </section>
           </template>
 
+          <template v-if="userApps.length">
+            <hr class="border-(--ui-border)">
+
+            <section class="space-y-3">
+              <h3 class="font-medium">
+                Personal apps
+              </h3>
+              <ul class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md">
+                <li
+                  v-for="app in userApps"
+                  :key="app.id"
+                  class="p-3 flex items-center justify-between gap-3"
+                >
+                  <div class="flex items-center gap-2 min-w-0">
+                    <AppIcon
+                      :name="app.icon"
+                      class="size-5 shrink-0 text-xs"
+                    />
+                    <div class="min-w-0">
+                      <div class="font-medium truncate">
+                        {{ app.title }}
+                      </div>
+                      <div
+                        v-if="app.status === 'default'"
+                        class="text-xs text-(--ui-text-muted)"
+                      >
+                        On for everyone
+                      </div>
+                    </div>
+                  </div>
+                  <USwitch
+                    :model-value="app.enabled"
+                    :disabled="app.status === 'default' || togglingAppId === app.id"
+                    @update:model-value="(v: boolean) => handleToggleUserApp(app, v)"
+                  />
+                </li>
+              </ul>
+            </section>
+          </template>
+
           <hr class="border-(--ui-border)">
 
           <section class="space-y-2">
@@ -1129,7 +1241,7 @@ const handleDelete = async () => {
 
           <p class="text-sm text-(--ui-text-muted)">
             New users get one email; existing users are silently attached to the
-            chosen organizations. Host admin can grant any role.
+            chosen organizations and apps. Host admin can grant any role.
           </p>
 
           <URadioGroup
@@ -1208,6 +1320,33 @@ const handleDelete = async () => {
                     @update:model-value="(v: string | number) => setRolesFor(org.id, String(v))"
                   />
                 </div>
+              </li>
+            </ul>
+          </div>
+
+          <div
+            v-if="invitablePersonalApps.length"
+            class="space-y-2"
+          >
+            <h3 class="font-medium">
+              Personal apps
+            </h3>
+            <ul class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md max-h-60 overflow-y-auto">
+              <li
+                v-for="app in invitablePersonalApps"
+                :key="app.id"
+                class="p-3 flex items-center gap-3"
+              >
+                <UCheckbox
+                  :model-value="inviteApps.includes(app.id)"
+                  :disabled="inviting"
+                  @update:model-value="toggleInviteApp(app.id)"
+                />
+                <AppIcon
+                  :name="app.icon"
+                  class="size-5 shrink-0 text-xs"
+                />
+                <span class="font-medium">{{ app.title }}</span>
               </li>
             </ul>
           </div>

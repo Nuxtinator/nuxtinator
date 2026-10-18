@@ -23,6 +23,7 @@ import { runTransaction } from '#core/server/utils/after-commit'
 import { requireAuth } from '#core/server/utils/auth'
 import { getRolePermissions } from '#core/server/utils/rbac'
 import { getUserGrantedPermissions } from '#core/server/utils/permission-grants'
+import { getPersonalAppPermissions } from '#core/server/utils/personal-apps'
 import type { Database } from '#core/server/database/schema'
 import type { Permission } from '#core/app/utils/permissions'
 
@@ -153,9 +154,11 @@ export function withOrgPermission<T>(
 // Every permission the user holds anywhere in the deployment, resolved
 // outside a request. The OAuth layer uses it as the upper bound for consent
 // and token issuance; the MCP layer uses it for tools/list visibility. Single
-// mode has one tenant, so this is the same set `defineTenantHandler` computes.
+// mode has one tenant, so this is the set `defineTenantHandler` computes plus
+// the permissions of the user's personal apps.
 export async function getUserPermissionsAcrossOrgs(userId: string): Promise<Set<Permission>> {
   const { perms } = await resolveSinglePerms(db, userId)
+  for (const perm of await getPersonalAppPermissions(db, userId)) perms.add(perm)
   return perms
 }
 

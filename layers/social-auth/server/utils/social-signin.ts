@@ -1,7 +1,7 @@
 import { db, sql } from '#core/server/utils/database'
 import { createUserAccount } from '#core/server/utils/accounts'
 import { isSelfRegistrationOpen } from '#core/server/utils/registration'
-import { acceptInvite, emitAcceptedMemberships, findInviteByToken, inviteState } from '#core/server/utils/invites'
+import { acceptInvite, emitAcceptedMemberships, emitInviteAccepted, findInviteByToken, inviteState } from '#core/server/utils/invites'
 import { encryptSecret } from '#core/server/utils/secret-crypto'
 import { deleteFromS3, isPublicStorageConfigured } from '#core/server/utils/storage'
 import { downloadAvatar, uploadAvatar } from '#core/server/utils/avatar'
@@ -198,6 +198,7 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
   }
   if (usableInvite) {
     await emitAcceptedMemberships(memberships, account.userId, usableInvite.invited_by)
+    await emitInviteAccepted(usableInvite.id, account.userId, usableInvite.invited_by)
     logEvent({
       eventType: 'invite_accepted',
       tableName: 'invites',

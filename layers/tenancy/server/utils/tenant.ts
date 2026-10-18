@@ -26,6 +26,7 @@ import { runTransaction } from '#core/server/utils/after-commit'
 import { requireAuth } from '#core/server/utils/auth'
 import { getRolePermissions, getUserPermissions } from '#core/server/utils/rbac'
 import { getUserGrantedPermissions } from '#core/server/utils/permission-grants'
+import { getPersonalAppPermissions } from '#core/server/utils/personal-apps'
 import type { Database } from '#core/server/database/schema'
 import type { Permission } from '#core/app/utils/permissions'
 
@@ -219,7 +220,8 @@ async function resolveOrgPerms(userId: string, orgId: string): Promise<Set<Permi
 
 // Every permission the user holds anywhere: the host-level set (`users.roles`
 // plus everything when `is_admin`) unioned with the effective set of each org
-// they belong to, suspended orgs excluded. The OAuth layer uses it as the
+// they belong to (suspended orgs excluded) and with their personal apps'
+// permissions. The OAuth layer uses it as the
 // upper bound for consent and token issuance — tokens are not org-bound, the
 // org is chosen per call — and the MCP layer uses it for tools/list visibility.
 export async function getUserPermissionsAcrossOrgs(userId: string): Promise<Set<Permission>> {
@@ -234,6 +236,7 @@ export async function getUserPermissionsAcrossOrgs(userId: string): Promise<Set<
   for (const m of memberships) {
     for (const perm of await resolveOrgPerms(userId, m.org_id)) perms.add(perm)
   }
+  for (const perm of await getPersonalAppPermissions(db, userId)) perms.add(perm)
   return perms
 }
 
@@ -267,6 +270,8 @@ export async function getUserPermissionsForRequest(
 
   const perms = await getUserPermissions(userId)
   for (const perm of await resolveOrgPerms(userId, orgId)) perms.add(perm)
+  // Personal apps are the same in every org.
+  for (const perm of await getPersonalAppPermissions(db, userId)) perms.add(perm)
   return perms
 }
 

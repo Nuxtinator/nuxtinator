@@ -17,7 +17,7 @@ const { data: org, pending, error } = await useFetch<{
   key: 'org-detail'
 })
 
-const { apps } = await useApps()
+const { orgApps, personalApps } = await useApps()
 
 const canManageSettings = computed(() => org.value?.perms?.includes('org.settings.write'))
 
@@ -89,8 +89,24 @@ const isSuspended = computed(() => (error.value as { statusCode?: number } | nul
           Apps
         </h2>
         <AppLauncherGrid
-          :apps="apps"
+          :apps="orgApps"
           empty-text="No apps enabled for this organization."
+        />
+      </section>
+
+      <section
+        v-if="personalApps.length"
+        class="space-y-3"
+      >
+        <h2 class="text-lg font-semibold">
+          Personal
+        </h2>
+        <p class="text-sm text-(--ui-text-muted) -mt-2">
+          Yours in every organization.
+        </p>
+        <AppLauncherGrid
+          :apps="personalApps"
+          empty-text=""
         />
       </section>
     </template>

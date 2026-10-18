@@ -97,7 +97,11 @@ export default defineNuxtConfig({
       tenancy: false,
       // The page that holds the user's account settings. Email-change and
       // provider-link flows return here; a host with its own account page sets it.
-      accountPath: '/account'
+      accountPath: '/account',
+      // Personal app layers (`registerApp({ scope: 'user' })`) add
+      // `{ <appId>: '<path>' }` here. Tenancy keeps these pages out of the
+      // `/@:orgSlug` routes and the launcher keeps them out of org feeds.
+      personalApps: {} as Record<string, string>
     }
   }
 })

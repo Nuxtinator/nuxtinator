@@ -7,6 +7,8 @@ import { validateRoleNames } from '../../../utils/rbac'
 import { logEvent } from '../../../utils/activity-logger'
 import { sendTemplateEmail } from '#email'
 import { createInvite, findPendingInvite } from '../../../utils/invites'
+import { getApps } from '../../../utils/app-settings'
+import { setUserAppGrant } from '../../../utils/personal-apps'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -17,13 +19,17 @@ interface Attachment {
 
 // Host-admin multi-org invite. Body shape:
 //
-//   { email?, display_name?, link?: true, attachments: [{ orgId, roles }, ...] }
+//   { email?, display_name?, link?: true, attachments: [{ orgId, roles }, ...], apps?: [appId, ...] }
+//
+// `apps` are personal apps (`registerApp({ scope: 'user' })`) to turn on for
+// the user. In multi-tenant mode an invite needs at least one org or app.
 //
 // Logic:
 //   * `link: true` → create a single-use invite link with no email and return
 //     its URL for the admin to share.
 //   * If a user with `email` exists → silent attach (no email). Insert one
 //     membership row per attachment; skip duplicates (409 listing the conflicts).
+//     Grant each app.
 //   * If not → create an invite for that address (its orgs ride on the invite)
 //     and send ONE invite email. No user row exists until it's accepted.
 //
@@ -43,12 +49,22 @@ export default defineEventHandler(async (event) => {
   const display_name = typeof body?.display_name === 'string' ? body.display_name.trim() : ''
   const attachmentsRaw = Array.isArray(body?.attachments) ? body.attachments : null
   const link = body?.link === true
+  const appsRaw: unknown[] = Array.isArray(body?.apps) ? body.apps : []
 
   if (!link && !EMAIL_RE.test(email)) {
     throw createError({ statusCode: 400, statusMessage: 'A valid email is required' })
   }
-  if (tenancyEnabled && (!attachmentsRaw || attachmentsRaw.length === 0)) {
-    throw createError({ statusCode: 400, statusMessage: 'attachments must include at least one org' })
+
+  const personalAppIds = new Set((await getApps(db)).filter(a => a.installed && a.scope === 'user').map(a => a.id))
+  const apps = [...new Set(appsRaw)].map((a) => {
+    if (typeof a !== 'string' || !personalAppIds.has(a)) {
+      throw createError({ statusCode: 400, statusMessage: `Unknown personal app: ${String(a)}` })
+    }
+    return a
+  })
+
+  if (tenancyEnabled && (!attachmentsRaw || attachmentsRaw.length === 0) && apps.length === 0) {
+    throw createError({ statusCode: 400, statusMessage: 'attachments must include at least one org, or apps at least one personal app' })
   }
 
   // Attachments only carry meaning in multi-tenant mode; leave the list empty in
@@ -86,7 +102,8 @@ export default defineEventHandler(async (event) => {
       email: null,
       display_name: display_name || null,
       invitedBy: hostAdminId,
-      orgs: attachments
+      orgs: attachments,
+      apps
     })
 
     logEvent({
@@ -95,12 +112,13 @@ export default defineEventHandler(async (event) => {
       recordId: invite.id,
       userId: hostAdminId,
       userAgent: getHeader(event, 'user-agent') || undefined,
-      metadata: { attachments }
+      metadata: { attachments, apps }
     }).catch(() => {})
 
     return {
       invite: { id: invite.id, kind: 'link', url: invite.url, expires_at: invite.expiresAt },
-      attachments: attachments.map(a => ({ orgId: a.orgId, status: 'pending' }))
+      attachments: attachments.map(a => ({ orgId: a.orgId, status: 'pending' })),
+      apps
     }
   }
 
@@ -122,7 +140,8 @@ export default defineEventHandler(async (event) => {
       email,
       display_name: display_name || null,
       invitedBy: hostAdminId,
-      orgs: attachments
+      orgs: attachments,
+      apps
     })
 
     try {
@@ -145,12 +164,13 @@ export default defineEventHandler(async (event) => {
       recordId: invite.id,
       userId: hostAdminId,
       userAgent: getHeader(event, 'user-agent') || undefined,
-      metadata: { email, attachments }
+      metadata: { email, attachments, apps }
     }).catch(() => {})
 
     return {
       invite: { id: invite.id, kind: 'email', email, expires_at: invite.expiresAt },
-      attachments: attachments.map(a => ({ orgId: a.orgId, status: 'pending' }))
+      attachments: attachments.map(a => ({ orgId: a.orgId, status: 'pending' })),
+      apps
     }
   }
 
@@ -187,6 +207,9 @@ export default defineEventHandler(async (event) => {
     if (memberships.length > 0) {
       await (trx as any).insertInto('memberships').values(memberships).execute()
     }
+    for (const appId of apps) {
+      await setUserAppGrant(trx, { userId, appId, granted: true, grantedBy: hostAdminId })
+    }
   })
 
   const nitro = useNitroApp()
@@ -210,7 +233,7 @@ export default defineEventHandler(async (event) => {
     recordId: userId,
     userId: hostAdminId,
     userAgent: getHeader(event, 'user-agent') || undefined,
-    metadata: { email, attachments: attachments.map(a => ({ orgId: a.orgId, roles: a.roles })) }
+    metadata: { email, attachments: attachments.map(a => ({ orgId: a.orgId, roles: a.roles })), apps }
   }).catch(() => {})
 
   return {
@@ -220,6 +243,7 @@ export default defineEventHandler(async (event) => {
       display_name: existing.display_name,
       verified: existing.verified
     },
-    attachments: attachments.map(a => ({ orgId: a.orgId, status: 'attached' }))
+    attachments: attachments.map(a => ({ orgId: a.orgId, status: 'attached' })),
+    apps
   }
 })

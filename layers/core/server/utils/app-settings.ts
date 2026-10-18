@@ -29,6 +29,10 @@ export interface AppCatalogEntry {
   requiredPermission: string | undefined
   order: number | undefined
   status: AppStatus
+  // 'user' for personal apps (see personal-apps.ts); orphans read as 'org'.
+  scope: 'org' | 'user'
+  // Personal apps only: permissions a user holds while the app is on for them.
+  permissions: string[]
   // True when a registered layer claims this app. False = orphan DB row
   // (layer uninstalled but catalog row remains).
   installed: boolean
@@ -64,6 +68,8 @@ export const getApps = defineSettings<AppEntry, AppRow, AppCatalogEntry>({
         requiredPermission: app.requiredPermission,
         order: app.order,
         status: row?.status ?? app.defaultStatus ?? 'disabled',
+        scope: app.scope ?? 'org',
+        permissions: app.permissions ?? [],
         installed: true,
         created_at: row?.created_at ?? null,
         updated_at: row?.updated_at ?? null
@@ -80,6 +86,8 @@ export const getApps = defineSettings<AppEntry, AppRow, AppCatalogEntry>({
       requiredPermission: undefined,
       order: undefined,
       status: row!.status ?? 'disabled',
+      scope: 'org',
+      permissions: [],
       installed: false,
       created_at: row!.created_at,
       updated_at: row!.updated_at

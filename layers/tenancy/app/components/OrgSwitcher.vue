@@ -1,10 +1,11 @@
 <script setup lang="ts">
 const { orgs, pending } = await useUserOrgs()
 const { slug } = useActiveOrg()
+const chromeOrg = useChromeOrgSlug()
 const route = useRoute()
 const open = ref(false)
 
-const activeOrg = computed(() => orgs.value.find(o => o.slug === slug.value) ?? null)
+const activeOrg = computed(() => orgs.value.find(o => o.slug === (slug.value ?? chromeOrg.value)) ?? null)
 
 // When the user is on `/@<current>/<section>/...`, switching to another org
 // should land on `/@<next>/<section>` so they stay in the same app/section.
@@ -75,7 +76,7 @@ function pathForOrg(targetSlug: string): string {
             <NuxtLink
               :to="pathForOrg(org.slug)"
               class="flex items-center justify-between gap-2 rounded-md px-2 py-2 hover:bg-(--ui-bg-accented) transition-colors"
-              :class="{ 'bg-(--ui-bg-accented)': org.slug === slug }"
+              :class="{ 'bg-(--ui-bg-accented)': org.slug === activeOrg?.slug }"
               @click="open = false"
             >
               <div class="min-w-0">
@@ -87,7 +88,7 @@ function pathForOrg(targetSlug: string): string {
                 </div>
               </div>
               <UIcon
-                v-if="org.slug === slug"
+                v-if="org.slug === activeOrg?.slug"
                 name="i-lucide-check"
                 class="size-4 text-(--ui-text)"
               />

@@ -12,6 +12,7 @@ interface AdminApp {
   description?: string
   icon?: string
   status: AppStatus
+  scope: 'org' | 'user'
   installed: boolean
   created_at: string
   updated_at: string
@@ -36,6 +37,16 @@ const STATUS_OPTIONS: { value: AppStatus, label: string, description: string, co
   { value: 'disabled', label: 'Disabled', description: 'Hidden from every org.', color: 'error', icon: 'i-lucide-circle-x' }
 ]
 const statusMeta = (s: AppStatus) => STATUS_OPTIONS.find(o => o.value === s) ?? STATUS_OPTIONS[1]!
+
+// Personal apps are turned on per user, the same way in both modes.
+// 'available' reads as invite-only, like 'host_controlled'.
+const PERSONAL_STATUS_OPTIONS: typeof STATUS_OPTIONS = [
+  { value: 'default', label: 'Everyone', description: 'On for every signed-in user.', color: 'success', icon: 'i-lucide-circle-check' },
+  { value: 'host_controlled', label: 'Invited users', description: 'On only for users a host admin turns it on for, from an invite or the user\'s page.', color: 'warning', icon: 'i-lucide-lock' },
+  { value: 'disabled', label: 'Disabled', description: 'Hidden from everyone.', color: 'error', icon: 'i-lucide-circle-x' }
+]
+const personalStatusValue = (s: AppStatus): AppStatus => s === 'available' ? 'host_controlled' : s
+const personalStatusMeta = (s: AppStatus) => PERSONAL_STATUS_OPTIONS.find(o => o.value === personalStatusValue(s)) ?? PERSONAL_STATUS_OPTIONS[1]!
 
 const onSetStatus = async (app: AdminApp, status: AppStatus) => {
   if (status === app.status) return
@@ -181,6 +192,14 @@ const onRemove = async () => {
               >
                 Layer not installed
               </UBadge>
+              <UBadge
+                v-else-if="app.scope === 'user'"
+                color="neutral"
+                variant="subtle"
+                size="sm"
+              >
+                Personal
+              </UBadge>
             </div>
             <div
               v-if="app.description"
@@ -201,6 +220,42 @@ const onRemove = async () => {
         >
           Remove
         </UButton>
+        <USelectMenu
+          v-else-if="app.scope === 'user'"
+          :model-value="personalStatusValue(app.status)"
+          :items="PERSONAL_STATUS_OPTIONS"
+          value-key="value"
+          label-key="label"
+          :search="false"
+          :color="personalStatusMeta(app.status).color"
+          variant="outline"
+          size="sm"
+          class="w-44 shrink-0"
+          @update:model-value="(v: AppStatus) => onSetStatus(app, v)"
+        >
+          <template #leading>
+            <UIcon
+              :name="personalStatusMeta(app.status).icon"
+              class="size-4"
+            />
+          </template>
+          <template #item="{ item }">
+            <div class="flex items-start gap-2 py-0.5">
+              <UIcon
+                :name="(item as typeof PERSONAL_STATUS_OPTIONS[number]).icon"
+                class="size-4 mt-0.5 shrink-0"
+              />
+              <div>
+                <div class="font-medium leading-tight">
+                  {{ (item as typeof PERSONAL_STATUS_OPTIONS[number]).label }}
+                </div>
+                <div class="text-xs text-(--ui-text-muted) leading-tight mt-0.5">
+                  {{ (item as typeof PERSONAL_STATUS_OPTIONS[number]).description }}
+                </div>
+              </div>
+            </div>
+          </template>
+        </USelectMenu>
         <!-- Single-tenant: a plain on/off switch. "On" stores `default` (shown
              in the launcher); "off" stores `disabled` (hidden). The `available`
              tier is multi-tenant-only (it means "org admin must opt in"), so it

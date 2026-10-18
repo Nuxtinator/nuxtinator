@@ -5,8 +5,10 @@
 //   - list-of-100.read:   view your own list (own-only enforced in handlers).
 //   - list-of-100.write:  create/edit/delete contacts on your own list.
 //
-// All three are granted to org members by default. Owner-only visibility is
-// enforced inside each route handler by filtering `where user_id = ctx.userId`.
+// List of 100 is a personal app: a user holds all three while the app is on
+// for them (see `registerApp({ scope: 'user', permissions })`), never through
+// roles. Owner-only visibility is enforced inside each route handler by
+// filtering `where user_id = ctx.userId`, and by RLS.
 
 export const LIST_OF_100_PERMISSIONS = [
   'list-of-100.access',
@@ -29,11 +31,6 @@ export const LIST_OF_100_PERMISSION_META: Record<string, { title: string, descri
     title: 'Edit your List of 100',
     description: 'Add, edit, delete contacts and mark contacted / prayed.'
   }
-}
-
-export const LIST_OF_100_DEFAULT_GRANTS: Record<'member' | 'admin', ListOf100Permission[]> = {
-  member: ['list-of-100.access', 'list-of-100.read', 'list-of-100.write'],
-  admin: [...LIST_OF_100_PERMISSIONS]
 }
 
 declare module '#permissions' {

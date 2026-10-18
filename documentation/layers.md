@@ -356,6 +356,53 @@ registerAdminSection({
 
 `/admin/...` routes don't get the `@<slug>` prefix — they're host-admin tooling.
 
+### Personal apps
+
+An app whose data belongs to each user, not to an org (a personal list, location sharing between people in different orgs), is a personal app. It is the same in every org and is turned on per user.
+
+```ts
+// nuxt.config.ts — build-time: keeps its pages at the bare path in every org
+export default defineNuxtConfig({
+  runtimeConfig: { public: { personalApps: { notes: '/notes' } } }
+})
+
+// server/plugins/register-notes.ts
+registerPermissions(NOTES_PERMISSIONS, NOTES_PERMISSION_META)
+registerApp({
+  id: 'notes',
+  title: 'Notes',
+  path: '/notes',
+  requiredPermission: 'notes.access',
+  scope: 'user',
+  permissions: [...NOTES_PERMISSIONS], // held by every user the app is on for
+  defaultStatus: 'host_controlled' // 'default' = every signed-in user
+})
+// no registerDefaultGrants: roles grant personal-app permissions nothing
+```
+
+Handlers use `withUserPermission` from `#core/server/utils/personal-apps` instead of `withOrgPermission`; `ctx.userId` is the caller and `app.current_user` is set for RLS:
+
+```ts
+import { withUserPermission } from '#core/server/utils/personal-apps'
+
+export default defineEventHandler(event =>
+  withUserPermission(event, { appId: 'notes' }, 'notes.read', (tx, ctx) =>
+    tx.selectFrom('notes_items').selectAll().where('user_id', '=', ctx.userId).execute()))
+```
+
+Tables carry `user_id`, no `org_id`, and no `_T<NNN>_` migration. Enable RLS in the regular migration:
+
+```ts
+await sql`ALTER TABLE notes_items ENABLE ROW LEVEL SECURITY`.execute(db)
+await sql`
+  CREATE POLICY user_isolation ON notes_items FOR ALL
+    USING      (user_id = nullif(current_setting('app.current_user', true), '')::uuid)
+    WITH CHECK (user_id = nullif(current_setting('app.current_user', true), '')::uuid)
+`.execute(db)
+```
+
+A host admin turns an invite-only personal app on per user from `/admin/users` (or ticks it in the invite form). [list-of-100](../layers/apps/list-of-100/) is the worked example.
+
 ### Database tables
 
 Create a `server/database/schema.d.ts` and merge your tables into core's global

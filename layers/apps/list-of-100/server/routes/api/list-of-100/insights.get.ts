@@ -3,7 +3,7 @@
 // Used by the Insights tab to render the per-day rhythm chart.
 
 import { sql } from 'kysely'
-import { withOrgPermission } from '#tenant/server'
+import { withUserPermission } from '#core/server/utils/personal-apps'
 
 interface DailyRow {
   day: string
@@ -12,7 +12,7 @@ interface DailyRow {
 }
 
 export default defineEventHandler(async (event) => {
-  return await withOrgPermission(event, { appId: 'list-of-100' }, 'list-of-100.read', async (tx, ctx) => {
+  return await withUserPermission(event, { appId: 'list-of-100' }, 'list-of-100.read', async (tx, ctx) => {
     const q = getQuery(event)
     const window = q.window === 'all' ? 'all' : '30d'
 

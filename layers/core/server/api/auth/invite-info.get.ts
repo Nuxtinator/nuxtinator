@@ -1,6 +1,6 @@
 import { getQuery } from 'h3'
 import { db } from '../../utils/database'
-import { findInviteByToken, getInviteOrgs, inviteState } from '../../utils/invites'
+import { findInviteByToken, getInviteApps, getInviteOrgs, inviteState } from '../../utils/invites'
 
 // Public: what an invite link is for, so the accept page can show it. `email`
 // is null for shareable link invites.
@@ -30,12 +30,14 @@ export default defineEventHandler(async (event) => {
     : null
 
   const orgs = (await getInviteOrgs(db, [invite.id])).get(invite.id) ?? []
+  const apps = (await getInviteApps(db, [invite.id])).get(invite.id) ?? []
 
   return {
     kind: invite.email ? 'email' : 'link',
     email: invite.email,
     display_name: invite.display_name ?? '',
     inviter_name: inviter?.display_name ?? null,
-    orgs: orgs.map(o => ({ slug: o.slug, name: o.name }))
+    orgs: orgs.map(o => ({ slug: o.slug, name: o.name })),
+    apps: apps.map(a => ({ id: a.id, title: a.title }))
   }
 })
