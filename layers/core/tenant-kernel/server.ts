@@ -173,6 +173,16 @@ export async function getUserPermissionsForRequest(
   return await getUserPermissionsAcrossOrgs(userId)
 }
 
+// App ids switched on for the org a request targets, or null when there is
+// no org to check. Single deploys have no per-org app switch, so always null.
+export async function getEnabledAppsForRequest(
+  _event: H3Event,
+  _userId: string,
+  _opts: { org?: string } = {}
+): Promise<Set<string> | null> {
+  return null
+}
+
 // Operator-admin gate. Same in single and multi modes — the bit on the user
 // row is the source of truth. Tenancy layer adds BYPASSRLS DB-role plumbing
 // on top for endpoints that need to read across orgs.

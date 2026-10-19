@@ -156,17 +156,20 @@ await db.transaction().execute(async (tx) => {
 
 `mcpLog` always passes `ctx.auth.userId` (string), never `ctx.event` — MCP requests carry a bearer token, not the admin auth-token cookie that `getAuthUser(event)` reads.
 
-## Authorization model — three gates
+## Authorization model — four gates
 
 A `tools/call` invocation must pass:
 
 1. **Bearer valid** — token + audience + family + client-enabled (transport boundary, via `requireValidBearer`).
 2. **Token scope includes `tool.scope`** — `auth.scopes.includes(tool.scope)`. Failure → `isError` with `structuredContent: { error: 'insufficient_scope', surface: 'token', actionable: 're_authorize' }`.
 3. **User holds `tool.scope` as RBAC permission in the org the call targets** — resolved per call by the `#tenant/server` kernel's `getUserPermissionsForRequest(event, userId, { org })`, where `org` is the tool's `org` input, else the request's `X-Active-Org` header. Membership roles and direct grants in that org count, as do host-level roles and `is_admin`. Failure → `isError` with `structuredContent: { error: 'insufficient_permission', surface: 'rbac', actionable: 'contact_admin' }`.
+4. **The tool's app is on for the org the call targets** — only for tools that declare `appId`. The kernel's `getEnabledAppsForRequest(event, userId, { org })` resolves the org the way the handler's `runInOrgTransaction(event, { org, userId })` does (including the user's sole membership when nothing selects one) and returns that org's enabled apps. Failure → `isError` with `structuredContent: { error: 'app_disabled', app, surface: 'org', actionable: 'contact_admin' }`, before the handler runs. Single mode has no per-org app switch, so the gate always passes; the same goes for a call that selects no org, which `runInOrgTransaction` then rejects with 400.
 
 Gates 2 and 3 reference the same string but check different surfaces. A user demoted in RBAC mid-session loses access immediately even with a valid token; reauthorization won't help — only an admin granting the permission will.
 
-`tools/list` filters by gate 2 and by the union of the user's permissions across every org they belong to (`getUserPermissionsAcrossOrgs`), so the model only sees tools it can call somewhere; the per-org check is gate 3 at call time.
+`tools/list` filters by gate 2 and by the union of the user's permissions across every org they belong to (`getUserPermissionsAcrossOrgs`), so the model only sees tools it can call somewhere; the per-org check is gate 3 at call time. When the request selects an org (`X-Active-Org`, or the user's only membership), tools whose `appId` is off in that org are hidden too; with no org selected they stay listed and gate 4 decides per call. `resources/list` and `resources/read` apply the same `appId` check against the request's org.
+
+Set `appId` on every tool that reads or writes an org-scoped app's data. Leave it off tools that work across orgs, such as the context layer's `list_orgs`, and off tools of personal (`scope: 'user'`) apps, which are never on per org.
 
 ## Org selection in multi-tenant mode
 

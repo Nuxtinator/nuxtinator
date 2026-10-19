@@ -49,6 +49,9 @@ export interface McpToolDef<I = unknown, O = unknown> {
   input: ZodSchema<I>
   output?: ZodSchema<O>
   rateLimit?: McpToolRateLimit
+  // Org-scoped app the tool belongs to. When set, calls targeting an org
+  // with that app switched off are refused, and tools/list hides the tool.
+  appId?: string
   handler: (input: I, ctx: McpToolContext) => Promise<McpToolResult<O>>
 }
 
@@ -73,6 +76,8 @@ export interface McpResourceReadResult {
 export interface McpResourceDef {
   uriPattern: string
   scope: Permission
+  // Same as `McpToolDef.appId`, for resources/list and resources/read.
+  appId?: string
   list: (ctx: McpResourceContext) => Promise<McpResourceListItem[]>
   read: (uri: string, ctx: McpResourceContext) => Promise<McpResourceReadResult>
 }
@@ -81,6 +86,7 @@ export interface McpResourceDef {
 export type McpAuthorizationError =
   | { error: 'insufficient_scope'; required: Permission; surface: 'token'; actionable: 're_authorize' }
   | { error: 'insufficient_permission'; required: Permission; surface: 'rbac'; actionable: 'contact_admin' }
+  | { error: 'app_disabled'; app: string; surface: 'org'; actionable: 'contact_admin' }
 
 export function defineMcpTool<I, O>(def: McpToolDef<I, O>): McpToolDef<I, O> {
   return def

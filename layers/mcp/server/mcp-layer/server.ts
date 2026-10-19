@@ -6,7 +6,7 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema
 } from '@modelcontextprotocol/sdk/types.js'
-import { getUserPermissionsAcrossOrgs, getUserPermissionsForRequest } from '#tenant/server'
+import { getEnabledAppsForRequest, getUserPermissionsAcrossOrgs, getUserPermissionsForRequest } from '#tenant/server'
 import type { Permission } from '#core/app/utils/permissions'
 // Cross-layer type import to the OAuth layer; see mcp-origin.ts for why we
 // use the `#oauth/*` aliases declared in the OAuth layer's nuxt.config.ts
@@ -47,15 +47,23 @@ function withStructuredText<T extends { content: Array<{ type: 'text'; text: str
   }
 }
 
+// `enabledApps` is null when the request targets no org (or the deploy has no
+// per-org app switch); every app counts as on and the call-time gate decides.
+function isAppOn(appId: string | undefined, enabledApps: ReadonlySet<string> | null): boolean {
+  return !appId || !enabledApps || enabledApps.has(appId)
+}
+
 function listVisibleTools(
   scopeSet: ReadonlySet<string>,
   userPerms: ReadonlySet<Permission>,
+  enabledApps: ReadonlySet<string> | null,
   tools: ReadonlyArray<RegisteredTool>
 ): RegisteredTool[] {
   const out: RegisteredTool[] = []
   for (const entry of tools) {
     if (!scopeSet.has(entry.def.scope)) continue
     if (!userPerms.has(entry.def.scope as Permission)) continue
+    if (!isAppOn(entry.def.appId, enabledApps)) continue
     out.push(entry)
   }
   return out
@@ -93,7 +101,10 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
   // ── tools/list ─────────────────────────────────────────────────────────
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const scopeSet = new Set<string>(auth.scopes)
-    const visible = listVisibleTools(scopeSet, userPermissions, registry.tools)
+    // Hides tools whose app is off in the org the request selects (header,
+    // or the user's only org). With no org selected every tool is listed.
+    const enabledApps = await getEnabledAppsForRequest(event, auth.userId)
+    const visible = listVisibleTools(scopeSet, userPermissions, enabledApps, registry.tools)
     return {
       tools: visible.map((entry) => {
         const tool: Record<string, unknown> = {
@@ -163,6 +174,20 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
         )
       }
 
+      // Gate 4: the tool's app is switched on for the org this call targets,
+      // resolved the way the handler's `runInOrgTransaction` resolves it.
+      if (tool.appId && !isAppOn(tool.appId, await getEnabledAppsForRequest(event, auth.userId, { org }))) {
+        return authzError(
+          {
+            error: 'app_disabled',
+            app: tool.appId,
+            surface: 'org',
+            actionable: 'contact_admin'
+          },
+          `App "${tool.appId}" is not enabled for this organization.`
+        )
+      }
+
       const toolCtx: McpToolContext = { ...dispatchCtx, userPermissions: callPermissions, tool }
 
       // Rate-limit buckets (default + per-tool).
@@ -211,11 +236,13 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
       const scopeSet = new Set<string>(auth.scopes)
       const out: Array<{ uri: string; name?: string; description?: string; mimeType?: string }> = []
       const seen = new Set<string>()
+      const enabledApps = await getEnabledAppsForRequest(event, auth.userId)
 
       for (const entry of registry.resources) {
         const def = entry.def
         if (!scopeSet.has(def.scope)) continue
         if (!userPermissions.has(def.scope as Permission)) continue
+        if (!isAppOn(def.appId, enabledApps)) continue
 
         try {
           const items = await def.list({ ...dispatchCtx, resource: def })
@@ -251,6 +278,9 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
         const readPermissions = await getUserPermissionsForRequest(event, auth.userId)
         if (!readPermissions.has(def.scope as Permission)) {
           throw new Error(`Insufficient permission. Resource requires '${def.scope}'.`)
+        }
+        if (def.appId && !isAppOn(def.appId, await getEnabledAppsForRequest(event, auth.userId))) {
+          throw new Error(`App "${def.appId}" is not enabled for this organization.`)
         }
         return await def.read(uri, { ...dispatchCtx, userPermissions: readPermissions, resource: def })
       }

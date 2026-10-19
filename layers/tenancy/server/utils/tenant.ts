@@ -34,7 +34,7 @@ import type { Permission } from '#core/app/utils/permissions'
 // the three-tier merge. Imported here for use inside `defineTenantHandler`'s
 // `appId` opt; external callers import the helpers directly from
 // `./app-settings.ts` so Nitro auto-import doesn't see two copies.
-import { isAppEnabledForOrg } from './app-settings'
+import { getOrgEnabledApps, isAppEnabledForOrg } from './app-settings'
 import { adminDb } from './database-admin'
 
 export interface TenantContext {
@@ -412,6 +412,39 @@ export async function runInOrgTransaction<T>(
     throw new Error('runInOrgTransaction: `org` requires `userId` so membership can be enforced')
   }
 
+  const orgId = await resolveTransactionOrgId(event, opts)
+  if (!orgId && opts.userId) {
+    throw createError({ statusCode: 400, statusMessage: 'No organization selected. Pass `org` or send the X-Active-Org header.' })
+  }
+
+  return await runTransaction(db, async (tx) => {
+    if (orgId) {
+      await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
+    }
+    return await fn(tx)
+  })
+}
+
+// App ids switched on for the org a request targets. The org is resolved the
+// way `runInOrgTransaction(event, { org, userId })` resolves it, so a gate on
+// this set checks the org the caller's transaction runs in. Null when no org
+// resolves (several memberships, none selected); org-scoped work then fails
+// with 400 in `runInOrgTransaction`. The MCP layer gates tools on it.
+export async function getEnabledAppsForRequest(
+  event: H3Event,
+  userId: string,
+  opts: { org?: string } = {}
+): Promise<Set<string> | null> {
+  const orgId = await resolveTransactionOrgId(event, { org: opts.org, userId })
+  if (!orgId) return null
+  return await runTransaction(db, async (tx) => {
+    await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
+    return await getOrgEnabledApps(tx, orgId)
+  })
+}
+
+// Org discovery for `runInOrgTransaction` (see its comment for the order).
+async function resolveTransactionOrgId(event: H3Event, opts: OrgTransactionOpts): Promise<string | undefined> {
   let orgId: string | undefined
   let slug: string | undefined
   if (opts.org) {
@@ -443,16 +476,7 @@ export async function runInOrgTransaction<T>(
     const owned = await memberOrgIds(opts.userId)
     if (owned.length === 1) orgId = owned[0]
   }
-  if (!orgId && opts.userId) {
-    throw createError({ statusCode: 400, statusMessage: 'No organization selected. Pass `org` or send the X-Active-Org header.' })
-  }
-
-  return await runTransaction(db, async (tx) => {
-    if (orgId) {
-      await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
-    }
-    return await fn(tx)
-  })
+  return orgId
 }
 
 // Open a transaction scoped to the org that owns the given project. Used by
