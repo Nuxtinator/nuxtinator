@@ -108,6 +108,21 @@ describe('MCP app switch', () => {
     expect(orgs.isError, orgs.content[0]?.text).toBeFalsy()
   })
 
+  it('list_orgs reports each org\'s MCP apps to a token holding any scope', async () => {
+    const { user, orgA, orgB } = await setupTwoOrgs()
+    const token = await issueMcpBearer(sql, user.id, ['files.read'])
+
+    const res = await callMcpTool(token, 'list_orgs', {})
+    expect(res.isError, res.content[0]?.text).toBeFalsy()
+    const orgs = res.structuredContent?.orgs as Array<{ slug: string, apps: string[] }>
+    const appsOf = (slug: string) => orgs.find(o => o.slug === slug)!.apps
+    expect(appsOf(orgA.slug)).toContain('context')
+    expect(appsOf(orgB.slug)).not.toContain('context')
+    for (const app of [...appsOf(orgA.slug), ...appsOf(orgB.slug)]) {
+      expect(MCP_APPS).toContain(app)
+    }
+  })
+
   it('tools/list hides every app tool for an org with the apps off', async () => {
     const { user, orgA, orgB } = await setupTwoOrgs()
     await disableApps(orgB.id, MCP_APPS)

@@ -63,7 +63,7 @@ export function createRegistry(): McpRegistry {
   const toolsByName = new Map<string, number>()
 
   function register<I, O>(tool: McpToolDef<I, O>): void {
-    if (!isAcceptableScope(tool.scope)) {
+    if (tool.scope !== undefined && !isAcceptableScope(tool.scope)) {
       throw new Error(
         `MCP tool "${tool.name}" declares scope "${tool.scope}" which is not in the project's PERMISSIONS list. `
         + `Add it to app/utils/permissions.ts or fix the tool definition.`
@@ -93,7 +93,7 @@ export function createRegistry(): McpRegistry {
       // Dev: replace prior registration so HMR works without a server restart.
       console.info(`[mcp-layer] Replacing duplicate tool registration: ${tool.name}`)
       tools[existingIndex] = entry
-      registerScope(tool.scope)
+      if (tool.scope) registerScope(tool.scope)
       return
     }
 
@@ -102,7 +102,7 @@ export function createRegistry(): McpRegistry {
     // Feed the OAuth-layer scope registry so /.well-known/* discovery
     // and the DCR explicit-scope ceiling pick up this tool's scope
     // without the consumer having to enumerate it in nuxt.config.
-    registerScope(tool.scope)
+    if (tool.scope) registerScope(tool.scope)
   }
 
   function registerResource(resource: McpResourceDef): void {

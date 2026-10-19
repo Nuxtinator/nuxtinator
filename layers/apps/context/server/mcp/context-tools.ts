@@ -4,7 +4,8 @@
 // `context.read`; section-content writes use `context.write`; creating a
 // portfolio requires the portfolio-create permission; adding or removing a
 // section definition requires the section permission.
-// All tools except `list_orgs` take an optional `org` slug and run inside
+// All tools take an optional `org` slug (the tenancy layer's `list_orgs`
+// lists the bearer's orgs) and run inside
 // `runInOrgTransaction(event, { org, userId }, ...)` from `#tenant/server`,
 // which in multi mode resolves the org (the `org` input, else the
 // `X-Active-Org` header on the MCP HTTP request), enforces the bearer's
@@ -81,33 +82,6 @@ function textResult(text: string, structured?: Record<string, unknown>) {
     ...(structured ? { structuredContent: structured } : {})
   }
 }
-
-export const listOrgsTool = defineMcpTool({
-  name: 'list_orgs',
-  title: 'List Organizations',
-  description: 'List organizations the bearer is a member of. Returns org id, slug, and name. Pass a slug as `org` to any other tool to operate in that org.',
-  scope: 'context.read',
-  input: z.object({}).strict(),
-  handler: async (_input, ctx) => {
-    try {
-      // The MCP server's tenancy middleware resolves the active org from the
-      // X-Active-Org header. We use the user's membership table directly so
-      // the response lists ALL orgs the bearer can switch to, not just the
-      // currently active one.
-      return await runInOrgTransaction(ctx.event, async (tx) => {
-        const rows = await tx
-          .selectFrom('memberships as m')
-          .innerJoin('orgs as o', 'o.id', 'm.org_id')
-          .select(['o.id', 'o.slug', 'o.name'])
-          .where('m.user_id', '=', ctx.auth.userId)
-          .orderBy('o.name', 'asc')
-          .distinct()
-          .execute()
-        return textResult(`${rows.length} org(s).`, { orgs: rows })
-      })
-    } catch (err) { return mcpError(err) }
-  }
-})
 
 export const listPortfoliosTool = defineMcpTool({
   name: 'list_portfolios',
@@ -847,7 +821,6 @@ export const updateSuggestionTool = defineMcpTool({
 })
 
 export const contextMcpTools = [
-  listOrgsTool,
   listPortfoliosTool,
   listSectionsTool,
   readSectionTool,

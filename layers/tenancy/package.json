@@ -17,6 +17,12 @@
     "kysely-postgres-js": "^2.0.0",
     "nuxt": "^4.0.0",
     "postgres": "^3.4.7",
-    "vue": "^3.0.0"
+    "vue": "^3.0.0",
+    "zod": "^3.23.0"
+  },
+  "peerDependenciesMeta": {
+    "zod": {
+      "optional": true
+    }
   }
 }

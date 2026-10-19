@@ -25,6 +25,19 @@ describe('createRegistry', () => {
     expect(registry.tools[0]!.def.name).toBe('list_pages')
   })
 
+  it('registers a tool without a scope', () => {
+    const tool = defineMcpTool({
+      name: 'list_mine',
+      description: 'List the bearer\'s own things',
+      input: z.object({}).strict(),
+      handler: async () => ({ content: [{ type: 'text' as const, text: 'ok' }] })
+    })
+
+    registry.register(tool)
+
+    expect(registry.tools[0]!.def.scope).toBeUndefined()
+  })
+
   it('rejects a tool whose scope is not in PERMISSIONS', () => {
     const bad = defineMcpTool({
       // @ts-expect-error — testing the runtime guard

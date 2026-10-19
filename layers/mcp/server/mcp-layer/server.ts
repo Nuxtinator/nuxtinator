@@ -61,8 +61,8 @@ function listVisibleTools(
 ): RegisteredTool[] {
   const out: RegisteredTool[] = []
   for (const entry of tools) {
-    if (!scopeSet.has(entry.def.scope)) continue
-    if (!userPerms.has(entry.def.scope as Permission)) continue
+    const scope = entry.def.scope
+    if (scope !== undefined && !(scopeSet.has(scope) && userPerms.has(scope))) continue
     if (!isAppOn(entry.def.appId, enabledApps)) continue
     out.push(entry)
   }
@@ -138,13 +138,14 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
       }
     }
     const tool = entry.def
+    const scope = tool.scope
 
     // Gate 2: scope on token
-    if (!auth.scopes.includes(tool.scope)) {
+    if (scope !== undefined && !auth.scopes.includes(scope)) {
       return authzError(
         {
           error: 'insufficient_scope',
-          required: tool.scope,
+          required: scope,
           surface: 'token',
           actionable: 're_authorize'
         },
@@ -161,16 +162,19 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
       // than the across-orgs union tools/list is filtered by.
       const args = req.params.arguments ?? {}
       const org = typeof args.org === 'string' ? args.org : undefined
-      const callPermissions = await getUserPermissionsForRequest(event, auth.userId, { org })
-      if (!callPermissions.has(tool.scope as Permission)) {
+      // A scope-less tool targets no org and gets the across-orgs set.
+      const callPermissions = scope === undefined
+        ? userPermissions
+        : await getUserPermissionsForRequest(event, auth.userId, { org })
+      if (scope !== undefined && !callPermissions.has(scope)) {
         return authzError(
           {
             error: 'insufficient_permission',
-            required: tool.scope,
+            required: scope,
             surface: 'rbac',
             actionable: 'contact_admin'
           },
-          `Insufficient permission. This tool requires '${tool.scope}'; your account does not currently have it.`
+          `Insufficient permission. This tool requires '${scope}'; your account does not currently have it.`
         )
       }
 
