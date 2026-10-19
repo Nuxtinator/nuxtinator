@@ -275,6 +275,88 @@ export async function getUserPermissionsForRequest(
   return perms
 }
 
+export interface UserOrg {
+  id: string
+  slug: string
+  name: string
+  perms: Set<Permission>
+}
+
+export interface UserOrgsFilter {
+  // Keep only orgs where the user holds this permission.
+  permission?: Permission
+  // Keep only orgs that have this app enabled.
+  appId?: string
+  // Keep only these orgs (a caller's own selection, still membership-checked).
+  orgIds?: string[]
+}
+
+// The user's orgs (suspended excluded) with their effective permissions in
+// each, narrowed by `filter`. Permissions resolve the way `withOrgContext`
+// resolves them: membership roles through the org's overlay plus direct
+// grants, each read with that org's GUC set. Reads no org's tenant data.
+export async function listUserOrgs(userId: string, filter: UserOrgsFilter = {}): Promise<UserOrg[]> {
+  let q = adminDb
+    .selectFrom('memberships')
+    .innerJoin('orgs', 'orgs.id', 'memberships.org_id')
+    .select(['orgs.id', 'orgs.slug', 'orgs.name', 'memberships.roles'])
+    .where('memberships.user_id', '=', userId)
+    .where('orgs.suspended_at', 'is', null)
+    .orderBy('orgs.name')
+  if (filter.orgIds) {
+    const ids = filter.orgIds.filter(id => UUID_RE.test(id))
+    if (ids.length === 0) return []
+    q = q.where('orgs.id', 'in', ids)
+  }
+  const out: UserOrg[] = []
+  for (const r of await q.execute()) {
+    const org = await withOrgScope(r.id, async (tx) => {
+      if (filter.appId && !(await isAppEnabledForOrg(tx, r.id, filter.appId))) return null
+      const perms = await getRolePermissions(tx, r.roles, r.id)
+      for (const perm of await getUserGrantedPermissions(tx, userId)) perms.add(perm)
+      if (filter.permission && !perms.has(filter.permission)) return null
+      return { id: r.id, slug: r.slug, name: r.name, perms }
+    })
+    if (org) out.push(org)
+  }
+  return out
+}
+
+export interface OrgScopesFilter {
+  // Skip suspended orgs.
+  activeOnly?: boolean
+  // Skip orgs where this app is off.
+  appId?: string
+}
+
+// The orgs a session-less job (sweep, webhook, offboarding) visits in turn
+// with `withOrgScope`.
+export async function listOrgScopes(filter: OrgScopesFilter = {}): Promise<(string | null)[]> {
+  let q = adminDb.selectFrom('orgs').select('id').orderBy('created_at')
+  if (filter.activeOnly) q = q.where('suspended_at', 'is', null)
+  const ids = (await q.execute()).map(r => r.id)
+  if (!filter.appId) return ids
+  const out: string[] = []
+  for (const id of ids) {
+    if (await withOrgScope(id, tx => isAppEnabledForOrg(tx, id, filter.appId!))) out.push(id)
+  }
+  return out
+}
+
+// Runs `fn` in a transaction scoped to one org (`null`: no org). Each call
+// sees exactly that org's rows; visit several orgs by calling it once per org.
+export async function withOrgScope<T>(
+  orgId: string | null,
+  fn: (tx: Transaction<Database>) => Promise<T>
+): Promise<T> {
+  return await runTransaction(db, async (tx) => {
+    if (orgId) {
+      await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
+    }
+    return await fn(tx)
+  })
+}
+
 // Operator-admin gate. The bit (`users.is_admin`) lives in core; this is the
 // same check, re-exported from the multi-mode kernel for symmetry. The thing
 // the tenancy layer adds *on top* is BYPASSRLS DB-role plumbing
