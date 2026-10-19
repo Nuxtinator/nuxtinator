@@ -45,6 +45,12 @@ describe('configureApp', () => {
     configureApp('crm', { title: undefined, order: 45 })
     expect(getRegisteredApp('crm')!.title).toBe('Intercessors')
   })
+
+  it('replaces the layer\'s default status', () => {
+    registerApp({ id: 'crm', title: 'CRM', path: '/crm', defaultStatus: 'available' })
+    configureApp('crm', { defaultStatus: 'host_controlled' })
+    expect(getRegisteredApp('crm')!.defaultStatus).toBe('host_controlled')
+  })
 })
 
 describe('buildRailLinks', () => {
