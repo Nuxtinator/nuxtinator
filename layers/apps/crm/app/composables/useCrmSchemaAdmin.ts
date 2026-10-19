@@ -128,7 +128,11 @@ export function useCrmSchemaAdmin() {
   const channelTypesCache = useState<Record<string, CrmChannelTypeSummary[]>>('crm:schema-channel-types', () => ({}))
   const orgKey = useCrmOrgKey()
 
-  const canManage = computed<boolean | null>(() => canManageCache.value[orgKey.value] ?? null)
+  // A host that doesn't offer the schema builder and permissions matrix sets
+  // app config `crm.schemaAdmin: false`: the links and pages stay hidden
+  // whatever the caller's permissions. The server still checks the permission.
+  const schemaAdmin = (useAppConfig() as { crm?: { schemaAdmin?: boolean } }).crm?.schemaAdmin !== false
+  const canManage = computed<boolean | null>(() => schemaAdmin ? (canManageCache.value[orgKey.value] ?? null) : false)
   const channelTypes = computed(() => channelTypesCache.value[orgKey.value] ?? [])
 
   // The org is captured before the request so a response that resolves after
