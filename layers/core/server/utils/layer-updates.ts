@@ -22,8 +22,14 @@ export interface LayerUpdate {
   latest: string | null
   updateAvailable: boolean // a newer in-range version exists
   majorHeld: boolean // a newer version exists outside the range (needs a manual bump)
-  compatible: boolean // installed core satisfies this layer's declared core range
-  requiredCore: string | null // the declared @nuxtinator/core range, when it's a real constraint
+  compatible: boolean // every layer this one declares in `nuxtinator.requires` is loaded at a satisfying version
+  unmet: UnmetRequirement[]
+}
+
+export interface UnmetRequirement {
+  pkg: string
+  range: string
+  loaded: string | null // null when the required layer isn't loaded at all
 }
 
 interface LockEntry {
@@ -86,8 +92,7 @@ export async function getAvailableLayerUpdates(opts?: { force?: boolean }): Prom
   const config = useRuntimeConfig()
   const lock = (config.layerLock ?? {}) as Record<string, LockEntry>
   const token = (config.layerSourceToken ?? '') as string
-  const coreVersion = (config.coreVersion ?? '') as string
-  const compat = (config.layerCompat ?? {}) as Record<string, string>
+  const unmetByPkg = (config.layerUnmet ?? {}) as Record<string, UnmetRequirement[]>
 
   // List each source repo's tags once, even when several layers share a repo.
   const tagsByRepo = new Map<string, string[]>()
@@ -117,14 +122,11 @@ export async function getAvailableLayerUpdates(opts?: { force?: boolean }): Prom
     const updateAvailable = Boolean(current && latestInRange && semver.gt(latestInRange, current))
     const majorHeld = Boolean(current && latest && latestInRange && semver.gt(latest, latestInRange))
 
-    // A "*" range (every layer's default today) means no constraint -> always compatible.
-    const range = compat[entry.pkg]
-    const requiredCore = range && range !== '*' ? range : null
-    const compatible = !requiredCore || !semver.valid(coreVersion)
-      || semver.satisfies(coreVersion, requiredCore, { includePrerelease: true })
+    const unmet = unmetByPkg[entry.pkg] ?? []
+    const compatible = unmet.length === 0
 
     const name = getRegisteredApp(id)?.title ?? id
-    return { id, name, pkg: entry.pkg, policy: entry.version, current, latestInRange, latest, updateAvailable, majorHeld, compatible, requiredCore }
+    return { id, name, pkg: entry.pkg, policy: entry.version, current, latestInRange, latest, updateAvailable, majorHeld, compatible, unmet }
   })
 
   cache = { at: Date.now(), data }

@@ -15,7 +15,12 @@ import { readLock, resolveAll, writeLock } from './lib/lock'
 let lock = readLock()
 if (!lock) {
   console.log('No layers.lock.json — resolving once from layers.ts…')
-  lock = resolveAll(LAYERS, process.env.LAYER_SOURCE_TOKEN).lock
+  const resolved = await resolveAll(LAYERS, process.env.LAYER_SOURCE_TOKEN)
+  if (resolved.conflicts.length) {
+    console.error(`Layer requirements can't be met:\n${resolved.conflicts.map(c => `  ${c}`).join('\n')}`)
+    process.exit(1)
+  }
+  lock = resolved.lock
   writeLock(lock)
 }
 

@@ -124,6 +124,28 @@ export default defineNuxtConfig({})
 
 If your layer imports a package that no other layer needs (e.g. a charting library, a parser), add it to `dependencies`. Anything shared with host or other layers — `kysely`, `kysely-postgres-js`, `postgres`, `h3`, `@nuxt/kit`, `@nuxt/ui`, `tailwindcss` — goes in `peerDependencies` so it resolves to the host's installed copy rather than getting duplicated under `.c12/` in production. Don't add a `main` field — Nuxt generates a `/// <reference types="layer-<id>" />` and TS would resolve it through `main`, picking up nuxt.config.ts in a context that breaks the typecheck.
 
+#### Requiring other layers
+
+Cross-layer imports (`#core/...`, another app layer's composables) are declared as `"*"` in `optionalDependencies` so module resolution works — that entry never carries a version. When your layer needs another layer to be present, or needs a minimum version of it (because it imports something that layer only gained in a later release), say so in `nuxtinator.requires`:
+
+```json
+// layers/apps/tasks/package.json
+{
+  "optionalDependencies": { "@nuxtinator/core": "*" },
+  "nuxtinator": {
+    "requires": { "@nuxtinator/core": ">=2.2.0" }
+  }
+}
+```
+
+Keys are package names, values are semver ranges (`"*"` = must be loaded, any version). Three things read it:
+
+- **`layers:update` / `layers:check`** (and the weekly layer-update PR) in a host pick, per layer, the newest version its policy allows whose requirements the others' picked versions meet. A layer whose newest release needs more than the host can resolve is held at an older release and reported. If no compatible set exists, nothing is written and the script exits non-zero.
+- **The build** (core's `layer-versions` module) checks every loaded layer's requirements. When both sides were fetched into the host's `_layers/`, an unmet requirement stops the build with e.g. `@nuxtinator/social-auth 0.3.0 needs @nuxtinator/core >=2.2.0 (loaded: 2.1.0)`. Layers loaded from anywhere else (this monorepo's workspace, a `NUXTINATOR_<ID>_PATH` checkout, a host's `apps/`) only warn, since their `version` lags their unreleased code. `/admin/updates` badges unmet requirements too.
+- **`bun run release`** refuses to tag a layer while a monorepo layer it requires has no pushed release in range — release the dependency first.
+
+Raise the minimum in the same change that starts using the new thing, so it ships with the release that needs it.
+
 Then add the layer to the workspace in the root [package.json](../package.json):
 
 ```json

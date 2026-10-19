@@ -20,6 +20,11 @@
     "@nuxtinator/core": "*",
     "@nuxtinator/crm": "*"
   },
+  "nuxtinator": {
+    "requires": {
+      "@nuxtinator/crm": "*"
+    }
+  },
   "peerDependencies": {
     "h3": "^1.0.0",
     "kysely": "^0.28.0",

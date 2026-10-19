@@ -44,6 +44,8 @@ bun run layers:update   # advance layers.lock.json to the newest in-range versio
 
 A scheduled GitHub Action ([.github/workflows/layer-updates.yml](.github/workflows/layer-updates.yml)) runs `layers:update` weekly and opens a PR with the lockfile change — merge it to deploy the update. It works with no secrets on public sources; add a `LAYER_UPDATE_TOKEN` (fine-grained PAT) so the PR runs CI and can auto-merge, and a `LAYER_SOURCE_TOKEN` (read-only) for a private layer source. Major updates outside a layer's range are reported, not auto-applied — widen the range in `layers.ts` to adopt one.
 
+Resolution also honours each layer's `nuxtinator.requires` (minimum versions of other layers, in its `package.json`): a layer whose newest release needs more than the others resolve to is held at an older release and listed under "Held back by layer requirements". When no compatible set exists, `layers:update` writes nothing and exits non-zero, so the weekly Action fails instead of opening a PR. The build checks the same requirements and stops on an unmet one between fetched layers.
+
 ## Cross-layer imports (aliases)
 
 Import shared functionality by alias, not relative path into `_layers/`:

@@ -47,6 +47,31 @@ if (!semver.gt(next, current)) {
 
 const tag = `${pkg.name}@${next}`
 
+// Every monorepo layer named in `nuxtinator.requires` must already have a pushed
+// release satisfying its range, or consumers resolving this tag can't pair it
+// with anything that builds.
+const requires: Record<string, string> = pkg.nuxtinator?.requires ?? {}
+const monorepoNames = new Set(paths.map(p => JSON.parse(readFileSync(`${p}/package.json`, 'utf8')).name))
+const remoteTags = Object.keys(requires).length
+  ? execSync('git ls-remote --tags --refs origin', { encoding: 'utf8' }).split('\n').map(l => l.split('refs/tags/')[1]).filter(Boolean)
+  : []
+const unreleased: string[] = []
+for (const [dep, range] of Object.entries(requires)) {
+  if (!semver.validRange(range)) {
+    console.error(`${id} requires ${dep} "${range}", which is not a valid semver range.`)
+    process.exit(1)
+  }
+  if (!monorepoNames.has(dep)) continue
+  const released = remoteTags.filter(t => t.startsWith(`${dep}@`)).map(t => t.slice(dep.length + 1))
+  if (!released.some(v => semver.valid(v) && semver.satisfies(v, range, { includePrerelease: true }))) {
+    unreleased.push(`${dep} ${range}`)
+  }
+}
+if (unreleased.length) {
+  console.error(`${id} requires layers with no pushed release in range — release them first:\n  ${unreleased.join('\n  ')}`)
+  process.exit(1)
+}
+
 // Targeted version-field edit so the file's formatting/key-order is preserved.
 const updated = /"version":\s*"[^"]*"/.test(pkgText)
   ? pkgText.replace(/"version":\s*"[^"]*"/, `"version": "${next}"`)
