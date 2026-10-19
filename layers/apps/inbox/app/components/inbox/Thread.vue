@@ -621,7 +621,7 @@ const appliedTags = computed(() =>
     </footer>
     </template>
 
-    <InboxNotesTimeline v-else :conversation-id="thread.conversation.id" :users="assignees" :can-moderate="me?.canManageAliases ?? false" />
+    <InboxNotesTimeline v-else :conversation-id="thread.conversation.id" :users="assignees" :can-moderate="me?.canModerate ?? false" />
 
     <UModal v-model:open="confirmSpam" title="Mark as spam?">
       <template #body>

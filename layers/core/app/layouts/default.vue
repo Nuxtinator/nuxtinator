@@ -84,7 +84,7 @@ watch(() => route.path, () => {
 
       <!-- Desktop top bar -->
       <!-- OrgSwitcher lives in the left group so it sits visually above the
-           AppRail (which starts at `w-14` directly below the header). -->
+           AppRail (which starts directly below the header). -->
       <header class="hidden lg:flex sticky top-0 z-40 bg-(--chrome-bg) border-b border-(--ui-border) py-3 px-4 items-center justify-between gap-4">
         <div class="flex items-center gap-3 min-w-0">
           <component
@@ -141,7 +141,10 @@ watch(() => route.path, () => {
         :ui="{ content: 'w-auto max-w-none' }"
       >
         <template #content>
-          <AppRail class="flex h-full" />
+          <AppRail
+            class="flex h-full"
+            always-expanded
+          />
         </template>
       </USlideover>
 

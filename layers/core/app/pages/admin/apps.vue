@@ -253,6 +253,10 @@ const onRemove = async () => {
           <div class="min-w-0">
             <div class="font-medium flex items-center gap-2">
               {{ app.title }}
+              <span
+                v-if="app.title !== app.id"
+                class="text-xs font-normal text-(--ui-text-dimmed)"
+              >{{ app.id }}</span>
               <UBadge
                 v-if="!app.installed"
                 color="warning"

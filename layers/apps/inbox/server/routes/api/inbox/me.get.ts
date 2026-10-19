@@ -17,7 +17,9 @@ export default defineEventHandler(async (event) => {
       personalFrom: inboxPersonalFromAddress(alias, settings.inboundDomain),
       contactAddress: settings.contactAddress || null,
       brandFromName: settings.brandFromName || null,
-      canManageAliases: ctx.roles.includes('admin')
+      canManageSettings: ctx.perms.has('inbox.settings.manage'),
+      // Note moderation and suppression clearing stay with the org admin role.
+      canModerate: ctx.roles.includes('admin')
     }
   })
 })

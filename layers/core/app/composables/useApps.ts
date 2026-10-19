@@ -12,6 +12,14 @@
 
 import { useActiveOrg } from '#tenant'
 
+export interface RailItemEntry {
+  id: string
+  title: string
+  path: string
+  icon?: string
+  order?: number
+}
+
 export interface AppEntry {
   id: string
   title: string
@@ -21,6 +29,9 @@ export interface AppEntry {
   requiredPermission?: string
   order?: number
   scope?: 'org' | 'user'
+  // Present when the app registers rail items; the rail shows these instead of
+  // the app's own entry.
+  rail?: RailItemEntry[]
 }
 
 interface AppsResponse {

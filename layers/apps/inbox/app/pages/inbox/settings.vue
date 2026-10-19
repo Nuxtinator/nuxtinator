@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Per-org inbox configuration (org-admin only): inbound mail domain, shared
+// Per-org inbox configuration (inbox.settings.manage): inbound mail domain, shared
 // contact address, auto-ack, the auto-close threshold, the contact-form API
 // key, who is emailed about unassigned mail, and the AI grounding source URLs. Values are org-scoped
 // overrides on top of code defaults —
@@ -28,7 +28,7 @@ const saving = ref(false)
 // Textarea-friendly view of the URL list (one per line).
 const urlsText = ref('')
 
-// Sending identities (admin manager): every inbox user with their alias,
+// Sending identities (settings managers): every inbox user with their alias,
 // joined from the assignees list (names) and the identities list (aliases).
 interface IdentityRow {
   userId: string
@@ -164,8 +164,8 @@ function generateApiKey() {
       icon="i-lucide-lock"
       color="warning"
       variant="subtle"
-      title="Admins only"
-      description="Only an organization admin can view or edit inbox settings."
+      title="No access"
+      description="You need the Manage inbox settings permission to view or edit inbox settings."
     />
 
     <template v-else-if="form">

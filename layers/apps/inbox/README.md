@@ -75,9 +75,11 @@ should return 4xx (never 404) — that confirms the route is reachable.
 
 - `inbox.access` — open the app, read, triage (status/assign/review flags)
 - `inbox.send` — compose and reply, spam blocklist
+- `inbox.settings.manage` — the settings page: inbox configuration and
+  teammates' sending aliases
 
 Default grants: `admin` everything, `member` nothing (grant via role or per-user
-grants).
+grants). The `inbox_agent` role has `inbox.access` and `inbox.send`.
 
 ## Local development
 

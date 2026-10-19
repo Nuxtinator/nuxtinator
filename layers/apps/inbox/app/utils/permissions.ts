@@ -4,7 +4,9 @@ export const INBOX_PERMISSIONS = [
   'inbox.access',
   // Compose and reply, plus the mutations that shape what gets sent or
   // received on the org's behalf: spam blocklist, canned responses.
-  'inbox.send'
+  'inbox.send',
+  // The settings page: inbox configuration and teammates' sending aliases.
+  'inbox.settings.manage'
 ] as const
 
 export type InboxPermission = typeof INBOX_PERMISSIONS[number]
@@ -17,6 +19,10 @@ export const INBOX_PERMISSION_META: Record<string, { title: string, description:
   'inbox.send': {
     title: 'Send email',
     description: 'Compose new conversations and reply to contacts; manage the spam blocklist and canned responses.'
+  },
+  'inbox.settings.manage': {
+    title: 'Manage inbox settings',
+    description: 'Configure the inbox (sender name, auto-replies, contact-form key, notifications) and set teammates\' sending aliases.'
   }
 }
 

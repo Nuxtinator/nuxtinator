@@ -1,7 +1,7 @@
 // The caller's own sending identity + the From options the composer offers.
 // Org-keyed (an org switch changes the alias/signature and the contact
 // address). `saveIdentity` PUTs the caller's own row; the alias field is only
-// accepted server-side for admins, mirrored here by `canManageAliases`.
+// accepted server-side from settings managers, mirrored here by `canManageSettings`.
 
 export interface InboxMe {
   userId: string
@@ -11,7 +11,10 @@ export interface InboxMe {
   contactAddress: string | null
   // The org's display name on shared-address sends ("Acme Support").
   brandFromName: string | null
-  canManageAliases: boolean
+  // inbox.settings.manage: the settings page and teammates' aliases.
+  canManageSettings: boolean
+  // Org admin: moderates notes and clears suppressions.
+  canModerate: boolean
 }
 
 export function useInboxMe() {

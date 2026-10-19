@@ -1,6 +1,7 @@
 import { db } from '#core/server/utils/database'
 import { requireAuth } from '#core/server/utils/auth'
 import { getUserEnabledApps, permissionsOfApps } from '#core/server/utils/personal-apps'
+import { railItemsFor } from '#core/server/utils/rail-registry'
 
 // Launcher feed for personal apps (`registerApp({ scope: 'user' })`): the
 // ones turned on for the caller, in both modes and whichever org they're in.
@@ -18,7 +19,8 @@ export default defineEventHandler(async (event) => {
       description: a.description,
       requiredPermission: a.requiredPermission,
       order: a.order,
-      scope: 'user' as const
+      scope: 'user' as const,
+      rail: railItemsFor(a.id, perms)
     }))
   return { apps }
 })

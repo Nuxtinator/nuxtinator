@@ -1,4 +1,7 @@
 <script setup lang="ts">
+// `expanded`: the rail is showing names next to its icons.
+defineProps<{ expanded?: boolean }>()
+
 const { slug } = useActiveOrg()
 const route = useRoute()
 
@@ -22,16 +25,23 @@ const isActive = computed(() => route.path === settingsPath.value || route.path.
   <NuxtLink
     v-if="canSeeSettings"
     :to="settingsPath"
-    class="flex items-center justify-center size-10 rounded-md transition-colors"
-    :class="isActive
-      ? 'bg-(--ui-bg-accented) text-(--ui-text)'
-      : 'text-(--ui-text-muted) hover:bg-(--ui-bg-accented) hover:text-(--ui-text)'"
-    title="Organization settings"
+    class="flex items-center rounded-md transition-colors"
+    :class="[
+      expanded ? 'h-10 w-full gap-3 px-2.5' : 'size-10 justify-center',
+      isActive
+        ? 'bg-(--ui-bg-accented) text-(--ui-text)'
+        : 'text-(--ui-text-muted) hover:bg-(--ui-bg-accented) hover:text-(--ui-text)'
+    ]"
+    :title="expanded ? undefined : 'Organization settings'"
     aria-label="Organization settings"
   >
     <UIcon
       name="i-lucide-settings"
-      class="size-5"
+      class="size-5 shrink-0"
     />
+    <span
+      v-if="expanded"
+      class="truncate text-sm"
+    >Organization settings</span>
   </NuxtLink>
 </template>

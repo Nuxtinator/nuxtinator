@@ -22,7 +22,7 @@ watch(open, (v) => {
 function save() {
   const patch: { alias?: string | null, signature?: string | null } = { signature: signature.value || null }
   // Only send `alias` when the user may manage it — otherwise the server 403s.
-  if (props.me?.canManageAliases) patch.alias = alias.value.trim() || null
+  if (props.me?.canManageSettings) patch.alias = alias.value.trim() || null
   emit('save', patch)
   open.value = false
 }
@@ -33,7 +33,7 @@ function save() {
     <template #body>
       <div class="space-y-3">
         <UFormField
-          v-if="me?.canManageAliases"
+          v-if="me?.canManageSettings"
           label="Alias"
           description="Mail to <alias>@ your inbound domain routes to you, and personal replies send From that address."
         >

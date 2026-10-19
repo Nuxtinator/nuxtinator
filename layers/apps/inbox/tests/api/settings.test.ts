@@ -1,8 +1,9 @@
 // Per-org inbox settings surface: an org admin reads and writes the
 // configuration through /api/inbox/settings, values persist as org-scoped
 // overrides, and a freshly set contact-form API key immediately routes
-// public submissions to the org. Non-admins are refused. Only an operator
-// admin changes the inbound domain and contact address.
+// public submissions to the org. Callers without inbox.settings.manage are
+// refused. Only an operator admin changes the inbound domain and contact
+// address.
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import { randomUUID } from 'node:crypto'
@@ -103,12 +104,19 @@ describe('inbox settings admin', () => {
     expect(moved).toMatchObject({ inboundDomain: `new.${b.domain}`, contactAddress: `help@new.${b.domain}`, mailIdentityEditable: true })
   })
 
-  it('refuses non-admins (403) and malformed values (400)', async () => {
+  it('refuses callers without inbox.settings.manage (403), admits a granted agent, and rejects malformed values (400)', async () => {
     const agent = await createInboxOrgWith(sql, ['inbox_agent'])
     await expect($fetch('/api/inbox/settings', agent.opts)).rejects.toMatchObject({ statusCode: 403 })
     await expect(
       $fetch('/api/inbox/settings', { method: 'PUT', body: { autoAckEnabled: false }, ...agent.opts })
     ).rejects.toMatchObject({ statusCode: 403 })
+
+    await sql`
+      INSERT INTO user_permission_grants (user_id, permission, org_id)
+      VALUES (${agent.user.id}, 'inbox.settings.manage', ${agent.org.id})
+    `
+    const granted = await $fetch<Settings>('/api/inbox/settings', agent.opts)
+    expect(granted.inboundDomain).toBe(agent.domain)
 
     const admin = await createInboxOrgWith(sql)
     await expect(

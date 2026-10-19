@@ -47,10 +47,7 @@ const Body = z.object({
 }).strict()
 
 export default defineEventHandler(async (event) => {
-  return await withOrgPermission(event, { appId: 'inbox' }, 'inbox.access', async (tx, ctx) => {
-    if (!ctx.roles.includes('admin')) {
-      throw createError({ statusCode: 403, statusMessage: 'Only an admin can edit inbox settings' })
-    }
+  return await withOrgPermission(event, { appId: 'inbox' }, 'inbox.settings.manage', async (tx, ctx) => {
     const parsed = Body.safeParse(await readBody(event))
     if (!parsed.success) {
       throw createError({ statusCode: 400, statusMessage: 'Invalid settings', data: parsed.error.flatten() })

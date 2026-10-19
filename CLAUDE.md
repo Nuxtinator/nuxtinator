@@ -185,9 +185,9 @@ The module merges locales and messages across all layers by locale code; the hos
 2. **`extends:`** lists every layer in load order. `core` first (lowest priority — gets overridden by other layers and host); `tenancy` next (multi-mode kernel overrides core's single-mode); then email backend, oauth, mcp, app layers, dev.
 3. **The host has no modules of its own** — `migrations`, `tenant-kernel`, and `email-kernel` modules all live in `layers/core/nuxt.config.ts`.
 
-### The six runtime registries (core owns)
+### The seven runtime registries (core owns)
 
-Every app layer feeds the host through six in-process registries in [layers/core/server/utils/](layers/core/server/utils/) at boot via a Nitro plugin:
+Every app layer feeds the host through seven in-process registries in [layers/core/server/utils/](layers/core/server/utils/) at boot via a Nitro plugin:
 
 | Registry | File | Function |
 |---|---|---|
@@ -196,9 +196,10 @@ Every app layer feeds the host through six in-process registries in [layers/core
 | App static roles | [roles-registry.ts](layers/core/server/utils/roles-registry.ts) | `registerStaticRole(...)` |
 | Launcher tiles | [app-registry.ts](layers/core/server/utils/app-registry.ts) | `registerApp(...)` |
 | In-app nav items | [nav-registry.ts](layers/core/server/utils/nav-registry.ts) | `registerNavItem(...)` |
+| Rail entries | [rail-registry.ts](layers/core/server/utils/rail-registry.ts) | `registerRailItem(...)` |
 | Admin shell sections | [admin-section-registry.ts](layers/core/server/utils/admin-section-registry.ts) | `registerAdminSection(...)` |
 
-The host bridges these to the client via auth-gated, permission-filtered endpoints (`/api/_apps`, `/api/_nav`, `/api/_admin-sections`) consumed by composables (`useApps`, `useAppNav`, `useAdminSections`). Core's own admin sections are registered the same way — see [layers/core/server/plugins/register-host-admin.ts](layers/core/server/plugins/register-host-admin.ts).
+The host bridges these to the client via auth-gated, permission-filtered endpoints (`/api/_apps`, `/api/_nav`, `/api/_admin-sections`) consumed by composables (`useApps`, `useAppNav`, `useAdminSections`). Core's own admin sections are registered the same way — see [layers/core/server/plugins/register-host-admin.ts](layers/core/server/plugins/register-host-admin.ts). Rail items ride along in the app feeds (`rail` on each app entry). A host changes how an installed app is presented with `configureApp(id, { title, icon, order })`, and sets the rail's behaviour under `rail` in its `app.config.ts` (see [documentation/layers.md](documentation/layers.md#the-app-rail)).
 
 ### Permissions: compile-time + runtime
 

@@ -50,15 +50,37 @@ export interface AppEntry {
   permissions?: string[]
 }
 
+// How a host presents an installed app, set with `configureApp` from a host
+// Nitro plugin without editing the app's layer.
+export interface AppPresentation {
+  title?: string
+  icon?: string
+  order?: number
+}
+
 const _apps = new Map<string, AppEntry>()
+const _presentation = new Map<string, AppPresentation>()
 
 export function registerApp(entry: AppEntry): void {
   if (!entry || typeof entry.id !== 'string' || entry.id.length === 0) return
   _apps.set(entry.id, entry)
 }
 
+// Applied whenever the registry is read, so it works whether the host's plugin
+// runs before or after the layer's `registerApp`.
+export function configureApp(id: string, presentation: AppPresentation): void {
+  if (typeof id !== 'string' || id.length === 0) return
+  const defined = Object.fromEntries(Object.entries(presentation).filter(([, v]) => v !== undefined))
+  _presentation.set(id, { ..._presentation.get(id), ...defined })
+}
+
+function presented(entry: AppEntry): AppEntry {
+  const p = _presentation.get(entry.id)
+  return p ? { ...entry, ...p } : entry
+}
+
 export function getRegisteredApps(): AppEntry[] {
-  return [..._apps.values()].sort((a, b) => {
+  return [..._apps.values()].map(presented).sort((a, b) => {
     const ao = a.order ?? 100
     const bo = b.order ?? 100
     if (ao !== bo) return ao - bo
@@ -67,7 +89,8 @@ export function getRegisteredApps(): AppEntry[] {
 }
 
 export function getRegisteredApp(id: string): AppEntry | null {
-  return _apps.get(id) ?? null
+  const entry = _apps.get(id)
+  return entry ? presented(entry) : null
 }
 
 // Permissions owned by personal apps. Roles never grant these: a user holds
@@ -85,4 +108,5 @@ export function __resetAppRegistryForTests(): void {
     throw new Error('__resetAppRegistryForTests is not callable in production')
   }
   _apps.clear()
+  _presentation.clear()
 }

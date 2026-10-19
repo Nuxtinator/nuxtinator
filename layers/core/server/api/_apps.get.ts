@@ -1,5 +1,6 @@
 import { withOrgContext } from '#tenant/server'
 import { getApps } from '#core/server/utils/app-settings'
+import { railItemsFor } from '#core/server/utils/rail-registry'
 
 // Host-level app launcher feed for single-tenant deploys. (Multi-tenant mode
 // uses the org-scoped `/api/o/:slug/_apps` from the tenancy layer; this endpoint
@@ -20,7 +21,8 @@ export default defineEventHandler(async (event) => {
         icon: a.icon,
         description: a.description,
         requiredPermission: a.requiredPermission,
-        order: a.order
+        order: a.order,
+        rail: railItemsFor(a.id, ctx.perms)
       }))
 
     return { apps }

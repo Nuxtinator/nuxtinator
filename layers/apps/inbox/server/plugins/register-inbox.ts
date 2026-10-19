@@ -40,7 +40,7 @@ export default defineNitroPlugin(() => {
     key: 'inbox_agent',
     name: 'Inbox Agent',
     description: 'Handles the shared email inbox — read, triage, compose, and reply.',
-    permissions: [...INBOX_PERMISSIONS],
+    permissions: ['inbox.access', 'inbox.send'],
     source: 'inbox'
   })
 
@@ -141,15 +141,12 @@ export default defineNitroPlugin(() => {
     requiredPermission: 'inbox.access',
     order: 10
   })
-  // Nav filtering is permission-based only; the settings endpoints add the
-  // org-admin role gate on top, and the page shows an admin-required notice
-  // to senders who aren't admins.
   registerNavItem({
     appId: 'inbox',
     title: 'Settings',
     path: '/inbox/settings',
     icon: 'i-lucide-settings',
-    requiredPermission: 'inbox.send',
+    requiredPermission: 'inbox.settings.manage',
     order: 90
   })
 })

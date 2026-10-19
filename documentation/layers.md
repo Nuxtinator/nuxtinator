@@ -25,7 +25,7 @@ Edit any layer's source directly here. Port-back to `nuxt-blueprints` is documen
 
 ## What the host owns
 
-The host shell stays thin. App layers feed it through **six in-process registries** in [server/utils/](../layers/core/server/utils/):
+The host shell stays thin. App layers feed it through **seven in-process registries** in [server/utils/](../layers/core/server/utils/):
 
 | Registry | File | What you call |
 |---|---|---|
@@ -34,9 +34,41 @@ The host shell stays thin. App layers feed it through **six in-process registrie
 | App static roles | [roles-registry.ts](../layers/core/server/utils/roles-registry.ts) | `registerStaticRole({ key, name, description, permissions, source })` |
 | App entries (launcher tiles) | [app-registry.ts](../layers/core/server/utils/app-registry.ts) | `registerApp({ id, title, path, icon, requiredPermission, order })` |
 | In-app nav items | [nav-registry.ts](../layers/core/server/utils/nav-registry.ts) | `registerNavItem({ appId, title, path, icon, requiredPermission, order })` |
+| Rail entries | [rail-registry.ts](../layers/core/server/utils/rail-registry.ts) | `registerRailItem({ appId, id, title, path, icon, requiredPermission, order })` |
 | Admin shell sections | [admin-section-registry.ts](../layers/core/server/utils/admin-section-registry.ts) | `registerAdminSection({ appId, title, path, icon, requiredPermission, order })` |
 
 Layers feed these at boot from a Nitro plugin. The host bridges each registry to the client via auth-gated, permission-filtered endpoints (`/api/_apps`, `/api/_nav`, `/api/_admin-sections`) consumed by composables (`useApps`, `useAppNav`, `useAdminSections`).
+
+### The app rail
+
+The rail on the left of every page lists one entry per app by default. An app that registers rail items shows those instead, so one app can contribute several entries. Each item shows while its app is on for the org and the user holds `requiredPermission`; paths take the single-tenant form or `/@:orgSlug/...`. Items and apps sort together on one `order` scale. The app's unread badge goes on its item at the app's own path, else on its first item.
+
+```ts
+// host server/plugins/rail.ts
+import { registerRailItem } from '#core/server/utils/rail-registry'
+import { configureApp } from '#core/server/utils/app-registry'
+
+export default defineNitroPlugin(() => {
+  registerRailItem({ appId: 'pt', id: 'dashboard', title: 'Dashboard', path: '/pt', icon: 'i-lucide-layout-dashboard', order: 10 })
+  registerRailItem({ appId: 'pt', id: 'campaigns', title: 'Campaigns', path: '/pt/campaigns', icon: 'i-lucide-flag', order: 20, requiredPermission: 'pt.campaigns.read' })
+  // Relabel, re-icon and move an installed app without editing its layer.
+  configureApp('crm', { title: 'Intercessors', icon: 'i-lucide-users', order: 45 })
+})
+```
+
+`configureApp` applies wherever the app appears (rail, launcher, `/admin/apps`, MCP), whichever plugin runs first.
+
+The rail shows icons only, with a toggle at the bottom that shows names next to them. Each browser remembers its choice; the mobile drawer always shows names. A host sets the rest in its `app.config.ts`:
+
+```ts
+export default defineAppConfig({
+  rail: {
+    expanded: true,     // start with names shown (default false)
+    launcher: false,    // hide the "All apps" link (default true)
+    orgSettings: false  // hide tenancy's organization settings link (default true)
+  }
+})
+```
 
 The host itself ships **no** permissions or roles — operator-admin is the `users.is_admin` boolean (no slug), checked via `requireOperatorAdmin(event)` from [tenant-kernel/server.ts](../layers/core/tenant-kernel/server.ts).
 
