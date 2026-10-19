@@ -5,6 +5,17 @@ const chromeOrg = useChromeOrgSlug()
 const route = useRoute()
 const open = ref(false)
 
+// Hosts that call their orgs something else set `orgSwitcher` in app config:
+// `{ title?, choose?, empty?, newLabel? }`. `newLabel` adds a link to /orgs/new.
+// No app-config default here: it would outrank app layers extended after tenancy.
+const appConfig = useAppConfig() as { orgSwitcher?: { title?: string, choose?: string, empty?: string, newLabel?: string } }
+const labels = computed(() => ({
+  title: appConfig.orgSwitcher?.title ?? 'Organizations',
+  choose: appConfig.orgSwitcher?.choose ?? 'Choose organization',
+  empty: appConfig.orgSwitcher?.empty ?? 'You don\'t belong to any organizations yet.',
+  newLabel: appConfig.orgSwitcher?.newLabel ?? null
+}))
+
 const activeOrg = computed(() => orgs.value.find(o => o.slug === (slug.value ?? chromeOrg.value)) ?? null)
 
 // When the user is on `/@<current>/<section>/...`, switching to another org
@@ -34,10 +45,10 @@ function pathForOrg(targetSlug: string): string {
       color="neutral"
       size="sm"
       class="max-w-[12rem]"
-      :aria-label="activeOrg ? `Active organization: ${activeOrg.name}` : 'Choose organization'"
+      :aria-label="activeOrg ? activeOrg.name : labels.choose"
     >
       <span class="truncate text-sm">
-        {{ activeOrg?.name || 'Choose organization' }}
+        {{ activeOrg?.name || labels.choose }}
       </span>
       <UIcon
         name="i-lucide-chevron-down"
@@ -48,7 +59,7 @@ function pathForOrg(targetSlug: string): string {
     <template #content>
       <div class="p-3">
         <p class="text-xs font-semibold uppercase tracking-wider text-(--ui-text-muted) px-1 pb-2">
-          Organizations
+          {{ labels.title }}
         </p>
 
         <div
@@ -62,7 +73,7 @@ function pathForOrg(targetSlug: string): string {
           v-else-if="orgs.length === 0"
           class="px-2 py-6 text-center text-sm text-(--ui-text-muted)"
         >
-          You don't belong to any organizations yet.
+          {{ labels.empty }}
         </div>
 
         <ul
@@ -100,6 +111,19 @@ function pathForOrg(targetSlug: string): string {
             </NuxtLink>
           </li>
         </ul>
+
+        <NuxtLink
+          v-if="labels.newLabel"
+          to="/orgs/new"
+          class="mt-2 flex items-center gap-2 rounded-md px-2 py-2 text-sm text-(--ui-text-muted) hover:bg-(--ui-bg-accented) hover:text-(--ui-text) transition-colors"
+          @click="open = false"
+        >
+          <UIcon
+            name="i-lucide-plus"
+            class="size-4"
+          />
+          {{ labels.newLabel }}
+        </NuxtLink>
       </div>
     </template>
   </UPopover>
