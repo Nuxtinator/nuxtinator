@@ -199,7 +199,7 @@ Every app layer feeds the host through seven in-process registries in [layers/co
 | Rail entries | [rail-registry.ts](layers/core/server/utils/rail-registry.ts) | `registerRailItem(...)` |
 | Admin shell sections | [admin-section-registry.ts](layers/core/server/utils/admin-section-registry.ts) | `registerAdminSection(...)` |
 
-The host bridges these to the client via auth-gated, permission-filtered endpoints (`/api/_apps`, `/api/_nav`, `/api/_admin-sections`) consumed by composables (`useApps`, `useAppNav`, `useAdminSections`). Core's own admin sections are registered the same way — see [layers/core/server/plugins/register-host-admin.ts](layers/core/server/plugins/register-host-admin.ts). Rail items ride along in the app feeds (`rail` on each app entry). A host changes how an installed app is presented with `configureApp(id, { title, icon, order })`, and sets the rail's behaviour under `rail` in its `app.config.ts` (see [documentation/layers.md](documentation/layers.md#the-app-rail)).
+The host bridges these to the client via auth-gated, permission-filtered endpoints (`/api/_apps`, `/api/_nav`, `/api/_admin-sections`) consumed by composables (`useApps`, `useAppNav`, `useAdminSections`). Core's own admin sections are registered the same way — see [layers/core/server/plugins/register-host-admin.ts](layers/core/server/plugins/register-host-admin.ts). Rail items ride along in the app feeds (`rail` on each app entry). A host changes how an installed app is presented with `configureApp(id, { title, icon, order, defaultStatus })`, and sets the rail's behaviour under `rail` in its `app.config.ts` (see [documentation/layers.md](documentation/layers.md#the-app-rail)).
 
 ### Permissions: compile-time + runtime
 

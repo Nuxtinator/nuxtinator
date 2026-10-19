@@ -51,11 +51,13 @@ export interface AppEntry {
 }
 
 // How a host presents an installed app, set with `configureApp` from a host
-// Nitro plugin without editing the app's layer.
+// Nitro plugin without editing the app's layer. `defaultStatus` replaces the
+// layer's registry default (still below a host admin's `apps.status`).
 export interface AppPresentation {
   title?: string
   icon?: string
   order?: number
+  defaultStatus?: AppEntry['defaultStatus']
 }
 
 const _apps = new Map<string, AppEntry>()

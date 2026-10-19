@@ -56,7 +56,7 @@ export default defineNitroPlugin(() => {
 })
 ```
 
-`configureApp` applies wherever the app appears (rail, launcher, `/admin/apps`, MCP), whichever plugin runs first.
+`configureApp` applies wherever the app appears (rail, launcher, `/admin/apps`, MCP), whichever plugin runs first. It also takes `defaultStatus`, which replaces the layer's registry default (a host admin's choice on `/admin/apps` still wins), so a host decides in code which installed apps are on by default.
 
 The rail shows icons only, with a toggle at the bottom that shows names next to them. Each browser remembers its choice; the mobile drawer always shows names. A host sets the rest in its `app.config.ts`:
 
