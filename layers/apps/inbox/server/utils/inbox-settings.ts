@@ -3,6 +3,7 @@
 // register-inbox.ts with runtimeConfig-derived defaults; the DB holds only
 // explicit per-org overrides, and RLS scopes reads to the caller's org
 // through the transaction.
+import { sql } from 'kysely'
 import { getSetting } from '#core/server/utils/settings-store'
 import { urlLooksPublic } from '#core/server/utils/safe-fetch'
 import type { DbClient } from '#core/server/utils/settings'
@@ -70,6 +71,8 @@ export interface InboxSettings {
   // webhook's org routing. One distinct (sub)domain per org.
   inboundDomain: string
   // Shared From identity and the base of contact+<token> reply addresses.
+  // Under slug addresses, <org slug>@<shared domain> for an org on the shared
+  // domain.
   contactAddress: string
   // Display name on shared-address sends and courtesy mail ("Acme Support").
   // Personal-alias sends carry the agent's own name instead.
@@ -103,9 +106,12 @@ export async function getInboxSettings(tx: DbClient): Promise<InboxSettings> {
     getSetting<string[]>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_NOTIFY_USER_IDS),
     getSetting<number>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_AUTO_CLOSE_DAYS)
   ])
+  const domain = String(inboundDomain || '').toLowerCase()
+  let contact = String(contactAddress || '').toLowerCase()
+  if (!contact) contact = await inboxSlugAddressFor(tx, domain)
   return {
-    inboundDomain: String(inboundDomain || '').toLowerCase(),
-    contactAddress: String(contactAddress || '').toLowerCase(),
+    inboundDomain: domain,
+    contactAddress: contact,
     brandFromName: String(brandFromName || '').trim(),
     autoAckEnabled: autoAckEnabled !== false,
     contactFormApiKey: String(contactFormApiKey || ''),
@@ -113,4 +119,33 @@ export async function getInboxSettings(tx: DbClient): Promise<InboxSettings> {
     notifyUserIds: sanitizeInboxNotifyUserIds(notifyUserIds),
     autoCloseDays: sanitizeAutoCloseDays(autoCloseDays)
   }
+}
+
+// Slug addresses: every org may share INBOX_DOMAIN, where the local part is the
+// org slug. Orgs only exist with the tenancy layer, so it needs multi mode.
+export function inboxSlugAddressesEnabled(): boolean {
+  try {
+    const config = useRuntimeConfig()
+    return !!config.inboxSlugAddresses && !!config.public.tenancy
+  } catch {
+    return false
+  }
+}
+
+// The domain every org shares under slug addresses; '' when they are off.
+export function inboxSharedDomain(): string {
+  if (!inboxSlugAddressesEnabled()) return ''
+  return String(useRuntimeConfig().inboxDomain || '').toLowerCase()
+}
+
+// <slug>@<shared domain> for the org bound to `tx` when `inboundDomain` is the
+// shared domain; '' otherwise. Derived on every read, so it follows renames.
+export async function inboxSlugAddressFor(tx: DbClient, inboundDomain: string): Promise<string> {
+  const shared = inboxSharedDomain()
+  if (!shared || inboundDomain !== shared) return ''
+  const res = await sql<{ slug: string }>`
+    select slug from orgs where id = nullif(current_setting('app.current_org', true), '')::uuid
+  `.execute(tx)
+  const slug = res.rows[0]?.slug
+  return slug ? `${slug}@${shared}` : ''
 }

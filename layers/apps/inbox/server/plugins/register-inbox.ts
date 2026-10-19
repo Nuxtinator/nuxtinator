@@ -19,7 +19,8 @@ import {
   INBOX_AUTO_CLOSE_DAYS_DEFAULT,
   sanitizeGroundingUrls,
   sanitizeInboxNotifyUserIds,
-  sanitizeAutoCloseDays
+  sanitizeAutoCloseDays,
+  inboxSlugAddressesEnabled
 } from '../utils/inbox-settings'
 import { INBOX_SETTING_TAGS, sanitizeTagPalette, type InboxTag } from '../utils/inbox-tags'
 import { INBOX_AI_DRAFT_FEATURE } from '../utils/inbox-ai-draft'
@@ -55,7 +56,8 @@ export default defineNitroPlugin(() => {
   registerSetting<string>({
     namespace: INBOX_SETTINGS_NAMESPACE,
     key: INBOX_SETTING_CONTACT_ADDRESS,
-    default: String(config.inboxContactAddress || '').toLowerCase(),
+    // Empty under slug addresses: getInboxSettings derives the org's address.
+    default: inboxSlugAddressesEnabled() ? '' : String(config.inboxContactAddress || '').toLowerCase(),
     parse: v => String(v ?? '').trim().toLowerCase(),
     label: 'Shared contact address'
   })

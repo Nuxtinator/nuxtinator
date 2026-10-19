@@ -13,8 +13,8 @@ export default defineEventHandler(async (event) => {
       alias,
       signature: identity?.signature ?? null,
       // Personal From only exists once an alias is set AND the org has an
-      // inbound domain configured to host it.
-      personalFrom: alias && settings.inboundDomain ? `${alias}@${settings.inboundDomain}` : null,
+      // inbound domain other than the shared slug-address domain to host it.
+      personalFrom: inboxPersonalFromAddress(alias, settings.inboundDomain),
       contactAddress: settings.contactAddress || null,
       brandFromName: settings.brandFromName || null,
       canManageAliases: ctx.roles.includes('admin')

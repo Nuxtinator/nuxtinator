@@ -26,6 +26,7 @@ export * from '@nuxtinator/tenancy/test-helpers'
 export { waitForMailTo, clearMailhog } from '../../../../core/tests/helpers/mailhog'
 
 export const INBOX_TEST_SIGNING_KEY = 'test-inbox-signing-key'
+export const INBOX_TEST_SHARED_DOMAIN = 'test-inbox-shared.test'
 
 export async function createInboxUser(
   sql: ReturnType<typeof postgres>,

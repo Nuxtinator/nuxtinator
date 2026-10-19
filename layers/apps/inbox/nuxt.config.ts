@@ -47,6 +47,9 @@ export default defineNuxtConfig({
     // Shared/system From identity and the base of contact+<token> reply
     // addresses, e.g. "contact@example.com".
     inboxContactAddress: process.env.INBOX_CONTACT_ADDRESS || '',
+    // Multi-tenant only: orgs on INBOX_DOMAIN get <org slug>@INBOX_DOMAIN as
+    // their contact address, and new mail to it routes by slug.
+    inboxSlugAddresses: process.env.INBOX_SLUG_ADDRESSES === 'true',
     // Send-sweep cadence in seconds. Tests lower it to make queued sends
     // observable quickly.
     inboxSendSweepSeconds: process.env.INBOX_SEND_SWEEP_SECONDS || '20',

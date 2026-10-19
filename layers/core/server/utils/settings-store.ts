@@ -89,6 +89,21 @@ export async function setSetting(
   await writeSetting(tx, 'core_settings', namespace, key, value)
 }
 
+// Drops the override (the active org's, in multi mode) so reads fall back to
+// the declared default.
+export async function clearSetting(
+  tx: DbClient,
+  namespace: string,
+  key: string
+): Promise<void> {
+  requireSetting(namespace, key)
+  await tx
+    .deleteFrom('core_settings')
+    .where('namespace', '=', namespace)
+    .where('key', '=', key)
+    .execute()
+}
+
 // Host-level counterpart of `setSetting`: persists a deployment-global override.
 export async function setHostSetting(
   tx: DbClient,

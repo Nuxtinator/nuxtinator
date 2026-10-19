@@ -4,6 +4,7 @@
 // org; the same alias can legitimately exist in two orgs.
 import type { Selectable, Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
+import { inboxSharedDomain } from './inbox-settings'
 
 type Tx = Transaction<Database>
 
@@ -30,9 +31,16 @@ export function inboxNormalizeAlias(raw: string): string {
   return alias
 }
 
+// An alias's personal From address: null without an alias or inbound domain,
+// and on the shared slug-address domain, where local parts are org slugs.
+export function inboxPersonalFromAddress(alias: string | null, inboundDomain: string): string | null {
+  if (!alias || !inboundDomain || inboundDomain === inboxSharedDomain()) return null
+  return `${alias}@${inboundDomain}`
+}
+
 // Resolve a user's personal From address + signature for an outbound send.
-// `personalFrom` is null when the user has no alias (or the org has no inbound
-// domain) — the caller then falls back to the shared contact address.
+// `personalFrom` is null when inboxPersonalFromAddress gives none — the caller
+// then falls back to the shared contact address.
 export async function inboxResolvePersonalIdentity(
   tx: Tx,
   userId: string,
@@ -41,7 +49,7 @@ export async function inboxResolvePersonalIdentity(
   const identity = await inboxGetIdentity(tx, userId)
   const alias = identity?.alias ?? null
   return {
-    personalFrom: alias && settings.inboundDomain ? `${alias}@${settings.inboundDomain}` : null,
+    personalFrom: inboxPersonalFromAddress(alias, settings.inboundDomain),
     signature: identity?.signature ?? null
   }
 }

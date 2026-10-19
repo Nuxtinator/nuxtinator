@@ -40,6 +40,7 @@ in production and Mailpit (`localhost:1025`, UI on `:8025`) in development.
 | `MAILGUN_WEBHOOK_SIGNING_KEY` | prod | Webhook HMAC verification — the **HTTP webhook signing key** (Settings → API Keys), NOT the sending key |
 | `INBOX_DOMAIN` | yes | Domain inbound mail is addressed to (single-tenant default; per-org override via settings) |
 | `INBOX_CONTACT_ADDRESS` | yes | Shared From identity + base of `contact+<token>` reply addresses |
+| `INBOX_SLUG_ADDRESSES` | no | `true` in multi-tenant deploys where orgs share `INBOX_DOMAIN`: an org on it gets `<org slug>@INBOX_DOMAIN` as its contact address (derived, never stored) and new mail to it routes by slug. Personal aliases are off on the shared domain; an operator can still give an org its own domain |
 | `INBOX_SEND_SWEEP_SECONDS` | no | Send sweep cadence (default 20) |
 | `INBOX_AUTO_CLOSE_CRON` | no | UTC cron for the nightly auto-close sweep (default `0 4 * * *`); the per-org quiet threshold is an inbox setting |
 | `NUXT_PUBLIC_SITE_URL` | yes | Canonical origin for links in mail (the auto-ack's confirmation link is dropped when unset) |
@@ -47,7 +48,8 @@ in production and Mailpit (`localhost:1025`, UI on `:8025`) in development.
 Multi-tenant: each org claims its own inbound (sub)domain via the settings store
 (namespace `inbox`, keys `inbound_domain` / `contact_address` / `auto_ack_enabled` /
 `auto_close_days`).
-Two orgs must never claim the same domain — such mail is unroutable and dropped.
+Two orgs must never claim the same domain — such mail is unroutable and dropped,
+except the shared domain under `INBOX_SLUG_ADDRESSES`, which routes by slug.
 
 ## Mailgun setup (per environment)
 

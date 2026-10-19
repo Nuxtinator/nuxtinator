@@ -13,7 +13,8 @@ import {
   cleanupTenancyTestData,
   cleanupCoreTestData,
   clearMailhog,
-  INBOX_TEST_SIGNING_KEY
+  INBOX_TEST_SIGNING_KEY,
+  INBOX_TEST_SHARED_DOMAIN
 } from './helpers'
 
 const HOST_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../dev')
@@ -51,10 +52,12 @@ export async function setup() {
   process.env.NODE_ENV = 'development'
   process.env.MAILGUN_WEBHOOK_SIGNING_KEY = INBOX_TEST_SIGNING_KEY
   process.env.INBOX_SEND_SWEEP_SECONDS = '2'
-  // No env-level inbound domain in tests — each test org claims its own via
-  // a core_settings override, keeping org routing assertions deterministic.
-  process.env.INBOX_DOMAIN = ''
+  // Each test org claims its own inbound domain via a core_settings override,
+  // keeping org routing assertions deterministic. INBOX_DOMAIN is the shared
+  // slug-address domain, which only orgs without that override sit on.
+  process.env.INBOX_DOMAIN = INBOX_TEST_SHARED_DOMAIN
   process.env.INBOX_CONTACT_ADDRESS = ''
+  process.env.INBOX_SLUG_ADDRESSES = 'true'
 
   await hooks.beforeAll()
   exposeContextToEnv()
