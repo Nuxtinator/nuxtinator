@@ -32,6 +32,7 @@ Cut a version release for a single nuxtinator layer. A "release" = bump the laye
 3. **Pre-flight (a tag must point at pushed code containing this version).**
    - Confirm the repo root has `scripts/release.ts`.
    - `git fetch` and check the branch isn't behind/ahead of origin in a way that matters — the tag will point at `HEAD`, and `HEAD` must be pushed for the tag to be useful to consumers.
+   - **Requirements.** If the layer now uses something new from another layer (a core util, a composable), its `package.json` `nuxtinator.requires` entry for that layer must name the minimum version that has it — raise it before releasing. Every monorepo layer named there needs a pushed tag in range; the script refuses otherwise ("release them first"), so release those layers first, then this one.
    - If the layer has **uncommitted changes**, surface them and confirm intent before tagging — you don't want to tag a version whose code isn't in the commit the tag points at. Offer to let the user commit first (don't commit on their behalf unless they say so).
 
 4. **Cut it.** From the repo root:

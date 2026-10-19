@@ -27,6 +27,12 @@
     "@nuxtinator/inbox": "*",
     "@nuxtinator/tenancy": "*"
   },
+  "nuxtinator": {
+    "requires": {
+      "@nuxtinator/ai": "*",
+      "@nuxtinator/context": "*"
+    }
+  },
   "peerDependencies": {
     "h3": "^1.0.0",
     "kysely": "^0.28.0",

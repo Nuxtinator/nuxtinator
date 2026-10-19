@@ -86,12 +86,13 @@ const allAutoUpdating = computed(() => rows.value.length > 0 && rows.value.every
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <UBadge
-              v-if="!r.compatible"
+              v-for="u in r.unmet"
+              :key="u.pkg"
               color="error"
               variant="subtle"
-              :title="`This layer declares it needs @nuxtinator/core ${r.requiredCore}`"
+              :title="`This layer declares it needs ${u.pkg} ${u.range} (${u.loaded === null ? 'not installed' : `installed: ${u.loaded}`})`"
             >
-              Needs core {{ r.requiredCore }}
+              Needs {{ u.pkg.replace('@nuxtinator/', '') }} {{ u.range }}
             </UBadge>
             <div class="text-right">
               <UBadge

@@ -9,7 +9,7 @@ export interface LayerUpdate {
   updateAvailable: boolean
   majorHeld: boolean
   compatible: boolean
-  requiredCore: string | null
+  unmet: { pkg: string, range: string, loaded: string | null }[]
 }
 
 interface LayerUpdatesResponse {
