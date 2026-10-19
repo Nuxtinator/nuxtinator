@@ -169,11 +169,13 @@ Gates 2 and 3 reference the same string but check different surfaces. A user dem
 
 `tools/list` filters by gate 2 and by the union of the user's permissions across every org they belong to (`getUserPermissionsAcrossOrgs`), so the model only sees tools it can call somewhere; the per-org check is gate 3 at call time. When the request selects an org (`X-Active-Org`, or the user's only membership), tools whose `appId` is off in that org are hidden too; with no org selected they stay listed and gate 4 decides per call. `resources/list` and `resources/read` apply the same `appId` check against the request's org.
 
-Set `appId` on every tool that reads or writes an org-scoped app's data. Leave it off tools that work across orgs, such as the context layer's `list_orgs`, and off tools of personal (`scope: 'user'`) apps, which are never on per org.
+Set `appId` on every tool that reads or writes an org-scoped app's data. Leave it off tools that work across orgs, such as the tenancy layer's `list_orgs`, and off tools of personal (`scope: 'user'`) apps, which are never on per org.
+
+A tool may omit `scope` when it is read-only and safe for any valid bearer, such as `list_orgs` listing the bearer's own memberships. Gates 2 and 3 are skipped for it, it is listed for every token, it registers no OAuth scope, and it counts against the read rate-limit buckets.
 
 ## Org selection in multi-tenant mode
 
-When the tenancy layer is loaded, every tool that touches org-scoped data accepts an optional `org` input: the slug of the org to operate in (the context layer's `list_orgs` returns the bearer's memberships). Without it the tool falls back to the request's `X-Active-Org` header, so a client pinned to one org through a fixed header keeps working. Either way the tool runs inside `runInOrgTransaction(event, { org, userId }, ...)` from `#tenant/server`, which rejects an org the bearer's user is not a member of (404, indistinguishable from a non-existent org), a suspended org (423), and a call that names no org at all (400).
+When the tenancy layer is loaded, every tool that touches org-scoped data accepts an optional `org` input: the slug of the org to operate in (the tenancy layer's `list_orgs` returns the bearer's memberships, each with the MCP apps switched on there; the tenancy layer registers it only when the MCP layer is loaded). Without it the tool falls back to the request's `X-Active-Org` header, so a client pinned to one org through a fixed header keeps working. Either way the tool runs inside `runInOrgTransaction(event, { org, userId }, ...)` from `#tenant/server`, which rejects an org the bearer's user is not a member of (404, indistinguishable from a non-existent org), a suspended org (423), and a call that names no org at all (400).
 
 A tool opts in by adding an `org` field to its Zod input and passing `{ org: input.org, userId: ctx.auth.userId }` as the second argument; the single-mode kernel accepts the option and ignores it.
 

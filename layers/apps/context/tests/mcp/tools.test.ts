@@ -1,4 +1,4 @@
-// MCP tool registry smoke test — confirms the 16 tools are declared with
+// MCP tool registry smoke test — confirms the 15 tools are declared with
 // the right scopes and that `update_section`'s optional optimistic-lock
 // field is intact. The write tools are driven end to end over /mcp in
 // write-tools.test.ts; auth / scope gating / rate limits are covered by the
@@ -10,10 +10,9 @@ import { fileURLToPath } from 'node:url'
 const TOOLS_FILE = fileURLToPath(new URL('../../server/mcp/context-tools.ts', import.meta.url))
 
 describe('context MCP tools file', () => {
-  it('declares the 16 expected tool names', async () => {
+  it('declares the 15 expected tool names', async () => {
     const src = await fs.readFile(TOOLS_FILE, 'utf8')
     const expected = [
-      'list_orgs',
       'list_portfolios',
       'list_sections',
       'read_section',
@@ -35,10 +34,10 @@ describe('context MCP tools file', () => {
     }
   })
 
-  it('assigns context.read to all eight read tools', async () => {
+  it('assigns context.read to all seven read tools', async () => {
     const src = await fs.readFile(TOOLS_FILE, 'utf8')
     const readMatches = src.match(/scope:\s*'context\.read'/g) ?? []
-    expect(readMatches.length).toBe(8)
+    expect(readMatches.length).toBe(7)
   })
 
   it('assigns context.write to the update tools and the suggestion write tools', async () => {
@@ -61,7 +60,7 @@ describe('context MCP tools file', () => {
     expect(destructive.length).toBe(1)
   })
 
-  it('every tool except list_orgs declares the optional org input', async () => {
+  it('every tool declares the optional org input', async () => {
     const src = await fs.readFile(TOOLS_FILE, 'utf8')
     const orgInputs = src.match(/\borg: orgInput\b/g) ?? []
     expect(orgInputs.length).toBe(15)

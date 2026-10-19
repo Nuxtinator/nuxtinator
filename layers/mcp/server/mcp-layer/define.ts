@@ -44,7 +44,9 @@ export interface McpToolDef<I = unknown, O = unknown> {
   // tool `title`.
   title?: string
   description: string
-  scope: Permission
+  // Omitted only on read-only tools any valid bearer may call (e.g. listing
+  // the bearer's own orgs): no token-scope or RBAC check, read rate bucket.
+  scope?: Permission
   destructive?: boolean
   input: ZodSchema<I>
   output?: ZodSchema<O>
