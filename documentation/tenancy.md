@@ -102,6 +102,22 @@ Layer migrations use the `enableTenantScoping(db, table)` helper from `#tenant/s
 
 ---
 
+## Visiting several orgs
+
+A transaction sees exactly one org. Work that covers several orgs visits each in turn, with that org's GUC set, using helpers from `#tenant/server`:
+
+- `listUserOrgs(userId, { permission?, appId?, orgIds? })` — the user's orgs (suspended excluded) with their effective permission set in each, narrowed by permission, enabled app or an explicit selection. Reads no tenant data.
+- `listOrgScopes({ activeOnly?, appId? })` — the org ids a session-less job visits: active ones only, and only where the app is on. Single mode returns `[null]`.
+- `withOrgScope(orgId, fn)` — a transaction scoped to one org (`null`: a plain transaction in single mode).
+
+```ts
+for (const orgId of await listOrgScopes({ activeOnly: true, appId: 'inbox' })) {
+  await withOrgScope(orgId, tx => sweep(tx))
+}
+```
+
+---
+
 ## URL shape
 
 Multi-mode page URLs use an `@`-prefix for the org slug:

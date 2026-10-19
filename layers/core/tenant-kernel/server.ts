@@ -183,6 +183,42 @@ export async function getEnabledAppsForRequest(
   return null
 }
 
+export interface UserOrg {
+  id: string
+  slug: string
+  name: string
+  perms: Set<Permission>
+}
+
+export interface UserOrgsFilter {
+  permission?: Permission
+  appId?: string
+  orgIds?: string[]
+}
+
+// The user's orgs. Single mode has none.
+export async function listUserOrgs(_userId: string, _filter: UserOrgsFilter = {}): Promise<UserOrg[]> {
+  return []
+}
+
+export interface OrgScopesFilter {
+  activeOnly?: boolean
+  appId?: string
+}
+
+// The org scopes a session-less job visits: one, with no org, in single mode.
+export async function listOrgScopes(_filter: OrgScopesFilter = {}): Promise<(string | null)[]> {
+  return [null]
+}
+
+// Runs `fn` in a transaction. The multi-mode kernel also sets the org GUC.
+export async function withOrgScope<T>(
+  _orgId: string | null,
+  fn: (tx: Transaction<Database>) => Promise<T>
+): Promise<T> {
+  return await runTransaction(db, fn)
+}
+
 // Operator-admin gate. Same in single and multi modes — the bit on the user
 // row is the source of truth. Tenancy layer adds BYPASSRLS DB-role plumbing
 // on top for endpoints that need to read across orgs.
