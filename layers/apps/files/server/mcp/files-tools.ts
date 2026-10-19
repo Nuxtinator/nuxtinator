@@ -95,6 +95,7 @@ export const listFilesTool = defineMcpTool({
   title: 'List Files',
   description: 'List documents, sites, and uploaded files in the active org, newest first. '
     + 'Shared items include share_url, and shared files a raw_url (both null when unshared).',
+  appId: 'files',
   scope: 'files.read',
   input: z.object({
     org: orgInput,
@@ -138,6 +139,7 @@ export const readDocTool = defineMcpTool({
   name: 'files_read_doc',
   title: 'Read Document',
   description: 'Read a single document, returning its markdown body.',
+  appId: 'files',
   scope: 'files.read',
   input: z.object({ org: orgInput, id: z.string().uuid() }).strict(),
   handler: async (input, ctx) => {
@@ -161,6 +163,7 @@ export const readSiteTool = defineMcpTool({
   name: 'files_read_site',
   title: 'Read Site',
   description: 'Read a single site, returning its self-contained HTML and public share URL (null when not shared).',
+  appId: 'files',
   scope: 'files.read',
   input: z.object({ org: orgInput, id: z.string().uuid() }).strict(),
   handler: async (input, ctx) => {
@@ -187,6 +190,7 @@ export const createDocTool = defineMcpTool({
   name: 'files_create_doc',
   title: 'Create Document',
   description: 'Create a new markdown document in the active org.',
+  appId: 'files',
   scope: 'files.write',
   input: z.object({
     org: orgInput,
@@ -236,6 +240,7 @@ export const updateDocTool = defineMcpTool({
   name: 'files_update_doc',
   title: 'Update Document',
   description: 'Update a document\'s title and/or markdown body. Creates a new version snapshot.',
+  appId: 'files',
   scope: 'files.write',
   input: z.object({
     org: orgInput,
@@ -274,6 +279,7 @@ export const createSiteTool = defineMcpTool({
     + '<a href="<raw_url>?download=1"> for a download), and outside resources such as fonts '
     + 'and CDN scripts load normally. '
     + 'Set share=true to issue a public link; the page is served in a sandboxed, opaque origin.',
+  appId: 'files',
   scope: 'files.write',
   input: z.object({
     org: orgInput,
@@ -326,6 +332,7 @@ export const updateSiteTool = defineMcpTool({
     + 'changes go live immediately at its share URL. The HTML may reference shared files by '
     + 'their raw_url (<video src>, <img src>, <a href="<raw_url>?download=1">) as well as inline '
     + 'assets; outside resources such as fonts and CDN scripts load normally.',
+  appId: 'files',
   scope: 'files.write',
   input: z.object({
     org: orgInput,
@@ -363,6 +370,7 @@ export const beginUploadTool = defineMcpTool({
     + 'Returns a presigned upload_url. Next: PUT the raw bytes to upload_url with the returned '
     + 'headers (e.g. `curl -X PUT -H \'Content-Type: <mime>\' -T <path> "<upload_url>"`), '
     + 'then call files_complete_upload with the returned key.',
+  appId: 'files',
   scope: 'files.write',
   input: z.object({
     org: orgInput,
@@ -399,6 +407,7 @@ export const completeUploadTool = defineMcpTool({
   description: 'Finish an upload started with files_begin_upload, after the bytes were PUT to its upload_url. '
     + 'Creates the file item. Set share=true to issue a public link; the result\'s raw_url can be '
     + 'embedded in a site (<video src>, <img src>, or <a href="<raw_url>?download=1">).',
+  appId: 'files',
   scope: 'files.write',
   input: z.object({
     org: orgInput,
@@ -464,6 +473,7 @@ export const shareTool = defineMcpTool({
   description: 'Issue a public link for a document, site, or file. Returns the existing link when the item '
     + 'is already shared; reissue=true replaces it, which breaks every page that embeds the old link. '
     + 'Files also get a raw_url to embed in a site.',
+  appId: 'files',
   scope: 'files.write',
   input: z.object({
     org: orgInput,
@@ -500,6 +510,7 @@ export const unshareTool = defineMcpTool({
   title: 'Stop Sharing',
   description: 'Revoke an item\'s public link. New loads fail immediately; a file already loaded through '
     + `its raw_url can keep working for up to ${RAW_LINK_TTL_SECONDS / 60} minutes.`,
+  appId: 'files',
   scope: 'files.write',
   input: z.object({ org: orgInput, id: z.string().uuid() }).strict(),
   handler: async (input, ctx) => {

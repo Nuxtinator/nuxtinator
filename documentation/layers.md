@@ -58,7 +58,7 @@ runtimeConfig: { public: { accountPath: '/profile' } }
 App layer code imports tenancy helpers from two aliases:
 
 - `#tenant` — client composables (`useActiveOrg`, `useMaybeActiveOrg`, `useTenantFetch`, `getActiveSlug`)
-- `#tenant/server` — server helpers (`defineTenantHandler`, `requireOperatorAdmin`, `getUserPermissionsAcrossOrgs` / `getUserPermissionsForRequest` for out-of-request permission reads such as OAuth scope filtering, `encodeFlowOrg` / `decodeFlowOrg`, `enableTenantScoping` for migrations)
+- `#tenant/server` — server helpers (`defineTenantHandler`, `requireOperatorAdmin`, `getUserPermissionsAcrossOrgs` / `getUserPermissionsForRequest` for out-of-request permission reads such as OAuth scope filtering, `getEnabledAppsForRequest` for the MCP app gate, `encodeFlowOrg` / `decodeFlowOrg`, `enableTenantScoping` for migrations)
 
 Two implementations ship — one in the host, one in [layers/tenancy/](../layers/tenancy/). The tenancy layer's [tenant-kernel module](../layers/tenancy/modules/tenant-kernel.ts) registers the alias first; the host's [tenant-kernel module](../layers/core/modules/tenant-kernel.ts) only registers if no other module did. Effect: tenancy version wins when present, single-mode is the fallback.
 

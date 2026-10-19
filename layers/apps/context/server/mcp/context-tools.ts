@@ -113,6 +113,7 @@ export const listPortfoliosTool = defineMcpTool({
   name: 'list_portfolios',
   title: 'List Portfolios',
   description: 'List portfolios in the active organization. Returns portfolio id, slug, name, color, icon_url, template (null = the default template), created_at, updated_at.',
+  appId: 'context',
   scope: 'context.read',
   input: z.object({ org: orgInput }).strict(),
   handler: async (input, ctx) => {
@@ -129,6 +130,7 @@ export const listSectionsTool = defineMcpTool({
   name: 'list_sections',
   title: 'List Sections',
   description: 'List all sections in a portfolio with titles, descriptions, content_length, and last_edited_at. Survey step: use content_length to decide which sections to load.',
+  appId: 'context',
   scope: 'context.read',
   input: z.object({ org: orgInput, portfolio_id: z.string().uuid() }).strict(),
   handler: async (input, ctx) => {
@@ -171,6 +173,7 @@ export const readSectionTool = defineMcpTool({
   name: 'read_section',
   title: 'Read Section',
   description: 'Read the markdown content of a single portfolio section. Returns content and last_edited_at (pass last_edited_at to update_section for optimistic-lock conflict detection), plus pending_suggestion_id and pending_suggestion_set_id when you have a suggestion awaiting review on it.',
+  appId: 'context',
   scope: 'context.read',
   input: z.object({
     org: orgInput,
@@ -212,6 +215,7 @@ export const bulkReadSectionsTool = defineMcpTool({
   name: 'bulk_read_sections',
   title: 'Read Several Sections',
   description: 'Read multiple portfolio sections in a single call. Validates all keys up front; rejects unknown keys.',
+  appId: 'context',
   scope: 'context.read',
   input: z.object({
     org: orgInput,
@@ -256,6 +260,7 @@ export const readOrganizationTool = defineMcpTool({
   name: 'read_organization',
   title: 'Read Whole Portfolio',
   description: 'Read all sections of a portfolio in one call (sections + content). Use when you need broad context across the whole portfolio.',
+  appId: 'context',
   scope: 'context.read',
   input: z.object({ org: orgInput, portfolio_id: z.string().uuid() }).strict(),
   handler: async (input, ctx) => {
@@ -301,6 +306,7 @@ export const updateSectionTool = defineMcpTool({
   name: 'update_section',
   title: 'Update Section',
   description: `Update the markdown content of a portfolio section. By default this suggests the change: it returns status "suggested" and the section is unchanged until an admin approves it. Writing into an empty section applies immediately (status "updated"). Pass mode "direct" only when the user explicitly asks to skip review. Pass last_edited_at (ISO timestamp from a prior read) to enable optimistic-lock conflict detection. Atomic: if the call returns an error, nothing was written. ${REVISE_INSTRUCTION} ${PRIVACY_INSTRUCTION}`,
+  appId: 'context',
   scope: 'context.write',
   input: z.object({
     org: orgInput,
@@ -390,6 +396,7 @@ export const bulkUpdateSectionsTool = defineMcpTool({
   name: 'bulk_update_sections',
   title: 'Update Several Sections',
   description: `Update multiple portfolio sections in a single call. By default the changes are suggested: sections with content come back with status "suggested" and are grouped into one suggestion an admin reviews; empty sections are written immediately (status "updated"). Pass mode "direct" only when the user explicitly asks to skip review. Each update may include last_edited_at for optimistic-lock conflict detection. Conflicted sections are skipped; sections that pass are still processed. Runs as one transaction: if the call returns an error, nothing in it was written or suggested. ${REVISE_INSTRUCTION} ${PRIVACY_INSTRUCTION}`,
+  appId: 'context',
   scope: 'context.write',
   input: z.object({
     org: orgInput,
@@ -495,6 +502,7 @@ export const createPortfolioTool = defineMcpTool({
   name: 'create_portfolio',
   title: 'Create Portfolio',
   description: `Create a portfolio in the active organization. The slug is derived from the name unless one is given, and a colliding slug is auto-suffixed (-2, -3) — read the returned slug and id rather than assuming them. \`template\` picks a registered portfolio template (omit for the default template; an unknown id is rejected with the registered ids). \`builtin_sections\` picks which of the template's sections the portfolio starts with (omit for all, [] for none; default template keys: ${BUILTIN_KEY_LIST}). Sections start with no content; write content with update_section.`,
+  appId: 'context',
   scope: 'context.portfolio.create',
   input: z.object({
     org: orgInput,
@@ -524,6 +532,7 @@ export const createSectionTool = defineMcpTool({
   name: 'create_section',
   title: 'Add Section',
   description: `Add a section to a portfolio. Pass \`key\` to add a built-in section from the portfolio's template (default template keys: ${BUILTIN_KEY_LIST}) — this is also how a deleted built-in is brought back, with its earlier content. Or pass \`title\` (plus optional description/order) to create a custom section; its key is slugified from the title and may not collide with a built-in key. Creates the definition only — write content afterwards with update_section.`,
+  appId: 'context',
   scope: 'context.section.custom',
   input: z.object({
     org: orgInput,
@@ -579,6 +588,7 @@ export const bulkCreateSectionsTool = defineMcpTool({
   name: 'bulk_create_sections',
   title: 'Add Several Sections',
   description: `Add several sections to a portfolio in one call. Each entry takes what create_section takes: \`key\` for a built-in from the portfolio's template (default template keys: ${BUILTIN_KEY_LIST}), or \`title\` (plus optional description/order) for a custom section. Entries are applied in the order given and reported one by one — an entry that fails (not a built-in key, key already in the portfolio, title colliding with a built-in) comes back with status "error" and the rest still apply. Creates definitions only — write content afterwards with bulk_update_sections.`,
+  appId: 'context',
   scope: 'context.section.custom',
   input: z.object({
     org: orgInput,
@@ -648,6 +658,7 @@ export const deleteSectionTool = defineMcpTool({
   name: 'delete_section',
   title: 'Remove Section',
   description: 'Remove a section from a portfolio, built-in or custom. Any content saved under the key stays in the database but is no longer listed or readable; adding the section again (create_section with the same key or title) restores it.',
+  appId: 'context',
   scope: 'context.section.custom',
   destructive: true,
   input: z.object({
@@ -687,6 +698,7 @@ export const listSuggestionsTool = defineMcpTool({
   name: 'list_suggestions',
   title: 'List My Suggestions',
   description: 'List your own suggested section updates, newest first, with status (pending, approved, rejected, withdrawn, superseded) and the reviewer\'s note when one was left. Use to check whether earlier suggestions were approved.',
+  appId: 'context',
   scope: 'context.read',
   input: z.object({
     org: orgInput,
@@ -717,6 +729,7 @@ export const withdrawSuggestionTool = defineMcpTool({
   name: 'withdraw_suggestion',
   title: 'Withdraw Suggestion',
   description: 'Withdraw one of your own pending suggestions so it leaves the review queue.',
+  appId: 'context',
   scope: 'context.write',
   input: z.object({
     org: orgInput,
@@ -748,6 +761,7 @@ export const readSuggestionTool = defineMcpTool({
   name: 'read_suggestion',
   title: 'Read Suggestion',
   description: 'Read one of your own suggestions: each section it touches with its status, the proposed content, and whether the section changed since it was suggested (stale). Use before update_suggestion to see what the suggestion currently proposes.',
+  appId: 'context',
   scope: 'context.read',
   input: z.object({
     org: orgInput,
@@ -782,6 +796,7 @@ export const updateSuggestionTool = defineMcpTool({
   name: 'update_suggestion',
   title: 'Update Suggestion',
   description: `Change one of your own pending suggestions in place instead of making a new one. Each update replaces the proposed content of a section already in the suggestion, or adds another section to it. Pass note to replace the note shown to the reviewer. Content is the full new section content, not a diff. Atomic: if the call returns an error, nothing was changed. ${PRIVACY_INSTRUCTION}`,
+  appId: 'context',
   scope: 'context.write',
   input: z.object({
     org: orgInput,
