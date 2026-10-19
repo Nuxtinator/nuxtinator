@@ -14,7 +14,7 @@ A forged entry sits to the left of the attacker's real address. The real address
 
 ## `NUXT_TRUSTED_PROXIES`
 
-A comma-separated list of presets, CIDRs and bare addresses. Default: `loopback,private`.
+A comma-separated list of presets, CIDRs and bare addresses. Default: `loopback,private,cloudflare`, so a deploy behind Cloudflare works without setting anything.
 
 | Preset | Ranges |
 |---|---|
@@ -28,14 +28,16 @@ An unknown preset or malformed CIDR throws on the first request, so a typo fails
 
 | Setup | Value |
 |---|---|
-| Nothing in front of the app (it listens on a public IP) | `loopback,private` (default). The header is ignored for public peers. |
-| A PaaS or load balancer on a private network (Railway, Render, Fly, a DO load balancer, nginx on the same host) | `loopback,private` (default) |
-| Cloudflare in front of any of the above, or a platform that routes through Cloudflare itself | `loopback,private,cloudflare` |
-| A proxy with a fixed public address | `loopback,private,203.0.113.10` |
+| Cloudflare in front of the app, or a platform that routes through Cloudflare itself | `loopback,private,cloudflare` (default) |
+| Nothing in front of the app (it listens on a public IP) | `loopback,private`. The header is ignored for public peers. |
+| A PaaS or load balancer on a private network (Railway, Render, Fly, a DO load balancer, nginx on the same host) | `loopback,private` |
+| A proxy with a fixed public address | `loopback,private,cloudflare,203.0.113.10` |
 
-**Behind Cloudflare, add `cloudflare`.** Without it, the Cloudflare edge IP becomes the "client". Every visitor routed through that edge then shares one bucket, and one abuser can use up the limit for all of them.
+**Behind Cloudflare, keep `cloudflare`.** Without it, the Cloudflare edge IP becomes the "client". Every visitor routed through that edge then shares one bucket, and one abuser can use up the limit for all of them.
 
-Adding `cloudflare` stays safe when the origin is also reachable directly (for example a `*.ondigitalocean.app` or `*.up.railway.app` URL). A direct request reaches the app through the platform's own ingress, which appends the caller's real address. That address isn't a Cloudflare one, so the walk stops there. You don't need to lock the origin down to Cloudflare-only for this to hold.
+**Without Cloudflare, drop it.** Nothing legitimate reaches the app from a Cloudflare address, and trusting those ranges only opens the Workers gap described under [Limits](#limits).
+
+Trusting `cloudflare` stays safe when the origin is also reachable directly (for example a `*.ondigitalocean.app` or `*.up.railway.app` URL). A direct request reaches the app through the platform's own ingress, which appends the caller's real address. That address isn't a Cloudflare one, so the walk stops there. You don't need to lock the origin down to Cloudflare-only for this to hold.
 
 ## Check what your platform sends
 
@@ -49,5 +51,5 @@ Every address to the right of your own IP in that output, plus the socket addres
 
 ## Limits
 
-- Trusting `cloudflare` also trusts Cloudflare Workers, which make requests from Cloudflare addresses. Someone who sends requests through their own Worker can set `X-Forwarded-For` themselves. If that matters, use a WAF rate-limit rule at Cloudflare as well.
+- Trusting `cloudflare` (the default) also trusts Cloudflare Workers, which make requests from Cloudflare addresses. Someone who sends requests through their own Worker can set `X-Forwarded-For` themselves. If that matters, use a WAF rate-limit rule at Cloudflare as well, or set `loopback,private` on a deploy that isn't behind Cloudflare.
 - Only rate-limit paths that call `getClientIp` follow this setting. Code that calls h3's `getRequestIP(event, { xForwardedFor: true })` takes the leftmost entry, which the client controls.

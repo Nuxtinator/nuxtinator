@@ -6,6 +6,7 @@ import { buildTrustedProxies, resolveClientIp, DEFAULT_TRUSTED_PROXIES } from '.
 
 const defaults = buildTrustedProxies(DEFAULT_TRUSTED_PROXIES)
 const withCloudflare = buildTrustedProxies('private,cloudflare')
+const withoutCloudflare = buildTrustedProxies('loopback,private')
 
 const CLIENT = '203.0.113.77'
 const CF_EDGE = '172.70.1.2'
@@ -37,8 +38,12 @@ describe('resolveClientIp', () => {
     expect(resolveClientIp(CLIENT, `9.9.9.9, ${CF_EDGE}`, withCloudflare)).toBe(CLIENT)
   })
 
+  it('trusts Cloudflare by default', () => {
+    expect(resolveClientIp(PAAS_INGRESS, `${CLIENT}, ${CF_EDGE}`, defaults)).toBe(CLIENT)
+  })
+
   it('without the cloudflare preset, a Cloudflare edge is the client — the setting is what matters', () => {
-    expect(resolveClientIp(PAAS_INGRESS, `${CLIENT}, ${CF_EDGE}`, defaults)).toBe(CF_EDGE)
+    expect(resolveClientIp(PAAS_INGRESS, `${CLIENT}, ${CF_EDGE}`, withoutCloudflare)).toBe(CF_EDGE)
   })
 
   it('normalizes ports, brackets and IPv4-mapped IPv6', () => {

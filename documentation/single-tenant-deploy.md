@@ -56,8 +56,9 @@ NUXT_SECRET_ENCRYPTION_KEY=<32-byte hex>
 APP_TITLE="Your App"
 NUXT_PUBLIC_SITE_URL=https://app.example.com
 
-# Behind Cloudflare: add `cloudflare`. See deploy-behind-a-proxy.md.
-NUXT_TRUSTED_PROXIES=loopback,private
+# Optional. Default trusts Cloudflare; without Cloudflare in front,
+# `loopback,private` is tighter. See deploy-behind-a-proxy.md.
+# NUXT_TRUSTED_PROXIES=loopback,private
 
 # Auth + email — same as multi-tenant.
 MAILGUN_API_KEY=...

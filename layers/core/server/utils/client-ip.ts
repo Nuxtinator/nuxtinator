@@ -34,7 +34,7 @@ const PRESETS: Record<string, string[]> = {
   cloudflare: CLOUDFLARE
 }
 
-export const DEFAULT_TRUSTED_PROXIES = 'loopback,private'
+export const DEFAULT_TRUSTED_PROXIES = 'loopback,private,cloudflare'
 
 // "1.2.3.4", "1.2.3.4:5678", "[::1]:80", "::ffff:1.2.3.4" → the bare address.
 function normalize(raw: string): string {

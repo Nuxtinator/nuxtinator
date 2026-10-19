@@ -92,7 +92,7 @@ export default defineNuxtConfig({
     // (NUXT_TRUSTED_PROXIES): comma-separated presets (loopback, private,
     // cloudflare) and CIDRs. getClientIp skips these addresses and keys on the
     // first one that isn't. See documentation/deploy-behind-a-proxy.md.
-    trustedProxies: 'loopback,private',
+    trustedProxies: 'loopback,private,cloudflare',
     public: {
       tenancy: false,
       // The page that holds the user's account settings. Email-change and
