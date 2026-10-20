@@ -1,6 +1,6 @@
 {
   "name": "@nuxtinator/tenancy",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -9,6 +9,11 @@
   },
   "optionalDependencies": {
     "@nuxtinator/core": "*"
+  },
+  "nuxtinator": {
+    "requires": {
+      "@nuxtinator/core": ">=2.7.0"
+    }
   },
   "peerDependencies": {
     "@nuxt/kit": "^4.0.0",
