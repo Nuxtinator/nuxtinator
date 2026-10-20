@@ -1,13 +1,23 @@
 <script setup lang="ts">
+// Signed-in users belong on the launcher at /dashboard (in multi-tenant mode
+// the tenancy route guard forwards that into the active org or the picker).
+// The redirect runs as route middleware, before this page renders: navigating
+// from setup during the app's first render can complete while the layout is
+// still pending, leaving this page on screen under the new URL.
+definePageMeta({
+  middleware: [() => {
+    if (useAuth().user.value) return navigateTo(launcherPath(), { replace: true })
+  }]
+})
+
 const { user, authReady } = useAuth()
 const config = useRuntimeConfig()
 const registrationOpen = await useRegistrationOpen({ lazy: true })
 
-// Signed-in users belong on the launcher at /dashboard (in multi-tenant mode
-// the tenancy route guard forwards that into the active org or the picker).
+// A sign-in that lands while this page is open.
 watch([authReady, user], ([r, u]) => {
   if (r && u) navigateTo(launcherPath())
-}, { immediate: true })
+})
 </script>
 
 <template>
