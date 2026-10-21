@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { getHeader } from 'h3'
+import { sql } from 'kysely'
 import { withOrgPermission } from '#tenant/server'
 import { validateRoleNames, getRolePermissions } from '#core/server/utils/rbac'
 import { logEvent } from '#core/server/utils/activity-logger'
@@ -74,7 +75,7 @@ export default defineEventHandler(async (event) => {
     const existing = await adminDb
       .selectFrom('users')
       .select(['id', 'email', 'display_name', 'verified'])
-      .where('email', '=', email)
+      .where(sql`lower(email)`, '=', email)
       .executeTakeFirst()
 
     if (!existing) {

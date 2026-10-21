@@ -6,13 +6,16 @@ import { getClientIp } from '../../utils/client-ip'
 import { readBody, getHeader, setResponseHeader } from 'h3'
 import { getSiteUrl } from '../../utils/site-url'
 import { createUserAccount } from '../../utils/accounts'
+import { normalizeEmail } from '../../utils/email-address'
 import { isSelfRegistrationOpen } from '../../utils/registration'
 import { startSession, nativeTokenFields } from '../../utils/sessions'
 import { useRuntimeConfig, createError } from '#imports'
 import { launcherPath } from '#core/app/utils/launcher'
 
 export default defineEventHandler(async (event) => {
-  const { email, password, display_name } = await readBody(event)
+  const body = await readBody(event)
+  const { password, display_name } = body ?? {}
+  const email = normalizeEmail(body?.email)
 
   if (!email || !password || !display_name) {
     throw createError({ statusCode: 400, statusMessage: 'Email, password, and display name are required' })

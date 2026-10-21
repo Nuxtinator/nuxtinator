@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { readBody, getHeader } from 'h3'
-import { db } from '#core/server/utils/database'
+import { db, sql } from '#core/server/utils/database'
 import { requireOperatorAdmin } from '#tenant/server'
 import { requireAuth } from '../../../utils/auth'
 import { validateRoleNames } from '../../../utils/rbac'
@@ -128,7 +128,7 @@ export default defineEventHandler(async (event) => {
   const existing = await db
     .selectFrom('users')
     .select(['id', 'email', 'display_name', 'verified'])
-    .where('email', '=', email)
+    .where(sql`lower(email)`, '=', email)
     .executeTakeFirst()
 
   if (!existing) {

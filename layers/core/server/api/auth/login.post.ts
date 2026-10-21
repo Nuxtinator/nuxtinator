@@ -1,5 +1,6 @@
 import bcrypt from 'bcrypt'
-import { db } from '../../utils/database'
+import { db, sql } from '../../utils/database'
+import { normalizeEmail } from '../../utils/email-address'
 import { logLoginFailed, logLogin } from '../../utils/activity-logger'
 import { enforceLoginRateLimit } from '../../utils/password-sign-in'
 import { startSession, nativeTokenFields } from '../../utils/sessions'
@@ -8,7 +9,9 @@ import { readBody, getHeader } from 'h3'
 import { createError } from '#imports'
 
 export default defineEventHandler(async (event) => {
-  const { email, password } = await readBody(event)
+  const body = await readBody(event)
+  const email = normalizeEmail(body?.email)
+  const password = body?.password
 
   if (!email || !password) {
     throw createError({ statusCode: 400, statusMessage: 'Email and password are required' })
@@ -21,7 +24,7 @@ export default defineEventHandler(async (event) => {
   const user = await db
     .selectFrom('users')
     .selectAll()
-    .where('email', '=', email)
+    .where(sql`lower(email)`, '=', email)
     .executeTakeFirst()
 
   if (!user) {

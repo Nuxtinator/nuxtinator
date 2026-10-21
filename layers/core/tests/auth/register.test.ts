@@ -52,6 +52,18 @@ describe('POST /api/auth/register', () => {
     expect(err.statusCode).toBe(400)
   })
 
+  it('stores the email lowercased', async () => {
+    const id = randomUUID().slice(0, 8)
+    await $fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'x-forwarded-for': testIp() },
+      body: { email: ` TEST-CORE-REG-${id}@Example.com `, password: 'testpassword123', display_name: 'Reg User' }
+    })
+
+    const rows = await sql`SELECT email FROM users WHERE lower(email) = ${`test-core-reg-${id}@example.com`}`
+    expect(rows.map(r => r.email)).toEqual([`test-core-reg-${id}@example.com`])
+  })
+
   it('creates an unverified user, sends verification email, and the token verifies', async () => {
     // Pre-condition: there must be an existing user so the new one is NOT
     // first-user (first-user gets auto-verified + auto-logged-in, which is a

@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt'
 import { readBody, getHeader } from 'h3'
-import { db } from '../../utils/database'
+import { db, sql } from '../../utils/database'
 import { logEvent, logLogin } from '../../utils/activity-logger'
 import { createUserAccount, postSignInRedirect } from '../../utils/accounts'
 import { acceptInvite, emitAcceptedMemberships, emitInviteAccepted, findInviteByToken, inviteState } from '../../utils/invites'
@@ -74,7 +74,7 @@ export default defineEventHandler(async (event) => {
   }
   const verified = invite.email !== null
 
-  const existing = await db.selectFrom('users').select('id').where('email', '=', email).executeTakeFirst()
+  const existing = await db.selectFrom('users').select('id').where(sql`lower(email)`, '=', email).executeTakeFirst()
   if (existing) {
     throw createError({
       statusCode: 409,

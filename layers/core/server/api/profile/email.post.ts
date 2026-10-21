@@ -93,7 +93,7 @@ export default defineEventHandler(async (event) => {
   const existingUser = await db
     .selectFrom('users')
     .select('id')
-    .where('email', '=', trimmedEmail)
+    .where(sql`lower(email)`, '=', trimmedEmail)
     .executeTakeFirst()
 
   if (existingUser) {

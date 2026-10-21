@@ -64,6 +64,16 @@ describe('POST /api/auth/login + GET /api/auth/me', () => {
     expect(setCookie).toMatch(/auth-token=/)
   })
 
+  it('matches the email case-insensitively', async () => {
+    const user = await createTestUser(sql, { email: `test-core-MiXed-${Date.now()}@example.com`, password: 'pw' })
+    const res = await $fetch('/api/auth/login', {
+      method: 'POST',
+      body: { email: user.email.toUpperCase(), password: 'pw' }
+    })
+
+    expect(res.user.id).toBe(user.id)
+  })
+
   it('GET /api/auth/me returns 401 without cookie', async () => {
     const err = await $fetch('/api/auth/me').catch(e => e)
     expect(err.statusCode).toBe(401)

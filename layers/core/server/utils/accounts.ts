@@ -3,6 +3,7 @@ import type { H3Event } from 'h3'
 import type { Transaction } from 'kysely'
 import { db, sql } from './database'
 import { logEvent } from './activity-logger'
+import { normalizeEmail } from './email-address'
 import { isSelfRegistrationEnabled } from './registration'
 import type { Database } from '#core/server/database/schema'
 import { launcherPath } from '#core/app/utils/launcher'
@@ -39,11 +40,12 @@ export async function createUserAccount(
   userAgent?: string
 ): Promise<CreatedAccount> {
   await sql`SELECT pg_advisory_xact_lock(${sql.lit(REGISTRATION_LOCK_KEY)})`.execute(trx)
+  const email = normalizeEmail(account.email)
 
   const existing = await trx
     .selectFrom('users')
     .select('id')
-    .where(sql`lower(email)`, '=', account.email.toLowerCase())
+    .where(sql`lower(email)`, '=', email)
     .executeTakeFirst()
   if (existing) {
     throw createError({ statusCode: 409, statusMessage: 'User with this email already exists' })
@@ -73,7 +75,7 @@ export async function createUserAccount(
       id: userId,
       created: now,
       updated: now,
-      email: account.email,
+      email,
       password: account.passwordHash,
       verified,
       is_admin: isFirstUser,
@@ -89,7 +91,7 @@ export async function createUserAccount(
       eventType: 'first_user_promoted',
       userId,
       userAgent,
-      metadata: { email: account.email }
+      metadata: { email }
     }, trx)
   }
 

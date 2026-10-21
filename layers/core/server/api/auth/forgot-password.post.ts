@@ -1,5 +1,5 @@
 import crypto from 'crypto'
-import { db } from '../../utils/database'
+import { db, sql } from '../../utils/database'
 import { sendTemplateEmail } from '#email'
 import { consumeRateLimit, logRateLimitExceeded } from '../../utils/rate-limit'
 import { getSiteUrl } from '../../utils/site-url'
@@ -41,7 +41,7 @@ export default defineEventHandler(async (event) => {
     const user = await db
       .selectFrom('users')
       .select(['id', 'email', 'display_name'])
-      .where('email', '=', email.toLowerCase())
+      .where(sql`lower(email)`, '=', email.toLowerCase())
       .executeTakeFirst()
 
     // If user doesn't exist, still return success (security measure)

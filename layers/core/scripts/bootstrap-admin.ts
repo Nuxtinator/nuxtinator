@@ -16,7 +16,9 @@
 import bcrypt from 'bcrypt'
 import { randomUUID } from 'node:crypto'
 import { createInterface } from 'node:readline/promises'
+import { sql } from 'kysely'
 import { createKyselyDb } from '../server/utils/db-connection'
+import { normalizeEmail } from '../server/utils/email-address'
 import type { Database } from '../server/database/schema'
 
 async function prompt(rl: ReturnType<typeof createInterface>, q: string, opts: { hidden?: boolean } = {}) {
@@ -62,7 +64,7 @@ async function main() {
 
   const rl = createInterface({ input: process.stdin, output: process.stdout })
   try {
-    const email = (await prompt(rl, 'Email: ')).toLowerCase()
+    const email = normalizeEmail(await prompt(rl, 'Email: '))
     if (!email || !email.includes('@')) {
       console.error('Invalid email')
       process.exit(1)
@@ -82,7 +84,7 @@ async function main() {
     const existing = await db
       .selectFrom('users')
       .select(['id', 'is_admin'])
-      .where('email', '=', email)
+      .where(sql`lower(email)`, '=', email)
       .executeTakeFirst()
 
     if (existing) {
