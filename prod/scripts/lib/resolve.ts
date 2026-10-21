@@ -20,7 +20,7 @@ export type LayerSpec = {
   version?: string // 'latest' | semver range | exact semver | raw ref. Default 'latest'.
 }
 
-export const DEFAULT_REPO = 'corsacca/nuxtinator'
+export const DEFAULT_REPO = 'Nuxtinator/nuxtinator'
 
 export const repoOf = (l: LayerSpec) => l.repo ?? DEFAULT_REPO
 export const subdirOf = (l: LayerSpec) => l.subdir ?? `layers/${l.id}`

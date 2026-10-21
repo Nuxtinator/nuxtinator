@@ -26,7 +26,7 @@ import { helpinatorEmbedRun } from './helpinator-search'
 
 type Tx = Transaction<Database>
 
-export const HELPINATOR_CRAWL_USER_AGENT = 'NuxtinatorHelpinator/1.0 (+https://github.com/corsacca/nuxtinator)'
+export const HELPINATOR_CRAWL_USER_AGENT = 'NuxtinatorHelpinator/1.0 (+https://github.com/Nuxtinator/nuxtinator)'
 const FETCH_TIMEOUT_MS = 10_000
 const MB = 1024 * 1024
 const MAX_ROBOTS_BYTES = 512 * 1024

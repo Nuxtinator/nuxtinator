@@ -61,6 +61,6 @@ collide on a path or table name break the model. Permission strings use `.`
 
 Adding DB tables, per-org tenancy retrofits (`*_T<NNN>_*.ts` migrations),
 admin sections, or static roles? The full file-by-file guide is upstream:
-https://github.com/corsacca/nuxtinator/blob/master/documentation/layers.md
+https://github.com/Nuxtinator/nuxtinator/blob/master/documentation/layers.md
 (section "Creating a new app layer"). Everything there applies; the only
 difference is your app loads from `apps/` instead of being fetched.

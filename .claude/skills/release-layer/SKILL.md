@@ -10,7 +10,7 @@ Cut a version release for a single nuxtinator layer. A "release" = bump the laye
 ## When to use
 
 - "release / tag / publish the `<layer>` layer", "cut a patch/minor/major of `<layer>`", "tag `<layer>` `<version>`".
-- Only inside the **nuxtinator monorepo** — the repo that has `scripts/release.ts` and `layers/*` workspaces (remote `corsacca/nuxtinator`). If the current repo doesn't have `scripts/release.ts`, stop and say this skill must be run from the nuxtinator repo.
+- Only inside the **nuxtinator monorepo** — the repo that has `scripts/release.ts` and `layers/*` workspaces (remote `Nuxtinator/nuxtinator`). If the current repo doesn't have `scripts/release.ts`, stop and say this skill must be run from the nuxtinator repo.
 - One layer per invocation. To release several, run it once per layer (versions are independent).
 
 ## Conventions

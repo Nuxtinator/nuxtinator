@@ -27,7 +27,7 @@ claude
 Point it at this repo and describe what you want:
 
 ```
-Read https://raw.githubusercontent.com/corsacca/nuxtinator/master/README.md and follow its assembly instructions to scaffold a new Nuxt app.
+Read https://raw.githubusercontent.com/Nuxtinator/nuxtinator/master/README.md and follow its assembly instructions to scaffold a new Nuxt app.
 ```
 
 Optionally include which layers you want:
@@ -91,7 +91,7 @@ Net: one `node_modules/` at the root, no per-layer install, no per-layer duplica
 Bootstrap is three commands wrapped as `bun run setup`:
 
 1. `bun install` — installs the consumer's root deps including `giget`. The `_layers/*` workspaces glob doesn't match yet (the directory doesn't exist).
-2. `bun run sync-layers` — calls `giget` for each selected layer; extracts `github:corsacca/nuxtinator/layers/<id>#<ref>` into `_layers/<id>/`.
+2. `bun run sync-layers` — calls `giget` for each selected layer; extracts `github:Nuxtinator/nuxtinator/layers/<id>#<ref>` into `_layers/<id>/`.
 3. `bun install` (second pass) — bun re-evaluates the workspaces glob, now finds `_layers/<id>/` directories, hoists their deps into the root `node_modules/.bun/` store, and creates `node_modules/@nuxtinator/<id>/` symlinks.
 
 Day-to-day is just `bun run dev`. Updating: `NUXTINATOR_REF=<tag>` in `.env`, then `bun run setup` again (the layer dirs get force-cleaned and refetched).
@@ -247,7 +247,7 @@ A few things to confirm:
 Pull the `prod/` directory from this repo into the user's project:
 
 ```bash
-bunx giget github:corsacca/nuxtinator/prod#master . --force
+bunx giget github:Nuxtinator/nuxtinator/prod#master . --force
 ```
 
 The `#master` ref is required: giget defaults to `main`, but this repo's default branch is `master`, so a bare command 404s. Run from the user's project directory. `giget` is used here only as a one-shot file-copy tool — it extracts the `prod/` subtree. The extracted template is **already wired with the consumer recipe**:

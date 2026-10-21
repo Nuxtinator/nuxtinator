@@ -1,6 +1,6 @@
 # Getting started — start a new project that consumes nuxtinator layers
 
-This guide is for **downstream consumers**: you want a fresh project that uses [nuxtinator](https://github.com/corsacca/nuxtinator)'s layers (auth, admin, multi-tenancy, OAuth, MCP, the bundled apps), without forking the layers themselves.
+This guide is for **downstream consumers**: you want a fresh project that uses [nuxtinator](https://github.com/Nuxtinator/nuxtinator)'s layers (auth, admin, multi-tenancy, OAuth, MCP, the bundled apps), without forking the layers themselves.
 
 You'll end up with a tiny project that has a `layers.ts` file listing which layers you want. A sync script fetches each one from GitHub into `_layers/<id>/`, bun workspaces hoist their deps into a single `node_modules/`, and Nuxt's `extends:` resolves each by package name. You own the project; you can update the pinned ref whenever you want a newer cut of the layers.
 
@@ -13,7 +13,7 @@ If instead you want to work on the layers themselves, see [dev-setup.md](dev-set
 ```bash
 # 1. Pull the prod template from the nuxtinator repo into a new project
 #    (#master is required — giget defaults to main, but this repo uses master)
-bunx giget github:corsacca/nuxtinator/prod#master my-app
+bunx giget github:Nuxtinator/nuxtinator/prod#master my-app
 cd my-app
 
 # 2. Pick which layers you want (the only file you edit for layer selection)
@@ -70,11 +70,11 @@ Open `layers.ts`. It has an entry for every available nuxtinator layer:
 const REF = process.env.NUXTINATOR_REF || 'master'
 
 export const LAYERS = [
-  { id: 'core',           pkg: '@nuxtinator/core',           url: `github:corsacca/nuxtinator/layers/core#${REF}` },
-  { id: 'tenancy',        pkg: '@nuxtinator/tenancy',        url: `github:corsacca/nuxtinator/layers/tenancy#${REF}` },
-  { id: 'email-mailgun',  pkg: '@nuxtinator/email-mailgun',  url: `github:corsacca/nuxtinator/layers/email-mailgun#${REF}` },
+  { id: 'core',           pkg: '@nuxtinator/core',           url: `github:Nuxtinator/nuxtinator/layers/core#${REF}` },
+  { id: 'tenancy',        pkg: '@nuxtinator/tenancy',        url: `github:Nuxtinator/nuxtinator/layers/tenancy#${REF}` },
+  { id: 'email-mailgun',  pkg: '@nuxtinator/email-mailgun',  url: `github:Nuxtinator/nuxtinator/layers/email-mailgun#${REF}` },
   // ...one entry per layer...
-  { id: 'dev',            pkg: '@nuxtinator/dev',            url: `github:corsacca/nuxtinator/layers/dev#${REF}` }
+  { id: 'dev',            pkg: '@nuxtinator/dev',            url: `github:Nuxtinator/nuxtinator/layers/dev#${REF}` }
 ] as const
 ```
 
@@ -167,7 +167,7 @@ You don't need to fork the nuxtinator repo to add features. Three ways, by how r
 
 1. **In-project code** — drop pages under `app/pages/<your-app>/` and routes under `server/routes/api/<your-app>/` directly in your project. Anything you `import` resolves against the project's deps. Good for project-specific stuff that won't be reused.
 
-2. **A local app in `apps/<id>/`** — for a self-contained feature you'd lift in or out as a unit. `nuxt.config.ts` globs `apps/*` into `extends`, so every subdirectory loads as a layer — no `layers.ts` entry, no fetch, no install step. The template ships a ready-made [`apps/example/`](https://github.com/corsacca/nuxtinator/tree/master/prod/apps/example); copy it and rename `example` → your app id throughout. This is the recommended home for your own apps. (Don't confuse `apps/` — your committed source — with `_layers/`, the gitignored cache of fetched layers.)
+2. **A local app in `apps/<id>/`** — for a self-contained feature you'd lift in or out as a unit. `nuxt.config.ts` globs `apps/*` into `extends`, so every subdirectory loads as a layer — no `layers.ts` entry, no fetch, no install step. The template ships a ready-made [`apps/example/`](https://github.com/Nuxtinator/nuxtinator/tree/master/prod/apps/example); copy it and rename `example` → your app id throughout. This is the recommended home for your own apps. (Don't confuse `apps/` — your committed source — with `_layers/`, the gitignored cache of fetched layers.)
 
 3. **A shared layer in its own repo** — to reuse a layer across projects, publish it to a git host and add an entry to `layers.ts`:
 
@@ -192,8 +192,8 @@ Read the upstream changelog before bumping — schema migrations may not be reve
 For per-layer ref pinning (e.g. you want `core@v1.0.0` but `messages@master` for some reason), edit the URL fields in `layers.ts` directly:
 
 ```ts
-{ id: 'core',     pkg: '@nuxtinator/core',     url: 'github:corsacca/nuxtinator/layers/core#v1.0.0' },
-{ id: 'messages', pkg: '@nuxtinator/messages', url: 'github:corsacca/nuxtinator/layers/apps/messages#master' }
+{ id: 'core',     pkg: '@nuxtinator/core',     url: 'github:Nuxtinator/nuxtinator/layers/core#v1.0.0' },
+{ id: 'messages', pkg: '@nuxtinator/messages', url: 'github:Nuxtinator/nuxtinator/layers/apps/messages#master' }
 ```
 
 The shared `REF` constant at the top of `layers.ts` is just a convenience for keeping most layers in sync.

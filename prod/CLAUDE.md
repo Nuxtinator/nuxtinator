@@ -151,7 +151,7 @@ To share a layer across projects, put it in its own git repo and add an entry to
 
 Framework/DB singletons (`nuxt`, `vue`, `@nuxt/kit`, `@nuxt/ui`, `kysely`, `kysely-postgres-js`, `postgres`, `h3`, `tailwindcss`) go in `peerDependencies` so they resolve to this host's copy. Layer-private deps go in `dependencies`. Cross-layer deps (e.g. `@nuxtinator/core`) go in `optionalDependencies` as `"*"`. Don't add a `main` field.
 
-For the full file-by-file template — DB schema augmentation, per-app tenancy retrofit migrations (`*_T<NNN>_*.ts`), admin sections, static roles, and the prefix conventions — see the upstream guide: **https://github.com/corsacca/nuxtinator/blob/master/documentation/layers.md** (section "Creating a new app layer").
+For the full file-by-file template — DB schema augmentation, per-app tenancy retrofit migrations (`*_T<NNN>_*.ts`), admin sections, static roles, and the prefix conventions — see the upstream guide: **https://github.com/Nuxtinator/nuxtinator/blob/master/documentation/layers.md** (section "Creating a new app layer").
 
 ## Good to know
 
