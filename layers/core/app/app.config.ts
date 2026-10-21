@@ -12,6 +12,11 @@ export default defineAppConfig({
       primary: 'green',
       neutral: 'slate'
     },
+    toast: {
+      slots: {
+        close: 'toast-countdown rounded-full'
+      }
+    },
     card: {
       defaultVariants: {
         variant: 'subtle'

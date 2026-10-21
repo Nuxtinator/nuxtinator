@@ -23,7 +23,7 @@ useHead({
 </script>
 
 <template>
-  <UApp :locale="uiLocale">
+  <UApp :locale="uiLocale" :toaster="{ progress: false, duration: 3000 }">
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>

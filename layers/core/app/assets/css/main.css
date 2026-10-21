@@ -55,3 +55,36 @@
   --ui-text-highlighted: #fff;
   --chrome-bg: color-mix(in oklab, var(--ui-color-neutral-800), var(--ui-color-neutral-900));
 }
+
+/* A ring around a toast's close button fills while its auto-dismiss timer runs, pausing when the
+   toasts are hovered or focused the way the timer does. Assumes the 3s toaster duration set in app.vue. */
+@property --toast-countdown {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 0%;
+}
+
+.toast-countdown {
+  position: relative;
+}
+
+.toast-countdown::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  background: conic-gradient(var(--ui-text-dimmed) var(--toast-countdown), var(--ui-border) 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  pointer-events: none;
+  animation: toast-countdown 3s linear forwards;
+}
+
+[data-slot="viewport"]:is(:hover, :focus-within) .toast-countdown::before {
+  animation-play-state: paused;
+}
+
+@keyframes toast-countdown {
+  to {
+    --toast-countdown: 100%;
+  }
+}
