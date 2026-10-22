@@ -54,29 +54,36 @@ export async function useApps() {
     return orgSlug.value ? `/api/o/${orgSlug.value}/_apps` : ''
   })
 
-  const { data, refresh: refreshOrg, pending, error } = await useFetch<AppsResponse>(url, {
-    default: () => ({ apps: [] as AppEntry[] }),
-    watch: [orgSlug, user],
-    immediate: !!user.value && (!tenancyOn || !!orgSlug.value),
-    key: 'org-apps'
-  })
+  const personalUrl = computed(() => (user.value ? '/api/_personal-apps' : ''))
+  const lastOrg = useCookie<string | null>('active-org-slug')
+
+  // Every composable runs before the first await: after it, SSR has no Nuxt
+  // instance and useCookie/useFetch throw.
+  const [
+    { data, refresh: refreshOrg, pending, error },
+    { data: personalData, refresh: refreshPersonal }
+  ] = await Promise.all([
+    useFetch<AppsResponse>(url, {
+      default: () => ({ apps: [] as AppEntry[] }),
+      watch: [orgSlug, user],
+      immediate: !!user.value && (!tenancyOn || !!orgSlug.value),
+      key: 'org-apps'
+    }),
+    useFetch<AppsResponse>(personalUrl, {
+      default: () => ({ apps: [] as AppEntry[] }),
+      watch: [user],
+      immediate: !!user.value,
+      key: 'personal-apps'
+    })
+  ])
 
   // On a personal page the org comes from the last-active-org cookie. If that
   // org is gone for the user (they left it, it was renamed), forget it.
-  const lastOrg = useCookie<string | null>('active-org-slug')
   watch(error, (err) => {
     if (slug.value || !chromeOrg.value) return
     if ((err as { statusCode?: number } | null)?.statusCode === 404) {
       lastOrg.value = null
     }
-  })
-
-  const personalUrl = computed(() => (user.value ? '/api/_personal-apps' : ''))
-  const { data: personalData, refresh: refreshPersonal } = await useFetch<AppsResponse>(personalUrl, {
-    default: () => ({ apps: [] as AppEntry[] }),
-    watch: [user],
-    immediate: !!user.value,
-    key: 'personal-apps'
   })
 
   const orgApps = computed<AppEntry[]>(() => (data.value?.apps ?? []).map(a => ({ ...a, scope: 'org' as const })))
