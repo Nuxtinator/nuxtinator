@@ -57,34 +57,34 @@ export async function useApps() {
   const personalUrl = computed(() => (user.value ? '/api/_personal-apps' : ''))
   const lastOrg = useCookie<string | null>('active-org-slug')
 
-  // Every composable runs before the first await: after it, SSR has no Nuxt
-  // instance and useCookie/useFetch throw.
-  const [
-    { data, refresh: refreshOrg, pending, error },
-    { data: personalData, refresh: refreshPersonal }
-  ] = await Promise.all([
-    useFetch<AppsResponse>(url, {
-      default: () => ({ apps: [] as AppEntry[] }),
-      watch: [orgSlug, user],
-      immediate: !!user.value && (!tenancyOn || !!orgSlug.value),
-      key: 'org-apps'
-    }),
-    useFetch<AppsResponse>(personalUrl, {
-      default: () => ({ apps: [] as AppEntry[] }),
-      watch: [user],
-      immediate: !!user.value,
-      key: 'personal-apps'
-    })
-  ])
+  // Every composable and watcher runs before the first await: after it, SSR has
+  // no Nuxt instance (useCookie/useFetch throw) and watchers outlive the component.
+  const orgFetch = useFetch<AppsResponse>(url, {
+    default: () => ({ apps: [] as AppEntry[] }),
+    watch: [orgSlug, user],
+    immediate: !!user.value && (!tenancyOn || !!orgSlug.value),
+    key: 'org-apps'
+  })
+  const personalFetch = useFetch<AppsResponse>(personalUrl, {
+    default: () => ({ apps: [] as AppEntry[] }),
+    watch: [user],
+    immediate: !!user.value,
+    key: 'personal-apps'
+  })
 
   // On a personal page the org comes from the last-active-org cookie. If that
   // org is gone for the user (they left it, it was renamed), forget it.
-  watch(error, (err) => {
+  watch(orgFetch.error, (err) => {
     if (slug.value || !chromeOrg.value) return
     if ((err as { statusCode?: number } | null)?.statusCode === 404) {
       lastOrg.value = null
     }
   })
+
+  const [
+    { data, refresh: refreshOrg, pending, error },
+    { data: personalData, refresh: refreshPersonal }
+  ] = await Promise.all([orgFetch, personalFetch])
 
   const orgApps = computed<AppEntry[]>(() => (data.value?.apps ?? []).map(a => ({ ...a, scope: 'org' as const })))
   const personalApps = computed<AppEntry[]>(() => (personalData.value?.apps ?? []).map(a => ({ ...a, scope: 'user' as const })))
