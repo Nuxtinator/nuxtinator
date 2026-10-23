@@ -53,18 +53,29 @@ watch(() => route.path, () => {
       </div>
       <UButton
         :to="launcherPath()"
-        icon="i-lucide-arrow-left"
+        icon="i-lucide-x"
         variant="ghost"
         color="neutral"
         size="sm"
-      >
-        Back to app
-      </UButton>
+        aria-label="Close admin"
+        title="Close admin"
+      />
     </header>
 
     <div class="sm:flex">
       <!-- Desktop sidebar -->
       <SidebarPanel class="hidden sm:flex w-64 shrink-0 sticky top-14 !h-[calc(100vh-3.5rem)]">
+        <NuxtLink
+          :to="launcherPath()"
+          class="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-(--ui-text-muted) hover:bg-(--ui-bg-accented) hover:text-(--ui-text) transition-colors"
+        >
+          <UIcon
+            name="i-lucide-arrow-left"
+            class="size-5 shrink-0"
+          />
+          Back to apps
+        </NuxtLink>
+        <USeparator class="my-3" />
         <SidebarNav :items="navItems" />
       </SidebarPanel>
 
@@ -90,6 +101,17 @@ watch(() => route.path, () => {
                 />
               </div>
             </template>
+            <NuxtLink
+              :to="launcherPath()"
+              class="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-(--ui-text-muted) hover:bg-(--ui-bg-accented) hover:text-(--ui-text) transition-colors"
+            >
+              <UIcon
+                name="i-lucide-arrow-left"
+                class="size-5 shrink-0"
+              />
+              Back to apps
+            </NuxtLink>
+            <USeparator class="my-3" />
             <SidebarNav :items="navItems" />
           </SidebarPanel>
         </template>
