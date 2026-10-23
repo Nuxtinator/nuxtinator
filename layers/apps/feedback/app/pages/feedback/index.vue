@@ -174,6 +174,14 @@ const projectForm = ref({
 const userItems = computed(() =>
   assignableUsers.value.map(u => ({ id: u.id, label: u.display_name || 'Unnamed user' }))
 )
+
+// Picker items for a recipient list: the candidates plus any selected id that
+// no longer matches one, so a removed user still shows and can be unselected.
+function recipientItems(selected: string[]) {
+  const known = new Set(userItems.value.map(u => u.id))
+  const stale = selected.filter(id => !known.has(id)).map(id => ({ id, label: 'Removed user' }))
+  return [...userItems.value, ...stale]
+}
 const projectBusy = ref(false)
 
 // The allowed-origins textarea accepts one origin per line (commas/spaces also
@@ -875,7 +883,7 @@ async function onReorderProjects(payload: { orderedIds: string[] }) {
           >
             <USelectMenu
               v-model="projectForm.notifyUserIds"
-              :items="userItems"
+              :items="recipientItems(projectForm.notifyUserIds)"
               value-key="id"
               label-key="label"
               multiple
@@ -916,7 +924,7 @@ async function onReorderProjects(payload: { orderedIds: string[] }) {
           >
             <USelectMenu
               v-model="defaultNotifyUserIds"
-              :items="userItems"
+              :items="recipientItems(defaultNotifyUserIds)"
               value-key="id"
               label-key="label"
               multiple

@@ -19,6 +19,7 @@ import { getWidgetAuthUser } from '../../../../utils/widget-auth'
 import { enforceWidgetRateLimit, widgetClientIp } from '../../../../utils/rate-limit'
 import { withProjectOrgContext } from '#tenant/server'
 import { logCreate } from '#core/server/utils/activity-logger'
+import { afterCommit } from '#core/server/utils/after-commit'
 import { uploadToS3, generateSignedUrl, deleteFromS3 } from '#core/server/utils/storage'
 import { notifyNewFeedbackCard } from '../../../../utils/notify-recipients'
 
@@ -269,16 +270,16 @@ export default defineEventHandler(async (event) => {
         : []
 
       // Notify the project's configured digest recipients about the new inbox
-      // card. Writes in this txn so a card and its notices commit together;
+      // card once it has committed, so a failed notice never loses the card;
       // core's daily digest sweep turns these into one email per recipient.
-      await notifyNewFeedbackCard(tx, {
+      await afterCommit(tx, scope => scope(notifyTx => notifyNewFeedbackCard(notifyTx, {
         cardId: card.id,
         cardTitle: notificationTitle,
         projectName: project?.name ?? null,
         subType: sub,
         actorId: authUser?.userId ?? null,
         projectPostMeta: project?.post_meta
-      })
+      })))
 
       return { card, attachmentRows }
     })
