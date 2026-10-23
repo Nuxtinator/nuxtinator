@@ -21,5 +21,10 @@
     "kysely": "^0.28.0",
     "nuxt": "^4.0.0",
     "vue": "^3.0.0"
+  },
+  "nuxtinator": {
+    "requires": {
+      "@nuxtinator/core": ">=2.7.0"
+    }
   }
 }

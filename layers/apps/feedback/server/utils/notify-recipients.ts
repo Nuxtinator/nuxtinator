@@ -14,7 +14,9 @@ import type { Transaction } from 'kysely'
 import { sql } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import { createNotification } from '#core/server/utils/notifications'
-import { getSetting } from '#core/server/utils/settings-store'
+import { getSetting, setSetting, clearSetting } from '#core/server/utils/settings-store'
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 // Settings namespace + key for the org-wide default recipient list. Declared in
 // code (register-feedback.ts), stored as overrides only.
@@ -82,9 +84,9 @@ export async function notifyNewFeedbackCard(
   // Per-project list wins; if the project hasn't chosen recipients, fall back
   // to the org-wide default from the shared settings store (RLS scopes the read
   // to this card's org inside the caller's transaction).
-  let recipientIds = resolveFeedbackNotifyRecipientIds(notice.projectPostMeta)
+  let recipientIds = await existingUserIds(tx, resolveFeedbackNotifyRecipientIds(notice.projectPostMeta))
   if (recipientIds.length === 0) {
-    recipientIds = await getSetting<string[]>(tx, FEEDBACK_SETTINGS_NAMESPACE, DEFAULT_NOTIFY_SETTING_KEY)
+    recipientIds = await existingUserIds(tx, await getSetting<string[]>(tx, FEEDBACK_SETTINGS_NAMESPACE, DEFAULT_NOTIFY_SETTING_KEY))
   }
   if (recipientIds.length === 0) return
 
@@ -98,4 +100,35 @@ export async function notifyNewFeedbackCard(
     actorId: notice.actorId,
     email: 'digest' as const
   })))
+}
+
+// The ids that still belong to a user, in their original order. A list can
+// outlive a user it names, and a notification to a missing user fails its FK.
+async function existingUserIds(tx: Transaction<Database>, ids: string[]): Promise<string[]> {
+  const candidates = ids.filter(id => UUID_RE.test(id))
+  if (candidates.length === 0) return []
+  const rows = await tx.selectFrom('users').select('id').where('id', 'in', candidates).execute()
+  const found = new Set(rows.map(r => r.id))
+  return candidates.filter(id => found.has(id))
+}
+
+// Drop a user from every notify list visible to `tx`: each project's own list
+// and the org-wide default. Run once per org scope when a user is deleted or
+// leaves an org.
+export async function removeNotifyRecipient(tx: Transaction<Database>, userId: string): Promise<void> {
+  await sql`
+    UPDATE projects
+    SET post_meta = jsonb_set(post_meta, '{notify_user_ids}', (post_meta->'notify_user_ids') - ${userId}::text)
+    WHERE jsonb_typeof(post_meta->'notify_user_ids') = 'array'
+      AND post_meta->'notify_user_ids' ? ${userId}::text
+  `.execute(tx)
+
+  const defaults = await getSetting<string[]>(tx, FEEDBACK_SETTINGS_NAMESPACE, DEFAULT_NOTIFY_SETTING_KEY)
+  if (!defaults.includes(userId)) return
+  const remaining = defaults.filter(id => id !== userId)
+  if (remaining.length === 0) {
+    await clearSetting(tx, FEEDBACK_SETTINGS_NAMESPACE, DEFAULT_NOTIFY_SETTING_KEY)
+  } else {
+    await setSetting(tx, FEEDBACK_SETTINGS_NAMESPACE, DEFAULT_NOTIFY_SETTING_KEY, remaining)
+  }
 }
