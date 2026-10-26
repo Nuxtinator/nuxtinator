@@ -1,6 +1,7 @@
 import { getRouterParam, getHeader } from 'h3'
 import { withOrgPermission } from '#tenant/server'
 import { logEvent } from '#core/server/utils/activity-logger'
+import { assertInviteWithinCaller } from '../../../../../../utils/org-invites'
 
 // Withdraws an unaccepted invite from the active org. An invite that also
 // grants other orgs (a host-admin invite) keeps working for those; one left
@@ -19,6 +20,7 @@ export default defineEventHandler(async (event) => {
       .where('invites.accepted_at', 'is', null)
       .executeTakeFirst()
     if (!invite) throw createError({ statusCode: 404, statusMessage: 'Invite not found' })
+    await assertInviteWithinCaller(tx, ctx, inviteId, { onlyThisOrg: false })
 
     await tx.deleteFrom('invite_orgs').where('invite_id', '=', inviteId).where('org_id', '=', ctx.orgId).execute()
     const remaining = await tx

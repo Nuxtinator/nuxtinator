@@ -199,7 +199,14 @@ export const bulkReadSectionsTool = defineMcpTool({
   handler: async (input, ctx) => {
     try {
       return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
-        const defs = await getPortfolioSections(tx, input.portfolio_id)
+        const exists = await tx
+          .selectFrom('context_portfolios')
+          .select(['id', 'template'])
+          .where('id', '=', input.portfolio_id)
+          .executeTakeFirst()
+        if (!exists) throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
+
+        const defs = await getPortfolioSections(tx, exists)
         const knownKeys = new Set(defs.map(d => d.key))
         const unknown = input.section_keys.filter(k => !knownKeys.has(k))
         if (unknown.length > 0) {

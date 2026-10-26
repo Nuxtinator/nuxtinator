@@ -78,6 +78,17 @@ describe('MCP section definition tools', () => {
     expect(back.structuredContent?.content).toBe('Alice')
   })
 
+  it('bulk_read_sections 404s on a portfolio in another org', async () => {
+    const { user, org, token } = await setupAdmin()
+    const other = await createContextOrg(sql)
+    const foreign = await createTestPortfolio(sql, { org_id: other.id, name: 'Foreign', created_by: user.id })
+    await seedTestSection(sql, { portfolio_id: foreign.id, section_key: 'identity', content: 'Other org secret', last_edited_by: user.id })
+
+    const bulk = await callMcpTool(token, 'bulk_read_sections', { org: org.slug, portfolio_id: foreign.id, section_keys: ['identity'] })
+    expect(bulk.isError).toBe(true)
+    expect(JSON.stringify(bulk)).not.toContain('Other org secret')
+  })
+
   it('create_section takes exactly one of key or title', async () => {
     const { user, org, token } = await setupAdmin()
     const portfolio = await createTestPortfolio(sql, { org_id: org.id, name: 'MCP Create', created_by: user.id })
