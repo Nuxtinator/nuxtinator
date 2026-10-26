@@ -13,11 +13,26 @@ const sections = computed(() => [
 const route = useRoute()
 const activeKey = computed(() => matchAppByPath(sections.value.flatMap(s => s.links), route.path)?.key ?? null)
 const { isHostAdmin } = usePermissions()
-const isHome = computed(() => /^\/(@[^/]+\/)?dashboard\/?$/.test(route.path))
 const { slug } = useActiveOrg()
-const homePath = computed(() => launcherPath(slug.value))
 
 const railConfig = useAppConfig().rail
+// The top link: the app launcher by default; a host can point it elsewhere
+// with `rail.launcher: { title, icon, path }`, or hide it with `false`.
+const launcherConfig = railConfig?.launcher as boolean | { title?: string, icon?: string, path?: string } | undefined
+const launcher = computed(() => {
+  if (launcherConfig === false) return null
+  const custom = typeof launcherConfig === 'object' ? launcherConfig : {}
+  return {
+    title: custom.title ?? 'All apps',
+    icon: custom.icon ?? 'i-lucide-grid-2x2',
+    path: custom.path ?? launcherPath(slug.value)
+  }
+})
+const isHome = computed(() => {
+  const path = typeof launcherConfig === 'object' ? launcherConfig.path : undefined
+  if (!path) return /^\/(@[^/]+\/)?dashboard\/?$/.test(route.path)
+  return route.path === path || route.path.startsWith(path + '/')
+})
 const { expanded: storedExpanded, toggle } = useRailExpanded()
 const expanded = computed(() => props.alwaysExpanded || storedExpanded.value)
 
@@ -46,21 +61,21 @@ function stateClass(active: boolean) {
     :class="expanded ? 'w-56 items-stretch px-2' : 'w-14 items-center'"
   >
     <NuxtLink
-      v-if="railConfig?.launcher !== false"
-      :to="homePath"
+      v-if="launcher"
+      :to="launcher.path"
       class="flex items-center rounded-md transition-colors"
       :class="[shapeClass, stateClass(isHome)]"
-      :title="expanded ? undefined : 'All apps'"
-      aria-label="All apps"
+      :title="expanded ? undefined : launcher.title"
+      :aria-label="launcher.title"
     >
       <UIcon
-        name="i-lucide-grid-2x2"
+        :name="launcher.icon"
         class="size-5 shrink-0"
       />
       <span
         v-if="expanded"
         class="truncate text-sm"
-      >All apps</span>
+      >{{ launcher.title }}</span>
     </NuxtLink>
     <template
       v-for="(section, i) in sections"
@@ -72,7 +87,7 @@ function stateClass(active: boolean) {
         class="my-1"
       />
       <div
-        v-else-if="i > 0 || railConfig?.launcher !== false"
+        v-else-if="i > 0 || launcher"
         class="border-t border-(--ui-border) my-1"
         :class="expanded ? 'w-full' : 'w-8'"
       />

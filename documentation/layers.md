@@ -70,6 +70,8 @@ export default defineAppConfig({
 })
 ```
 
+`launcher` also takes `{ title, icon, path }` to point the top link somewhere other than the app launcher, e.g. `{ title: 'Your sites', icon: 'i-lucide-church', path: '/orgs' }`. It shows on every page, inside an org or not, and is highlighted on `path` and the pages under it.
+
 The host itself ships **no** permissions or roles — operator-admin is the `users.is_admin` boolean (no slug), checked via `requireOperatorAdmin(event)` from [tenant-kernel/server.ts](../layers/core/tenant-kernel/server.ts).
 
 ### A host's own account page
