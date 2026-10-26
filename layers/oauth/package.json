@@ -10,6 +10,11 @@
   "optionalDependencies": {
     "@nuxtinator/core": "*"
   },
+  "nuxtinator": {
+    "requires": {
+      "@nuxtinator/core": ">=2.7.0"
+    }
+  },
   "peerDependencies": {
     "@nuxt/ui": "^4.0.0",
     "h3": "^1.0.0",
