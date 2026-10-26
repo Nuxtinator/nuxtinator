@@ -210,7 +210,7 @@ Two parallel permission stores you must keep in sync:
 
 Core itself ships **no** permissions — operator-admin authority is the `users.is_admin` boolean (no permission slug), checked via `requireOperatorAdmin(event)` from [layers/core/tenant-kernel/server.ts](layers/core/tenant-kernel/server.ts). The tenancy layer adds `org.*` permissions when loaded.
 
-Code that checks permissions calls `isRegisteredPermission()` / `getAllPermissions()` — it never reads the static `PERMISSIONS` array directly, so layer contributions are always included. The `admin` role name is special-cased in [rbac.ts](layers/core/server/utils/rbac.ts) `getRolePermissions` to union every registered permission.
+Code that checks permissions calls `isRegisteredPermission()` / `getAllPermissions()` — it never reads the static `PERMISSIONS` array directly, so layer contributions are always included. The `admin` role name is special-cased in [rbac.ts](layers/core/server/utils/rbac.ts) `getRolePermissions` to union every registered permission, minus any a host withholds with `withholdFromAdmin` ([permissions-registry.ts](layers/core/server/utils/permissions-registry.ts)).
 
 Use granular permissions (e.g. `mail.read`, `mail.write`) not coarse ones (`mail.manage`) — the same vocabulary is shared with OAuth scopes.
 

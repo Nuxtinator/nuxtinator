@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // CRM sidebar — record-type switcher. Docked panel on desktop, slideover
-// drawer on mobile (same split as the messages sidebar).
+// drawer on mobile (same split as the messages sidebar). Renders nothing
+// when useCrmSidebar finds nothing to switch between.
 import type { SidebarNavItem } from '#core/app/utils/sidebar-nav'
 
 const open = defineModel<boolean>('open', { default: false })
@@ -12,6 +13,7 @@ watch(() => route.path, () => {
 
 const { visibleTypes, ensureTypes } = useCrmTypes()
 const { canManage, ensureAccess } = useCrmSchemaAdmin()
+const { shown } = useCrmSidebar()
 const crmPath = useCrmPath()
 
 onMounted(() => {
@@ -42,6 +44,7 @@ const settingsItems = computed<SidebarNavItem[]>(() =>
 <template>
   <!-- Desktop docked panel -->
   <SidebarPanel
+    v-if="shown"
     class="hidden lg:flex w-64 shrink-0"
     title="CRM"
   >
@@ -64,6 +67,7 @@ const settingsItems = computed<SidebarNavItem[]>(() =>
 
   <!-- Mobile drawer -->
   <USlideover
+    v-if="shown"
     v-model:open="open"
     side="left"
     :ui="{ content: 'max-w-xs' }"

@@ -74,6 +74,8 @@ export default defineAppConfig({
 
 The host itself ships **no** permissions or roles — operator-admin is the `users.is_admin` boolean (no slug), checked via `requireOperatorAdmin(event)` from [tenant-kernel/server.ts](../layers/core/tenant-kernel/server.ts).
 
+The `admin` role gets every registered permission. A host keeps a layer's permission from admins with `withholdFromAdmin` from a Nitro plugin, e.g. `withholdFromAdmin(['crm.schema.manage'])` to keep the CRM's schema builder from org admins; users then hold it only through another role or a per-user grant.
+
 ### A host's own account page
 
 Core's `/account` page is a few `<AccountGroup title="…">` cards, each stacking row components: `AccountAvatar`, `AccountDisplayName`, `AccountMemberSince`, `AccountEmail`, `AccountPassword`, `AccountSignInMethods` (one row per provider), `AccountSessions`, `AccountAppearance`, `AccountSignOut` and `AccountDelete`. Rows that edit something open their form under the row when clicked, one at a time. `AccountSections` renders the cards other layers register, such as OAuth's Connected apps, and goes between groups. A host that wants an account page in its own layout writes a page that groups the rows it wants, plus `<ReauthModal />`. It then points core at that page so the email-change and provider-link flows return there:

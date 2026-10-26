@@ -50,6 +50,7 @@ const statusField = computed(() =>
 )
 
 const sidebarOpen = ref(false)
+const { shown: sidebarShown } = useCrmSidebar()
 const createOpen = ref(false)
 
 const isFiltered = computed(() =>
@@ -64,9 +65,13 @@ const showEmpty = computed(() =>
   <div class="flex h-[calc(100vh-57px)] -mx-4 sm:-mx-6 lg:-mx-8 -my-6 lg:-my-8">
     <CrmSidebar v-model:open="sidebarOpen" />
 
-    <section class="flex-1 flex flex-col min-w-0 border-l-0 lg:border-l border-(--ui-border) overflow-hidden">
+    <section
+      class="flex-1 flex flex-col min-w-0 border-l-0 border-(--ui-border) overflow-hidden"
+      :class="{ 'lg:border-l': sidebarShown }"
+    >
       <header class="flex items-center gap-2 px-4 py-3 border-b border-(--ui-border) bg-(--ui-bg)">
         <UButton
+          v-if="sidebarShown"
           class="lg:hidden"
           icon="i-lucide-menu"
           variant="ghost"

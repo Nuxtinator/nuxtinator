@@ -10,7 +10,7 @@ import {
 } from '#core/app/utils/role-definitions'
 import type { Permission } from '#core/app/utils/permissions'
 import { getAppStaticRole, getAppStaticRoleNames } from './roles-registry'
-import { getAllPermissions, isRegisteredPermission } from './permissions-registry'
+import { getAllPermissions, isRegisteredPermission, isWithheldFromAdmin } from './permissions-registry'
 import { getDefaultGrants } from './default-grants-registry'
 import { getRoleOverlay } from './role-overlay-registry'
 import { getPersonalAppPermissionSlugs } from './app-registry'
@@ -30,7 +30,8 @@ type DbClient = Kysely<Database> | Transaction<Database>
 // mode RLS also scopes `custom_roles` to the active org.
 //
 // `admin` is special-cased to the union of every registered permission so
-// layer-contributed perms automatically reach admin without explicit grants.
+// layer-contributed perms automatically reach admin without explicit grants,
+// except those a host withholds with `withholdFromAdmin`.
 // Personal-app permissions are never role permissions, so they're dropped.
 export async function getRolePermissions(
   client: DbClient,
@@ -84,7 +85,9 @@ export async function getRolePermissions(
 
   const set = new Set<string>()
   if (roleNames.includes('admin')) {
-    for (const perm of getAllPermissions()) set.add(perm)
+    for (const perm of getAllPermissions()) {
+      if (!isWithheldFromAdmin(perm)) set.add(perm)
+    }
   }
   for (const perms of perRole.values()) {
     for (const perm of perms) set.add(perm)
