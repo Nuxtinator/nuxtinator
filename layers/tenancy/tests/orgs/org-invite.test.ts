@@ -156,3 +156,74 @@ describe('POST /api/o/[orgSlug]/invite', () => {
     expect(orgs[0]!.roles).toEqual(['admin'])
   })
 })
+
+describe('resend / revoke of an org invite', () => {
+  const sql = getHostAdminDb()
+
+  afterEach(async () => {
+    await cleanupTenancyTestData(sql)
+  })
+
+  async function inviterIn(org: { slug: string, id: string }, auth: Parameters<typeof withOrgHeader>[0]) {
+    const role = await $fetch(`/api/o/${org.slug}/roles`, {
+      method: 'POST',
+      body: { name: 'InviteOnly', permissions: ['org.members.invite', 'org.members.read'] },
+      ...withOrgHeader(auth, org.slug)
+    })
+    const user = await createTenancyUser(sql)
+    await addTestMembership(sql, { user_id: user.id, org_id: org.id, roles: [role.name] })
+    return { user, role: role.name as string }
+  }
+
+  async function linkInvite(org: { slug: string }, auth: Parameters<typeof withOrgHeader>[0], roles: string[]) {
+    const res = await $fetch(`/api/o/${org.slug}/invite`, {
+      method: 'POST',
+      body: { link: true, display_name: 'test-tenancy-link', roles },
+      ...withOrgHeader(auth, org.slug)
+    })
+    return res.invite.id as string
+  }
+
+  it('an inviter cannot resend or revoke an invite granting more than they hold', async () => {
+    const { org, auth } = await createOrgWithAdmin(sql)
+    const { user } = await inviterIn(org, auth)
+    const inviteId = await linkInvite(org, auth, ['admin'])
+
+    const resend = await $fetch(`/api/o/${org.slug}/invites/${inviteId}/resend`, {
+      method: 'POST',
+      ...withOrgHeader(getAuthHeaders(user), org.slug)
+    }).catch(e => e)
+    expect(resend.statusCode).toBe(403)
+
+    const revoke = await $fetch(`/api/o/${org.slug}/invites/${inviteId}`, {
+      method: 'DELETE',
+      ...withOrgHeader(getAuthHeaders(user), org.slug)
+    }).catch(e => e)
+    expect(revoke.statusCode).toBe(403)
+  })
+
+  it('an inviter can resend an invite within their own permissions', async () => {
+    const { org, auth } = await createOrgWithAdmin(sql)
+    const { user, role } = await inviterIn(org, auth)
+    const inviteId = await linkInvite(org, auth, [role])
+
+    const res = await $fetch(`/api/o/${org.slug}/invites/${inviteId}/resend`, {
+      method: 'POST',
+      ...withOrgHeader(getAuthHeaders(user), org.slug)
+    })
+    expect(res.url).toMatch(/\/accept-invite\?token=/)
+  })
+
+  it('an org admin cannot resend an invite that also grants another org', async () => {
+    const { org, auth } = await createOrgWithAdmin(sql)
+    const { org: other } = await createOrgWithAdmin(sql)
+    const inviteId = await linkInvite(org, auth, ['member'])
+    await sql`INSERT INTO invite_orgs (invite_id, org_id, roles) VALUES (${inviteId}, ${other.id}, ${['admin']})`
+
+    const err = await $fetch(`/api/o/${org.slug}/invites/${inviteId}/resend`, {
+      method: 'POST',
+      ...withOrgHeader(auth, org.slug)
+    }).catch(e => e)
+    expect(err.statusCode).toBe(403)
+  })
+})

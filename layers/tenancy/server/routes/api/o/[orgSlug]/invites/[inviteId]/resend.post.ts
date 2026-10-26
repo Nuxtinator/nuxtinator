@@ -2,6 +2,7 @@ import { getRouterParam, getHeader } from 'h3'
 import { withOrgPermission } from '#tenant/server'
 import { logEvent } from '#core/server/utils/activity-logger'
 import { renewInvite } from '#core/server/utils/invites'
+import { assertInviteWithinCaller } from '../../../../../../utils/org-invites'
 import { sendTemplateEmail } from '#email'
 
 // Issues a fresh link for an unaccepted invite into the active org. An email
@@ -21,6 +22,7 @@ export default defineEventHandler(async (event) => {
       .where('invites.accepted_at', 'is', null)
       .executeTakeFirst()
     if (!invite) throw createError({ statusCode: 404, statusMessage: 'Invite not found' })
+    await assertInviteWithinCaller(tx, ctx, invite.id, { onlyThisOrg: true })
 
     const renewed = await renewInvite(tx, invite.id)
 
