@@ -149,14 +149,9 @@ function generateApiKey() {
         variant="ghost"
         class="-ml-2"
       />
-      <div>
-        <h1 class="text-2xl font-bold">
-          Inbox settings
-        </h1>
-        <p class="text-sm text-(--ui-text-muted)">
-          Mail routing, courtesy replies, and integrations for this organization's inbox.
-        </p>
-      </div>
+      <h1 class="text-2xl font-bold">
+        Inbox settings
+      </h1>
     </header>
 
     <UAlert
@@ -165,57 +160,59 @@ function generateApiKey() {
       color="warning"
       variant="subtle"
       title="No access"
-      description="You need the Manage inbox settings permission to view or edit inbox settings."
+      description="You need the Manage inbox settings permission."
     />
 
     <template v-else-if="form">
       <div class="space-y-4">
-        <UFormField
-          label="Inbound mail domain"
-          description="The (sub)domain inbound mail arrives on, e.g. mail.example.com. Routes webhook mail to this organization."
-        >
+        <UFormField>
+          <template #label>
+            Inbound mail domain
+            <InfoTip text="The (sub)domain inbound mail arrives on, e.g. mail.example.com. Mail on it is routed to this organization." />
+          </template>
           <UInput v-model="form.inboundDomain" placeholder="mail.example.com" class="w-full" :disabled="!form.mailIdentityEditable" />
         </UFormField>
 
-        <UFormField
-          label="Shared contact address"
-          description="The From identity for team replies and the base of contact+token reply addresses. Must live on the inbound domain."
-        >
+        <UFormField :help="form.mailIdentityEditable ? undefined : 'Set by the platform operator.'">
+          <template #label>
+            Shared contact address
+            <InfoTip text="The From address for team replies and the base of contact+token reply addresses. Must be on the inbound domain." />
+          </template>
           <UInput v-model="form.contactAddress" placeholder="contact@mail.example.com" class="w-full" :disabled="!form.mailIdentityEditable" />
         </UFormField>
 
-        <p
-          v-if="!form.mailIdentityEditable"
-          class="text-sm text-(--ui-text-muted)"
-        >
-          The inbound domain and contact address are set by the platform operator, who also sets the domain up with the mail provider. Ask them to change these.
-        </p>
-
-        <UFormField
-          label="Brand From name"
-          description="The display name on shared-address sends and courtesy replies (e.g. Acme Support). Personal-alias sends carry the agent's own name."
-        >
+        <UFormField>
+          <template #label>
+            Brand From name
+            <InfoTip text="Display name on shared-address sends and courtesy replies. Personal-alias sends use the agent's own name." />
+          </template>
           <UInput v-model="form.brandFromName" placeholder="Acme Support" class="w-full" />
         </UFormField>
 
-        <UFormField
-          label="Auto-acknowledge new conversations"
-          description="Send a courtesy 'we received your message' to authenticated senders opening a new conversation."
-        >
+        <UFormField>
+          <template #label>
+            Auto-acknowledge new conversations
+            <InfoTip text="Sends a courtesy &quot;we received your message&quot; to authenticated senders who open a new conversation." />
+          </template>
           <USwitch v-model="form.autoAckEnabled" />
         </UFormField>
 
-        <UFormField
-          label="Auto-close quiet conversations after (days)"
-          description="A pending conversation (replied, awaiting the contact) with no reply for this many days is closed by the nightly sweep. 0 leaves them open until closed by hand. A new message reopens a closed conversation either way."
-        >
+        <UFormField>
+          <template #label>
+            Auto-close after (days)
+            <InfoTip>
+              <p>A pending conversation with no reply from the contact for this many days is closed by the nightly sweep.</p>
+              <p>0 never auto-closes. A new message always reopens a closed conversation.</p>
+            </InfoTip>
+          </template>
           <UInputNumber v-model="form.autoCloseDays" :min="0" :max="365" class="w-40" />
         </UFormField>
 
-        <UFormField
-          label="Contact-form API key"
-          description="Server-to-server key that authorizes the public contact-form endpoint and routes submissions to this organization. Empty disables the form."
-        >
+        <UFormField>
+          <template #label>
+            Contact-form API key
+            <InfoTip text="Server-to-server key for the public contact-form endpoint; submissions are routed to this organization. Empty disables the form." />
+          </template>
           <div class="flex gap-2">
             <UInput v-model="form.contactFormApiKey" class="flex-1 font-mono" />
             <UButton
@@ -228,10 +225,11 @@ function generateApiKey() {
           </div>
         </UFormField>
 
-        <UFormField
-          label="Email on unassigned mail"
-          description="These users are emailed as soon as mail lands on a conversation nobody has been assigned. Everyone with inbox access still gets the in-app notification. Leave empty to notify no one by email."
-        >
+        <UFormField>
+          <template #label>
+            Email on unassigned mail
+            <InfoTip text="These users are emailed when mail lands on an unassigned conversation. Everyone with inbox access still gets the in-app notification." />
+          </template>
           <USelectMenu
             v-model="form.notifyUserIds"
             :items="userItems"
@@ -244,11 +242,12 @@ function generateApiKey() {
           />
         </UFormField>
 
-        <UFormField
-          label="AI grounding source URLs"
-          description="One URL per line. Pages are snapshotted daily as reference material for AI reply drafting."
-        >
-          <UTextarea v-model="urlsText" :rows="4" placeholder="https://example.com/help" class="w-full font-mono" />
+        <UFormField>
+          <template #label>
+            AI grounding source URLs
+            <InfoTip text="Pages snapshotted daily as reference material for AI reply drafts." />
+          </template>
+          <UTextarea v-model="urlsText" :rows="4" placeholder="One URL per line" class="w-full font-mono" />
         </UFormField>
       </div>
 
@@ -262,15 +261,10 @@ function generateApiKey() {
       </div>
 
       <section class="space-y-3 pt-4 border-t border-(--ui-border)">
-        <div>
-          <h2 class="text-lg font-semibold">
-            Sending identities
-          </h2>
-          <p class="text-sm text-(--ui-text-muted)">
-            Each teammate's alias routes mail to &lt;alias&gt;@ the inbound domain to them and
-            enables a personal From address. Signatures are self-service (each user edits their own).
-          </p>
-        </div>
+        <h2 class="text-lg font-semibold">
+          Sending identities
+          <InfoTip text="An alias routes <alias>@ the inbound domain to that teammate and gives them a personal From address. Each user edits their own signature." />
+        </h2>
         <ul class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md">
           <li
             v-for="row in identities"

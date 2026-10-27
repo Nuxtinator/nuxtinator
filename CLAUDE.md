@@ -302,6 +302,7 @@ Database is Postgres via Kysely + `kysely-postgres-js`. Schema composed: core ta
 
 ## User instruction reminders
 
+- Before any UI work, read [layers/core/DESIGN.md](layers/core/DESIGN.md) and follow it. When a UI decision is made or reversed, update DESIGN.md (the rule) and [documentation/ui-decisions.md](documentation/ui-decisions.md) (the reasoning and what was rejected).
 - App-layer pages live at `app/pages/<appId>/...`. Don't write them with org-slug prefixes — the tenancy layer adds those automatically when loaded.
 - Layer code that touches the database imports `db` from `#core/server/utils/database`. Only the tenancy layer imports `adminDb` (via `#tenant/admin-db`); doing so from outside that layer is a tenancy contract violation.
 - Server route handlers that need user identity / permissions use `defineTenantHandler` from `#tenant/server`. In single mode it's just `requireAuth` + a transaction; in multi mode it adds the org context.

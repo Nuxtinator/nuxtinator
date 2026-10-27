@@ -329,6 +329,8 @@ The default layout (host) renders the launcher rail + per-app sidebar around you
 
 A page that should *not* be org-prefixed — a public bridge or callback that owns no org context — opts out with `definePageMeta({ tenantExempt: true })`. The tenancy route guard then leaves it at its naive path instead of rewriting to `/@<slug>/…` or bouncing to `/orgs`, so a layer can exempt its own route without editing the guard. In single mode there's no guard, so the flag is a harmless no-op.
 
+Follow the UI rules in [layers/core/DESIGN.md](../layers/core/DESIGN.md): use core's components (`InfoTip`, `SidebarPanel`, `AccountGroup`/`AccountRow`, `ConfirmModal`) and theme tokens rather than hand-rolled markup and raw colors.
+
 ### 7. Wire it into the host
 
 Three places to update (in this order):

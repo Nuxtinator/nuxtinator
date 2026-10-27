@@ -2,6 +2,8 @@
 
 Styling and UI choices for the nuxtinator layers, with the reasoning behind each. Check this before changing colors, tokens, surfaces or chrome; add an entry when a new decision is made.
 
+The rules themselves, as developers in this repo and in consumer projects should follow them, live in [layers/core/DESIGN.md](../layers/core/DESIGN.md), which ships with core. This file keeps the reasoning and the rejected alternatives. When a decision is made or reversed, update both.
+
 Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/assets/css/main.css) and [layers/core/app/app.config.ts](../layers/core/app/app.config.ts).
 
 ## Color palette
@@ -44,6 +46,14 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
 - **Personal apps sit after org apps.** The collapsed rail separates them with the same plain divider it uses under the home icon (it's too narrow for a label); the expanded rail uses `<USeparator label="Personal">`; the launcher popover uses `<USeparator label="Personal">`; dashboards use a "Personal" heading. On a personal app's pages the rail and org switcher keep showing the last active org, so leaving the app returns to it.
 - **Leaving admin**: the admin sidebar (desktop and mobile drawer) opens with a "Back to apps" link above the sections, and the admin header's top-right is a plain × button to the launcher.
 - **The theme toggle sits in the top bar** between the notification bell and the profile icon, in both the desktop and mobile headers (`<ThemeToggle size="sm" />`).
+
+## Help text
+
+- **Explanations go behind an (i) icon, not on the page.** Put `<InfoTip text="…" />` (core) next to the label or heading; it opens the text in a click popover, so it works on touch. For longer help, put `<p>` paragraphs in its default slot. On a `UFormField`, use the `#label` slot: `<template #label>Label <InfoTip text="…" /></template>`.
+  - Full-sentence `description`s under every field, and intro paragraphs under page and section headings, were rejected: the page turned into a wall of text and the controls got lost.
+- **Keep on the page only what the user needs right now**: a short note explaining why a control is disabled (e.g. `help="Set by the platform operator."`), validation errors, and labels. Keep labels short; move the detail into the InfoTip.
+- **Don't add a subtitle that repeats the page title.**
+- InfoTip sits at `vertical-align: -0.2em`, which centres the icon on the label's capital letters; `align-middle` made it sit low.
 
 ## Settings pages
 

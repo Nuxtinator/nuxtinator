@@ -153,6 +153,10 @@ Framework/DB singletons (`nuxt`, `vue`, `@nuxt/kit`, `@nuxt/ui`, `kysely`, `kyse
 
 For the full file-by-file template — DB schema augmentation, per-app tenancy retrofit migrations (`*_T<NNN>_*.ts`), admin sections, static roles, and the prefix conventions — see the upstream guide: **https://github.com/Nuxtinator/nuxtinator/blob/master/documentation/layers.md** (section "Creating a new app layer").
 
+## UI rules
+
+Before any UI work — in the host or in your own app layer — read `_layers/core/DESIGN.md` and follow it. It lists the core components to use (help icons, sidebars, settings rows, confirm dialogs) and the styling rules every nuxtinator page shares. It updates with core, so re-read it after a core update.
+
 ## Good to know
 
 - **SSR is off** — this is a SPA.
