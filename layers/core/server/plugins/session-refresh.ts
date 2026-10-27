@@ -6,6 +6,7 @@ import {
   setSessionCookies,
   clearSessionCookies
 } from '../utils/sessions'
+import { cookieName } from '../utils/cookie-names'
 
 // Browsers carry a 15-minute access cookie and a long-lived refresh cookie.
 // When a request arrives with a refresh cookie but no valid access token, the
@@ -20,10 +21,10 @@ export default defineNitroPlugin((nitroApp) => {
     const path = event.path || ''
     if (SKIP_PREFIXES.some(p => path.startsWith(p))) return
 
-    const refreshToken = getCookie(event, REFRESH_COOKIE)
+    const refreshToken = getCookie(event, cookieName(REFRESH_COOKIE))
     if (!refreshToken) return
 
-    const access = getCookie(event, ACCESS_COOKIE)
+    const access = getCookie(event, cookieName(ACCESS_COOKIE))
     if (access && verifyToken(access)) return
 
     const tokens = await refreshSession(event, refreshToken)

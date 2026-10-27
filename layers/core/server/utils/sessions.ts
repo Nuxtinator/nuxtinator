@@ -5,6 +5,7 @@ import { db } from './database'
 import { getClientIp } from './client-ip'
 import { logEvent } from './activity-logger'
 import { requireAuth, type SessionTokenPayload } from './auth'
+import { cookieName } from './cookie-names'
 import type { SessionClient } from '#core/server/database/schema'
 
 // Sessions: a short-lived access JWT plus a rotating refresh token, one
@@ -72,15 +73,15 @@ const cookieBase = () => ({
 })
 
 export function setSessionCookies(event: H3Event, tokens: IssuedTokens): void {
-  setCookie(event, ACCESS_COOKIE, tokens.accessToken, { ...cookieBase(), maxAge: ACCESS_TTL_SECONDS })
+  setCookie(event, cookieName(ACCESS_COOKIE), tokens.accessToken, { ...cookieBase(), maxAge: ACCESS_TTL_SECONDS })
   if (tokens.refreshToken) {
-    setCookie(event, REFRESH_COOKIE, tokens.refreshToken, { ...cookieBase(), maxAge: REFRESH_TTL_MS / 1000 })
+    setCookie(event, cookieName(REFRESH_COOKIE), tokens.refreshToken, { ...cookieBase(), maxAge: REFRESH_TTL_MS / 1000 })
   }
 }
 
 export function clearSessionCookies(event: H3Event): void {
-  setCookie(event, ACCESS_COOKIE, '', { ...cookieBase(), maxAge: 0 })
-  setCookie(event, REFRESH_COOKIE, '', { ...cookieBase(), maxAge: 0 })
+  setCookie(event, cookieName(ACCESS_COOKIE), '', { ...cookieBase(), maxAge: 0 })
+  setCookie(event, cookieName(REFRESH_COOKIE), '', { ...cookieBase(), maxAge: 0 })
 }
 
 // Creates a session for a user who just proved who they are. Browsers get the

@@ -11,6 +11,6 @@ export function isPersonalAppPath(path: string): boolean {
 // and org switcher keep it while the user is in the app; elsewhere none.
 export function useChromeOrgSlug() {
   const route = useRoute()
-  const lastOrg = useCookie<string | null>('active-org-slug')
+  const lastOrg = useCookie<string | null>(cookieName('active-org-slug'))
   return computed<string | null>(() => isPersonalAppPath(route.path) ? lastOrg.value ?? null : null)
 }

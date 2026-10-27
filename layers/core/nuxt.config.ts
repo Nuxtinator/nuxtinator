@@ -94,6 +94,9 @@ export default defineNuxtConfig({
     // first one that isn't. See documentation/deploy-behind-a-proxy.md.
     trustedProxies: 'loopback,private,cloudflare',
     public: {
+      // Prepended to session and active-org cookie names
+      // (NUXT_PUBLIC_COOKIE_PREFIX) so apps on the same hostname don't share them.
+      cookiePrefix: '',
       tenancy: false,
       // The page that holds the user's account settings. Email-change and
       // provider-link flows return here; a host with its own account page sets it.

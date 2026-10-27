@@ -1,4 +1,5 @@
 import { REFRESH_COOKIE, refreshSession, setSessionCookies, clearSessionCookies, isNativeClient } from '../../utils/sessions'
+import { cookieName } from '../../utils/cookie-names'
 
 // Exchanges a refresh token for a new access token. Native clients send
 // `{ refreshToken }` and get the new pair back; when `refreshToken` comes back
@@ -9,7 +10,7 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event).catch(() => null) as { refreshToken?: unknown } | null
   const token = native
     ? (typeof body?.refreshToken === 'string' ? body.refreshToken : '')
-    : getCookie(event, REFRESH_COOKIE) || ''
+    : getCookie(event, cookieName(REFRESH_COOKIE)) || ''
 
   const tokens = token ? await refreshSession(event, token) : null
   if (!tokens) {

@@ -37,6 +37,9 @@ import type { Permission } from '#core/app/utils/permissions'
 import { getOrgEnabledApps, isAppEnabledForOrg } from './app-settings'
 import { adminDb } from './database-admin'
 
+// Prefixed like core's session cookies (NUXT_PUBLIC_COOKIE_PREFIX).
+const activeOrgCookie = () => `${useRuntimeConfig().public.cookiePrefix || ''}active-org-slug`
+
 export interface TenantContext {
   userId: string
   orgId: string
@@ -103,7 +106,7 @@ async function runWithOrgContext<T>(
       }
     }
 
-    setCookie(event, 'active-org-slug', orgSlug, {
+    setCookie(event, activeOrgCookie(), orgSlug, {
       maxAge: 60 * 60 * 24 * 30,
       sameSite: 'lax',
       path: '/',
@@ -260,7 +263,7 @@ export async function getUserPermissionsForRequest(
     if (!orgId) {
       slug = (event.context.orgSlug as string | undefined)
         ?? getRequestHeader(event, 'x-active-org')
-        ?? getCookie(event, 'active-org-slug')
+        ?? getCookie(event, activeOrgCookie())
     }
   }
   if (!orgId && slug) {
@@ -536,7 +539,7 @@ async function resolveTransactionOrgId(event: H3Event, opts: OrgTransactionOpts)
     if (!orgId) {
       slug = (event.context.orgSlug as string | undefined)
         ?? getRequestHeader(event, 'x-active-org')
-        ?? getCookie(event, 'active-org-slug')
+        ?? getCookie(event, activeOrgCookie())
     }
   }
   if (!orgId && slug) {

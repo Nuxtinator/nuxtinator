@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken'
 import type { SignOptions } from 'jsonwebtoken'
 import type { H3Event } from 'h3'
+import { cookieName } from './cookie-names'
 
 export interface AuthTokenPayload {
   userId: string
@@ -56,7 +57,7 @@ export function getAccessToken(event: H3Event): string | null {
   const refreshed = event.context.refreshedAccessToken
   if (typeof refreshed === 'string' && refreshed) return refreshed
 
-  const cookie = getCookie(event, 'auth-token')
+  const cookie = getCookie(event, cookieName('auth-token'))
   if (cookie) return cookie
 
   const header = getHeader(event, 'authorization') || ''

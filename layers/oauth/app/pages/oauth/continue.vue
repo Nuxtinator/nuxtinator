@@ -35,7 +35,7 @@ function resume() {
 }
 
 function choose(slug: string) {
-  useCookie('active-org-slug', { maxAge: 60 * 60 * 24 * 30, sameSite: 'lax', path: '/' }).value = slug
+  useCookie(`${useRuntimeConfig().public.cookiePrefix || ''}active-org-slug`, { maxAge: 60 * 60 * 24 * 30, sameSite: 'lax', path: '/' }).value = slug
   resume()
 }
 

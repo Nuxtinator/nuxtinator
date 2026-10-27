@@ -71,7 +71,7 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
   }
 
   // No active org but the path looks like an app page — try the active-org cookie.
-  const cookie = useCookie<string | null>('active-org-slug')
+  const cookie = useCookie<string | null>(`${useRuntimeConfig().public.cookiePrefix || ''}active-org-slug`)
   if (cookie.value) {
     return navigateTo({ path: `/@${cookie.value}${path}`, query: to.query, hash: to.hash })
   }

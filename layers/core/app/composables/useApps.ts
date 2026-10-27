@@ -55,7 +55,7 @@ export async function useApps() {
   })
 
   const personalUrl = computed(() => (user.value ? '/api/_personal-apps' : ''))
-  const lastOrg = useCookie<string | null>('active-org-slug')
+  const lastOrg = useCookie<string | null>(cookieName('active-org-slug'))
 
   // Every composable and watcher runs before the first await: after it, SSR has
   // no Nuxt instance (useCookie/useFetch throw) and watchers outlive the component.
