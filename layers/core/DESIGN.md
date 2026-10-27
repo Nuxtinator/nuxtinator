@@ -13,6 +13,7 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 | Help or explanation for a field or section | `<InfoTip text="…" />` |
 | Sidebar | `<SidebarPanel>` with `<SidebarNav :items>` inside |
 | Settings page | `<SettingsGroup title>` cards of `<SettingsRow label value>` rows; `useSettingsRow(id)` keeps one row open at a time |
+| Page or tab edited as one form | `<SaveBar :dirty :saving @save @discard>` at the end of the form, with `useUnsavedGuard(dirty, discard)` |
 | Confirm before a destructive action | `if (!await confirmAction({ title, confirmLabel })) return` with `const confirmAction = useConfirm()`; or `<ConfirmModal v-model:open @confirm :loading>` when the modal should stay open while the work runs |
 | Labelled divider | `<USeparator label="…">` |
 | Theme or language picker | `<ThemeToggle>`, `<LocaleSwitcher>` |
@@ -26,9 +27,21 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 
 ## Settings pages
 
+Use one of two patterns per page or tab.
+
+**Rows**, for settings that each stand on their own:
+
 - Group settings as rows in a few `SettingsGroup` cards, not one card per setting. Each row shows label, current value and an action.
 - Forms stay closed until the user acts: a row's Change button opens its form under the row (the `panel` slot with `open`), with Save and Cancel. One row open at a time.
-- Destructive actions open the same way, behind an outlined error button, and confirm with `ConfirmModal`.
+
+**One form with a save bar**, for settings edited together (a whole tab, or anything with a live preview):
+
+- The fields are open on the page, grouped in a few cards, with no per-section Save buttons.
+- End the form with `<SaveBar>`. Save stays disabled until something changes; Discard changes appears beside it once it has.
+- Call `useUnsavedGuard(dirty, discard)` so switching tabs, leaving the page or closing the browser tab asks before dropping unsaved edits. Tabs on the page need `activation-mode="manual"`.
+- A toggle that takes effect on its own (a switch) may still save at once; keep it out of `dirty`.
+
+Either way, destructive actions open behind an outlined error button and confirm with `ConfirmModal`.
 
 ## Dialogs and feedback
 
