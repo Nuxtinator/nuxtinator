@@ -9,6 +9,7 @@ const route = useRoute()
 const orgSlug = computed(() => route.params.orgSlug as string)
 const roleId = computed(() => route.params.id as string)
 const toast = useToast()
+const confirmAction = useConfirm()
 
 interface CustomRole {
   id: string
@@ -78,7 +79,7 @@ const onSave = async () => {
 
 const onDelete = async () => {
   if (!role.value) return
-  if (!confirm(`Delete role "${role.value.name}"?`)) return
+  if (!await confirmAction({ title: `Delete role "${role.value.name}"?`, confirmLabel: 'Delete' })) return
   try {
     await $fetch(`/api/o/${orgSlug.value}/roles/${roleId.value}`, { method: 'DELETE' })
     toast.add({ title: 'Role deleted', color: 'success' })

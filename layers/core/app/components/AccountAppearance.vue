@@ -4,7 +4,7 @@ const { theme, toggleTheme } = useTheme()
 </script>
 
 <template>
-  <AccountRow
+  <SettingsRow
     label="Theme"
     :value="theme === 'light' ? 'Light' : 'Dark'"
   >
@@ -18,5 +18,5 @@ const { theme, toggleTheme } = useTheme()
         {{ theme === 'light' ? 'Switch to dark' : 'Switch to light' }}
       </UButton>
     </template>
-  </AccountRow>
+  </SettingsRow>
 </template>

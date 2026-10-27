@@ -38,6 +38,7 @@ const UButton = resolveComponent('UButton')
 const UBadge = resolveComponent('UBadge')
 
 const toast = useToast()
+const confirmAction = useConfirm()
 const { user: currentUser } = useAuth()
 
 const page = ref(1)
@@ -600,7 +601,11 @@ const handleSaveMembershipRoles = async (m: Membership) => {
 
 const handleRemoveMembership = async (m: Membership) => {
   if (!selectedUser.value) return
-  if (!confirm(`Remove ${selectedUser.value.display_name || selectedUser.value.email} from ${m.name}?`)) return
+  if (!await confirmAction({
+    title: 'Remove from org?',
+    description: `Remove ${selectedUser.value.display_name || selectedUser.value.email} from ${m.name}?`,
+    confirmLabel: 'Remove'
+  })) return
   removingOrgId.value = m.id
   try {
     const userId = selectedUser.value.id

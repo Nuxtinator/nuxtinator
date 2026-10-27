@@ -106,6 +106,6 @@ export default defineNuxtModule({
     // The generated runtimeConfig type snapshots this value with one literal
     // key per loaded layer, so a plain Record doesn't satisfy it; widen
     // through the generated type.
-    nuxt.options.runtimeConfig.layerUnmet = Object.fromEntries(unmet) as typeof nuxt.options.runtimeConfig.layerUnmet
+    nuxt.options.runtimeConfig.layerUnmet = Object.fromEntries(unmet) as unknown as typeof nuxt.options.runtimeConfig.layerUnmet
   }
 })

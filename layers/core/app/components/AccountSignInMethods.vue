@@ -55,7 +55,7 @@ async function unlink(id: string) {
 </script>
 
 <template>
-  <AccountRow
+  <SettingsRow
     v-for="p in methods.providers"
     :key="p.id"
     :label="p.label"
@@ -87,5 +87,5 @@ async function unlink(id: string) {
         Link
       </UButton>
     </template>
-  </AccountRow>
+  </SettingsRow>
 </template>

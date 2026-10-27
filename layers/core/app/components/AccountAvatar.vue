@@ -55,7 +55,7 @@ async function remove() {
 </script>
 
 <template>
-  <AccountRow
+  <SettingsRow
     label="Avatar"
     :value="data.can_upload ? `${data.types_text}, up to ${data.max_mb} MB` : undefined"
   >
@@ -98,5 +98,5 @@ async function remove() {
         Remove
       </UButton>
     </template>
-  </AccountRow>
+  </SettingsRow>
 </template>

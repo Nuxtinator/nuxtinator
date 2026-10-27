@@ -10,29 +10,29 @@ definePageMeta({
       Account Settings
     </h1>
 
-    <AccountGroup title="Profile">
+    <SettingsGroup title="Profile">
       <AccountAvatar />
       <AccountDisplayName />
       <AccountMemberSince />
-    </AccountGroup>
+    </SettingsGroup>
 
-    <AccountGroup title="Sign-in & security">
+    <SettingsGroup title="Sign-in & security">
       <AccountEmail />
       <AccountPassword />
       <AccountSignInMethods />
       <AccountSessions />
-    </AccountGroup>
+    </SettingsGroup>
 
-    <AccountGroup title="Preferences">
+    <SettingsGroup title="Preferences">
       <AccountAppearance />
-    </AccountGroup>
+    </SettingsGroup>
 
     <AccountSections />
 
-    <AccountGroup title="Danger zone">
+    <SettingsGroup title="Danger zone">
       <AccountSignOut />
       <AccountDelete />
-    </AccountGroup>
+    </SettingsGroup>
 
     <ReauthModal />
   </div>

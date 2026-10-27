@@ -4,6 +4,7 @@ definePageMeta({
 })
 
 const route = useRoute()
+const toast = useToast()
 const token = computed(() => route.params.token as string)
 const { isLoggedIn } = useAuth()
 
@@ -124,7 +125,7 @@ const saveTitle = async () => {
     editTitle.value = ''
   } catch (err: any) {
     console.error('Error updating title:', err)
-    alert(err.data?.message || 'Failed to update title')
+    toast.add({ title: 'Failed to update title', description: err.data?.message, color: 'error' })
     cancelEdit()
   }
 }

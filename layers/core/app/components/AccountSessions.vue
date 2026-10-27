@@ -18,7 +18,7 @@ const { data, refresh } = useLazyFetch<{ sessions: SessionRow[] }>('/api/auth/se
 })
 
 const busy = ref<string | null>(null)
-const { open, toggle } = useAccountRow('sessions')
+const { open, toggle } = useSettingsRow('sessions')
 
 function describe(s: SessionRow): string {
   const ua = s.user_agent || ''
@@ -67,7 +67,7 @@ async function revokeOthers() {
 </script>
 
 <template>
-  <AccountRow
+  <SettingsRow
     label="Devices"
     :value="data.sessions.length ? `${data.sessions.length} signed in` : undefined"
     :open="open"
@@ -129,5 +129,5 @@ async function revokeOthers() {
         </UButton>
       </div>
     </template>
-  </AccountRow>
+  </SettingsRow>
 </template>

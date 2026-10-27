@@ -20,5 +20,10 @@
     "nuxt": "^4.0.0",
     "vue": "^3.0.0",
     "zod": "^3.23.0"
+  },
+  "nuxtinator": {
+    "requires": {
+      "@nuxtinator/core": ">=2.10.0"
+    }
   }
 }

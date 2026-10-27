@@ -4,7 +4,7 @@ const { logout } = useAuth()
 </script>
 
 <template>
-  <AccountRow
+  <SettingsRow
     label="Sign out"
     value="Sign out of your account on this device."
   >
@@ -17,5 +17,5 @@ const { logout } = useAuth()
         Sign out
       </UButton>
     </template>
-  </AccountRow>
+  </SettingsRow>
 </template>

@@ -57,5 +57,5 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
 
 ## Settings pages
 
-- **Settings are rows grouped into a few cards, not one card per setting.** Each row shows a label, the current value and an action (see `AccountGroup` / `AccountRow`). A card holding a single button or field read as sparse and made the page long.
+- **Settings are rows grouped into a few cards, not one card per setting.** Each row shows a label, the current value and an action (see `SettingsGroup` / `SettingsRow`). A card holding a single button or field read as sparse and made the page long.
 - **Forms stay closed until the user acts.** A row's Change button opens its form under the row, with Save and Cancel; one row is open at a time. The open panel sits on `bg-(--ui-bg-elevated)` with rounded corners, so it reads as revealed content rather than part of the card. Destructive actions (delete account) open the same way, behind an outlined error button.

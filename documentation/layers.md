@@ -78,7 +78,7 @@ The `admin` role gets every registered permission. A host keeps a layer's permis
 
 ### A host's own account page
 
-Core's `/account` page is a few `<AccountGroup title="…">` cards, each stacking row components: `AccountAvatar`, `AccountDisplayName`, `AccountMemberSince`, `AccountEmail`, `AccountPassword`, `AccountSignInMethods` (one row per provider), `AccountSessions`, `AccountAppearance`, `AccountSignOut` and `AccountDelete`. Rows that edit something open their form under the row when clicked, one at a time. `AccountSections` renders the cards other layers register, such as OAuth's Connected apps, and goes between groups. A host that wants an account page in its own layout writes a page that groups the rows it wants, plus `<ReauthModal />`. It then points core at that page so the email-change and provider-link flows return there:
+Core's `/account` page is a few `<SettingsGroup title="…">` cards, each stacking row components: `AccountAvatar`, `AccountDisplayName`, `AccountMemberSince`, `AccountEmail`, `AccountPassword`, `AccountSignInMethods` (one row per provider), `AccountSessions`, `AccountAppearance`, `AccountSignOut` and `AccountDelete`. Rows that edit something open their form under the row when clicked, one at a time. `AccountSections` renders the cards other layers register, such as OAuth's Connected apps, and goes between groups. A host that wants an account page in its own layout writes a page that groups the rows it wants, plus `<ReauthModal />`. It then points core at that page so the email-change and provider-link flows return there:
 
 ```ts
 // nuxt.config.ts
@@ -329,7 +329,7 @@ The default layout (host) renders the launcher rail + per-app sidebar around you
 
 A page that should *not* be org-prefixed — a public bridge or callback that owns no org context — opts out with `definePageMeta({ tenantExempt: true })`. The tenancy route guard then leaves it at its naive path instead of rewriting to `/@<slug>/…` or bouncing to `/orgs`, so a layer can exempt its own route without editing the guard. In single mode there's no guard, so the flag is a harmless no-op.
 
-Follow the UI rules in [layers/core/DESIGN.md](../layers/core/DESIGN.md): use core's components (`InfoTip`, `SidebarPanel`, `AccountGroup`/`AccountRow`, `ConfirmModal`) and theme tokens rather than hand-rolled markup and raw colors.
+Follow the UI rules in [layers/core/DESIGN.md](../layers/core/DESIGN.md): use core's components (`InfoTip`, `SidebarPanel`, `SettingsGroup`/`SettingsRow`, `useConfirm`/`ConfirmModal`) and theme tokens rather than hand-rolled markup and raw colors.
 
 ### 7. Wire it into the host
 

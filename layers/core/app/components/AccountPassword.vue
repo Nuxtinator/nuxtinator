@@ -4,7 +4,7 @@
 const { user, checkAuth } = useAuth()
 const { withReauth } = useReauth()
 const toast = useToast()
-const { open, toggle, close } = useAccountRow('password')
+const { open, toggle, close } = useSettingsRow('password')
 
 const hasPassword = computed(() => user.value?.has_password !== false)
 
@@ -79,7 +79,7 @@ async function handlePasswordChange() {
 </script>
 
 <template>
-  <AccountRow
+  <SettingsRow
     label="Password"
     :value="hasPassword ? '••••••••' : 'Not set'"
     :open="open"
@@ -209,5 +209,5 @@ async function handlePasswordChange() {
         </div>
       </form>
     </template>
-  </AccountRow>
+  </SettingsRow>
 </template>

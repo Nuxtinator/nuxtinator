@@ -4,7 +4,7 @@ const { user } = useAuth()
 </script>
 
 <template>
-  <AccountRow
+  <SettingsRow
     label="Member since"
     :value="user?.created ? new Date(user.created).toLocaleDateString() : undefined"
   />

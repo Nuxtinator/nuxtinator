@@ -12,8 +12,8 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 |---|---|
 | Help or explanation for a field or section | `<InfoTip text="…" />` |
 | Sidebar | `<SidebarPanel>` with `<SidebarNav :items>` inside |
-| Settings page | `<AccountGroup title>` cards of `<AccountRow label value>` rows |
-| Confirm before a destructive action | `<ConfirmModal v-model:open title description @confirm>` |
+| Settings page | `<SettingsGroup title>` cards of `<SettingsRow label value>` rows; `useSettingsRow(id)` keeps one row open at a time |
+| Confirm before a destructive action | `if (!await confirmAction({ title, confirmLabel })) return` with `const confirmAction = useConfirm()`; or `<ConfirmModal v-model:open @confirm :loading>` when the modal should stay open while the work runs |
 | Labelled divider | `<USeparator label="…">` |
 | Theme or language picker | `<ThemeToggle>`, `<LocaleSwitcher>` |
 
@@ -26,13 +26,13 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 
 ## Settings pages
 
-- Group settings as rows in a few `AccountGroup` cards, not one card per setting. Each row shows label, current value and an action.
+- Group settings as rows in a few `SettingsGroup` cards, not one card per setting. Each row shows label, current value and an action.
 - Forms stay closed until the user acts: a row's Change button opens its form under the row (the `panel` slot with `open`), with Save and Cancel. One row open at a time.
 - Destructive actions open the same way, behind an outlined error button, and confirm with `ConfirmModal`.
 
 ## Dialogs and feedback
 
-- Never use `alert()`, `confirm()` or `prompt()`. Confirm with `ConfirmModal`; report success and errors with `useToast()`.
+- Never use `alert()`, `confirm()` or `prompt()`. Confirm with `useConfirm()` / `ConfirmModal`; report success and errors with `useToast()`.
 
 ## Colors and surfaces
 

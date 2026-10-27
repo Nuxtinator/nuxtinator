@@ -12,6 +12,7 @@ import type {
 } from '../../components/kanban/types'
 
 const toast = useToast()
+const confirmAction = useConfirm()
 
 definePageMeta({
   middleware: 'auth'
@@ -247,7 +248,11 @@ async function submitProject() {
   }
 }
 async function deleteProject(p: Project) {
-  if (!import.meta.client || !confirm(`Delete project "${p.name}" and all its cards + swimlanes?`)) return
+  if (!import.meta.client || !await confirmAction({
+    title: `Delete project "${p.name}"?`,
+    description: 'Its cards and swimlanes are deleted too.',
+    confirmLabel: 'Delete'
+  })) return
   try {
     await $fetch(`/api/feedback/projects/${p.id}`, { method: 'DELETE' })
     projects.value = projects.value.filter(x => x.id !== p.id)

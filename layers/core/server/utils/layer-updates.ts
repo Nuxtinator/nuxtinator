@@ -92,7 +92,7 @@ export async function getAvailableLayerUpdates(opts?: { force?: boolean }): Prom
   const config = useRuntimeConfig()
   const lock = (config.layerLock ?? {}) as Record<string, LockEntry>
   const token = (config.layerSourceToken ?? '') as string
-  const unmetByPkg = (config.layerUnmet ?? {}) as Record<string, UnmetRequirement[]>
+  const unmetByPkg = (config.layerUnmet ?? {}) as unknown as Record<string, UnmetRequirement[]>
 
   // List each source repo's tags once, even when several layers share a repo.
   const tagsByRepo = new Map<string, string[]>()

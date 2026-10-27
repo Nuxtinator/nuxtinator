@@ -2,7 +2,7 @@
 // Account row: the display name, edited in a panel opened from Change.
 const { user } = useAuth()
 const toast = useToast()
-const { open, toggle, close } = useAccountRow('display-name')
+const { open, toggle, close } = useSettingsRow('display-name')
 
 const nameState = reactive({
   display_name: ''
@@ -52,7 +52,7 @@ async function handleNameUpdate() {
 </script>
 
 <template>
-  <AccountRow
+  <SettingsRow
     label="Display name"
     :value="user?.display_name || 'Not set'"
     :open="open"
@@ -108,5 +108,5 @@ async function handleNameUpdate() {
         </div>
       </form>
     </template>
-  </AccountRow>
+  </SettingsRow>
 </template>

@@ -5,7 +5,7 @@
 const { user } = useAuth()
 const { withReauth } = useReauth()
 const route = useRoute()
-const { open, toggle, close } = useAccountRow('email')
+const { open, toggle, close } = useSettingsRow('email')
 
 // Provider-only accounts have no password and confirm through `withReauth`.
 const hasPassword = computed(() => user.value?.has_password !== false)
@@ -92,7 +92,7 @@ async function handleEmailChange() {
 </script>
 
 <template>
-  <AccountRow
+  <SettingsRow
     label="Email"
     :value="user?.email"
     :open="open"
@@ -176,5 +176,5 @@ async function handleEmailChange() {
         </div>
       </form>
     </template>
-  </AccountRow>
+  </SettingsRow>
 </template>

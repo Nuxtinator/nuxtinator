@@ -3,7 +3,7 @@
 // Delete confirms by password or, without one, by re-authentication.
 const { user, deleteAccount } = useAuth()
 const { withReauth } = useReauth()
-const { open, toggle, close } = useAccountRow('delete')
+const { open, toggle, close } = useSettingsRow('delete')
 
 const hasPassword = computed(() => user.value?.has_password !== false)
 
@@ -54,7 +54,7 @@ watch(() => deleteState.password, () => {
 </script>
 
 <template>
-  <AccountRow
+  <SettingsRow
     label="Delete account"
     value="Permanently remove your account and all of its data."
     :open="open"
@@ -124,5 +124,5 @@ watch(() => deleteState.password, () => {
         </div>
       </div>
     </template>
-  </AccountRow>
+  </SettingsRow>
 </template>
