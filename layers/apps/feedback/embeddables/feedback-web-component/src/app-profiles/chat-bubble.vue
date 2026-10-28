@@ -269,6 +269,7 @@ async function doSubmit() {
     submitOk.value = true
     saveName(form.submitter_name.trim())
     resetForm()
+    autoScreenshot()
     setTimeout(() => { submitOk.value = false }, 2500)
   } catch (e) {
     submitError.value = e.message || 'Submit failed.'
