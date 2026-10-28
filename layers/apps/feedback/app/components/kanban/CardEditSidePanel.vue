@@ -36,7 +36,6 @@ const emit = defineEmits<{
   'update:modelValue': [value: boolean]
   save: [patch: Partial<Card> & { post_meta?: Record<string, any> }]
   delete: [cardId: string]
-  archive: [patch: Partial<Card> & { post_meta?: Record<string, any> }]
   replied: [card: Card]
 }>()
 
@@ -256,13 +255,20 @@ const columnSelectItems = computed(() => props.columns.map(c => ({ label: c.name
 const projectSelectItems = computed(() => props.projects.map(p => ({ label: p.name, value: p.id })))
 
 // The phase picker only applies while a card sits in the DOING column.
-const currentColumnName = computed(() =>
-  props.columns.find(c => c.id === props.card?.column_id)?.name ?? ''
-)
 const isDoing = computed(() =>
   props.columns.find(c => c.id === draft.value?.column_id)?.name === DOING_COLUMN
 )
-const isArchived = computed(() => currentColumnName.value === 'ARCHIVE')
+// Footer "Move to" menu: every column except the card's current one. Moving
+// saves the panel's edits along with the new column.
+const moveToItems = computed(() =>
+  props.columns
+    .filter(c => c.id !== props.card?.column_id)
+    .map(c => ({
+      label: c.name,
+      icon: c.name === 'ARCHIVE' ? 'i-lucide-archive' : 'i-lucide-columns-3',
+      onSelect: () => handleMoveTo(c.id)
+    }))
+)
 const phaseSelectItems = PHASES.map(p => ({ label: p.label, value: p.value }))
 
 // -------- Meta helpers --------
@@ -433,9 +439,9 @@ function handleDeleteCancel() {
   showDeleteConfirm.value = false
 }
 
-function handleArchive() {
+function handleMoveTo(columnId: string) {
   if (!draft.value || !props.card) return
-  emit('archive', buildPatch())
+  emit('save', { ...buildPatch(), column_id: columnId })
 }
 
 // -------- Agent bridge: format + clipboard --------
@@ -550,15 +556,26 @@ function formatCardContextForAgent(): string {
     lines.push('## Type-specific')
     lines.push(typeSpecificLines)
   }
+  if (attachments.value.length) {
+    lines.push('')
+    lines.push('## Attachments')
+    lines.push('_Signed links, valid for 7 days._')
+    for (const a of attachments.value) {
+      const kind = a.kind === 'screenshot' ? 'Screenshot' : 'File'
+      lines.push(`- ${kind}: [${a.filename}](${a.url}) (${a.mime_type}, ${formatBytes(a.size_bytes)})`)
+    }
+  }
   lines.push('')
   lines.push('---')
   lines.push('')
   lines.push(`**Action:** ${action} — ${getActionInstructions(action)}`)
   lines.push(`**Context Path:** \`${projectName} / ${columnName} / ${headline}\``)
   lines.push('')
+  const { screenshot_url: screenshotUrl, ...restMeta } = card.post_meta ?? {}
+  const postMeta = screenshotUrl ? { ...restMeta, screenshot_url: screenshotUrl } : restMeta
   lines.push('## Post Meta (All Fields)')
   lines.push('```json')
-  lines.push(JSON.stringify(card.post_meta ?? {}, null, 2))
+  lines.push(JSON.stringify(postMeta, null, 2))
   lines.push('```')
   return lines.join('\n')
 }
@@ -704,6 +721,8 @@ async function handleCopyForAgent() {
                 <UTextarea
                   v-if="f.type === 'textarea'"
                   :rows="3"
+                  autoresize
+                  :maxrows="20"
                   :model-value="getMeta(f.name)"
                   :placeholder="f.placeholder || ''"
                   class="w-full"
@@ -927,9 +946,11 @@ async function handleCopyForAgent() {
               <UButton color="error" variant="outline" icon="i-lucide-trash-2" @click="handleDeleteClick">
                 Delete
               </UButton>
-              <UButton v-if="!isArchived" color="neutral" variant="soft" icon="i-lucide-archive" @click="handleArchive">
-                Archive
-              </UButton>
+              <UDropdownMenu v-if="moveToItems.length" :items="moveToItems" :content="{ side: 'top', align: 'start' }">
+                <UButton color="neutral" variant="soft" icon="i-lucide-move-right" trailing-icon="i-lucide-chevron-up">
+                  Move to
+                </UButton>
+              </UDropdownMenu>
             </div>
             <div class="flex items-center gap-2">
               <UButton variant="ghost" @click="open = false">Cancel</UButton>

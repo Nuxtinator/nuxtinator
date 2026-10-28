@@ -528,22 +528,6 @@ async function archiveCard(card: Card) {
   }
 }
 
-// Archiving from the edit panel persists the card's edits (labels, etc.) first,
-// then moves it into the ARCHIVE column so the move endpoint logs the history.
-async function onArchiveCard(patch: Partial<Card>) {
-  const card = activeCard.value
-  if (!card) return
-  try {
-    const saved = await persistCard(card, patch)
-    const i = cards.value.findIndex(c => c.id === saved.id)
-    if (i >= 0) cards.value.splice(i, 1, saved)
-    cardPanelOpen.value = false
-    await archiveCard(saved)
-  } catch (e: any) {
-    toast.add({ title: 'Archive failed', description: e?.data?.statusMessage, color: 'error' })
-  }
-}
-
 // Header gear dropdown for the focused project — same actions as the
 // project right-click menu.
 const projectMenuItems = computed(() => {
@@ -832,7 +816,6 @@ async function onReorderProjects(payload: { orderedIds: string[] }) {
       :users="assignableUsers"
       @save="onSaveCard"
       @delete="onDeleteCard"
-      @archive="onArchiveCard"
       @replied="onCardReplied"
     />
 
