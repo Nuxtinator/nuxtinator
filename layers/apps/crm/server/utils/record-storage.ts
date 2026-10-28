@@ -24,6 +24,7 @@ import { getRecordType, getRecordTypeFields, type CrmFieldSetting } from './defi
 import { normalizeChannelValue } from './normalize'
 import { claimChannel, findChannel, linkChannel, unlinkChannel } from './channels'
 import { recordCrmActivity } from './crm-activity'
+import { assertNotAccountOwned } from './account-link'
 
 type Tx = Transaction<Database>
 
@@ -37,6 +38,8 @@ export interface CrmHydratedRecord {
   createdBy: string
   createdAt: Date
   updatedAt: Date
+  /** The linked user account, whose name and email addresses the record shows. */
+  userId: string | null
   /** Logical field values keyed by field key (shapes per InferRecordShape). */
   fields: Record<string, unknown>
 }
@@ -113,6 +116,7 @@ export async function hydrateRecords(
       createdBy: row.created_by,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      userId: row.user_id ?? null,
       fields
     })
   }
@@ -856,6 +860,11 @@ export async function applyFieldPatch(
     oldRecord = await getRecord(tx, ctx, typeKey, id)
 
     if (scalarOps.size === 0 && listOps.size === 0) return oldRecord
+
+    for (const key of [...scalarOps.keys(), ...listOps.keys()]) {
+      const def = defsByKey.get(key)!
+      await assertNotAccountOwned(tx, id, { name: def.column === 'name', channelType: def.storage === 'channels' ? def.channelType : null })
+    }
 
     // Promoted columns, the jsonb merge, and the updated_at bump (no DB
     // trigger exists — the kernel owns it) in a single statement.

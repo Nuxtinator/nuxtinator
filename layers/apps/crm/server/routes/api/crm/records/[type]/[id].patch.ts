@@ -45,6 +45,7 @@ export default defineEventHandler(async (event) => {
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
       createdBy: record.createdBy,
+      userId: record.userId,
       // The update gate passed, so canEdit is true by construction (type
       // answer or edit share — either way this caller can edit this record).
       capabilities: { canEdit: true, canShare: caps.share, canDelete: caps.delete }

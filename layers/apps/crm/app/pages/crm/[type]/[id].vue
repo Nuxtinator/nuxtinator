@@ -58,6 +58,10 @@ const canEdit = computed(() => record.value?.capabilities.canEdit ?? false)
 const canShare = computed(() => record.value?.capabilities.canShare ?? false)
 const canDelete = computed(() => record.value?.capabilities.canDelete ?? false)
 
+// A record linked to a user account shows that account's name and email
+// addresses; only the person changes them (see server/utils/account-link.ts).
+const accountLinked = computed(() => !!record.value?.userId)
+
 // The timeline self-fetches; this handle re-pulls it after actions on this
 // page that append activity rows.
 const timeline = ref<{ refresh: () => Promise<void> } | null>(null)
@@ -180,7 +184,7 @@ async function removeRecord() {
         :status-field="statusField"
         :back-to="crmPath(`/${typeKey}`)"
         :back-label="typeInfo?.label ?? 'Back'"
-        :can-edit="canEdit"
+        :can-edit="canEdit && !accountLinked"
         :can-share="canShare"
         :can-delete="canDelete"
         :deleting="deleting"
@@ -188,6 +192,17 @@ async function removeRecord() {
         @share-changed="refreshTimeline"
         @delete="removeRecord"
       />
+
+      <p
+        v-if="accountLinked"
+        class="flex items-center gap-1.5 text-sm text-(--ui-text-muted)"
+      >
+        <UIcon
+          name="i-lucide-user-round-check"
+          class="size-4 shrink-0"
+        />
+        This person has an account. Their name and email address come from it, and only they can change them.
+      </p>
 
       <CrmFieldSection
         v-for="group in sectionGroups"
@@ -215,6 +230,7 @@ async function removeRecord() {
                 :field="field"
                 :entries="channelEntries(field)"
                 :editable="canEdit"
+                :addresses-locked="accountLinked && field.channelType === 'email'"
                 @refresh="onChannelsChanged"
               />
             </div>

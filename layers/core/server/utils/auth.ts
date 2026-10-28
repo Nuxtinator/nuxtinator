@@ -5,7 +5,7 @@ import { cookieName } from './cookie-names'
 
 export interface AuthTokenPayload {
   userId: string
-  email: string
+  email: string | null
   display_name: string
 }
 

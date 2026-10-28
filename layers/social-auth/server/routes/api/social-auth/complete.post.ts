@@ -37,6 +37,7 @@ export default defineEventHandler(async (event) => {
       .selectFrom('users')
       .select(['id', 'email'])
       .where(sql`lower(email)`, '=', pending.profile.email ?? '')
+      .$narrowType<{ email: string }>()
       .executeTakeFirst()
     if (!account) {
       clearPendingSignup(event)

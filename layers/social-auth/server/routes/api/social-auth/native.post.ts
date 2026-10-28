@@ -100,7 +100,8 @@ export default defineEventHandler(async (event) => {
   let outcome = await signIn()
 
   if (outcome.kind === 'needs_password' && password) {
-    const account = await db.selectFrom('users').select(['id', 'email']).where('id', '=', outcome.userId).executeTakeFirstOrThrow()
+    // `needs_password` names the account the provider's verified address matched.
+    const account = await db.selectFrom('users').select(['id', 'email']).where('id', '=', outcome.userId).$narrowType<{ email: string }>().executeTakeFirstOrThrow()
     await enforceLoginRateLimit(event, account.email, '/api/social-auth/native')
     if (!(await checkAccountPassword(account, password, userAgent))) {
       throw createError({ statusCode: 401, statusMessage: 'Password is incorrect', data: { needsPassword: true } })

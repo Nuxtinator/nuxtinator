@@ -6,6 +6,8 @@ A Nuxt layer that adds a generic record kernel, a code-shipped **contacts** reco
 
 Fifteen tables in four groups: **records** (`crm_records` with promoted `name`/`status` columns and a jsonb `data` bag, plus `crm_record_field_entries`, `crm_record_user_refs`, `crm_record_connections`, `crm_record_shares` for the multi-value storage classes), **channels** (`crm_channels` — one row per distinct address, shared by every record that links it through `crm_contact_channels`; `crm_channel_types` for admin-created types), **compliance** (`crm_channel_consents` as current state per channel+purpose, `crm_consent_events` as the append-only proof log that survives channel erasure via value snapshot + fingerprint, `crm_channel_suppressions` for bounces/complaints/manual blocks), and **presentation** (`crm_record_activity`, `crm_record_comments`, and the override tables `crm_record_types` / `crm_record_fields`). See [migrations/](migrations/) — `crm_001`–`crm_008` plus the tenancy retrofits `crm_T001` (org_id + RLS) and `crm_T002` (org-scoped uniques).
 
+A record can carry `user_id`, the user account of the person it describes (`crm_011`, rescoped per org by `crm_T003`; one record per type per user). A linked record's name and email addresses belong to that account: the host app copies them onto the record, and the CRM's API and detail page refuse to change them ([server/utils/account-link.ts](server/utils/account-link.ts)). Consent and every other field stay editable.
+
 Where a field's values live is decided by its kind (`storageOf` in [app/utils/crm-manifest.ts](app/utils/crm-manifest.ts)): promoted column, jsonb key, entry rows, user refs, connection edges, or the channel service.
 
 ## Extension points for other layers

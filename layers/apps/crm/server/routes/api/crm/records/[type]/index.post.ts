@@ -35,6 +35,7 @@ export default defineEventHandler(async (event) => {
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
       createdBy: record.createdBy,
+      userId: record.userId,
       // A fresh record has no shares, so canEdit is the plain type answer.
       capabilities: { canEdit: caps.update, canShare: caps.share, canDelete: caps.delete }
     }

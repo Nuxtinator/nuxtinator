@@ -28,7 +28,7 @@ export const REAUTH_WINDOW_MS = 5 * 60 * 1000
 
 export interface SessionUser {
   id: string
-  email: string
+  email: string | null
   display_name: string
 }
 

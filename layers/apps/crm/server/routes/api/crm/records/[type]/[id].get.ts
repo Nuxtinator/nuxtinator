@@ -36,6 +36,7 @@ export default defineEventHandler(async (event) => {
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
       createdBy: record.createdBy,
+      userId: record.userId,
       capabilities: {
         canEdit: await canUpdateRecord(tx, ctx, typeKey, id),
         canShare: caps.share,

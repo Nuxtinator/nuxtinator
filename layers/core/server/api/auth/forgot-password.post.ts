@@ -42,6 +42,7 @@ export default defineEventHandler(async (event) => {
       .selectFrom('users')
       .select(['id', 'email', 'display_name'])
       .where(sql`lower(email)`, '=', email.toLowerCase())
+      .$narrowType<{ email: string }>()
       .executeTakeFirst()
 
     // If user doesn't exist, still return success (security measure)
