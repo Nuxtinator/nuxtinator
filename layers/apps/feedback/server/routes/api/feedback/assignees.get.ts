@@ -10,18 +10,18 @@ export default defineEventHandler(async (event) => {
       const rows = await tx
         .selectFrom('memberships')
         .innerJoin('users', 'users.id', 'memberships.user_id')
-        .select(['users.id', 'users.display_name'])
+        .select(['users.id', 'users.display_name', 'users.avatar'])
         .where('memberships.org_id', '=', ctx.orgId)
         .orderBy('users.display_name', 'asc')
         .execute()
-      return { users: rows.map(r => ({ id: r.id, display_name: r.display_name })) }
+      return { users: rows.map(r => ({ id: r.id, display_name: r.display_name, avatar: r.avatar })) }
     }
 
     const rows = await tx
       .selectFrom('users')
-      .select(['id', 'display_name'])
+      .select(['id', 'display_name', 'avatar'])
       .orderBy('display_name', 'asc')
       .execute()
-    return { users: rows.map(r => ({ id: r.id, display_name: r.display_name })) }
+    return { users: rows.map(r => ({ id: r.id, display_name: r.display_name, avatar: r.avatar })) }
   })
 })

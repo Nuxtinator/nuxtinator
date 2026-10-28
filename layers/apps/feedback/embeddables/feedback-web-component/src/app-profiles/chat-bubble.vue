@@ -64,6 +64,7 @@ const SUB_TYPE_LABEL = { bug: 'Bug', idea: 'Idea' }
 const STATUS_LABEL = {
   new: 'New',
   triage_needed: 'Triage',
+  discussing: 'In discussion',
   in_progress: 'In progress',
   rejected: 'Rejected',
   accepted: 'Accepted'
@@ -1064,6 +1065,7 @@ watch(open, (v) => {
 .fw-badge { padding: 2px 7px; border-radius: 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
 .fw-badge-new { background: #dbeafe; color: #1d4ed8; }
 .fw-badge-triage_needed { background: #fef3c7; color: #92400e; }
+.fw-badge-discussing { background: #e0f2fe; color: #075985; }
 .fw-badge-in_progress { background: #ede9fe; color: #5b21b6; }
 .fw-badge-rejected { background: #fee2e2; color: #991b1b; }
 .fw-badge-accepted { background: #dcfce7; color: #166534; }

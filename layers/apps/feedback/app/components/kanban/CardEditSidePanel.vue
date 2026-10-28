@@ -451,7 +451,8 @@ function determineActionFromColumn(columnName: string): string {
     'PLANNING': 'Design & Architect',
     'BUILDING': 'Implement',
     'TESTING': 'Test & Validate',
-    'DONE': 'Review & Document'
+    'DONE': 'Review & Document',
+    'DISCUSS': 'Discuss'
   }
   return actions[columnName] || 'Work On'
 }
@@ -462,7 +463,8 @@ function getActionInstructions(action: string): string {
     'Design & Architect': 'Help me turn this feedback into a concrete design plan.',
     'Implement': 'Help me implement the change this feedback is asking for.',
     'Test & Validate': 'Help me verify this feedback has been addressed.',
-    'Review & Document': 'Help me summarize what changed and notify the reporter.'
+    'Review & Document': 'Help me summarize what changed and notify the reporter.',
+    'Discuss': 'Help me think this feedback through: what is unclear, what we would need to decide, and what to ask the submitter.'
   }
   return instructions[action] || `Help me ${action.toLowerCase()} this feedback.`
 }

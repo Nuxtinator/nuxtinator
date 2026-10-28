@@ -10,9 +10,10 @@
 //
 // Board vocabulary (columns are global to the deployment, ordered by
 // position): FEEDBACK INBOX holds untriaged intake — new findings, ideas, and
-// feature requests land there. TODO is the approved queue (a human drags a
-// card there to green-light it). DOING is in progress, DONE is finished, and
-// ARCHIVE holds rejected / deferred / accepted-as-is items.
+// feature requests land there. DISCUSS holds cards that have been read but
+// need more conversation or a decision first. TODO is the approved queue (a
+// human drags a card there to green-light it). DOING is in progress, DONE is
+// finished, and ARCHIVE holds rejected / deferred / accepted-as-is items.
 
 import { z } from 'zod'
 import { sql, type Kysely, type Transaction } from 'kysely'
@@ -99,7 +100,7 @@ export const listProjectsTool = defineMcpTool({
 export const listCardsTool = defineMcpTool({
   name: 'feedback_list_cards',
   title: 'List Cards',
-  description: 'List cards in the active org, optionally filtered to one project and/or one column (by name, e.g. "TODO"). Cards in TODO are approved and waiting to be worked; cards in ARCHIVE were rejected, deferred, or accepted as-is.',
+  description: 'List cards in the active org, optionally filtered to one project and/or one column (by name, e.g. "TODO"). Cards in DISCUSS need more conversation or a decision before work starts; cards in TODO are approved and waiting to be worked; cards in ARCHIVE were rejected, deferred, or accepted as-is.',
   appId: 'feedback',
   scope: 'feedback.read',
   input: z.object({
@@ -151,7 +152,7 @@ export const listCardsTool = defineMcpTool({
 export const createProjectTool = defineMcpTool({
   name: 'feedback_create_project',
   title: 'Create Board',
-  description: 'Create a kanban project (board) in the active org, along with its default swimlane. Columns are global to the deployment, so the new board immediately uses the existing FEEDBACK INBOX / TODO / DOING / DONE / ARCHIVE workflow. Board names are not unique — call feedback_list_projects first and reuse the existing board rather than creating a near-duplicate. Returns the project_id that feedback_create_card and feedback_list_cards need.',
+  description: 'Create a kanban project (board) in the active org, along with its default swimlane. Columns are global to the deployment, so the new board immediately uses the existing FEEDBACK INBOX / DISCUSS / TODO / DOING / DONE / ARCHIVE workflow. Board names are not unique — call feedback_list_projects first and reuse the existing board rather than creating a near-duplicate. Returns the project_id that feedback_create_card and feedback_list_cards need.',
   appId: 'feedback',
   scope: 'feedback.write',
   input: z.object({
@@ -273,7 +274,7 @@ export const createCardTool = defineMcpTool({
 export const moveCardTool = defineMcpTool({
   name: 'feedback_move_card',
   title: 'Move Card',
-  description: 'Move a card to another column by name. Typical agent flow: pick a card from TODO, move it to DOING while working on it, then to DONE when finished. Leave triage moves (into TODO or ARCHIVE) to humans unless instructed.',
+  description: 'Move a card to another column by name. Typical agent flow: pick a card from TODO, move it to DOING while working on it, then to DONE when finished. Leave triage moves (into DISCUSS, TODO or ARCHIVE) to humans unless instructed.',
   appId: 'feedback',
   scope: 'feedback.write',
   input: z.object({

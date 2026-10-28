@@ -4,6 +4,7 @@ import ProjectsBoard from '../../components/kanban/ProjectsBoard.vue'
 import ProjectsSidebar from '../../components/kanban/ProjectsSidebar.vue'
 import CardEditSidePanel from '../../components/kanban/CardEditSidePanel.vue'
 import KanbanContextMenu from '../../components/kanban/KanbanContextMenu.vue'
+import { BOARD_USERS_KEY, type BoardUser } from '../../composables/useCardUtils'
 import type {
   KanbanCardModel as Card,
   KanbanColumnModel as Column,
@@ -64,7 +65,8 @@ const projects = ref<Project[]>([])
 const columns = ref<Column[]>([])
 const swimlanes = ref<Swimlane[]>([])
 const cards = ref<Card[]>([])
-const assignableUsers = ref<{ id: string, display_name: string | null }[]>([])
+const assignableUsers = ref<BoardUser[]>([])
+provide(BOARD_USERS_KEY, assignableUsers)
 const loading = ref(true)
 const error = ref('')
 
@@ -100,7 +102,7 @@ async function loadAll() {
     const [projectsRes, columnsRes, assigneesRes] = await Promise.all([
       $fetch<Project[]>('/api/feedback/projects'),
       $fetch<Column[]>('/api/feedback/columns'),
-      $fetch<{ users: { id: string, display_name: string | null }[] }>('/api/feedback/assignees')
+      $fetch<{ users: BoardUser[] }>('/api/feedback/assignees')
         .catch(() => ({ users: [] }))
     ])
 

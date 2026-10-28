@@ -20,17 +20,19 @@ describe('feedback columns endpoints', () => {
     // Restore canonical positions / collapse state — reorder and is_collapsed
     // mutations bleed across tests since columns is global state.
     await sql`UPDATE columns SET position = 1, is_collapsed = false WHERE name = 'FEEDBACK INBOX'`
-    await sql`UPDATE columns SET position = 2, is_collapsed = false WHERE name = 'DOING'`
-    await sql`UPDATE columns SET position = 3, is_collapsed = false WHERE name = 'DONE'`
-    await sql`UPDATE columns SET position = 4, is_collapsed = false WHERE name = 'ARCHIVE'`
+    await sql`UPDATE columns SET position = 2, is_collapsed = false WHERE name = 'DISCUSS'`
+    await sql`UPDATE columns SET position = 3, is_collapsed = false WHERE name = 'TODO'`
+    await sql`UPDATE columns SET position = 4, is_collapsed = false WHERE name = 'DOING'`
+    await sql`UPDATE columns SET position = 5, is_collapsed = false WHERE name = 'DONE'`
+    await sql`UPDATE columns SET position = 6, is_collapsed = false WHERE name = 'ARCHIVE'`
     await cleanupFeedbackTestData(sql)
   })
 
   it('GET /api/feedback/columns: any authenticated user lists all columns', async () => {
     const { auth } = await createFeedbackOrgWith(sql, ['member'])
     const res = await $fetch<Array<{ id: string, name: string, position: number }>>('/api/feedback/columns', auth)
-    // Migration seeds four columns.
-    expect(res.length).toBe(4)
+    // Migrations seed six columns.
+    expect(res.length).toBe(6)
     expect(res[0]!.name).toBe('FEEDBACK INBOX')
     expect(res[res.length - 1]!.name).toBe('ARCHIVE')
   })
