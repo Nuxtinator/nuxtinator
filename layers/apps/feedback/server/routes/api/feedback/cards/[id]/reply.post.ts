@@ -1,9 +1,11 @@
 /**
  * POST /api/feedback/cards/:id/reply — email the feedback submitter.
  *
- * Sends the member's message to the address the submitter signed in with,
- * quoting their original feedback underneath, and appends the sent reply to
- * the card's `post_meta.replies` so the panel shows what was said.
+ * Sends the member's message to the submitter, quoting their original
+ * feedback underneath, and appends the sent reply to the card's
+ * `post_meta.replies` so the panel shows what was said. The recipient is
+ * `body.to` when given (saved as the card's `submitter_email`, so anonymous
+ * submissions can be answered), otherwise the stored `submitter_email`.
  */
 import { getRouterParam, readBody } from 'h3'
 import { sql } from 'kysely'
@@ -14,6 +16,8 @@ import { buildFeedbackReplyEmail } from '../../../../../utils/reply-email'
 
 const MESSAGE_CAP = 10_000
 const SUBJECT_CAP = 200
+const EMAIL_CAP = 254
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
@@ -26,6 +30,10 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: `message exceeds ${MESSAGE_CAP} characters` })
   }
   const subjectIn = typeof body.subject === 'string' ? body.subject.trim().slice(0, SUBJECT_CAP) : ''
+  const toIn = typeof body.to === 'string' ? body.to.trim() : ''
+  if (toIn && (toIn.length > EMAIL_CAP || !EMAIL_RE.test(toIn))) {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid email address' })
+  }
 
   return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
     const card = await tx
@@ -40,7 +48,8 @@ export default defineEventHandler(async (event) => {
     }
 
     const postMeta = (card.post_meta ?? {}) as Record<string, any>
-    const to = typeof postMeta.submitter_email === 'string' ? postMeta.submitter_email.trim() : ''
+    const stored = typeof postMeta.submitter_email === 'string' ? postMeta.submitter_email.trim() : ''
+    const to = toIn || stored
     if (!to) throw createError({ statusCode: 400, statusMessage: 'Submitter has no email address' })
 
     const sender = await tx
@@ -71,7 +80,7 @@ export default defineEventHandler(async (event) => {
       .updateTable('cards')
       .set({
         post_meta: sql`jsonb_set(
-          post_meta,
+          post_meta || jsonb_build_object('submitter_email', ${to}::text),
           '{replies}',
           (CASE WHEN jsonb_typeof(post_meta->'replies') = 'array' THEN post_meta->'replies' ELSE '[]'::jsonb END)
             || ${JSON.stringify([reply])}::text::jsonb
@@ -82,7 +91,8 @@ export default defineEventHandler(async (event) => {
       .returningAll()
       .executeTakeFirstOrThrow()
 
-    logUpdate('cards', id, ctx.userId, { fields: ['post_meta.replies'], reply_to: to })
+    const fields = to === stored ? ['post_meta.replies'] : ['post_meta.replies', 'post_meta.submitter_email']
+    logUpdate('cards', id, ctx.userId, { fields, reply_to: to })
     return row
   })
 })

@@ -309,7 +309,8 @@ const submittedAtFormatted = computed(() => {
 const pageUrlIsLink = computed(() => /^https?:\/\//i.test(String(getMeta('page_url'))))
 
 // -------- Reply to submitter --------
-// Only signed-in widget submissions carry an address to reply to.
+// Signed-in widget submissions carry the account's address; for the rest, a
+// member enters one when replying and it is saved on the card.
 const submitterEmail = computed(() => {
   const v = getMeta('submitter_email')
   return typeof v === 'string' ? v.trim() : ''
@@ -346,31 +347,38 @@ const originalFeedback = computed(() => {
 
 const replyOpen = ref(false)
 const replySending = ref(false)
-const replyForm = reactive({ subject: '', message: '' })
+const replyForm = reactive({ to: '', subject: '', message: '' })
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const replyToValid = computed(() => EMAIL_RE.test(replyForm.to.trim()))
 
 function openReply() {
   if (!props.card) return
   const headline = cardHeadline(props.card)
   const short = headline.length > 80 ? `${headline.slice(0, 77)}…` : headline
   const name = String(getMeta('submitter_name') || '').trim().split(/\s+/)[0]
+  replyForm.to = submitterEmail.value
   replyForm.subject = `Re: ${short}`
   replyForm.message = name ? `Hi ${name},\n\n` : ''
   replyOpen.value = true
 }
 
 async function sendReply() {
-  if (!props.card || !draft.value || !replyForm.message.trim()) return
+  if (!props.card || !draft.value || !replyForm.message.trim() || !replyToValid.value) return
   replySending.value = true
   try {
     const updated = await $fetch<Card>(`/api/feedback/cards/${props.card.id}/reply`, {
       method: 'POST',
-      body: { subject: replyForm.subject, message: replyForm.message }
+      body: { to: replyForm.to.trim(), subject: replyForm.subject, message: replyForm.message }
     })
-    // Carry the new reply into the draft so a later Save keeps it.
-    draft.value.post_meta = { ...draft.value.post_meta, replies: updated.post_meta?.replies ?? [] }
+    // Carry the new reply and address into the draft so a later Save keeps them.
+    draft.value.post_meta = {
+      ...draft.value.post_meta,
+      submitter_email: updated.post_meta?.submitter_email ?? null,
+      replies: updated.post_meta?.replies ?? []
+    }
     emit('replied', updated)
     replyOpen.value = false
-    toast.add({ title: 'Reply sent', description: `Emailed ${submitterEmail.value}`, icon: 'i-lucide-send', color: 'success' })
+    toast.add({ title: 'Reply sent', description: `Emailed ${replyForm.to.trim()}`, icon: 'i-lucide-send', color: 'success' })
   } catch (err: any) {
     toast.add({ title: 'Reply failed', description: err?.data?.statusMessage || err?.message, color: 'error' })
   } finally {
@@ -686,10 +694,11 @@ async function handleCopyForAgent() {
                 v-else-if="getMeta('page_url')"
                 class="break-all text-(--ui-text-muted)"
               >{{ getMeta('page_url') }}</span>
-              <div v-if="submitterEmail" class="flex items-center justify-between gap-2">
+              <div class="flex items-center justify-between gap-2">
                 <span class="inline-flex min-w-0 items-center gap-1.5 text-(--ui-text-muted)">
                   <UIcon name="i-lucide-mail" class="shrink-0" />
-                  <span class="truncate">{{ submitterEmail }}</span>
+                  <span v-if="submitterEmail" class="truncate">{{ submitterEmail }}</span>
+                  <span v-else class="italic">No email address</span>
                 </span>
                 <UButton
                   size="xs"
@@ -966,20 +975,30 @@ async function handleCopyForAgent() {
 
   <UModal
     v-model:open="replyOpen"
-    :title="`Reply to ${getMeta('submitter_name') || submitterEmail}`"
+    :title="`Reply to ${getMeta('submitter_name') || submitterEmail || 'submitter'}`"
     description="Sent by email. Their original feedback is quoted below your message."
     :ui="{ content: 'max-w-xl' }"
   >
     <template #body>
       <div class="space-y-4">
-        <UFormField label="To">
-          <UInput :model-value="submitterEmail" disabled icon="i-lucide-mail" class="w-full" />
+        <UFormField label="To" required>
+          <template #label>
+            To <InfoTip text="Saved on the card as the submitter's email." />
+          </template>
+          <UInput
+            v-model="replyForm.to"
+            type="email"
+            placeholder="name@example.com"
+            icon="i-lucide-mail"
+            :autofocus="!submitterEmail"
+            class="w-full"
+          />
         </UFormField>
         <UFormField label="Subject">
           <UInput v-model="replyForm.subject" class="w-full" />
         </UFormField>
         <UFormField label="Message" required>
-          <UTextarea v-model="replyForm.message" :rows="8" autofocus autoresize class="w-full" />
+          <UTextarea v-model="replyForm.message" :rows="8" :autofocus="!!submitterEmail" autoresize class="w-full" />
         </UFormField>
         <div v-if="originalFeedback.length" class="space-y-2">
           <div class="text-xs font-medium text-(--ui-text-muted)">
@@ -1000,7 +1019,7 @@ async function handleCopyForAgent() {
         <UButton
           icon="i-lucide-send"
           :loading="replySending"
-          :disabled="!replyForm.message.trim()"
+          :disabled="!replyForm.message.trim() || !replyToValid"
           @click="sendReply"
         >
           Send

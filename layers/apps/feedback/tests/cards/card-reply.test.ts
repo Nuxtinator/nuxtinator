@@ -70,6 +70,29 @@ describe('feedback card reply', () => {
     })
   })
 
+  it('sends to an address set by the member and saves it on the card', async () => {
+    const to = `test-feedback-anon-${randomUUID().slice(0, 8)}@example.com`
+    const { org, auth, card } = await setup({ problem_description: 'Search is slow', submitter_name: 'Anon' })
+
+    const updated = await $fetch<{ post_meta: Record<string, any> }>(`/api/feedback/cards/${card.id}/reply`, {
+      method: 'POST',
+      body: { to, message: 'Thanks, looking into it.' },
+      ...withOrgHeader(auth, org.slug)
+    })
+
+    const mail = await waitForMailTo(to)
+    expect(mail.text).toContain('Thanks, looking into it.')
+    expect(updated.post_meta.submitter_email).toBe(to)
+    expect(updated.post_meta.replies[0]).toMatchObject({ to })
+
+    const invalid = await $fetch(`/api/feedback/cards/${card.id}/reply`, {
+      method: 'POST',
+      body: { to: 'not-an-email', message: 'hello' },
+      ...withOrgHeader(auth, org.slug)
+    }).catch(e => e)
+    expect(invalid.statusCode).toBe(400)
+  })
+
   it('400 when the submitter left no email, or the message is empty', async () => {
     const { org, auth, card } = await setup({ problem_description: 'x', submitter_name: 'Anon' })
 
