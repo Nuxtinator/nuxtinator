@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Read-only log of help-chat conversations, newest first.
-import type { HelpinatorConversationSummary } from '../../utils/helpinator-types'
+import type { HelpinatorConversationSummary, HelpinatorListState } from '../../utils/helpinator-types'
+import { helpinatorListFilter } from '../../utils/helpinator-types'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -15,7 +16,7 @@ const { data: widgets } = useFetch<{ id: string, name: string }[]>('/api/helpina
 
 // The channel comes from the sidebar, via `?widget=<id>`.
 const widgetId = computed(() => typeof route.query.widget === 'string' ? route.query.widget : 'all')
-const state = ref<'all' | 'handed_off' | 'with_email' | 'bot_only'>('all')
+const state = ref<HelpinatorListState>('all')
 
 const title = computed(() => widgetId.value === 'all'
   ? 'All conversations'
@@ -36,10 +37,18 @@ function query(offset: number) {
   return {
     limit: PAGE,
     offset,
-    ...(widgetId.value !== 'all' ? { widgetId: widgetId.value } : {}),
-    ...(state.value === 'handed_off' ? { handedOff: 'true' } : {}),
-    ...(state.value === 'bot_only' ? { handedOff: 'false' } : {}),
-    ...(state.value === 'with_email' ? { hasEmail: 'true' } : {})
+    ...helpinatorListFilter(widgetId.value, state.value)
+  }
+}
+
+// The transcript page steps through the same filtered list.
+function transcriptLink(id: string) {
+  return {
+    path: pathTo(`/helpinator/conversations/${id}`),
+    query: {
+      ...(widgetId.value !== 'all' ? { widget: widgetId.value } : {}),
+      ...(state.value !== 'all' ? { state: state.value } : {})
+    }
   }
 }
 
@@ -116,7 +125,7 @@ function pagePath(url: string | null): string {
       <ul v-else class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-lg overflow-hidden">
         <li v-for="c in rows" :key="c.id">
           <NuxtLink
-            :to="pathTo(`/helpinator/conversations/${c.id}`)"
+            :to="transcriptLink(c.id)"
             class="flex gap-4 px-4 py-3 hover:bg-(--ui-bg-elevated) transition-colors"
           >
             <div class="flex-1 min-w-0">

@@ -93,9 +93,17 @@ export interface HelpinatorConversationFilter {
   offset: number
 }
 
+function filteredConversations(tx: Tx, f: Omit<HelpinatorConversationFilter, 'limit' | 'offset'>) {
+  let q = tx.selectFrom('helpinator_conversations as c')
+  if (f.widgetId && HELPINATOR_UUID_RE.test(f.widgetId)) q = q.where('c.widget_id', '=', f.widgetId)
+  if (f.handedOff === true) q = q.where('c.inbox_conversation_id', 'is not', null)
+  if (f.handedOff === false) q = q.where('c.inbox_conversation_id', 'is', null)
+  if (f.hasEmail === true) q = q.where('c.visitor_email', 'is not', null)
+  return q
+}
+
 export async function helpinatorListConversations(tx: Tx, f: HelpinatorConversationFilter) {
-  let q = tx
-    .selectFrom('helpinator_conversations as c')
+  const rows = await filteredConversations(tx, f)
     .innerJoin('helpinator_widgets as w', 'w.id', 'c.widget_id')
     .selectAll('c')
     .select('w.name as widget_name')
@@ -104,12 +112,8 @@ export async function helpinatorListConversations(tx: Tx, f: HelpinatorConversat
       where m.conversation_id = c.id and m.role = 'user'
       order by m.created_at asc limit 1
     )`.as('first_question'))
-  if (f.widgetId && HELPINATOR_UUID_RE.test(f.widgetId)) q = q.where('c.widget_id', '=', f.widgetId)
-  if (f.handedOff === true) q = q.where('c.inbox_conversation_id', 'is not', null)
-  if (f.handedOff === false) q = q.where('c.inbox_conversation_id', 'is', null)
-  if (f.hasEmail === true) q = q.where('c.visitor_email', 'is not', null)
-  const rows = await q
     .orderBy('c.last_message_at', 'desc')
+    .orderBy('c.id', 'desc')
     .limit(f.limit + 1)
     .offset(f.offset)
     .execute()
@@ -121,6 +125,27 @@ export async function helpinatorListConversations(tx: Tx, f: HelpinatorConversat
     })),
     hasMore
   }
+}
+
+// The conversations either side of `id` in the list's order under the same
+// filter: `prev` is the next newer one, `next` the next older one.
+export async function helpinatorConversationNeighbors(tx: Tx, id: string, f: Omit<HelpinatorConversationFilter, 'limit' | 'offset'>) {
+  const cursor = sql`(select last_message_at, id from helpinator_conversations where id = ${id})`
+  const prev = await filteredConversations(tx, f)
+    .select('c.id')
+    .where(sql<boolean>`(c.last_message_at, c.id) > ${cursor}`)
+    .orderBy('c.last_message_at', 'asc')
+    .orderBy('c.id', 'asc')
+    .limit(1)
+    .executeTakeFirst()
+  const next = await filteredConversations(tx, f)
+    .select('c.id')
+    .where(sql<boolean>`(c.last_message_at, c.id) < ${cursor}`)
+    .orderBy('c.last_message_at', 'desc')
+    .orderBy('c.id', 'desc')
+    .limit(1)
+    .executeTakeFirst()
+  return { prevId: prev?.id ?? null, nextId: next?.id ?? null }
 }
 
 export async function helpinatorGetConversationOr404(tx: Tx, id: string) {

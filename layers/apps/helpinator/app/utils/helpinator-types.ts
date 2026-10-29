@@ -138,3 +138,15 @@ export function helpinatorFormatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
+
+export type HelpinatorListState = 'all' | 'handed_off' | 'with_email' | 'bot_only'
+
+// The conversation-log API filters for a channel (`'all'` or a widget id) and state.
+export function helpinatorListFilter(widgetId: string, state: HelpinatorListState): Record<string, string> {
+  return {
+    ...(widgetId !== 'all' ? { widgetId } : {}),
+    ...(state === 'handed_off' ? { handedOff: 'true' } : {}),
+    ...(state === 'bot_only' ? { handedOff: 'false' } : {}),
+    ...(state === 'with_email' ? { hasEmail: 'true' } : {})
+  }
+}

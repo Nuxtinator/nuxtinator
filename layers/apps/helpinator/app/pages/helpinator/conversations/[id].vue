@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // One help-chat transcript, read-only.
-import type { HelpinatorConversationSummary, HelpinatorTranscriptMessage } from '../../../utils/helpinator-types'
-import { helpinatorErrorMessage } from '../../../utils/helpinator-types'
+import type { HelpinatorConversationSummary, HelpinatorListState, HelpinatorTranscriptMessage } from '../../../utils/helpinator-types'
+import { helpinatorErrorMessage, helpinatorListFilter } from '../../../utils/helpinator-types'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -14,6 +14,24 @@ const { data, error } = useFetch<{
   conversation: HelpinatorConversationSummary
   messages: HelpinatorTranscriptMessage[]
 }>(() => `/api/helpinator/conversations/${id.value}`)
+
+// Previous/next follow the list this transcript was opened from: its channel
+// (`?widget=`) and state (`?state=`), newest first.
+const LIST_STATES: HelpinatorListState[] = ['all', 'handed_off', 'with_email', 'bot_only']
+const listWidget = computed(() => typeof route.query.widget === 'string' ? route.query.widget : 'all')
+const listState = computed<HelpinatorListState>(() => {
+  const s = route.query.state
+  return LIST_STATES.includes(s as HelpinatorListState) ? s as HelpinatorListState : 'all'
+})
+const { data: neighbors } = useFetch<{ prevId: string | null, nextId: string | null }>(
+  () => `/api/helpinator/conversations/${id.value}/neighbors`,
+  { query: computed(() => helpinatorListFilter(listWidget.value, listState.value)) }
+)
+
+function siblingLink(siblingId: string | null | undefined) {
+  if (!siblingId) return undefined
+  return { path: pathTo(`/helpinator/conversations/${siblingId}`), query: route.query }
+}
 
 const conversation = computed(() => data.value?.conversation)
 // The server only stores http(s) page URLs; older rows may hold anything, so
@@ -36,6 +54,28 @@ function inboxLink(inboxId: string): string {
 
 <template>
   <HelpinatorShell title="Conversation" :active-widget-id="conversation?.widget_id">
+    <template #actions>
+      <UButton
+        :to="siblingLink(neighbors?.prevId)"
+        :disabled="!neighbors?.prevId"
+        icon="i-lucide-chevron-left"
+        variant="ghost"
+        color="neutral"
+        size="sm"
+        aria-label="Previous conversation"
+        title="Previous (newer) conversation"
+      />
+      <UButton
+        :to="siblingLink(neighbors?.nextId)"
+        :disabled="!neighbors?.nextId"
+        icon="i-lucide-chevron-right"
+        variant="ghost"
+        color="neutral"
+        size="sm"
+        aria-label="Next conversation"
+        title="Next (older) conversation"
+      />
+    </template>
     <div class="max-w-5xl mx-auto space-y-4">
       <UAlert v-if="error" color="error" variant="subtle" :title="helpinatorErrorMessage(error)" />
 

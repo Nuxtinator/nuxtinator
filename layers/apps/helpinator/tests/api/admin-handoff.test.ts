@@ -120,6 +120,29 @@ describe('admin + handoff', () => {
     expect(detail.messages[1]!.pages_loaded.map(p => p.ref)).toEqual([`section:${widget.libraryId}:faq`])
   })
 
+  it('steps to the newer and older conversation within the list filter', async () => {
+    const { org, opts } = await createHelpinatorOrgWith(sql)
+    const p = await seedPortfolio(sql, org.id, 'P', { faq: 'x' })
+    const widget = await seedWidget(sql, { orgId: org.id, portfolioId: p.id, sectionKey: 'faq' })
+    await primeAiFake({ text: 'answer' })
+    const ids: string[] = []
+    for (const [i, q] of ['oldest', 'middle', 'newest'].entries()) {
+      const turn = await sendTurn(widget.id, q)
+      await sql`UPDATE helpinator_conversations SET last_message_at = now() - ${`${3 - i} hours`}::interval WHERE id = ${turn.conversationId}`
+      ids.push(turn.conversationId)
+    }
+    const [oldest, middle, newest] = ids as [string, string, string]
+    const neighbors = (id: string, query: Record<string, string> = {}) =>
+      $fetch<{ prevId: string | null, nextId: string | null }>(`/api/helpinator/conversations/${id}/neighbors`, { query, ...opts })
+
+    expect(await neighbors(middle)).toEqual({ prevId: newest, nextId: oldest })
+    expect(await neighbors(newest)).toEqual({ prevId: null, nextId: middle })
+    expect(await neighbors(oldest)).toEqual({ prevId: middle, nextId: null })
+
+    await sql`UPDATE helpinator_conversations SET visitor_email = 'v@example.com' WHERE id IN (${oldest}, ${newest})`
+    expect(await neighbors(newest, { hasEmail: 'true' })).toEqual({ prevId: null, nextId: oldest })
+  })
+
   it('visitor handoff creates an open, unassigned inbox conversation with the transcript — once', async () => {
     const { org } = await createHelpinatorOrgWith(sql)
     const p = await seedPortfolio(sql, org.id, 'P', { faq: 'x' })
