@@ -12,7 +12,8 @@ type UserStatus = 'active' | 'not_verified'
 interface AdminUserRow {
   id: string
   display_name: string
-  email: string
+  // Null for accounts created without an address (e.g. a host's app installs).
+  email: string | null
   verified: boolean
   is_admin: boolean
   status: UserStatus
@@ -324,7 +325,8 @@ const columns: TableColumn<AdminUserRow>[] = [
   },
   {
     accessorKey: 'email',
-    header: sortableHeader('Email', 'email')
+    header: sortableHeader('Email', 'email'),
+    cell: ({ row }) => row.original.email ?? h(UBadge, { color: 'neutral', variant: 'subtle', size: 'sm' }, () => 'No email')
   },
   {
     accessorKey: 'status',
@@ -603,7 +605,7 @@ const handleRemoveMembership = async (m: Membership) => {
   if (!selectedUser.value) return
   if (!await confirmAction({
     title: 'Remove from org?',
-    description: `Remove ${selectedUser.value.display_name || selectedUser.value.email} from ${m.name}?`,
+    description: `Remove ${selectedUser.value.display_name || selectedUser.value.email || 'this user'} from ${m.name}?`,
     confirmLabel: 'Remove'
   })) return
   removingOrgId.value = m.id
@@ -873,7 +875,7 @@ const handleDelete = async () => {
               {{ selectedUser.display_name }}
             </h2>
             <p class="text-sm text-(--ui-text-muted)">
-              {{ selectedUser.email }}
+              {{ selectedUser.email ?? 'No email address' }}
             </p>
           </header>
 
@@ -924,7 +926,7 @@ const handleDelete = async () => {
                 Mark verified
               </UButton>
               <UButton
-                v-if="selectedUser.status === 'not_verified'"
+                v-if="selectedUser.status === 'not_verified' && selectedUser.email"
                 variant="outline"
                 :loading="sendingVerification"
                 @click="handleSendVerification"
@@ -932,6 +934,7 @@ const handleDelete = async () => {
                 Resend verification email
               </UButton>
               <UButton
+                v-if="selectedUser.email"
                 variant="outline"
                 color="neutral"
                 :loading="sendingPasswordReset"
@@ -1392,11 +1395,11 @@ const handleDelete = async () => {
           </h2>
           <p class="text-sm">
             <template v-if="selectedUser.is_admin">
-              {{ selectedUser.display_name || selectedUser.email }} will lose access to the
+              {{ selectedUser.display_name || selectedUser.email || 'This user' }} will lose access to the
               admin area.
             </template>
             <template v-else>
-              {{ selectedUser.display_name || selectedUser.email }} will get full control of
+              {{ selectedUser.display_name || selectedUser.email || 'This user' }} will get full control of
               this deployment, including every user and host setting.
             </template>
           </p>
