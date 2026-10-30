@@ -19,11 +19,15 @@ const props = defineProps<{
   entries: CrmChannelEntry[]
   /** The record detail's canEdit capability — false renders read-only. */
   editable: boolean
+  /** The addresses come from a linked user account: they can't be added, changed or removed; primary, label and consent stay editable. */
+  addressesLocked?: boolean
 }>()
 
 const emit = defineEmits<{
   refresh: []
 }>()
+
+const canChangeAddresses = computed(() => props.editable && !props.addressesLocked)
 
 const toast = useToast()
 const { addChannel, updateChannel, removeChannel, fetchConsent } = useCrmChannels(
@@ -158,6 +162,7 @@ function remove(entry: CrmChannelEntry) {
           v-model="editValue"
           class="flex-1 sm:max-w-xs"
           size="sm"
+          :disabled="addressesLocked"
           :placeholder="placeholder"
           @keydown.enter.prevent="saveEdit(entry)"
         />
@@ -242,7 +247,7 @@ function remove(entry: CrmChannelEntry) {
           @click="startEdit(entry)"
         />
         <UButton
-          v-if="editable"
+          v-if="canChangeAddresses"
           icon="i-lucide-x"
           size="xs"
           variant="ghost"
@@ -254,14 +259,14 @@ function remove(entry: CrmChannelEntry) {
     </div>
 
     <p
-      v-if="!editable && entries.length === 0"
+      v-if="!canChangeAddresses && entries.length === 0"
       class="text-sm sm:pt-1.5 text-(--ui-text-muted)"
     >
       —
     </p>
 
     <div
-      v-if="editable"
+      v-if="canChangeAddresses"
       class="flex gap-2"
     >
       <UInput

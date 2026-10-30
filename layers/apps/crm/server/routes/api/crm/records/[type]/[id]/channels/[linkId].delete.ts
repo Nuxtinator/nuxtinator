@@ -9,6 +9,7 @@ import { withOrgContext } from '#tenant/server'
 import { requireRecordUpdate } from '../../../../../../../utils/type-permissions'
 import { assertRecordVisible, requireRecordType } from '../../../../../../../utils/list-records'
 import { unlinkChannel } from '../../../../../../../utils/channels'
+import { assertNotAccountOwned } from '../../../../../../../utils/account-link'
 
 const uuidSchema = z.string().uuid()
 
@@ -24,6 +25,14 @@ export default defineEventHandler(async (event) => {
     if (!uuidSchema.safeParse(linkId).success) {
       throw createError({ statusCode: 404, statusMessage: 'Channel link not found.' })
     }
+    const link = await tx
+      .selectFrom('crm_contact_channels as cc')
+      .innerJoin('crm_channels as ch', 'ch.id', 'cc.channel_id')
+      .select('ch.channel_type as channel_type')
+      .where('cc.id', '=', linkId)
+      .where('cc.record_id', '=', id)
+      .executeTakeFirst()
+    if (link) await assertNotAccountOwned(tx, id, { channelType: link.channel_type })
     await unlinkChannel(tx, ctx, id, linkId)
     return { ok: true }
   })

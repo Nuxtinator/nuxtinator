@@ -7,6 +7,7 @@
 
 import { z } from 'zod'
 import { withOrgContext } from '#tenant/server'
+import { accountOwnedChannelTypes } from '../../../../../utils/account-link'
 import { applyFieldPatch, requireRecordType, requireTypePermission, resolveTypeCapabilities } from '#crm/server'
 
 const Body = z.object({
@@ -35,6 +36,8 @@ export default defineEventHandler(async (event) => {
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
       createdBy: record.createdBy,
+      userId: record.userId,
+      accountOwnedChannelTypes: accountOwnedChannelTypes(record.userId),
       // A fresh record has no shares, so canEdit is the plain type answer.
       capabilities: { canEdit: caps.update, canShare: caps.share, canDelete: caps.delete }
     }

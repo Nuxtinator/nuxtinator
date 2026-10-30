@@ -48,6 +48,12 @@ export default defineEventHandler(async (event) => {
         to: next
       }
     })
+
+    try {
+      await useNitroApp().hooks.callHook('user.updated', { userId: id, fields: ['display_name'] })
+    } catch (err) {
+      console.warn('[hook user.updated] handler threw:', err)
+    }
   }
 
   const updated = await db

@@ -23,6 +23,8 @@ export interface CrmRecordsTable {
   created_by: string
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>
+  // The user account of the person the record describes (see crm_011).
+  user_id: ColumnType<string | null, string | null | undefined, string | null>
 }
 
 export interface CrmRecordFieldEntriesTable {

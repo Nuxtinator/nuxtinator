@@ -32,6 +32,8 @@ export default defineEventHandler(async (event) => {
     })
   }
 
+  const before = await db.selectFrom('users').select('display_name').where('id', '=', user.userId).executeTakeFirst()
+
   // Update display name in database
   const updated = await db
     .updateTable('users')
@@ -59,6 +61,14 @@ export default defineEventHandler(async (event) => {
       new_name: trimmedName
     }
   })
+
+  if (before?.display_name !== trimmedName) {
+    try {
+      await useNitroApp().hooks.callHook('user.updated', { userId: user.userId, fields: ['display_name'] })
+    } catch (err) {
+      console.warn('[hook user.updated] handler threw:', err)
+    }
+  }
 
   return {
     success: true,

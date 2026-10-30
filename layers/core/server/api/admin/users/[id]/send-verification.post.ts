@@ -24,6 +24,11 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'User not found' })
   }
 
+  if (!target.email) {
+    throw createError({ statusCode: 400, statusMessage: 'This user has no email address' })
+  }
+  const to = target.email
+
   if (target.verified) {
     throw createError({ statusCode: 400, statusMessage: 'User is already verified' })
   }
@@ -44,7 +49,7 @@ export default defineEventHandler(async (event) => {
   const verificationUrl = `${getSiteUrl()}/api/auth/verify?token=${tokenKey}`
 
   const sent = await sendTemplateEmail({
-    to: target.email,
+    to,
     template: 'verification',
     data: {
       userName: target.display_name,

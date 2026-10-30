@@ -25,6 +25,10 @@ export default defineEventHandler(async (event) => {
     return { user: { id: existing.id, verified: true } }
   }
 
+  if (!existing.email) {
+    throw createError({ statusCode: 400, statusMessage: 'This user has no email address' })
+  }
+
   await db
     .updateTable('users')
     .set({ verified: true, updated: new Date().toISOString() })

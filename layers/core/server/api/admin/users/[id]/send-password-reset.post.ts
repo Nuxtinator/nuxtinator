@@ -24,6 +24,11 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'User not found' })
   }
 
+  if (!target.email) {
+    throw createError({ statusCode: 400, statusMessage: 'This user has no email address' })
+  }
+  const to = target.email
+
   const token = randomUUID()
   const expires = new Date(Date.now() + 60 * 60 * 1000) // 1 hour, matches forgot-password
 
@@ -48,7 +53,7 @@ export default defineEventHandler(async (event) => {
   const resetUrl = `${getSiteUrl()}/reset-password?token=${token}`
 
   const sent = await sendTemplateEmail({
-    to: target.email,
+    to,
     template: 'passwordReset',
     data: {
       userName: target.display_name || 'User',

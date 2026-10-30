@@ -36,7 +36,8 @@ export interface UsersTable {
   id: Generated<string>
   created: ColumnType<Date, string | undefined, string>
   updated: ColumnType<Date, string | undefined, string>
-  email: string
+  // Null for a user created without an address (see migration 016).
+  email: string | null
   display_name: string
   avatar: Generated<string>
   password: ColumnType<string | null, string | null | undefined, string | null>

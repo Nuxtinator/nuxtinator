@@ -556,6 +556,7 @@ The tenancy layer emits Nitro hooks layers can subscribe to. In single mode thes
 | `user.deleting` | `{ userId }` | Just before a user row is deleted, while everything tied to it still exists. (Both modes.) |
 | `user.deleted` | `{ userId, avatar }` | After a user's deletion has committed. (Both modes.) |
 | `user.verified` | `{ userId, email }` | User accepts invite or verifies email. (Both modes.) |
+| `user.updated` | `{ userId, fields }` | The user's `display_name` or `email` changed, from their profile or an operator's edit. (Both modes.) |
 | `membership.created` | `{ membershipId, userId, orgId, roles, createdByUserId }` | Membership row inserted. |
 | `membership.updated` | `{ membershipId, userId, orgId, oldRoles, newRoles }` | Roles changed. |
 | `membership.deleted` | `{ membershipId, userId, orgId }` | Membership removed. |

@@ -39,6 +39,11 @@ interface CoreHookMap {
     userId: string
     email: string
   }) => void | Promise<void>
+  // The user's display name or email changed (after the write committed).
+  'user.updated': (p: {
+    userId: string
+    fields: ('display_name' | 'email')[]
+  }) => void | Promise<void>
   'membership.created': (p: {
     membershipId: string
     userId: string

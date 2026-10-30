@@ -37,6 +37,8 @@ export interface CrmHydratedRecord {
   createdBy: string
   createdAt: Date
   updatedAt: Date
+  /** The linked user account, whose name and email addresses the record shows. */
+  userId: string | null
   /** Logical field values keyed by field key (shapes per InferRecordShape). */
   fields: Record<string, unknown>
 }
@@ -113,6 +115,7 @@ export async function hydrateRecords(
       createdBy: row.created_by,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      userId: row.user_id ?? null,
       fields
     })
   }

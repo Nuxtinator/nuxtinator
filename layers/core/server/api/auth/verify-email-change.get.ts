@@ -78,6 +78,12 @@ export default defineEventHandler(async (event) => {
       }
     })
 
+    try {
+      await useNitroApp().hooks.callHook('user.updated', { userId: user.id, fields: ['email'] })
+    } catch (err) {
+      console.warn('[hook user.updated] handler threw:', err)
+    }
+
     // Redirect to the account page with a success message
     return sendRedirect(event, withQueryParams(accountPath, { email_change: 'success' }))
   } catch (error) {
