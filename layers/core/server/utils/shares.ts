@@ -74,7 +74,7 @@ export async function getKnownPeople(tx: Tx, userId: string): Promise<KnownPerso
 }
 
 // Runs `fn` in a transaction as `userId`, outside any one app.
-export async function asUser<T>(userId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
+export async function runAsShareUser<T>(userId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
   return await txScopeFor(null, userId)(fn)
 }
 
@@ -122,7 +122,7 @@ async function getShare(tx: Tx, table: string, resourceId: string, shareId: stri
   return rows[0] ?? null
 }
 
-export async function listShares(tx: Tx, table: string, resourceId: string): Promise<ShareListEntry[]> {
+export async function listResourceShares(tx: Tx, table: string, resourceId: string): Promise<ShareListEntry[]> {
   requireStandardTable(table)
   const { rows } = await sql<ShareRow & { display_name: string | null, avatar: string | null, email: string | null, expires_at: Date | null, accepted_at: Date | null }>`
     select s.id, s.role, s.grantee_user_id, s.grantee_invite_id, s.created_at,
@@ -215,14 +215,14 @@ export async function shareByInvite(
   return { id: rows[0]!.id, url: invite.url }
 }
 
-export async function setShareRole(tx: Tx, input: { table: string, resourceId: string, shareId: string, role: ShareRole }): Promise<void> {
+export async function setResourceShareRole(tx: Tx, input: { table: string, resourceId: string, shareId: string, role: ShareRole }): Promise<void> {
   requireStandardTable(input.table)
   await sql`update ${sql.table(input.table)} set role = ${input.role} where id = ${input.shareId} and resource_id = ${input.resourceId}`.execute(tx)
 }
 
 // Removes a share. A pending share's invite goes with it, so its link stops
 // working.
-export async function removeShare(tx: Tx, input: { table: string, resourceId: string, shareId: string }): Promise<void> {
+export async function removeResourceShare(tx: Tx, input: { table: string, resourceId: string, shareId: string }): Promise<void> {
   requireStandardTable(input.table)
   const share = await getShare(tx, input.table, input.resourceId, input.shareId)
   if (!share) return
@@ -286,7 +286,7 @@ export function defineShareHandler(opts: ShareHandlerOptions): EventHandler<Even
           return {
             canManage: isOwner,
             owner: ownerRow ?? null,
-            shares: await listShares(tx, opts.table, resourceId)
+            shares: await listResourceShares(tx, opts.table, resourceId)
           }
         }
         if (method === 'POST') {
@@ -345,12 +345,12 @@ export function defineShareHandler(opts: ShareHandlerOptions): EventHandler<Even
 
       if (method === 'PATCH') {
         requireOwner()
-        await setShareRole(tx, { table: opts.table, resourceId, shareId, role: parseRole(body?.role) })
+        await setResourceShareRole(tx, { table: opts.table, resourceId, shareId, role: parseRole(body?.role) })
         return { id: shareId }
       }
       if (method === 'DELETE') {
         if (!isOwner && share.grantee_user_id !== userId) requireOwner()
-        await removeShare(tx, { table: opts.table, resourceId, shareId })
+        await removeResourceShare(tx, { table: opts.table, resourceId, shareId })
         return { id: shareId }
       }
       throw createError({ statusCode: 405, statusMessage: 'Method not allowed' })
