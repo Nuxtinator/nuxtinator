@@ -47,9 +47,13 @@ export default defineNuxtConfig({
   // Bundle the Tinfoil SDK and its crypto stack into the server build. Left
   // external, Nitro hoists its @noble/hashes 2.x over the 1.x another
   // dependency needs, and 1.x's self-import then resolves to 2.x and crashes.
+  // tinfoil and @tinfoilsh/verifier can also each pull a different
+  // @freedomofpress/crypto-browser; left external, the older one lands under
+  // .nitro/ with a @noble/hashes 1.x that can't resolve its own self-import.
   nitro: {
     externals: {
-      inline: ['tinfoil', 'ehbp', '@tinfoilsh/verifier', 'hpke', '@panva/hpke-noble', '@noble/hashes', '@noble/curves', '@noble/post-quantum']
+      inline: ['tinfoil', 'ehbp', '@tinfoilsh/verifier', 'hpke', '@panva/hpke-noble', '@noble/hashes', '@noble/curves', '@noble/post-quantum',
+        '@freedomofpress/crypto-browser', '@freedomofpress/sigstore-browser', '@freedomofpress/tuf-browser']
     }
   },
 
