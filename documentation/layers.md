@@ -435,7 +435,7 @@ registerApp({
   requiredPermission: 'notes.access',
   scope: 'user',
   permissions: [...NOTES_PERMISSIONS], // held by every user the app is on for
-  defaultStatus: 'host_controlled' // 'default' = every signed-in user
+  defaultStatus: 'host_controlled' // 'default' = every signed-in user, 'admins' = host admins only
 })
 // no registerDefaultGrants: roles grant personal-app permissions nothing
 ```
@@ -461,7 +461,7 @@ await sql`
 `.execute(db)
 ```
 
-A host admin turns an invite-only personal app on per user from `/admin/users` (or ticks it in the invite form). [list-of-100](../layers/apps/list-of-100/) is the worked example.
+A host admin turns an invite-only personal app on per user from `/admin/users` (or ticks it in the invite form), or for whole host groups from `/admin/apps` → Users; groups themselves are managed on `/admin/groups`. RLS on these tables holds only when the app connects as `app_user` — see [database-roles.md](database-roles.md). [list-of-100](../layers/apps/list-of-100/) is the worked example.
 
 ### Database tables
 
@@ -639,7 +639,7 @@ When [layers/tenancy/](../layers/tenancy/) is in `extends:`:
 - `host_admin` (BYPASSRLS) — used by migrations + cross-org `/api/admin/orgs/...` endpoints. Exposed as `adminDb` from `#tenant/admin-db`. **Layer code outside the tenancy layer must never import this.**
 - `app_user` (RLS-enforced) — the default for the host's `db` and for layer code.
 
-Connection URLs: `DATABASE_URL` for `host_admin`, `APP_DATABASE_URL` for `app_user`. Single-tenant deploys can set only `DATABASE_URL` — the host's `db` falls back to it.
+Connection URLs: `DATABASE_URL` for `host_admin`, `APP_DATABASE_URL` for `app_user`. Single-tenant deploys need both too, since personal-app tables use RLS — see [database-roles.md](database-roles.md).
 
 If you deploy through a connection pooler, configure transaction-pooling mode. `defineTenantHandler` uses `SET LOCAL`, which is transaction-scoped; session-pooling would leak `app.current_org` across requests. `prepare: false` is configured on the postgres-js driver to remain compatible with PgBouncer txn-pool.
 

@@ -79,7 +79,7 @@ export interface CustomRolesTable extends NuxtinatorCustomRolesColumns {
   permissions: Generated<string[]>
 }
 
-export type AppStatus = 'disabled' | 'available' | 'default' | 'host_controlled'
+export type AppStatus = 'disabled' | 'available' | 'default' | 'host_controlled' | 'admins'
 
 export interface AppsTable {
   id: string
@@ -188,6 +188,31 @@ export interface InviteAppsTable {
   app_id: string
 }
 
+// A named set of users: a host group (`org_id` NULL) or one org's. See
+// migration 018_create_groups.
+export interface GroupsTable {
+  id: Generated<string>
+  org_id: string | null
+  name: string
+  archived_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
+export interface GroupMembersTable {
+  group_id: string
+  user_id: string
+  added_by: string | null
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
+// A group that can open an app, beside `user_apps`' per-user grants.
+export interface AppGroupsTable {
+  app_id: string
+  group_id: string
+  granted_by: string | null
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
 export type NotificationEmailMode = 'immediate' | 'digest' | 'none'
 
 export interface NotificationsTable {
@@ -221,6 +246,9 @@ export interface CoreDatabase {
   invites: InvitesTable
   user_apps: UserAppsTable
   invite_apps: InviteAppsTable
+  groups: GroupsTable
+  group_members: GroupMembersTable
+  app_groups: AppGroupsTable
 }
 
 // The full schema Kysely sees: core tables plus whatever optional layers

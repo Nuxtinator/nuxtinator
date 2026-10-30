@@ -111,7 +111,7 @@ interface AdminPersonalApp {
   id: string
   title: string
   icon?: string
-  status: 'disabled' | 'available' | 'default' | 'host_controlled'
+  status: 'disabled' | 'available' | 'default' | 'host_controlled' | 'admins'
   scope: 'org' | 'user'
   installed: boolean
 }
@@ -686,6 +686,7 @@ interface UserPersonalApp {
   status: AdminPersonalApp['status']
   enabled: boolean
   granted: boolean
+  viaGroup: boolean
 }
 const userApps = ref<UserPersonalApp[]>([])
 const togglingAppId = ref<string | null>(null)
@@ -1167,11 +1168,23 @@ const handleDelete = async () => {
                       >
                         On for everyone
                       </div>
+                      <div
+                        v-else-if="app.status === 'admins'"
+                        class="text-xs text-(--ui-text-muted)"
+                      >
+                        Host admins only
+                      </div>
+                      <div
+                        v-else-if="app.viaGroup && !app.granted"
+                        class="text-xs text-(--ui-text-muted)"
+                      >
+                        Through a group
+                      </div>
                     </div>
                   </div>
                   <USwitch
                     :model-value="app.enabled"
-                    :disabled="app.status === 'default' || togglingAppId === app.id"
+                    :disabled="app.status === 'default' || app.status === 'admins' || (app.viaGroup && !app.granted) || togglingAppId === app.id"
                     @update:model-value="(v: boolean) => handleToggleUserApp(app, v)"
                   />
                 </li>

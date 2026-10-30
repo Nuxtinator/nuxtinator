@@ -112,7 +112,7 @@ Add more depending on which layers you enabled:
 
 | Layer | Extra env |
 |---|---|
-| `tenancy` | `APP_DATABASE_URL` (the `app_user` role; falls back to `DATABASE_URL` in single-deployment) |
+| `tenancy` | `NUXT_TENANT_FLOW_SECRET` (`APP_DATABASE_URL`, the `app_user` role, is needed by every deploy — see [database-roles.md](database-roles.md)) |
 | `email-mailgun` | `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `SMTP_FROM`, `SMTP_FROM_NAME` |
 | `oauth` | `OAUTH_CONSENT_COOKIE_SECRET` |
 | `feedback` | `NUXT_PUBLIC_FEEDBACK_PROJECT_ID` |

@@ -35,9 +35,10 @@ export interface AppEntry {
   //                 single mode treats it as 'disabled'
   //   'disabled'  — off everywhere
   // For a personal app (`scope: 'user'`), 'default' is on for every signed-in
-  // user, and 'available' / 'host_controlled' are on only for users a host
-  // admin granted it to.
-  defaultStatus?: 'available' | 'default' | 'disabled' | 'host_controlled'
+  // user, 'available' / 'host_controlled' are on only for users a host admin
+  // granted it to (directly or through a host group), and 'admins' is on only
+  // for host admins. Org apps don't take 'admins'.
+  defaultStatus?: 'available' | 'default' | 'disabled' | 'host_controlled' | 'admins'
   // 'org' (default): the app's data belongs to an org and it is turned on per
   // org. 'user': a personal app — its data belongs to each user, it is the
   // same in every org, and it is turned on per user (see personal-apps.ts).

@@ -4,7 +4,7 @@ definePageMeta({
   middleware: ['auth', 'admin']
 })
 
-type AppStatus = 'disabled' | 'available' | 'default' | 'host_controlled'
+type AppStatus = 'disabled' | 'available' | 'default' | 'host_controlled' | 'admins'
 
 interface AdminApp {
   id: string
@@ -42,7 +42,8 @@ const statusMeta = (s: AppStatus) => STATUS_OPTIONS.find(o => o.value === s) ?? 
 // 'available' reads as invite-only, like 'host_controlled'.
 const PERSONAL_STATUS_OPTIONS: typeof STATUS_OPTIONS = [
   { value: 'default', label: 'Everyone', description: 'On for every signed-in user.', color: 'success', icon: 'i-lucide-circle-check' },
-  { value: 'host_controlled', label: 'Invited users', description: 'On only for users a host admin turns it on for, from an invite or the user\'s page.', color: 'warning', icon: 'i-lucide-lock' },
+  { value: 'host_controlled', label: 'Groups and users', description: 'On only for members of the groups you pick and for users you turn it on for.', color: 'warning', icon: 'i-lucide-lock' },
+  { value: 'admins', label: 'Admins only', description: 'On only for host admins.', color: 'warning', icon: 'i-lucide-shield' },
   { value: 'disabled', label: 'Disabled', description: 'Hidden from everyone.', color: 'error', icon: 'i-lucide-circle-x' }
 ]
 const personalStatusValue = (s: AppStatus): AppStatus => s === 'available' ? 'host_controlled' : s
@@ -122,7 +123,16 @@ interface AppUser {
   display_name: string
   email: string
   granted: boolean
+  viaGroup: boolean
   enabled: boolean
+}
+
+interface AppGroup {
+  id: string
+  name: string
+  member_count: number
+  archived: boolean
+  selected: boolean
 }
 
 // Personal apps are turned on per user: the slideover lists users (those with
@@ -139,6 +149,9 @@ const appUsersLoading = ref(false)
 const usersSearch = ref('')
 const togglingUserId = ref<string | null>(null)
 
+const appGroups = ref<AppGroup[]>([])
+const savingGroups = ref(false)
+
 const loadAppUsers = async () => {
   if (!usersApp.value) return
   appUsersLoading.value = true
@@ -154,12 +167,43 @@ const loadAppUsers = async () => {
   }
 }
 
+const loadAppGroups = async () => {
+  if (!usersApp.value) return
+  const res = await $fetch<{ groups: AppGroup[] }>(`/api/admin/apps/${usersApp.value.id}/groups`)
+  appGroups.value = res.groups
+}
+
 const openUsers = async (app: AdminApp) => {
   usersApp.value = app
   usersSearch.value = ''
   appUsers.value = []
-  await loadAppUsers()
+  appGroups.value = []
+  await Promise.all([loadAppUsers(), loadAppGroups()])
 }
+
+const onToggleGroup = async (group: AppGroup, selected: boolean) => {
+  if (!usersApp.value) return
+  const groupIds = appGroups.value
+    .filter(g => g.id === group.id ? selected : g.selected)
+    .map(g => g.id)
+  savingGroups.value = true
+  try {
+    await $fetch(`/api/admin/apps/${usersApp.value.id}/groups`, { method: 'PUT', body: { groupIds } })
+    await Promise.all([loadAppGroups(), loadAppUsers()])
+  } catch (err: unknown) {
+    toast.add({
+      title: 'Update failed',
+      description: (err as { data?: { statusMessage?: string } } | null)?.data?.statusMessage,
+      color: 'error'
+    })
+  } finally {
+    savingGroups.value = false
+  }
+}
+
+// Whether the per-user switches and group choices take effect at the app's
+// current status.
+const appUsersPickable = computed(() => appUsersStatus.value === 'host_controlled' || appUsersStatus.value === 'available')
 
 let usersSearchTimer: ReturnType<typeof setTimeout> | null = null
 watch(usersSearch, () => {
@@ -472,7 +516,7 @@ const onRemove = async () => {
     <USlideover
       v-model:open="usersOpen"
       :title="usersApp ? `${usersApp.title} — users` : ''"
-      description="Turn this app on or off for each user. Each user's data stays theirs in every org."
+      description="Turn this app on for groups or for individual users. Each user's data stays theirs in every org."
     >
       <template #body>
         <div class="space-y-3">
@@ -480,14 +524,60 @@ const onRemove = async () => {
             v-if="appUsersStatus === 'default'"
             class="text-sm text-(--ui-text-muted)"
           >
-            This app is on for everyone. Set it to Invited users to choose who has it.
+            This app is on for everyone. Set it to Groups and users to choose who has it.
+          </p>
+          <p
+            v-else-if="appUsersStatus === 'admins'"
+            class="text-sm text-(--ui-text-muted)"
+          >
+            This app is on for host admins only. Set it to Groups and users to choose who has it.
           </p>
           <p
             v-else-if="appUsersStatus === 'disabled'"
             class="text-sm text-(--ui-text-muted)"
           >
-            This app is disabled for everyone. Set it to Invited users to choose who has it.
+            This app is disabled for everyone. Set it to Groups and users to choose who has it.
           </p>
+          <USeparator label="Groups" />
+          <div
+            v-if="appGroups.length === 0"
+            class="text-sm text-(--ui-text-muted)"
+          >
+            No groups yet. Create them under Groups.
+          </div>
+          <ul
+            v-else
+            class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md"
+          >
+            <li
+              v-for="g in appGroups"
+              :key="g.id"
+              class="flex items-center justify-between gap-3 p-3"
+            >
+              <div class="min-w-0">
+                <div class="font-medium truncate flex items-center gap-2">
+                  {{ g.name }}
+                  <UBadge
+                    v-if="g.archived"
+                    color="neutral"
+                    variant="subtle"
+                    size="sm"
+                  >
+                    Archived
+                  </UBadge>
+                </div>
+                <div class="text-xs text-(--ui-text-muted)">
+                  {{ g.member_count }} {{ g.member_count === 1 ? 'member' : 'members' }}
+                </div>
+              </div>
+              <USwitch
+                :model-value="g.selected"
+                :disabled="!appUsersPickable || savingGroups || (g.archived && !g.selected)"
+                @update:model-value="(v: boolean) => onToggleGroup(g, v)"
+              />
+            </li>
+          </ul>
+          <USeparator label="Users" />
           <UInput
             v-model="usersSearch"
             icon="i-lucide-search"
@@ -520,12 +610,14 @@ const onRemove = async () => {
                   {{ u.display_name || u.email }}
                 </div>
                 <div class="text-xs text-(--ui-text-muted) truncate">
-                  {{ u.email }}
+                  {{ u.email }}<template v-if="u.viaGroup && !u.granted && appUsersPickable">
+                    · through a group
+                  </template>
                 </div>
               </div>
               <USwitch
                 :model-value="u.enabled"
-                :disabled="appUsersStatus === 'default' || appUsersStatus === 'disabled' || togglingUserId === u.id"
+                :disabled="!appUsersPickable || (u.viaGroup && !u.granted) || togglingUserId === u.id"
                 @update:model-value="(v: boolean) => onToggleUser(u, v)"
               />
             </li>
