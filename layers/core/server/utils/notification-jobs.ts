@@ -18,9 +18,11 @@
 // orgs in one query. Each job therefore iterates org scopes, setting the GUC
 // per org — mirroring the per-(user,org) scan the messages digest used to do.
 // In single-tenant mode there's exactly one scope (`null`) and no GUC.
+// Personal-app notifications have no org; in multi mode RLS shows them only
+// with `app.current_user` set, so jobs also visit each of their recipients.
 //
 // This per-org iteration is O(orgs) per sweep; fine at current scale. If the
-// org count grows large, replace `listOrgScopes()` with a NOTIFY/LISTEN signal
+// org count grows large, replace `listScopes()` with a NOTIFY/LISTEN signal
 // or a non-RLS pending-queue table.
 
 import { sql, type Transaction } from 'kysely'
@@ -52,22 +54,38 @@ interface OrgScope {
   slug: string
 }
 
-// The set of org scopes a job must visit. `[null]` in single mode (no GUC);
-// one entry per org in multi mode.
-async function listOrgScopes(): Promise<(OrgScope | null)[]> {
-  if (!isTenancyMode()) return [null]
-  // Raw SQL — `orgs` is a tenancy-only table not in core's Kysely schema.
-  const res = await sql<OrgScope>`select id, name, slug from orgs`.execute(db)
-  return res.rows
+// One pass of a job: an org (multi mode), a personal-notification recipient
+// (multi mode), or everything (single mode: both null, no GUC).
+interface JobScope {
+  org: OrgScope | null
+  userId: string | null
+}
+
+// The scopes a job must visit. Personal recipients are those with rows that
+// are pending email of `mode`, or older than `before`.
+async function listScopes(mode: 'immediate' | 'digest' | null, before: Date | null): Promise<JobScope[]> {
+  if (!isTenancyMode()) return [{ org: null, userId: null }]
+  // Raw SQL — `orgs` and the recipients function are tenancy-only.
+  const orgs = await sql<OrgScope>`select id, name, slug from orgs`.execute(db)
+  const users = await sql<{ user_id: string }>`
+    select user_id from personal_notification_recipients(${mode}, ${before}) as user_id
+  `.execute(db)
+  return [
+    ...orgs.rows.map(org => ({ org, userId: null })),
+    ...users.rows.map(r => ({ org: null, userId: r.user_id }))
+  ]
 }
 
 async function withScopeTx<T>(
-  orgId: string | null,
+  scope: JobScope,
   fn: (tx: Transaction<Database>) => Promise<T>
 ): Promise<T> {
   return await db.transaction().execute(async (tx) => {
-    if (orgId) {
-      await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
+    if (scope.org) {
+      await sql`select set_config('app.current_org', ${scope.org.id}, true)`.execute(tx)
+    }
+    if (scope.userId) {
+      await sql`select set_config('app.current_user', ${scope.userId}, true)`.execute(tx)
     }
     return await fn(tx)
   })
@@ -105,9 +123,9 @@ async function selectPending(
   return await qb.execute()
 }
 
-async function stampEmailed(orgId: string | null, ids: string[]): Promise<void> {
+async function stampEmailed(scope: JobScope, ids: string[]): Promise<void> {
   if (ids.length === 0) return
-  await withScopeTx(orgId, async (tx) => {
+  await withScopeTx(scope, async (tx) => {
     await tx
       .updateTable('notifications')
       .set({ emailed_at: sql<Date>`now()` })
@@ -118,10 +136,9 @@ async function stampEmailed(orgId: string | null, ids: string[]): Promise<void> 
 
 export async function runImmediateSweep(): Promise<void> {
   await withJobLock(IMMEDIATE_LOCK_KEY, 'immediate', async () => {
-    for (const org of await listOrgScopes()) {
-      const orgId = org?.id ?? null
+    for (const scope of await listScopes('immediate', null)) {
       let rows: NotificationEmailRow[] = []
-      await withScopeTx(orgId, async (tx) => {
+      await withScopeTx(scope, async (tx) => {
         rows = await selectPending(tx, 'immediate', 200)
       })
       if (rows.length === 0) continue
@@ -129,7 +146,7 @@ export async function runImmediateSweep(): Promise<void> {
       for (const row of rows) {
         await sendImmediateNotificationEmail(row)
       }
-      await stampEmailed(orgId, rows.map(r => r.id))
+      await stampEmailed(scope, rows.map(r => r.id))
     }
   })
 }
@@ -139,13 +156,13 @@ export async function runDigest(): Promise<void> {
     // One digest email per user, aggregated across all of that user's orgs
     // and grouped by org inside the email.
     const perUser = new Map<string, DigestOrgGroup[]>()
-    const idsByOrg = new Map<string | null, string[]>()
+    const idsByScope: { scope: JobScope, ids: string[] }[] = []
 
-    for (const org of await listOrgScopes()) {
-      const orgId = org?.id ?? null
-      await withScopeTx(orgId, async (tx) => {
+    for (const scope of await listScopes('digest', null)) {
+      const org = scope.org
+      await withScopeTx(scope, async (tx) => {
         const rows = await selectPending(tx, 'digest')
-        const ids = idsByOrg.get(orgId) ?? []
+        const ids: string[] = []
         const byUser = new Map<string, NotificationEmailRow[]>()
         for (const row of rows) {
           const list = byUser.get(row.user_id) ?? []
@@ -158,7 +175,7 @@ export async function runDigest(): Promise<void> {
           groups.push({ org: org ? { name: org.name, slug: org.slug } : null, rows: userRows })
           perUser.set(userId, groups)
         }
-        if (ids.length > 0) idsByOrg.set(orgId, ids)
+        if (ids.length > 0) idsByScope.push({ scope, ids })
       })
     }
 
@@ -167,8 +184,8 @@ export async function runDigest(): Promise<void> {
       await sendNotificationDigestEmail(userId, groups)
       sent++
     }
-    for (const [orgId, ids] of idsByOrg.entries()) {
-      await stampEmailed(orgId, ids)
+    for (const { scope, ids } of idsByScope) {
+      await stampEmailed(scope, ids)
     }
     console.log(`[notifications] digest sent ${sent} email(s)`)
   })
@@ -177,8 +194,8 @@ export async function runDigest(): Promise<void> {
 export async function runRetention(): Promise<void> {
   await withJobLock(RETENTION_LOCK_KEY, 'retention', async () => {
     const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000)
-    for (const org of await listOrgScopes()) {
-      await withScopeTx(org?.id ?? null, async (tx) => {
+    for (const scope of await listScopes(null, cutoff)) {
+      await withScopeTx(scope, async (tx) => {
         await tx
           .deleteFrom('notifications')
           .where('created_at', '<', cutoff)
