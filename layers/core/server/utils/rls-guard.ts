@@ -1,10 +1,10 @@
 import { sql } from 'kysely'
 import { db } from '#core/server/utils/database'
 
-// Tenant isolation holds only if `db` connects as a role RLS applies to.
-// Superusers, BYPASSRLS roles, and owners of RLS tables (without FORCE ROW
-// LEVEL SECURITY) see every org's rows, which turns every org-scoped
-// permission check into a check against rows from any org.
+// Every RLS policy (org isolation, personal-app rows) holds only if `db`
+// connects as a role RLS applies to. Superusers, BYPASSRLS roles, and owners
+// of RLS tables (without FORCE ROW LEVEL SECURITY) skip every policy, in
+// single mode as much as in multi mode.
 
 let verdict: Promise<string | null> | null = null
 
@@ -40,11 +40,11 @@ async function checkRole(): Promise<string | null> {
 }
 
 export function rlsBypassMessage(reason: string): string {
-  return `Tenant isolation is not enforced: the app database connection's ${reason}. `
-    + 'Set APP_DATABASE_URL to a role without BYPASSRLS that owns no tables (app_user — see documentation/tenancy.md).'
+  return `Row-level security is not enforced: the app database connection's ${reason}. `
+    + 'Set APP_DATABASE_URL to a role without BYPASSRLS that owns no tables (app_user — see documentation/database-roles.md).'
 }
 
-// Fails the request closed when isolation isn't enforced. An unreachable
+// Fails the request closed when RLS isn't enforced. An unreachable
 // database is left to the handler, since no rows can leak without one.
 export async function assertDbEnforcesRls(): Promise<void> {
   let reason: string | null
@@ -54,7 +54,7 @@ export async function assertDbEnforcesRls(): Promise<void> {
     return
   }
   if (reason) {
-    console.error(`[tenancy] ${rlsBypassMessage(reason)}`)
-    throw createError({ statusCode: 503, statusMessage: 'Tenant isolation is not configured' })
+    console.error(`[core] ${rlsBypassMessage(reason)}`)
+    throw createError({ statusCode: 503, statusMessage: 'Row-level security is not configured' })
   }
 }

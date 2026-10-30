@@ -8,37 +8,12 @@ This document covers the **multi-tenant** operator setup. Layer-author guidance 
 
 ## Database role setup (one-time, manual)
 
-Tenant isolation is enforced via **Postgres Row-Level Security**. Two database roles are required:
+Tenant isolation is enforced via **Postgres Row-Level Security**, with the same two roles every deploy uses — see [database-roles.md](database-roles.md) for the SQL. Multi-tenant deploys add one thing: the owner role (`host_admin`) must have `BYPASSRLS`, since the tenancy layer's cross-org `/api/admin/orgs/*` endpoints use it through `adminDb`.
 
 | Role | Purpose | RLS |
 |---|---|---|
 | `host_admin` | Migrations + cross-org `/api/admin/orgs/*` endpoints | `BYPASSRLS` |
 | `app_user` | Default for all request handlers and layer code | RLS-enforced |
-
-Before booting the app, create both roles:
-
-```sql
--- Privileged role used by migrations + cross-org admin endpoints.
-CREATE ROLE host_admin LOGIN PASSWORD '<>' BYPASSRLS;
-GRANT ALL PRIVILEGES ON DATABASE <db> TO host_admin;
-GRANT ALL PRIVILEGES ON SCHEMA public TO host_admin;
-
--- Restricted role for app requests.
-CREATE ROLE app_user LOGIN PASSWORD '<>';   -- explicitly NOT BYPASSRLS
-GRANT CONNECT ON DATABASE <db> TO app_user;
-GRANT USAGE ON SCHEMA public TO app_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
-
--- CRITICAL: defaults must be FOR ROLE host_admin so future tables CREATEd by
--- migrations (which run as host_admin) automatically grant to app_user.
-ALTER DEFAULT PRIVILEGES FOR ROLE host_admin IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
-ALTER DEFAULT PRIVILEGES FOR ROLE host_admin IN SCHEMA public
-  GRANT USAGE, SELECT ON SEQUENCES TO app_user;
-```
-
-The tenancy layer's `tenancy_020_setup_db_roles.ts` migration also runs the GRANT block idempotently if `app_user` exists — but the `CREATE ROLE` step is operator territory.
 
 Verify:
 
@@ -58,7 +33,7 @@ APP_DATABASE_URL=postgres://app_user:...@localhost/<dbname>  # default for the h
 NUXT_TENANT_FLOW_SECRET=<random 32+ bytes hex>        # HMAC key for OAuth state-binding
 ```
 
-The host's `db` falls back to `DATABASE_URL` if `APP_DATABASE_URL` is unset. With the tenancy layer loaded, `db`'s role must be one RLS applies to: if it is a superuser, has `BYPASSRLS`, or owns an RLS table, every request is refused with a 503 and the reason is logged as `[tenancy] Tenant isolation is not enforced…` ([rls-guard.ts](../layers/tenancy/server/utils/rls-guard.ts)). Set both variables, in dev too.
+`db`'s role must be one RLS applies to: if it is a superuser, has `BYPASSRLS`, or owns an RLS table, every request is refused with a 503 and the reason is logged as `[core] Row-level security is not enforced…` ([rls-guard.ts](../layers/core/server/utils/rls-guard.ts)). Set both variables, in dev too.
 
 `NUXT_TENANT_FLOW_SECRET` is consumed by `encodeFlowOrg`/`decodeFlowOrg` (see [layers/tenancy/server/utils/tenant.ts](../layers/tenancy/server/utils/tenant.ts)). Used by OAuth flows to bind the active org to the `state` parameter — without this, an OAuth flow started in org A and completed after a tab switch could land tokens in org B.
 

@@ -11,9 +11,12 @@ import {
   cleanupCoreTestData,
   clearMailhog
 } from './helpers'
+import { createNotesTables, dropNotesTables } from './fixtures/notes-tables'
 
 // Resolve dev/ relative to this file: layers/core/tests/global-setup.ts → ../../host
 const HOST_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../../dev')
+const FIXTURES = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures')
+const SHARES = resolve(FIXTURES, 'notes-shares.ts')
 
 // NODE_ENV must be 'development' both at build time (Vite inlines
 // `process.env.NODE_ENV` into the bundle, so the email layer's
@@ -32,6 +35,14 @@ const hooks = createTest({
       }
     },
     nitro: {
+      // A shareable personal app for the sharing tests.
+      plugins: [resolve(FIXTURES, 'notes-plugin.ts')],
+      handlers: [
+        { route: '/api/test-core-notes/:id', handler: resolve(FIXTURES, 'notes-read.ts') },
+        { route: '/api/test-core-notes/:id/shares', handler: SHARES },
+        { route: '/api/test-core-notes/:id/shares/:shareId', handler: SHARES },
+        { route: '/api/test-core-notes/:id/shares/:shareId/resend', handler: SHARES }
+      ],
       replace: {
         'process.env.NODE_ENV': JSON.stringify('development')
       }
@@ -58,6 +69,7 @@ export async function setup() {
 
   const admin = getHostAdminDb()
   await cleanupCoreTestData(admin)
+  await createNotesTables(admin)
 
   // MailHog state is process-global; start each test run with an empty inbox.
   try {
@@ -71,6 +83,8 @@ export async function teardown() {
   try {
     const admin = getHostAdminDb()
     await cleanupCoreTestData(admin)
+    await dropNotesTables(admin)
+    await admin`DELETE FROM apps WHERE id = 'test-core-notes'`
   } finally {
     await closeTestDatabases()
     await hooks.afterAll()

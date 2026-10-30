@@ -2,8 +2,9 @@ import { db } from '#core/server/utils/database'
 import { requireOperatorAdmin } from '#tenant/server'
 import { getInviteApps, getInviteOrgs, inviteState } from '../../../utils/invites'
 
-// Host admin: every invite that hasn't been accepted, newest first, with the
-// orgs and personal apps each one grants.
+// Host admin: every admin invite that hasn't been accepted, newest first, with
+// the orgs and personal apps each one grants. Users' share invites are theirs
+// and stay off this list.
 export default defineEventHandler(async (event) => {
   await requireOperatorAdmin(event)
 
@@ -20,6 +21,7 @@ export default defineEventHandler(async (event) => {
       'inviter.display_name as inviter_name'
     ])
     .where('invites.accepted_at', 'is', null)
+    .where('invites.kind', '=', 'admin')
     .orderBy('invites.created_at', 'desc')
     .execute()
 

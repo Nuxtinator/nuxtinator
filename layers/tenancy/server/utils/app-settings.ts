@@ -75,9 +75,10 @@ export const getOrgApps = defineSettings<AppCatalogEntry, OrgAppRow, OrgAppEntry
 })
 
 // Whether an org has an app on, given the catalog status and the org's row
-// (if any). A host-disabled app is off regardless of the row.
+// (if any). A host-disabled app is off regardless of the row. 'admins' belongs
+// to personal apps and reads as disabled for an org app.
 export function resolveOrgAppEnabled(status: AppStatus, orgRow: { enabled: boolean } | undefined): boolean {
-  if (status === 'disabled') return false
+  if (status === 'disabled' || status === 'admins') return false
   if (orgRow) return orgRow.enabled
   return status === 'default'
 }

@@ -121,13 +121,13 @@ NODE_ENV=development
 
 **Database TLS** auto-negotiates by default — postgres.js `prefer`: it asks the server (via `SSLRequest`) and uses TLS when the server offers it, falling back to plaintext when it doesn't. So a local Postgres with no TLS, a private-network Postgres/PgBouncer that speaks plaintext (Docker, Dokploy, Fly internal networking), and a managed Postgres that requires TLS all connect with no configuration. To force a specific posture, append `?sslmode=...` to `DATABASE_URL`/`APP_DATABASE_URL` — the standard libpq modes (`disable`, `allow`, `prefer`, `require`, `verify-full`) are honored. Note that `prefer` and `require` do **not** verify the server certificate; use `verify-full` (with a CA the cert chains to) for real MITM protection.
 
-### Tenancy (multi-tenant only)
+### App database role
 
 ```env
-APP_DATABASE_URL=postgres://app_user:...@.../db   # falls back to DATABASE_URL if unset
+APP_DATABASE_URL=postgres://app_user:...@.../db   # RLS-enforced role for the app's `db`
 ```
 
-Multi-tenant production also requires a transaction-pooling connection pooler. See [tenancy.md](documentation/tenancy.md).
+Every deploy needs it: requests are refused while the app connects as a role that skips row-level security. See [database-roles.md](documentation/database-roles.md). Multi-tenant production also requires a transaction-pooling connection pooler — see [tenancy.md](documentation/tenancy.md).
 
 ### Email (Mailgun)
 
@@ -290,8 +290,7 @@ _layers
 
 The scaffolded `.env.example` contains the union of every layer's vars. Trim it to the layers the user selected:
 
-- Always keep the **Core** block (`APP_TITLE`, `DATABASE_URL`, `JWT_SECRET`, `NUXT_SECRET_ENCRYPTION_KEY`, `NUXT_PUBLIC_SITE_URL`, `NODE_ENV`).
-- Keep `APP_DATABASE_URL` only if `tenancy` is selected.
+- Always keep the **Core** block (`APP_TITLE`, `DATABASE_URL`, `APP_DATABASE_URL`, `JWT_SECRET`, `NUXT_SECRET_ENCRYPTION_KEY`, `NUXT_PUBLIC_SITE_URL`, `NODE_ENV`).
 - Keep the `MAILGUN_*` + `SMTP_FROM*` block only if `email-mailgun` is selected.
 - Keep `NUXT_SOCIAL_AUTH_*` only if `social-auth` is selected.
 - Keep `OAUTH_*` only if `oauth` is selected.
