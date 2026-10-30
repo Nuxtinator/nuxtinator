@@ -170,7 +170,11 @@ export interface InvitesTable {
   expires_at: ColumnType<Date, Date | string, Date | string>
   accepted_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
   accepted_by: string | null
+  // 'admin' or 'share'; see migration 020_invites_kind.
+  kind: Generated<InviteKind>
 }
+
+export type InviteKind = 'admin' | 'share'
 
 // A host admin's grant of a personal app to one user. See migration
 // 015_create_user_apps.

@@ -463,6 +463,40 @@ await sql`
 
 A host admin turns an invite-only personal app on per user from `/admin/users` (or ticks it in the invite form), or for whole host groups from `/admin/apps` → Users; groups themselves are managed on `/admin/groups`. RLS on these tables holds only when the app connects as `app_user` — see [database-roles.md](database-roles.md). [list-of-100](../layers/apps/list-of-100/) is the worked example.
 
+#### Sharing personal items
+
+A personal item (a tree, a list, a collection) is shared with people, as a viewer or an editor. Each shareable resource gets its own share table, made in the app's migration by core's helper:
+
+```ts
+// migrations/notes_002_note_shares.ts
+import { createShareTable, dropShareTable, sharedWithMe, CURRENT_USER_SQL } from '@nuxtinator/core/share-tables'
+
+const SPEC = { table: 'notes_note_shares', resourceTable: 'notes_items', ownerColumn: 'user_id' }
+
+export async function up(db: Kysely<unknown>) {
+  await createShareTable(db, SPEC)
+  await sql.raw(`DROP POLICY user_isolation ON notes_items`).execute(db)
+  await sql.raw(`CREATE POLICY notes_read ON notes_items FOR SELECT USING (
+    user_id = ${CURRENT_USER_SQL} OR ${sharedWithMe(SPEC, 'notes_items.id')}
+  )`).execute(db)
+  await sql.raw(`CREATE POLICY notes_write ON notes_items FOR ALL
+    USING (user_id = ${CURRENT_USER_SQL}) WITH CHECK (user_id = ${CURRENT_USER_SQL})`).execute(db)
+}
+export async function down(db: Kysely<unknown>) { await dropShareTable(db, SPEC) }
+```
+
+`sharedWithMe(SPEC, expr, { role: 'editor' })` limits a policy to editor shares; child tables pass the expression naming their resource. Qualify `expr` with its table (`notes_items.id`, not `id`), or it binds to the share table's own `id`. Register the table at boot, and mount the share routes:
+
+```ts
+// server/plugins/register-notes.ts
+registerShareTable({ appId: 'notes', table: 'notes_note_shares' })
+
+// server/routes/api/notes/items/[id]/shares/index.ts, …/shares/[shareId].ts and …/shares/[shareId]/resend.post.ts
+export default defineShareHandler({ appId: 'notes', table: 'notes_note_shares', permission: 'notes.read' })
+```
+
+The page opens `<ShareDialog v-model:open :endpoint="`/api/notes/items/${id}/shares`" :title>`. The owner shares with a known person (someone who accepted a share from them, or whose share they accepted, in any app), by email invite, or by single-use link; nothing reaches anyone's account until they accept. A share invite creates an account only while self-registration is on, and stays off `/admin/invites`. Personal content goes with its owner: shares are deleted with the item. See [server/utils/shares.ts](../layers/core/server/utils/shares.ts).
+
 ### Database tables
 
 Create a `server/database/schema.d.ts` and merge your tables into core's global

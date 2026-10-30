@@ -3,11 +3,15 @@ import type { Kysely, Transaction } from 'kysely'
 import { db, sql } from './database'
 import { getSiteUrl } from './site-url'
 import { getRegisteredApp } from './app-registry'
-import type { Database } from '#core/server/database/schema'
+import { getShareTables } from './share-registry'
+import type { Database, InviteKind } from '#core/server/database/schema'
 
 // Invitations live in `invites`, never in `users`: the user row is created
 // when someone accepts. An invite either names an email address (sent by
-// email) or has none (a single-use link the inviter shares). In multi-tenant
+// email) or has none (a single-use link the inviter shares). An admin's invite
+// (`kind` 'admin') may grant orgs and personal apps; a share invite (`kind`
+// 'share') grants only the pending shares that point at it (see shares.ts),
+// and creates an account only while self-registration is on. In multi-tenant
 // mode `invite_orgs` (tenancy layer) holds the orgs and roles it grants; those
 // tables only exist when the tenancy layer is loaded, so every query that
 // touches them is gated on the tenancy flag. `invite_apps` (core, both modes)
@@ -30,6 +34,7 @@ export interface InviteRow {
   created_at: Date
   expires_at: Date
   accepted_at: Date | null
+  kind: InviteKind
 }
 
 export type InviteState = 'valid' | 'expired' | 'accepted'
@@ -60,6 +65,7 @@ export async function createInvite(
     orgs: InviteOrgAttachment[]
     // Personal app ids the invite turns on for whoever accepts it.
     apps?: string[]
+    kind?: InviteKind
   }
 ): Promise<{ id: string, token: string, url: string, expiresAt: Date }> {
   const id = randomUUID()
@@ -74,7 +80,8 @@ export async function createInvite(
       email: input.email ? input.email.toLowerCase() : null,
       display_name: input.display_name || null,
       invited_by: input.invitedBy,
-      expires_at: expiresAt
+      expires_at: expiresAt,
+      ...(input.kind ? { kind: input.kind } : {})
     })
     .execute()
 
@@ -113,19 +120,20 @@ export async function findInviteByToken(executor: Executor, token: string): Prom
   if (!token) return null
   const row = await executor
     .selectFrom('invites')
-    .select(['id', 'email', 'display_name', 'invited_by', 'created_at', 'expires_at', 'accepted_at'])
+    .select(['id', 'email', 'display_name', 'invited_by', 'created_at', 'expires_at', 'accepted_at', 'kind'])
     .where('token_hash', '=', hashInviteToken(token))
     .executeTakeFirst()
   return row ?? null
 }
 
-// An unaccepted, unexpired invite addressed to `email`, optionally one that
-// grants `orgId`.
+// An unaccepted, unexpired admin invite addressed to `email`, optionally one
+// that grants `orgId`.
 export async function findPendingInvite(executor: Executor, email: string, orgId?: string): Promise<{ id: string } | null> {
   let q = executor
     .selectFrom('invites')
     .select('invites.id')
     .where(sql`lower(invites.email)`, '=', email.toLowerCase())
+    .where('invites.kind', '=', 'admin')
     .where('invites.accepted_at', 'is', null)
     .where('invites.expires_at', '>', new Date())
   if (orgId && tenancyEnabled()) {
@@ -193,7 +201,8 @@ export interface AcceptedMembership {
   created: boolean
 }
 
-// Marks the invite accepted by `userId` and grants its orgs and personal apps.
+// Marks the invite accepted by `userId` and grants its orgs and personal apps,
+// or for a share invite, turns its pending shares into shares for `userId`.
 // If the user is already in one of those orgs, the invite's roles are added to
 // the ones they have. Throws 410 when the invite was accepted concurrently or
 // has expired.
@@ -208,10 +217,20 @@ export async function acceptInvite(
     .where('id', '=', inviteId)
     .where('accepted_at', 'is', null)
     .where('expires_at', '>', new Date())
+    .returning('kind')
     .executeTakeFirst()
 
-  if (Number(claimed.numUpdatedRows ?? 0) === 0) {
+  if (!claimed) {
     throw createError({ statusCode: 410, statusMessage: 'Invitation has already been used or has expired' })
+  }
+
+  // Under RLS the new grantee can't see share rows that don't name them yet,
+  // so each table's definer function does the conversion, in this transaction.
+  if (claimed.kind === 'share') {
+    for (const table of getShareTables().filter(t => t.standard)) {
+      await sql`select ${sql.raw(`${table.table}_accept_invite`)}(${inviteId}::uuid, ${userId}::uuid)`.execute(trx)
+    }
+    return []
   }
 
   await sql`

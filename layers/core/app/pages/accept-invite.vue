@@ -23,6 +23,8 @@ interface InviteInfo {
   inviter_name: string | null
   orgs: Array<{ slug: string, name: string }>
   apps: Array<{ id: string, title: string }>
+  share: boolean
+  can_create_account: boolean
 }
 
 const info = ref<InviteInfo | null>(null)
@@ -226,7 +228,16 @@ async function useDifferentAccount() {
           variant="soft"
           :title="error"
         />
-        <p class="text-(--ui-text-muted)">
+        <p
+          v-if="info?.share"
+          class="text-(--ui-text-muted)"
+        >
+          {{ info.inviter_name || 'Someone' }} shared something with you.
+        </p>
+        <p
+          v-else
+          class="text-(--ui-text-muted)"
+        >
           <template v-if="info?.inviter_name">
             {{ info.inviter_name }} invited you to join
           </template>
@@ -245,7 +256,7 @@ async function useDifferentAccount() {
           :loading="submitting"
           @click="handleJoin"
         >
-          Join as {{ user.email }}
+          {{ info?.share ? 'Accept' : 'Join' }} as {{ user.email }}
         </UButton>
         <UButton
           color="neutral"
@@ -256,6 +267,24 @@ async function useDifferentAccount() {
           @click="useDifferentAccount"
         >
           Use a different account
+        </UButton>
+      </div>
+
+      <div
+        v-else-if="info?.share && !info.can_create_account"
+        class="space-y-6"
+      >
+        <p class="text-(--ui-text-muted)">
+          {{ info.inviter_name || 'Someone' }} shared something with you. Sign in to accept it.
+          If you don't have an account yet, ask the site's administrator for one.
+        </p>
+        <UButton
+          color="primary"
+          size="lg"
+          block
+          :to="`/login?redirect=${encodeURIComponent(route.fullPath)}`"
+        >
+          Sign in
         </UButton>
       </div>
 
@@ -274,7 +303,13 @@ async function useDifferentAccount() {
         />
 
         <p
-          v-if="info?.orgs.length || info?.apps.length"
+          v-if="info?.share"
+          class="text-(--ui-text-muted)"
+        >
+          {{ info.inviter_name || 'Someone' }} shared something with you.
+        </p>
+        <p
+          v-else-if="info?.orgs.length || info?.apps.length"
           class="text-(--ui-text-muted)"
         >
           You've been invited to join <strong>{{ joiningWhat }}</strong>.

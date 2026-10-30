@@ -6,6 +6,7 @@
   "exports": {
     ".": "./nuxt.config.ts",
     "./kit": "./kit/alias.ts",
+    "./share-tables": "./kit/share-tables.ts",
     "./test-helpers": "./tests/helpers/index.ts"
   },
   "dependencies": {
