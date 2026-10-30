@@ -87,7 +87,8 @@ export function clearSessionCookies(event: H3Event): void {
 // Creates a session for a user who just proved who they are. Browsers get the
 // tokens as cookies; the return value is what a native client receives.
 // `authenticatedAt` is when they proved it, for a sign-in handed over from
-// elsewhere; it decides whether the session counts as recently authenticated.
+// elsewhere; it decides whether the session counts as recently authenticated,
+// so a time in the future is taken as now.
 export async function startSession(event: H3Event, user: SessionUser, opts: { authenticatedAt?: Date } = {}): Promise<IssuedTokens> {
   const client: SessionClient = isNativeClient(event) ? 'native' : 'web'
   const sessionId = randomUUID()
@@ -104,7 +105,7 @@ export async function startSession(event: H3Event, user: SessionUser, opts: { au
       refresh_token_hash: hashToken(refreshToken),
       created_at: now,
       last_used_at: now,
-      authenticated_at: opts.authenticatedAt ?? now,
+      authenticated_at: opts.authenticatedAt && opts.authenticatedAt < now ? opts.authenticatedAt : now,
       expires_at: new Date(now.getTime() + REFRESH_TTL_MS),
       user_agent: getHeader(event, 'user-agent') || null,
       ip: ip && ip !== 'unknown' ? ip : null

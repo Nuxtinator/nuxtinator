@@ -12,7 +12,8 @@ type MemberStatus = 'active' | 'not_verified'
 interface MemberRow {
   membership_id: string
   user_id: string
-  email: string
+  // Null for accounts created without an address (e.g. a host's app installs).
+  email: string | null
   display_name: string
   avatar: string | null
   editable: boolean
@@ -186,7 +187,8 @@ const columns: TableColumn<MemberRow>[] = [
   },
   {
     accessorKey: 'email',
-    header: sortableHeader('Email', 'email')
+    header: sortableHeader('Email', 'email'),
+    cell: ({ row }) => row.original.email ?? h(UBadge, { color: 'neutral', variant: 'subtle', size: 'sm' }, () => 'No email')
   },
   {
     accessorKey: 'status',
@@ -711,6 +713,7 @@ const handleRemove = async () => {
                 </UBadge>
               </div>
               <a
+                v-if="selectedMember.email"
                 :href="`mailto:${selectedMember.email}`"
                 class="text-sm text-(--ui-text-muted) hover:text-(--ui-text) transition-colors inline-flex items-center gap-1.5 mt-0.5 truncate"
               >
@@ -1082,8 +1085,8 @@ const handleRemove = async () => {
               </h3>
               <p class="text-sm text-(--ui-text-muted) mt-1">
                 This will remove
-                <span class="font-medium text-(--ui-text)">{{ selectedMember?.display_name }}</span>
-                ({{ selectedMember?.email }}) from <span class="font-medium text-(--ui-text)">{{ org?.name }}</span>.
+                <span class="font-medium text-(--ui-text)">{{ selectedMember?.display_name || selectedMember?.email || 'this member' }}</span>
+                <template v-if="selectedMember?.display_name && selectedMember?.email">({{ selectedMember.email }})</template> from <span class="font-medium text-(--ui-text)">{{ org?.name }}</span>.
                 Their global account is unaffected. They can be re-invited later.
               </p>
             </div>

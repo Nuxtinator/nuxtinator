@@ -919,7 +919,7 @@ const handleDelete = async () => {
             </div>
             <div class="flex gap-2 flex-wrap">
               <UButton
-                v-if="selectedUser.status === 'not_verified'"
+                v-if="selectedUser.status === 'not_verified' && selectedUser.email"
                 :loading="markingVerified"
                 @click="handleMarkVerified"
               >

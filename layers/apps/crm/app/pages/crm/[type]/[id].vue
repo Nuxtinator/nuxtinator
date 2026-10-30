@@ -230,7 +230,7 @@ async function removeRecord() {
                 :field="field"
                 :entries="channelEntries(field)"
                 :editable="canEdit"
-                :addresses-locked="accountLinked && field.channelType === 'email'"
+                :addresses-locked="!!field.channelType && record.accountOwnedChannelTypes.includes(field.channelType)"
                 @refresh="onChannelsChanged"
               />
             </div>

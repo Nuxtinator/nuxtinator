@@ -47,8 +47,9 @@ describe('account-linked records', () => {
     const { org, auth } = await createCrmOrgWith(sql, ['admin'])
     const opts = withOrgHeader(auth, org.slug)
     const rec = await linkedContact(opts)
-    const detail = await $fetch<{ userId: string | null }>(`/api/crm/records/contacts/${rec.id}`, opts)
+    const detail = await $fetch<{ userId: string | null, accountOwnedChannelTypes: string[] }>(`/api/crm/records/contacts/${rec.id}`, opts)
     expect(detail.userId).toBe(rec.personId)
+    expect(detail.accountOwnedChannelTypes).toEqual(['email'])
   })
 
   it('refuses renames and email changes', async () => {
@@ -64,6 +65,17 @@ describe('account-linked records', () => {
 
     const rows = await sql`SELECT name FROM crm_records WHERE id = ${rec.id}`
     expect(rows[0]!.name).toBe('test-crm Linked')
+  })
+
+  it('leaves the name as it is, primary and label editable', async () => {
+    const { org, auth } = await createCrmOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    const rec = await linkedContact(opts)
+    const base = `/api/crm/records/contacts/${rec.id}`
+
+    expect(await status($fetch(base, { method: 'PATCH', body: { fields: { name: 'test-crm Linked' } }, ...opts }))).toBe(200)
+    expect(await status($fetch(`${base}/channels/${rec.linkId}`, { method: 'PATCH', body: { label: 'Work' }, ...opts }))).toBe(200)
+    expect(await status($fetch(`${base}/channels/${rec.linkId}`, { method: 'PATCH', body: { primary: true }, ...opts }))).toBe(200)
   })
 
   it('keeps the same edits open once the link is gone', async () => {

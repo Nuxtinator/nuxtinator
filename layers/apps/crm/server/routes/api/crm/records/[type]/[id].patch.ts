@@ -9,6 +9,7 @@
 
 import { z } from 'zod'
 import { withOrgContext } from '#tenant/server'
+import { accountOwnedChannelTypes, assertPatchKeepsAccountFields } from '../../../../../utils/account-link'
 import {
   applyFieldPatch,
   assertRecordVisible,
@@ -34,6 +35,7 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 400, statusMessage: 'Invalid body', data: parsed.error.flatten() })
     }
 
+    await assertPatchKeepsAccountFields(tx, typeKey, id, parsed.data.fields)
     const record = await applyFieldPatch(tx, ctx, typeKey, id, parsed.data.fields)
     const caps = await resolveTypeCapabilities(tx, ctx, typeKey)
     return {
@@ -46,6 +48,7 @@ export default defineEventHandler(async (event) => {
       updatedAt: record.updatedAt,
       createdBy: record.createdBy,
       userId: record.userId,
+      accountOwnedChannelTypes: accountOwnedChannelTypes(record.userId),
       // The update gate passed, so canEdit is true by construction (type
       // answer or edit share — either way this caller can edit this record).
       capabilities: { canEdit: true, canShare: caps.share, canDelete: caps.delete }

@@ -24,7 +24,6 @@ import { getRecordType, getRecordTypeFields, type CrmFieldSetting } from './defi
 import { normalizeChannelValue } from './normalize'
 import { claimChannel, findChannel, linkChannel, unlinkChannel } from './channels'
 import { recordCrmActivity } from './crm-activity'
-import { assertNotAccountOwned } from './account-link'
 
 type Tx = Transaction<Database>
 
@@ -860,11 +859,6 @@ export async function applyFieldPatch(
     oldRecord = await getRecord(tx, ctx, typeKey, id)
 
     if (scalarOps.size === 0 && listOps.size === 0) return oldRecord
-
-    for (const key of [...scalarOps.keys(), ...listOps.keys()]) {
-      const def = defsByKey.get(key)!
-      await assertNotAccountOwned(tx, id, { name: def.column === 'name', channelType: def.storage === 'channels' ? def.channelType : null })
-    }
 
     // Promoted columns, the jsonb merge, and the updated_at bump (no DB
     // trigger exists — the kernel owns it) in a single statement.

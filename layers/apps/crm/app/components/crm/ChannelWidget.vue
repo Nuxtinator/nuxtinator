@@ -19,7 +19,7 @@ const props = defineProps<{
   entries: CrmChannelEntry[]
   /** The record detail's canEdit capability — false renders read-only. */
   editable: boolean
-  /** The addresses come from a linked user account: consent stays editable, the addresses don't. */
+  /** The addresses come from a linked user account: they can't be added, changed or removed; primary, label and consent stay editable. */
   addressesLocked?: boolean
 }>()
 
@@ -157,11 +157,12 @@ function remove(entry: CrmChannelEntry) {
       :key="entry.linkId"
       class="flex items-center gap-2"
     >
-      <template v-if="canChangeAddresses && editingId === entry.linkId">
+      <template v-if="editable && editingId === entry.linkId">
         <UInput
           v-model="editValue"
           class="flex-1 sm:max-w-xs"
           size="sm"
+          :disabled="addressesLocked"
           :placeholder="placeholder"
           @keydown.enter.prevent="saveEdit(entry)"
         />
@@ -191,7 +192,7 @@ function remove(entry: CrmChannelEntry) {
       </template>
       <template v-else>
         <UButton
-          v-if="canChangeAddresses"
+          v-if="editable"
           icon="i-lucide-star"
           size="xs"
           variant="ghost"
@@ -237,7 +238,7 @@ function remove(entry: CrmChannelEntry) {
         </button>
         <span class="flex-1" />
         <UButton
-          v-if="canChangeAddresses"
+          v-if="editable"
           icon="i-lucide-pencil"
           size="xs"
           variant="ghost"
