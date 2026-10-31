@@ -74,12 +74,37 @@ should return 4xx (never 404) — that confirms the route is reachable.
 ## Permissions
 
 - `inbox.access` — open the app, read, triage (status/assign/review flags)
+- `inbox.read` — read conversations from an AI client over MCP (no triage)
 - `inbox.send` — compose and reply, spam blocklist
 - `inbox.settings.manage` — the settings page: inbox configuration and
   teammates' sending aliases
 
 Default grants: `admin` everything, `member` nothing (grant via role or per-user
-grants). The `inbox_agent` role has `inbox.access` and `inbox.send`.
+grants). The `inbox_agent` role has `inbox.access`, `inbox.read` and `inbox.send`.
+
+## MCP tools
+
+When the host also loads the MCP layer, the inbox registers tools for AI
+clients (all with `appId: 'inbox'` and an optional `org` slug):
+
+| Tool | Scope | Effect |
+|---|---|---|
+| `inbox_list_conversations` | `inbox.read` | read |
+| `inbox_read_conversation` | `inbox.read` | read |
+| `inbox_list_for_record` | `inbox.read` | read |
+| `inbox_list_assignees` | `inbox.read` | read |
+| `inbox_get_drafting_background` | `inbox.read` | read |
+| `inbox_save_draft` | `inbox.send` | write (AI draft, never sent) |
+| `inbox_add_comment` | `inbox.access` | write |
+| `inbox_update_conversation` | `inbox.access` | write (status, assignee, tags; never spam) |
+| `inbox_send_reply` | `inbox.send` | destructive (sends mail outside the org) |
+
+Text written by outside senders is wrapped in `<untrusted_email nonce="…">`
+markers with a fresh nonce per response. Held messages return no body unless
+the call sets `includeHeld`. Writes show on the conversation timeline under the
+user, labelled "via <client name>". Replies to a suppressed address, or sent
+while the inbox has no sending address, are refused with 409 here and in the
+composer route alike.
 
 ## Local development
 

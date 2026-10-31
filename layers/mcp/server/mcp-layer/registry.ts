@@ -13,10 +13,25 @@ function isAcceptableScope(scope: string): boolean {
   return isPermission(scope) || isRegisteredPermission(scope)
 }
 
+export interface McpToolAnnotations {
+  readOnlyHint: boolean
+  destructiveHint: boolean
+}
+
 export interface RegisteredTool {
   def: McpToolDef
   inputJsonSchema: Record<string, unknown>
   outputJsonSchema?: Record<string, unknown>
+  annotations?: McpToolAnnotations
+}
+
+// Only tools that declare `readOnly` or `destructive` get annotations: the
+// spec defaults an unannotated tool to destructive, which is the safe reading
+// for tools that never said either way.
+function toolAnnotations(tool: McpToolDef): McpToolAnnotations | undefined {
+  if (tool.readOnly === undefined && tool.destructive === undefined) return undefined
+  const readOnly = tool.readOnly === true
+  return { readOnlyHint: readOnly, destructiveHint: !readOnly && tool.destructive === true }
 }
 
 export interface RegisteredResource {
@@ -83,7 +98,13 @@ export function createRegistry(): McpRegistry {
       )
     }
     const outputJsonSchema = tool.output ? projectSchema(tool.output) : undefined
-    const entry: RegisteredTool = { def: tool as McpToolDef, inputJsonSchema, outputJsonSchema }
+    const annotations = toolAnnotations(tool as McpToolDef)
+    const entry: RegisteredTool = {
+      def: tool as McpToolDef,
+      inputJsonSchema,
+      outputJsonSchema,
+      ...(annotations ? { annotations } : {})
+    }
 
     const existingIndex = toolsByName.get(tool.name)
     if (existingIndex !== undefined) {

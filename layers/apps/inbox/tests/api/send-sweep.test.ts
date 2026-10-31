@@ -98,9 +98,21 @@ async function queueReply(conversationId: string, opts: object, body = '<p>On it
   return res.id
 }
 
+// The composer route refuses replies it knows can't be delivered, so a reply
+// that becomes undeliverable after queueing is inserted straight into the
+// queue: the sweep must still catch it.
+async function insertQueuedReply(orgId: string, conversationId: string): Promise<string> {
+  const [row] = await sql<{ id: string }[]>`
+    INSERT INTO inbox_messages (org_id, conversation_id, direction, status, body_html, body_text)
+    VALUES (${orgId}, ${conversationId}, 'outbound', 'queued', '<p>On it.</p>', 'On it.')
+    RETURNING id
+  `
+  return row!.id
+}
+
 describe('send sweep hardening', () => {
   it('fails a queued reply to a suppressed channel without sending', async () => {
-    const { org, opts, domain } = await createInboxOrgWith(sql)
+    const { org, domain } = await createInboxOrgWith(sql)
     await setInboxOrgSetting(sql, org.id, 'auto_ack_enabled', false)
     const sender = uniqueSender('suppressed')
     const res = await postInbound({ recipient: `hello@${domain}`, from: `S <${sender}>` })
@@ -115,7 +127,7 @@ describe('send sweep hardening', () => {
     })
     expect(supp.suppressed).toBe(true)
 
-    const msgId = await queueReply(res.body.conversation_id as string, opts)
+    const msgId = await insertQueuedReply(org.id, res.body.conversation_id as string)
     const row = await waitForMessage(msgId, r => r.status === 'failed')
     expect(row.failed_reason).toBe('Recipient suppressed')
     // The row failed before any claim/send was attempted — nothing went out.
@@ -160,7 +172,7 @@ describe('send sweep hardening', () => {
   })
 
   it('holds a queued reply while no contact address is set, then sends it once one is', async () => {
-    const { org, opts, domain } = await createInboxOrgWith(sql)
+    const { org, domain } = await createInboxOrgWith(sql)
     await setInboxOrgSetting(sql, org.id, 'auto_ack_enabled', false)
     const sender = uniqueSender('hold')
     const res = await postInbound({ recipient: `hello@${domain}`, from: `R <${sender}>` })
@@ -171,7 +183,7 @@ describe('send sweep hardening', () => {
       DELETE FROM core_settings
       WHERE org_id = ${org.id} AND namespace = 'inbox' AND key = 'contact_address'
     `
-    const msgId = await queueReply(res.body.conversation_id as string, opts)
+    const msgId = await insertQueuedReply(org.id, res.body.conversation_id as string)
 
     // The sweep holds it: still queued, no attempt spent, reason recorded,
     // and nothing delivered.

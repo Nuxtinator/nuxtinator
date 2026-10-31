@@ -47,6 +47,10 @@ export interface McpToolDef<I = unknown, O = unknown> {
   // Omitted only on read-only tools any valid bearer may call (e.g. listing
   // the bearer's own orgs): no token-scope or RBAC check, read rate bucket.
   scope?: Permission
+  // Sent to clients as the MCP `readOnlyHint` / `destructiveHint` tool
+  // annotations, so they can decide whether to confirm before calling.
+  // A read-only tool also skips the writes-per-token rate-limit bucket.
+  readOnly?: boolean
   destructive?: boolean
   input: ZodSchema<I>
   output?: ZodSchema<O>

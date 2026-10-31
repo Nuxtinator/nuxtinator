@@ -116,6 +116,9 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
         if (entry.outputJsonSchema) {
           tool.outputSchema = entry.outputJsonSchema
         }
+        if (entry.annotations) {
+          tool.annotations = entry.annotations
+        }
         return tool
       })
     }

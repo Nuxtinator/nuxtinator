@@ -40,7 +40,7 @@ export default defineNitroPlugin(() => {
     key: 'inbox_agent',
     name: 'Inbox Agent',
     description: 'Handles the shared email inbox — read, triage, compose, and reply.',
-    permissions: ['inbox.access', 'inbox.send'],
+    permissions: ['inbox.access', 'inbox.read', 'inbox.send'],
     source: 'inbox'
   })
 

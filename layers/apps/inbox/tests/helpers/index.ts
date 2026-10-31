@@ -8,9 +8,9 @@
 // deliberately survive record deletion (crm registry semantics), so cleanup
 // relies on the org cascade wiping org-scoped channels.
 import type postgres from 'postgres'
-import { createHmac, randomUUID } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { S3Client } from '@bradenmacdonald/s3-lite-client'
-import { $fetch } from '@nuxt/test-utils/e2e'
+import { $fetch, url as nuxtUrl } from '@nuxt/test-utils/e2e'
 import {
   createTestUser,
   getAuthHeaders,
@@ -190,6 +190,75 @@ export async function s3ObjectExists(key: string): Promise<boolean> {
   return await getTestS3().exists(key)
 }
 
+// --- MCP over the real /mcp transport ------------------------------------
+
+export interface McpToolResult {
+  content: Array<{ type: string, text: string }>
+  structuredContent?: Record<string, unknown>
+  isError?: boolean
+}
+
+export const INBOX_TEST_MCP_CLIENT_NAME = 'test-inbox mcp client'
+
+// Mint an oauth client + token family + access token with the same row shapes
+// the token endpoint writes. The token's resource must equal the server's
+// mcpResource, read from its RFC 9728 metadata. The client id is
+// `test-inbox-` prefixed so cleanup can scope its delete.
+export async function issueMcpBearer(
+  sql: ReturnType<typeof postgres>,
+  userId: string,
+  scopes: string[]
+): Promise<string> {
+  const metaRes = await fetch(nuxtUrl('/.well-known/oauth-protected-resource'))
+  const meta = await metaRes.json() as { resource: string }
+  const clientId = `test-inbox-${randomBytes(8).toString('hex')}`
+  await sql`
+    INSERT INTO oauth_clients (client_id, client_name, redirect_uris)
+    VALUES (${clientId}, ${INBOX_TEST_MCP_CLIENT_NAME}, ${['http://localhost/callback']})
+  `
+  const familyId = randomUUID()
+  await sql`
+    INSERT INTO oauth_token_families (family_id, user_id, client_id)
+    VALUES (${familyId}, ${userId}, ${clientId})
+  `
+  const token = `oat_${randomBytes(32).toString('hex')}`
+  const tokenHash = createHash('sha256').update(token).digest('hex')
+  await sql`
+    INSERT INTO oauth_access_tokens (token_hash, client_id, user_id, scope, resource, family_id, expires)
+    VALUES (${tokenHash}, ${clientId}, ${userId}, ${scopes.join(' ')}, ${meta.resource}, ${familyId}, now() + interval '1 hour')
+  `
+  return token
+}
+
+// One JSON-RPC request over Streamable HTTP. The stateless transport answers
+// with an SSE frame; unwrap the data line to the result.
+async function mcpRequest<T>(token: string, method: string, params: Record<string, unknown>): Promise<T> {
+  const res = await fetch(nuxtUrl('/mcp'), {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'accept': 'application/json, text/event-stream',
+      'mcp-protocol-version': '2025-11-25',
+      'authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
+  })
+  const text = await res.text()
+  if (res.status !== 200) throw new Error(`MCP ${method} returned ${res.status}: ${text}`)
+  const dataLine = text.trim().split('\n').find(l => l.startsWith('data:'))
+  const rpc = JSON.parse(dataLine ? dataLine.slice('data:'.length).trim() : text) as { result?: T, error?: unknown }
+  if (rpc.error) throw new Error(`MCP ${method} error: ${JSON.stringify(rpc.error)}`)
+  return rpc.result!
+}
+
+export async function callMcpTool(token: string, name: string, args: Record<string, unknown>): Promise<McpToolResult> {
+  return await mcpRequest<McpToolResult>(token, 'tools/call', { name, arguments: args })
+}
+
+export async function listMcpTools(token: string): Promise<Array<{ name: string, annotations?: Record<string, boolean> }>> {
+  return (await mcpRequest<{ tools: Array<{ name: string, annotations?: Record<string, boolean> }> }>(token, 'tools/list', {})).tools
+}
+
 // --- Cleanup ---------------------------------------------------------------
 
 // Deleting the test orgs cascades every org-scoped row (inbox_*, crm_*,
@@ -197,4 +266,7 @@ export async function s3ObjectExists(key: string): Promise<boolean> {
 export async function cleanupInboxTestData(sql: ReturnType<typeof postgres>): Promise<void> {
   await sql`DELETE FROM orgs WHERE slug LIKE 'test-inbox-%'`
   await sql`DELETE FROM users WHERE email LIKE 'test-inbox-%'`
+  // OAuth clients minted by `issueMcpBearer`; their token families and
+  // access tokens cascade off the users deleted above.
+  await sql`DELETE FROM oauth_clients WHERE client_id LIKE 'test-inbox-%'`
 }
