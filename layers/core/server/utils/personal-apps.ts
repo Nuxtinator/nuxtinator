@@ -8,10 +8,12 @@
 //   1. Registry default   — `registerApp({ defaultStatus })`
 //   2. Host-admin status  — `apps.status` (set via /admin/apps)
 //        'default'                     on for every signed-in user
-//        'available' / 'host_controlled'  on only with a `user_apps` grant
+//        'available' / 'host_controlled'  on only with a grant (3)
+//        'admins'                      on only for host admins
 //        'disabled'                    off for everyone
-//   3. Per-user grant     — a `user_apps` row (set by a host admin, or by
-//                           accepting an invite that carries the app)
+//   3. Grants             — a `user_apps` row (set by a host admin, or by
+//                           accepting an invite that carries the app), or
+//                           membership of a host group listed in `app_groups`
 //
 // While an app is on for a user they hold every permission it lists in
 // `registerApp({ permissions })`; personal apps take nothing from roles.
@@ -35,38 +37,67 @@ export interface UserAppEntry extends AppCatalogEntry {
   enabled: boolean
   // True when the user holds a `user_apps` grant for the app.
   granted: boolean
+  // True when the user is in a host group that can open the app.
+  viaGroup: boolean
 }
 
 interface UserAppRow {
-  app_id: string
+  granted: boolean
+  viaGroup: boolean
 }
 
-export const getUserApps = defineSettings<AppCatalogEntry, UserAppRow, UserAppEntry>({
+// What a user has that can turn a personal app on for them.
+export interface UserAppAccess {
+  granted: boolean
+  viaGroup: boolean
+  isAdmin: boolean
+}
+
+const readUserApps = defineSettings<AppCatalogEntry, UserAppRow, Omit<UserAppEntry, 'enabled'>>({
   loadDefaults: async (tx) => {
     const catalog = await getApps(tx)
     return catalog.filter(a => a.installed && a.scope === 'user')
   },
   loadOverrides: async (tx, ctx) => {
     if (!ctx.userId) throw new Error('getUserApps requires ctx.userId')
-    const rows = await tx
-      .selectFrom('user_apps')
-      .select('app_id')
-      .where('user_id', '=', ctx.userId)
-      .execute()
-    return new Map(rows.map(r => [r.app_id, r]))
+    const [grants, viaGroups] = await Promise.all([
+      tx.selectFrom('user_apps').select('app_id').where('user_id', '=', ctx.userId).execute(),
+      tx.selectFrom('app_groups')
+        .innerJoin('groups', 'groups.id', 'app_groups.group_id')
+        .innerJoin('group_members', 'group_members.group_id', 'app_groups.group_id')
+        .select('app_groups.app_id')
+        .distinct()
+        .where('group_members.user_id', '=', ctx.userId)
+        .where('groups.org_id', 'is', null)
+        .execute()
+    ])
+    const out = new Map<string, UserAppRow>()
+    for (const r of grants) out.set(r.app_id, { granted: true, viaGroup: false })
+    for (const r of viaGroups) out.set(r.app_id, { granted: out.get(r.app_id)?.granted ?? false, viaGroup: true })
+    return out
   },
   keyOf: app => app.id,
   merge: (app, row) => ({
     ...app!,
-    enabled: resolveUserAppEnabled(app!.status, !!row),
-    granted: !!row
+    granted: row?.granted ?? false,
+    viaGroup: row?.viaGroup ?? false
   })
 })
 
-export function resolveUserAppEnabled(status: AppCatalogEntry['status'], granted: boolean): boolean {
+export async function getUserApps(client: DbClient, ctx: { userId: string }): Promise<UserAppEntry[]> {
+  const [apps, user] = await Promise.all([
+    readUserApps(client, ctx),
+    client.selectFrom('users').select('is_admin').where('id', '=', ctx.userId).executeTakeFirst()
+  ])
+  const isAdmin = user?.is_admin === true
+  return apps.map(a => ({ ...a, enabled: resolveUserAppEnabled(a.status, { granted: a.granted, viaGroup: a.viaGroup, isAdmin }) }))
+}
+
+export function resolveUserAppEnabled(status: AppCatalogEntry['status'], access: UserAppAccess): boolean {
   if (status === 'disabled') return false
   if (status === 'default') return true
-  return granted
+  if (status === 'admins') return access.isAdmin
+  return access.granted || access.viaGroup
 }
 
 export async function getUserEnabledApps(client: DbClient, userId: string): Promise<UserAppEntry[]> {

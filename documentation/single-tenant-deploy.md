@@ -1,6 +1,6 @@
 # Deploying go-saas as a single-tenant app
 
-Single-tenant mode is the default when [layers/tenancy/](../layers/tenancy/) is **not** in `extends:`. No orgs, no memberships, no RLS, no two-DB-role split. App layers run unchanged — the `#tenant` kernel resolves to a passthrough single-mode implementation.
+Single-tenant mode is the default when [layers/tenancy/](../layers/tenancy/) is **not** in `extends:`. No orgs, no memberships, no org RLS. App layers run unchanged — the `#tenant` kernel resolves to a passthrough single-mode implementation. Personal apps still keep each user's rows apart with RLS, so the two-role database setup applies here too.
 
 ---
 
@@ -8,9 +8,9 @@ Single-tenant mode is the default when [layers/tenancy/](../layers/tenancy/) is 
 
 | Concern | Single mode | Multi mode (for comparison) |
 |---|---|---|
-| Database roles | One role (your choice; superuser or normal) | `host_admin` (BYPASSRLS) + `app_user` (RLS-enforced) |
-| Connection strings | `DATABASE_URL` only | `DATABASE_URL` + `APP_DATABASE_URL` |
-| RLS | Off everywhere | On for every tenant table |
+| Database roles | Owner + `app_user` (RLS-enforced) | `host_admin` (BYPASSRLS) + `app_user` (RLS-enforced) |
+| Connection strings | `DATABASE_URL` + `APP_DATABASE_URL` | `DATABASE_URL` + `APP_DATABASE_URL` |
+| RLS | Personal-app tables only | Personal-app tables and every tenant table |
 | Org tables | None (no `orgs`, `memberships`, `org_apps`, `org_role_overrides`) | Present + retrofitted on app tables |
 | URL shape | `/calendar/events` | `/@acme/calendar/events` |
 | `users.is_admin` | The operator gate | Same — operator gate (cross-org reach is the additional thing tenancy adds) |
@@ -46,10 +46,11 @@ Each layer is a named workspace package; the `layer()` helper passes the name th
 
 ### Environment
 
-Only one DB connection is needed:
+Two connections to the same database (see [database-roles.md](database-roles.md)):
 
 ```bash
-DATABASE_URL=postgres://<role>:<password>@<host>/<db>
+DATABASE_URL=postgres://host_admin:<password>@<host>/<db>
+APP_DATABASE_URL=postgres://app_user:<password>@<host>/<db>
 
 JWT_SECRET=<random>
 NUXT_SECRET_ENCRYPTION_KEY=<32-byte hex>
@@ -67,21 +68,13 @@ SMTP_FROM=...
 SMTP_FROM_NAME=...
 ```
 
-`APP_DATABASE_URL` and `NUXT_TENANT_FLOW_SECRET` are unused.
+`NUXT_TENANT_FLOW_SECRET` is unused.
 
 ### Database setup
 
-Create one role and one database:
+Create the owner and `app_user` roles with the SQL in [database-roles.md](database-roles.md). The owner doesn't need `BYPASSRLS` in single mode. If `db` connects as the owner (or a superuser), every request is refused with a 503 until `APP_DATABASE_URL` points at `app_user`.
 
-```sql
-CREATE ROLE myapp LOGIN PASSWORD '<>';
-GRANT ALL PRIVILEGES ON DATABASE <db> TO myapp;
-GRANT ALL PRIVILEGES ON SCHEMA public TO myapp;
-```
-
-That's it. No `BYPASSRLS` needed (no RLS to bypass). No default-privileges dance.
-
-If you'll later switch to multi-tenant by adding the tenancy layer, you'll need to add the `host_admin` / `app_user` split — see [tenancy.md](tenancy.md).
+If you'll later switch to multi-tenant by adding the tenancy layer, give the owner `BYPASSRLS` — see [tenancy.md](tenancy.md).
 
 ### Migrations
 
@@ -129,8 +122,8 @@ Example: a user with `roles: ['member']` who's not an admin gets `{member: [...]
 
 If you start single and later want multi-tenant:
 
-1. Provision the `host_admin` and `app_user` Postgres roles (see [tenancy.md](tenancy.md) for the SQL).
-2. Set `APP_DATABASE_URL` and `NUXT_TENANT_FLOW_SECRET` env vars.
+1. Give the owner role `BYPASSRLS` (see [tenancy.md](tenancy.md)).
+2. Set the `NUXT_TENANT_FLOW_SECRET` env var.
 3. Add `{ id: 'tenancy', pkg: '@nuxtinator/tenancy' }` to the `LAYERS` array in `dev/layers.ts` (must come **second** in the list, right after `core`, so its multi-mode kernel overrides core's single-mode). Also add `"@nuxtinator/tenancy": "workspace:*"` to `dev/package.json`'s deps and `"layers/tenancy"` to the workspaces array in the root `package.json`. For a consumer project, add the matching entry to `prod/layers.ts` instead.
 4. Run `bun dev` once. The tenancy layer's migrations run, including retrofits that add `org_id` columns and RLS policies to existing tables. The first user becomes a member of a freshly-created default org.
 

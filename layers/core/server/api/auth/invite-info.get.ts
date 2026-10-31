@@ -1,9 +1,12 @@
 import { getQuery } from 'h3'
 import { db } from '../../utils/database'
 import { findInviteByToken, getInviteApps, getInviteOrgs, inviteState } from '../../utils/invites'
+import { isSelfRegistrationEnabled } from '../../utils/registration'
 
 // Public: what an invite link is for, so the accept page can show it. `email`
-// is null for shareable link invites.
+// is null for shareable link invites. `share` marks an invite from a user who
+// shared something; it can create an account only while self-registration is
+// on (`can_create_account`).
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
   const token = typeof query.token === 'string' ? query.token : ''
@@ -38,6 +41,8 @@ export default defineEventHandler(async (event) => {
     display_name: invite.display_name ?? '',
     inviter_name: inviter?.display_name ?? null,
     orgs: orgs.map(o => ({ slug: o.slug, name: o.name })),
-    apps: apps.map(a => ({ id: a.id, title: a.title }))
+    apps: apps.map(a => ({ id: a.id, title: a.title })),
+    share: invite.kind === 'share',
+    can_create_account: invite.kind !== 'share' || await isSelfRegistrationEnabled(db)
   }
 })

@@ -23,19 +23,23 @@ import { getApp } from '../../../utils/app-settings'
 //   * disabled → available / host_controlled: no row changes.
 //   * personal apps (`scope: 'user'`): no org rows, ever. 'default' turns the
 //     app on for every user; 'available' / 'host_controlled' leave it on only
-//     for users with a `user_apps` grant.
+//     for users with a grant (direct, or through a host group); 'admins' only
+//     for host admins. Org apps don't take 'admins'.
 export default defineEventHandler(async (event) => {
   const { userId } = await requireOperatorAdmin(event)
   const appId = getRouterParam(event, 'appId')
   if (!appId) throw createError({ statusCode: 400, statusMessage: 'appId required' })
   const body = await readBody(event)
   const status = body?.status
-  if (status !== 'disabled' && status !== 'available' && status !== 'default' && status !== 'host_controlled') {
-    throw createError({ statusCode: 400, statusMessage: 'status must be disabled | available | default | host_controlled' })
+  if (status !== 'disabled' && status !== 'available' && status !== 'default' && status !== 'host_controlled' && status !== 'admins') {
+    throw createError({ statusCode: 400, statusMessage: 'status must be disabled | available | default | host_controlled | admins' })
   }
 
   const existing = await getApp(db, appId)
   if (!existing) throw createError({ statusCode: 404, statusMessage: 'App not found' })
+  if (status === 'admins' && existing.scope !== 'user') {
+    throw createError({ statusCode: 400, statusMessage: 'Only personal apps can be limited to admins' })
+  }
 
   const oldStatus = existing.status
   if (oldStatus === status) return { id: appId, status }

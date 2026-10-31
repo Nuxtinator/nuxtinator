@@ -177,7 +177,8 @@ export async function completeSocialSignIn(input: SignInInput): Promise<SignInOu
         display_name: displayName,
         passwordHash: null,
         verified: true,
-        selfSignup: !usableInvite
+        // A share invite creates an account only while self-registration is on.
+        selfSignup: !usableInvite || usableInvite.kind === 'share'
       }, input.userAgent)
       await trx.insertInto('user_identities').values(identityRow(account.userId, input)).execute()
       const memberships = usableInvite ? await acceptInvite(trx, usableInvite.id, account.userId) : []

@@ -15,12 +15,9 @@
 // admin endpoints (`/api/admin/*` without `/orgs/:orgId`) skip this — they
 // have their own gate.
 import { adminDb } from '../utils/database-admin'
-import { assertDbEnforcesRls } from '../utils/rls-guard'
 import { getAuthUser } from '#core/server/utils/auth'
 
 export default defineEventHandler(async (event) => {
-  await assertDbEnforcesRls()
-
   const url = event.path || ''
 
   // Skip everything that isn't an authenticated app surface.

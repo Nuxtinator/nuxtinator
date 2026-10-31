@@ -8,7 +8,8 @@ const LIMIT = 100
 
 // Host admin: users with whether a personal app is on for them. Users with a
 // grant come first; `q` filters by name or email. Toggling goes through
-// PUT /api/admin/users/:id/apps/:appId.
+// PUT /api/admin/users/:id/apps/:appId. `viaGroup` marks users who have the app
+// through a host group on the app's access list.
 export default defineEventHandler(async (event) => {
   await requireOperatorAdmin(event)
   const appId = getRouterParam(event, 'appId')
@@ -22,6 +23,12 @@ export default defineEventHandler(async (event) => {
   const q = typeof getQuery(event).q === 'string' ? (getQuery(event).q as string).trim() : ''
   const pattern = q ? `%${q}%` : null
   const granted = sql<boolean>`exists (select 1 from user_apps ua where ua.user_id = users.id and ua.app_id = ${appId})`
+  const viaGroup = sql<boolean>`exists (
+    select 1 from app_groups ag
+      join groups g on g.id = ag.group_id and g.org_id is null
+      join group_members gm on gm.group_id = ag.group_id
+     where ag.app_id = ${appId} and gm.user_id = users.id
+  )`
 
   const base = db.selectFrom('users')
     .$if(!!pattern, qb => qb.where(eb => eb.or([
@@ -31,7 +38,7 @@ export default defineEventHandler(async (event) => {
 
   const [rows, totalRow] = await Promise.all([
     base
-      .select(['users.id', 'users.display_name', 'users.email', 'users.avatar', granted.as('granted')])
+      .select(['users.id', 'users.display_name', 'users.email', 'users.avatar', 'users.is_admin', granted.as('granted'), viaGroup.as('via_group')])
       .orderBy(granted, 'desc')
       .orderBy('users.display_name', 'asc')
       .limit(LIMIT)
@@ -48,7 +55,8 @@ export default defineEventHandler(async (event) => {
       email: r.email,
       avatar: r.avatar,
       granted: r.granted,
-      enabled: resolveUserAppEnabled(app.status, r.granted)
+      viaGroup: r.via_group,
+      enabled: resolveUserAppEnabled(app.status, { granted: r.granted, viaGroup: r.via_group, isAdmin: r.is_admin })
     }))
   }
 })

@@ -1,11 +1,12 @@
 {
   "name": "@nuxtinator/core",
-  "version": "2.12.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./nuxt.config.ts",
     "./kit": "./kit/alias.ts",
+    "./share-tables": "./kit/share-tables.ts",
     "./test-helpers": "./tests/helpers/index.ts"
   },
   "dependencies": {

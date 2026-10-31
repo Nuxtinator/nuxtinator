@@ -4,7 +4,8 @@
 // finished `title` / `body` / `icon` text plus a naive in-app `link`
 // (single-tenant shape, e.g. `/messages/<id>`); the tenant route guard adds
 // the `/@<slug>` prefix in the browser, and clicks never cross orgs because the
-// feed is active-org scoped by RLS.
+// feed is active-org scoped by RLS. A personal app's transaction has no org,
+// so in multi mode its notifications get no org and show in every org.
 //
 // Email delivery is decoupled from the write: the row records `email` intent
 // and a background sweep does the sending (see `notification-jobs.ts`). That

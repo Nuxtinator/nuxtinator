@@ -18,7 +18,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 //  - Signed out, with `{ token, display_name, password }`: creates the account.
 //    An email invite uses the invited address and the account starts verified.
 //    A link invite takes `email` from the body; that address is unproven, so
-//    the account must verify it before it can sign in.
+//    the account must verify it before it can sign in. A share invite creates
+//    an account only while self-registration is on.
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
   const token = typeof body?.token === 'string' ? body.token : ''
@@ -85,7 +86,7 @@ export default defineEventHandler(async (event) => {
   const passwordHash = await bcrypt.hash(password, 12)
 
   const { account, memberships } = await db.transaction().execute(async (trx) => {
-    const account = await createUserAccount(trx, { email, display_name, passwordHash, verified, selfSignup: false }, userAgent)
+    const account = await createUserAccount(trx, { email, display_name, passwordHash, verified, selfSignup: invite.kind === 'share' }, userAgent)
     const memberships = await acceptInvite(trx, invite.id, account.userId)
     return { account, memberships }
   })

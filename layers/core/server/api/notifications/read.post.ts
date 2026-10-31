@@ -18,6 +18,8 @@ const Body = z.object({
 
 export default defineEventHandler(async (event) => {
   return await withOrgContext(event, async (tx, ctx) => {
+    // Personal-app notifications have no org; their RLS policy shows them to the recipient.
+    await sql`select set_config('app.current_user', ${ctx.userId}, true)`.execute(tx)
     const parsed = Body.safeParse(await readBody(event))
     if (!parsed.success || (!parsed.data.ids && !parsed.data.all && !parsed.data.links)) {
       throw createError({ statusCode: 400, statusMessage: 'Provide ids or links (non-empty) or all=true.' })

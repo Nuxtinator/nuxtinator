@@ -208,6 +208,39 @@ export const inviteEmailTemplate: EmailTemplate = buildEmailTemplate(
   data => `You've been invited to ${data.orgName || data.appName || 'the application'}\n\nHello ${data.userName || 'there'}!\n\n${data.inviterName ? `${data.inviterName} has invited you` : 'You have been invited'} to join ${data.orgName || data.appName || 'the application'}.\n\nAccept your invitation: ${data.inviteUrl || '#'}\n\nThis invitation will expire in 7 days.`
 )
 
+function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' }[c]!))
+}
+
+// A user shared a personal item. The inviter's name and the item's label are
+// user-entered, so they're escaped. `sharedIn` is the personal app's title.
+export const shareInviteEmailTemplate: EmailTemplate = buildEmailTemplate(
+  'Something was shared with you',
+  data => `
+    <h2 style="color: #333; margin-top: 0;">Hello!</h2>
+    <p style="color: #666; line-height: 1.6;">
+      ${escapeHtml(data.inviterName || 'Someone')} shared ${data.itemLabel ? `<strong>${escapeHtml(data.itemLabel)}</strong>` : 'something'} with you
+      in ${escapeHtml(data.sharedIn || data.appName || 'the application')}.
+    </p>
+    <div style="text-align: center; margin-top: 30px;">
+      <a href="${data.inviteUrl || '#'}" style="${baseStyles.button}">
+        Open it
+      </a>
+    </div>
+    <p style="color: #666; line-height: 1.6; margin-top: 20px; font-size: 14px;">
+      If the button doesn't work, copy and paste this link into your browser:
+      <br>
+      <a href="${data.inviteUrl || '#'}" style="color: #000000; text-decoration: underline; word-break: break-all;">
+        ${data.inviteUrl || '#'}
+      </a>
+    </p>
+    <p style="color: #666; line-height: 1.6; margin-top: 20px; font-size: 14px;">
+      This link expires in 7 days. If you weren't expecting this email, you can safely ignore it.
+    </p>
+  `,
+  data => `${data.inviterName || 'Someone'} shared ${data.itemLabel || 'something'} with you in ${data.sharedIn || data.appName || 'the application'}.\n\nOpen it: ${data.inviteUrl || '#'}\n\nThis link expires in 7 days.`
+)
+
 export const passwordResetEmailTemplate: EmailTemplate = buildEmailTemplate(
   'Reset Your Password',
   data => `
@@ -243,7 +276,8 @@ export const emailTemplates = {
   verification: verificationEmailTemplate,
   emailChangeVerification: emailChangeVerificationTemplate,
   passwordReset: passwordResetEmailTemplate,
-  invite: inviteEmailTemplate
+  invite: inviteEmailTemplate,
+  shareInvite: shareInviteEmailTemplate
 }
 
 export function renderEmailTemplate(

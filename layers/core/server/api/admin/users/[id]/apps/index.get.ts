@@ -4,8 +4,8 @@ import { requireOperatorAdmin } from '#tenant/server'
 import { getUserApps } from '../../../../../utils/personal-apps'
 
 // Host admin: every installed personal app with whether it's on for this user
-// (`enabled`) and whether that comes from a grant (`granted`) or from the
-// app's 'default' status.
+// (`enabled`) and whether that comes from a grant (`granted`), a host group
+// (`viaGroup`) or the app's status.
 export default defineEventHandler(async (event) => {
   await requireOperatorAdmin(event)
   const id = getRouterParam(event, 'id')
@@ -22,7 +22,8 @@ export default defineEventHandler(async (event) => {
       icon: a.icon,
       status: a.status,
       enabled: a.enabled,
-      granted: a.granted
+      granted: a.granted,
+      viaGroup: a.viaGroup
     }))
   }
 })

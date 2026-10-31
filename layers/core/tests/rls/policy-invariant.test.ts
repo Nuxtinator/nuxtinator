@@ -1,12 +1,17 @@
 // Every org-scoped permission check assumes each row visible inside a tenant
 // transaction belongs to the active org. These assertions hold every layer's
-// migrations to that: RLS on every org_id table, and every policy is exactly
-// "org_id = active org". Reaching rows of another org goes through
-// `withRecordOrgContext`, never a wider policy. The one other shape allowed is
-// a personal-app policy: on a table with no org_id, keyed on the
+// migrations to that: RLS on every org_id table, and every permissive policy is
+// exactly "org_id = active org". Reaching rows of another org goes through
+// `withRecordOrgContext`, never a wider policy. The one other permissive shape
+// allowed is a personal-app policy: on a table with no org_id, keyed on the
 // `app.current_user` setting (see core's personal-apps.ts). Each top-level OR
 // branch of it must test a session setting, so a branch like `true` can't
-// widen it to every row.
+// widen it to every row. On an org_id table, a policy may also reach rows with
+// no org the same way (`org_id IS NULL AND <keyed on app.current_user>`):
+// personal-app notifications, which belong to no org.
+//
+// Restrictive policies are always accepted: Postgres ANDs them with the
+// permissive ones, so they can only narrow what those allow.
 import { describe, it, expect } from 'vitest'
 import { getHostAdminDb, getAppUserDb } from '../helpers'
 
@@ -46,20 +51,26 @@ function orBranches(expr: string): string[] {
 const keyedOnUser = (expr: string) =>
   expr.includes(CURRENT_USER) && orBranches(expr).every(b => b.includes(ANY_SETTING))
 
+const NO_ORG = '((org_id IS NULL) AND '
+const noOrgKeyedOnUser = (expr: string) =>
+  expr.startsWith(NO_ORG) && expr.endsWith(')') && orBranches(expr).length === 1
+  && keyedOnUser(expr.slice(NO_ORG.length, -1))
+
 // org_id tables read outside any org context, filtered by org_id in code.
 const NO_RLS = new Set([
   'memberships', // resolves the active org itself
   'org_apps', // app switch checks run before and outside the org transaction
   'invite_orgs', // invite acceptance runs before membership exists
-  'activity_logs' // nullable org_id; host-wide events and the rate limiter read it without an org
+  'activity_logs', // nullable org_id; host-wide events and the rate limiter read it without an org
+  'groups' // nullable org_id; host groups have none, and handlers decide who sees a group
 ])
 
 describe('RLS policy invariant', () => {
   const sql = getHostAdminDb()
 
   it('every policy restricts rows to the active org', async () => {
-    const policies = await sql<{ tablename: string, policyname: string, qual: string | null, with_check: string | null }[]>`
-      select tablename, policyname, qual, with_check
+    const policies = await sql<{ tablename: string, policyname: string, permissive: string, qual: string | null, with_check: string | null }[]>`
+      select tablename, policyname, permissive, qual, with_check
       from pg_policies
       where schemaname = 'public'
     `
@@ -78,8 +89,14 @@ describe('RLS policy invariant', () => {
       && (p.qual !== null || p.with_check !== null)
       && (p.qual === null || keyedOnUser(p.qual))
       && (p.with_check === null || keyedOnUser(p.with_check))
+    const noOrgUserScoped = (p: typeof policies[number]) =>
+      orgTables.has(p.tablename)
+      && (p.qual !== null || p.with_check !== null)
+      && (p.qual === null || noOrgKeyedOnUser(p.qual))
+      && (p.with_check === null || noOrgKeyedOnUser(p.with_check))
+    const restrictive = (p: typeof policies[number]) => p.permissive === 'RESTRICTIVE'
     const wider = policies
-      .filter(p => !orgScoped(p) && !userScoped(p))
+      .filter(p => !restrictive(p) && !orgScoped(p) && !userScoped(p) && !noOrgUserScoped(p))
       .map(p => `${p.tablename}.${p.policyname}: USING ${p.qual} WITH CHECK ${p.with_check}`)
     expect(wider).toEqual([])
   })
