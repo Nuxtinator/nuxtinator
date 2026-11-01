@@ -21,6 +21,7 @@ import {
   parseScopeString
 } from '../../utils/oauth-validation'
 import { logOauthEvent, OAUTH_EVENTS } from '../../utils/oauth-audit'
+import { choicesCover, choicesFromRow } from '../../utils/oauth-consent-choices'
 import type { H3Event } from 'h3'
 import { getClientIp } from '#core/server/utils/client-ip'
 
@@ -192,9 +193,12 @@ export default defineEventHandler(async (event) => {
   // org-scoped request has written it. Passing the user lets the kernel fall
   // back to their sole membership, and lets a stale cookie fall back too.
   let pendingRequestId: string | null
+  // Scopes an existing consent already answers, when it answers them all.
+  let consentedScopes: string[] = []
   try {
     pendingRequestId = await runInOrgTransaction(event, { userId: authUser.userId }, async (tx) => {
-      // Existing consent short-circuit.
+      // Existing consent short-circuit: the user already said yes or no to
+      // every requested scope, and said yes to at least one permission.
       const existingConsent = await tx
         .selectFrom('oauth_consents')
         .selectAll()
@@ -204,11 +208,13 @@ export default defineEventHandler(async (event) => {
         .where('revoked', '=', false)
         .executeTakeFirst()
 
-      const consentCoversScope = existingConsent
-        && isScopeSubset(grantedScopes, parseScopeString(existingConsent.scope))
-
-      if (consentCoversScope) {
-        return null // Signals the caller to issue a code directly.
+      const choices = choicesFromRow(existingConsent)
+      if (choices && choicesCover(choices, grantedScopes)) {
+        const previouslyGranted = grantedScopes.filter(s => choices.granted.includes(s))
+        if (hasAnyPermissionScope(previouslyGranted)) {
+          consentedScopes = previouslyGranted
+          return null // Signals the caller to issue a code directly.
+        }
       }
 
       const csrfHash = sha256Hex(csrfPlaintext)
@@ -262,7 +268,7 @@ export default defineEventHandler(async (event) => {
       clientId: client.client_id,
       userId: authUser.userId,
       redirectUri: normalizedRedirect,
-      scope: grantedScopes.join(' '),
+      scope: consentedScopes.join(' '),
       resource: cfg.mcpResource,
       codeChallenge,
       event

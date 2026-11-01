@@ -13,9 +13,12 @@
 //
 // Membership validation runs once here so handlers don't repeat it. Bare
 // admin endpoints (`/api/admin/*` without `/orgs/:orgId`) skip this — they
-// have their own gate.
+// have their own gate. OAuth bearer requests skip it too: the token, not a
+// session cookie sent alongside it, says who is calling, and
+// `defineTenantHandler` resolves their org itself.
 import { adminDb } from '../utils/database-admin'
 import { getAuthUser } from '#core/server/utils/auth'
+import { hasOauthBearer } from '#core/server/utils/bearer-auth'
 
 export default defineEventHandler(async (event) => {
   const url = event.path || ''
@@ -23,6 +26,7 @@ export default defineEventHandler(async (event) => {
   // Skip everything that isn't an authenticated app surface.
   if (url.startsWith('/api/auth/')) return
   if (url.startsWith('/api/_')) return // chrome endpoints
+  if (hasOauthBearer(event)) return
 
   const authUser = getAuthUser(event)
   if (!authUser) return // requireAuth in handlers will 401 cleanly

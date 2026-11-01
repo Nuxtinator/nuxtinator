@@ -16,6 +16,14 @@
 //   5. If `opts.appId` was passed, 410 if that app is disabled for the org.
 //   6. Refresh the `active-org-slug` cookie (30d) so bare-URL hits redirect.
 //   7. Run the handler with `(tx, ctx)` where ctx has full org context.
+//
+// An OAuth bearer token signs in in place of the session (see core's
+// `bearer-auth.ts`). The middleware skips those requests, so step 2 resolves
+// the org here instead: an `/api/o/<slug>/` path or the `X-Active-Org` header,
+// else the user's only org, with the same membership (404) and suspension
+// (423) checks. The route must name a permission the token carries,
+// `ctx.perms` is narrowed to the token's scopes, and the cookie in step 6
+// isn't set.
 import type { H3Event, EventHandler, EventHandlerRequest } from 'h3'
 import type { Transaction, Kysely } from 'kysely'
 import { sql } from 'kysely'
@@ -24,6 +32,7 @@ import { db } from '#core/server/utils/database'
 // Tracks each request transaction so `afterCommit` work runs once it commits.
 import { runTransaction } from '#core/server/utils/after-commit'
 import { requireAuth } from '#core/server/utils/auth'
+import { getBearerIdentity, narrowToScopes, requireBearerPermission, runAsOauthClient } from '#core/server/utils/bearer-auth'
 import { getRolePermissions, getUserPermissions } from '#core/server/utils/rbac'
 import { getUserGrantedPermissions } from '#core/server/utils/permission-grants'
 import { getPersonalAppPermissions } from '#core/server/utils/personal-apps'
@@ -50,8 +59,11 @@ export interface TenantContext {
   role: string | null
   roles: string[]
   // Effective permissions for this org: union(role perms) ∪ direct user
-  // grants (org-scoped via RLS).
+  // grants (org-scoped via RLS), narrowed to the token's scopes for an OAuth
+  // request.
   perms: Set<Permission>
+  // The OAuth client making the request; null for a session request.
+  clientId: string | null
 }
 
 export interface DefineTenantHandlerOpts {
@@ -63,36 +75,81 @@ export type TenantHandler<T> = (
   ctx: TenantContext
 ) => Promise<T> | T
 
-// The shared core: validates middleware-supplied context, opens the txn, sets
-// the GUC, and yields. Used by both `defineTenantHandler` (returns an
-// EventHandler) and `withOrgContext` (function-call style, used inside an
-// existing defineEventHandler).
+interface RequestOrg {
+  orgId: string
+  orgSlug: string
+  orgName: string
+  roles: string[]
+}
+
+// The org of a session request, as the tenancy middleware resolved it.
+function middlewareOrg(event: H3Event): RequestOrg {
+  const orgSlug = event.context.orgSlug as string | undefined
+  const orgId = event.context.orgId as string | undefined
+  if (!orgSlug || !orgId) {
+    throw createError({ statusCode: 404, statusMessage: ORG_NOT_FOUND })
+  }
+  return {
+    orgId,
+    orgSlug,
+    orgName: (event.context.orgName as string | undefined) ?? '',
+    roles: (event.context.orgRoles as string[] | undefined) ?? []
+  }
+}
+
+// The org of an OAuth request: an `/api/o/<slug>/` path or the
+// `X-Active-Org` header, else the user's only active org. Membership and
+// suspension are checked as the middleware checks them for a session.
+async function bearerOrg(event: H3Event, userId: string): Promise<RequestOrg> {
+  const pathSlug = (event.path || '').match(/^\/api\/o\/([^/?]+)/)?.[1]
+  const slug = pathSlug ? decodeURIComponent(pathSlug) : getRequestHeader(event, 'x-active-org')
+  let orgId: string | undefined
+  if (!slug) {
+    const owned = await memberOrgIds(userId)
+    if (owned.length !== 1) {
+      throw createError({ statusCode: 400, statusMessage: 'No organization selected. Send the X-Active-Org header.' })
+    }
+    orgId = owned[0]
+  }
+  const row = await adminDb
+    .selectFrom('orgs')
+    .innerJoin('memberships', 'memberships.org_id', 'orgs.id')
+    .select(['orgs.id', 'orgs.slug', 'orgs.name', 'orgs.suspended_at', 'memberships.roles'])
+    .where('memberships.user_id', '=', userId)
+    .where(eb => slug ? eb('orgs.slug', '=', slug) : eb('orgs.id', '=', orgId!))
+    .executeTakeFirst()
+  if (!row) throw createError({ statusCode: 404, statusMessage: ORG_NOT_FOUND })
+  if (row.suspended_at) throw createError({ statusCode: 423, statusMessage: 'This organization is suspended.' })
+  return { orgId: row.id, orgSlug: row.slug, orgName: row.name, roles: row.roles ?? [] }
+}
+
+// The shared core: resolves the caller and their org, opens the txn, sets
+// the GUC, and yields. Used by `defineTenantHandler` (returns an
+// EventHandler), `withOrgContext` (function-call style, used inside an
+// existing defineEventHandler) and `withOrgPermission`, which passes the
+// `requiredPerm` an OAuth request must carry as a scope.
 async function runWithOrgContext<T>(
   event: H3Event,
   opts: DefineTenantHandlerOpts,
+  requiredPerm: Permission | undefined,
   fn: TenantHandler<T>
 ): Promise<T> {
-  const authUser = requireAuth(event)
-  const orgSlug = event.context.orgSlug as string | undefined
-  const orgId = event.context.orgId as string | undefined
-  const orgName = (event.context.orgName as string | undefined) ?? ''
-  const memberRoles = (event.context.orgRoles as string[] | undefined) ?? []
+  const bearer = await getBearerIdentity(event)
+  if (bearer) requireBearerPermission(event, bearer, requiredPerm)
+  const userId = bearer?.userId ?? requireAuth(event).userId
+  const clientId = bearer?.clientId ?? null
+  const { orgId, orgSlug, orgName, roles: memberRoles } = bearer
+    ? await bearerOrg(event, bearer.userId)
+    : middlewareOrg(event)
 
-  if (!orgSlug || !orgId) {
-    throw createError({
-      statusCode: 404,
-      statusMessage: 'This organization does not exist or you don\'t have access.'
-    })
-  }
-
-  return await runTransaction(db, async (tx) => {
+  return await runAsOauthClient(clientId, () => runTransaction(db, async (tx) => {
     await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
 
     const perms = await getRolePermissions(tx, memberRoles, orgId)
     // Additive per-user grants ride on top of role-derived perms. The read
     // runs inside this transaction — after the GUC is set — so RLS scopes
     // the grants to the active org without an explicit org_id filter.
-    for (const perm of await getUserGrantedPermissions(tx, authUser.userId)) {
+    for (const perm of await getUserGrantedPermissions(tx, userId)) {
       perms.add(perm)
     }
 
@@ -106,24 +163,27 @@ async function runWithOrgContext<T>(
       }
     }
 
-    setCookie(event, activeOrgCookie(), orgSlug, {
-      maxAge: 60 * 60 * 24 * 30,
-      sameSite: 'lax',
-      path: '/',
-      httpOnly: false
-    })
+    if (!bearer) {
+      setCookie(event, activeOrgCookie(), orgSlug, {
+        maxAge: 60 * 60 * 24 * 30,
+        sameSite: 'lax',
+        path: '/',
+        httpOnly: false
+      })
+    }
 
     const role = memberRoles[0] ?? null
     return await fn(tx, {
-      userId: authUser.userId,
+      userId,
       orgId,
       orgSlug,
       orgName,
       role,
       roles: memberRoles,
-      perms
+      perms: bearer ? narrowToScopes(perms, bearer.scopes) : perms,
+      clientId
     })
-  })
+  }))
 }
 
 export function defineTenantHandler<T>(fn: TenantHandler<T>): EventHandler<EventHandlerRequest, Promise<T>>
@@ -134,7 +194,7 @@ export function defineTenantHandler<T>(
 ): EventHandler<EventHandlerRequest, Promise<T>> {
   const opts: DefineTenantHandlerOpts = typeof optsOrFn === 'function' ? {} : optsOrFn
   const fn = (typeof optsOrFn === 'function' ? optsOrFn : maybeFn) as TenantHandler<T>
-  return defineEventHandler<EventHandlerRequest, Promise<T>>(event => runWithOrgContext(event, opts, fn))
+  return defineEventHandler<EventHandlerRequest, Promise<T>>(event => runWithOrgContext(event, opts, undefined, fn))
 }
 
 // Function-call style — for handlers already wrapped in `defineEventHandler`.
@@ -156,7 +216,7 @@ export function withOrgContext<T>(
 ): Promise<T> {
   const opts: DefineTenantHandlerOpts = typeof optsOrFn === 'function' ? {} : optsOrFn
   const fn = (typeof optsOrFn === 'function' ? optsOrFn : maybeFn) as TenantHandler<T>
-  return runWithOrgContext(event, opts, fn)
+  return runWithOrgContext(event, opts, undefined, fn)
 }
 
 export function withOrgPermission<T>(
@@ -180,7 +240,7 @@ export function withOrgPermission<T>(
   const opts: DefineTenantHandlerOpts = hasOpts ? (a as DefineTenantHandlerOpts) : {}
   const perm = (hasOpts ? b : a) as Permission
   const fn = (hasOpts ? c : b) as TenantHandler<T>
-  return runWithOrgContext(event, opts, async (tx, ctx) => {
+  return runWithOrgContext(event, opts, perm, async (tx, ctx) => {
     if (!ctx.perms.has(perm)) {
       throw createError({ statusCode: 403, statusMessage: `Permission required: ${perm}` })
     }

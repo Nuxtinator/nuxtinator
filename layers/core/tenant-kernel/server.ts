@@ -9,6 +9,9 @@
 //     their direct grants (`user_permission_grants`), then calls the handler.
 //     There is no `app.current_org` GUC, no app-enable check, no per-org
 //     overlay.
+//   - An OAuth bearer token signs in in place of the session (see
+//     `bearer-auth.ts`): the route must name a permission the token carries,
+//     and `ctx.perms` is narrowed to the token's scopes.
 //   - `encodeFlowOrg` / `decodeFlowOrg` are no-ops — OAuth `state` carries
 //     whatever the caller put in it.
 //   - `requireOperatorAdmin` checks `users.is_admin`. Same in both modes; the
@@ -21,6 +24,7 @@ import { db } from '#core/server/utils/database'
 // Tracks each request transaction so `afterCommit` work runs once it commits.
 import { runTransaction } from '#core/server/utils/after-commit'
 import { requireAuth } from '#core/server/utils/auth'
+import { getBearerIdentity, narrowToScopes, requireBearerPermission, runAsOauthClient } from '#core/server/utils/bearer-auth'
 import { getRolePermissions } from '#core/server/utils/rbac'
 import { getUserGrantedPermissions } from '#core/server/utils/permission-grants'
 import { getPersonalAppPermissions } from '#core/server/utils/personal-apps'
@@ -36,8 +40,11 @@ export interface TenantContext {
   // plus `admin` when `is_admin` is set.
   role: string | null
   roles: string[]
-  // Effective permissions: union(role perms) ∪ direct user grants.
+  // Effective permissions: union(role perms) ∪ direct user grants, narrowed
+  // to the token's scopes for an OAuth request.
   perms: Set<Permission>
+  // The OAuth client making the request; null for a session request.
+  clientId: string | null
 }
 
 export interface DefineTenantHandlerOpts {
@@ -73,22 +80,29 @@ async function resolveSinglePerms(
   return { roles, perms }
 }
 
+// `perm` is the permission the route is gated on, which an OAuth request
+// must carry as a scope.
 async function runWithSingleContext<T>(
   event: H3Event,
+  perm: Permission | undefined,
   fn: TenantHandler<T>
 ): Promise<T> {
-  const authUser = requireAuth(event)
-  return await runTransaction(db, async (tx) => {
-    const { roles, perms } = await resolveSinglePerms(tx, authUser.userId)
+  const bearer = await getBearerIdentity(event)
+  if (bearer) requireBearerPermission(event, bearer, perm)
+  const userId = bearer?.userId ?? requireAuth(event).userId
+  const clientId = bearer?.clientId ?? null
+  return await runAsOauthClient(clientId, () => runTransaction(db, async (tx) => {
+    const { roles, perms } = await resolveSinglePerms(tx, userId)
     return await fn(tx, {
-      userId: authUser.userId,
+      userId,
       orgId: null,
       orgSlug: null,
       role: null,
       roles,
-      perms
+      perms: bearer ? narrowToScopes(perms, bearer.scopes) : perms,
+      clientId
     })
-  })
+  }))
 }
 
 export function defineTenantHandler<T>(fn: TenantHandler<T>): EventHandler<EventHandlerRequest, Promise<T>>
@@ -98,7 +112,7 @@ export function defineTenantHandler<T>(
   maybeFn?: TenantHandler<T>
 ): EventHandler<EventHandlerRequest, Promise<T>> {
   const fn = (typeof optsOrFn === 'function' ? optsOrFn : maybeFn) as TenantHandler<T>
-  return defineEventHandler<EventHandlerRequest, Promise<T>>(event => runWithSingleContext(event, fn))
+  return defineEventHandler<EventHandlerRequest, Promise<T>>(event => runWithSingleContext(event, undefined, fn))
 }
 
 // Function-call style — for handlers already wrapped in `defineEventHandler`.
@@ -119,7 +133,7 @@ export function withOrgContext<T>(
   maybeFn?: TenantHandler<T>
 ): Promise<T> {
   const fn = (typeof optsOrFn === 'function' ? optsOrFn : maybeFn) as TenantHandler<T>
-  return runWithSingleContext(event, fn)
+  return runWithSingleContext(event, undefined, fn)
 }
 
 // Same as `withOrgContext` plus a permission gate on `ctx.perms`.
@@ -143,7 +157,7 @@ export function withOrgPermission<T>(
   const hasOpts = typeof a === 'object'
   const perm = (hasOpts ? b : a) as Permission
   const fn = (hasOpts ? c : b) as TenantHandler<T>
-  return runWithSingleContext(event, async (tx, ctx) => {
+  return runWithSingleContext(event, perm, async (tx, ctx) => {
     if (!ctx.perms.has(perm)) {
       throw createError({ statusCode: 403, statusMessage: `Permission required: ${perm}` })
     }

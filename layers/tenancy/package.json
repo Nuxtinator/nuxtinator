@@ -12,7 +12,7 @@
   },
   "nuxtinator": {
     "requires": {
-      "@nuxtinator/core": ">=3.0.0"
+      "@nuxtinator/core": ">=3.1.0"
     }
   },
   "peerDependencies": {

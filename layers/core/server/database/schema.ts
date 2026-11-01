@@ -68,6 +68,8 @@ export interface ActivityLogsTable extends NuxtinatorActivityLogsColumns {
   user_id: string | null
   user_agent: string | null
   metadata: Generated<Record<string, unknown>>
+  // The OAuth client the action came through (migration 021).
+  client_id: string | null
 }
 
 export interface CustomRolesTable extends NuxtinatorCustomRolesColumns {

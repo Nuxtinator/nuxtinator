@@ -9,6 +9,7 @@ export const OAUTH_EVENTS = {
   CONSENT_GRANTED: 'oauth.consent_granted',
   CONSENT_DENIED: 'oauth.consent_denied',
   CONSENT_REVOKED: 'oauth.consent_revoked',
+  CONSENT_UPDATED: 'oauth.consent_updated',
   SCOPE_REDUCED: 'oauth.scope_reduced',
   AUTHORIZE_ORG_UNRESOLVED: 'oauth.authorize_org_unresolved',
   AUTHORIZATION_CODE_ISSUED: 'oauth.authorization_code_issued',
