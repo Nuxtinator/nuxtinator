@@ -1,6 +1,6 @@
 {
   "name": "@nuxtinator/context",
-  "version": "1.12.1",
+  "version": "1.12.2",
   "private": true,
   "type": "module",
   "exports": {
@@ -18,6 +18,11 @@
     "@nuxtinator/core": "*",
     "@nuxtinator/mcp": "*",
     "@nuxtinator/tenancy": "*"
+  },
+  "nuxtinator": {
+    "requires": {
+      "@nuxtinator/core": ">=3.1.0"
+    }
   },
   "devDependencies": {
     "@types/archiver": "^6.0.3",
