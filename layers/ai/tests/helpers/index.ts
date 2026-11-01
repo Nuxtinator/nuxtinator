@@ -73,6 +73,7 @@ export async function cleanupAiTestData(sql: ReturnType<typeof postgres>): Promi
   await clearAiHostConfig(sql)
   await sql`DELETE FROM core_settings WHERE namespace = 'ai' AND org_id IN (SELECT id FROM orgs WHERE slug LIKE 'test-ai-%')`
   await sql`DELETE FROM activity_logs WHERE org_id IN (SELECT id FROM orgs WHERE slug LIKE 'test-ai-%')`
+  await sql`DELETE FROM ai_usage WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'test-ai-%')`
   await sql`DELETE FROM orgs WHERE slug LIKE 'test-ai-%'`
   await sql`DELETE FROM users WHERE email LIKE 'test-ai-%'`
 }

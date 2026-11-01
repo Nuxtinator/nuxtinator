@@ -108,6 +108,19 @@ This is the shared AI backend built for Phase 10a of the inbox plan
   unit-tested) translates both ways. Input is text or JSON only (OpenRouter's
   image `assets` and Jev's `box` question aren't wired; Tinfoil's decision
   models are text-only).
+- **Spend log.** Every provider round trip (chat, transcription, decisions,
+  embeddings) writes one `ai_usage` row: feature, model, provider, whose key
+  paid, tokens and USD cost. Cost is the provider's own `usage.cost` when it
+  reports one (OpenRouter), else the catalog prices applied to the tokens,
+  else null ("unpriced"). The org, user and key source are read when the run
+  is resolved (`resolveAiRun` / `resolveAiEmbedRun`) and kept beside the run
+  object in a WeakMap, so calls made after the caller's transaction commits
+  are still attributed. Rows are written in their own transaction, not
+  awaited, so a rolled-back caller is still billed and the call never waits on
+  a second pool connection. With tenancy, rows carry `org_id`; a personal
+  app's calls have no org and are visible to the user who made them. The org
+  page's Spend tab (`?tab=spend`) shows this month, last month, all time, the
+  last 30 days and this month by feature.
 - **Layer-only types.** Image parts, reasoning levels, provider/kind fields
   and `transcribe` types live in [types/ai-ext.ts](types/ai-ext.ts), on top of
   core's `#core/ai-fallback/types` (the surface the throwing fallback shares).
@@ -174,7 +187,9 @@ This is the shared AI backend built for Phase 10a of the inbox plan
   · decisions translation [server/utils/ai-decisions.ts](server/utils/ai-decisions.ts) (pure, unit-tested)
   · OpenAI/Anthropic catalog parsers [server/utils/direct-models.ts](server/utils/direct-models.ts) (pure, unit-tested)
   · Tinfoil transport [server/utils/tinfoil-client.ts](server/utils/tinfoil-client.ts)
-  + catalog parser [server/utils/tinfoil-models.ts](server/utils/tinfoil-models.ts) (pure, unit-tested).
+  + catalog parser [server/utils/tinfoil-models.ts](server/utils/tinfoil-models.ts) (pure, unit-tested)
+  · spend log [server/utils/ai-usage.ts](server/utils/ai-usage.ts)
+  + table [migrations/](migrations/) (`ai_usage`; `_T` files add `org_id` and RLS).
 - Barrel: [server/exports/index.ts](server/exports/index.ts) (`#ai/server`) ·
   client types [app/utils/ai-manifest.ts](app/utils/ai-manifest.ts) (`#ai`).
 - Boot: [server/plugins/register-ai.ts](server/plugins/register-ai.ts) (settings,
@@ -184,11 +199,13 @@ This is the shared AI backend built for Phase 10a of the inbox plan
   · [server/routes/api/ai/admin/key.{put,delete}.ts](server/routes/api/ai/admin/)
   · [server/routes/api/ai/org/config.{get,put}.ts](server/routes/api/ai/org/)
   · [server/routes/api/ai/org/key.{put,delete}.ts](server/routes/api/ai/org/)
+  · [server/routes/api/ai/org/usage.get.ts](server/routes/api/ai/org/usage.get.ts)
   · [server/routes/api/ai/status.get.ts](server/routes/api/ai/status.get.ts).
 - UI: [app/components/AiModelSelect.vue](app/components/AiModelSelect.vue)
   (searchable picker) · [app/components/AiProviderKey.vue](app/components/AiProviderKey.vue)
   (one provider's key) · [app/components/AiModelList.vue](app/components/AiModelList.vue)
   · [app/utils/ai-model-meta.ts](app/utils/ai-model-meta.ts)
+  · [app/components/AiSpend.vue](app/components/AiSpend.vue) (org spend tab)
   · host page [app/pages/admin/ai/index.vue](app/pages/admin/ai/index.vue)
   · org page [app/pages/@[orgSlug]/settings/ai.vue](app/pages/@[orgSlug]/settings/ai.vue).
 - Tests: [tests/unit/ai-model-list.test.ts](tests/unit/ai-model-list.test.ts) (parser)
@@ -196,10 +213,13 @@ This is the shared AI backend built for Phase 10a of the inbox plan
   · [tests/unit/ai-stream.test.ts](tests/unit/ai-stream.test.ts) (pure)
   · [tests/unit/tinfoil-models.test.ts](tests/unit/tinfoil-models.test.ts) (Tinfoil catalog parser)
   · [tests/unit/ai-decisions.test.ts](tests/unit/ai-decisions.test.ts) (decisions translation)
+  · [tests/unit/ai-usage.test.ts](tests/unit/ai-usage.test.ts) (cost from usage and prices)
   · [tests/api/ai-admin.test.ts](tests/api/ai-admin.test.ts) (host endpoints,
   gating, validation, cross-org sharing)
   · [tests/api/ai-org.test.ts](tests/api/ai-org.test.ts) (org key lifecycle,
-  allowed set, resolution chain, isolation, audit).
+  allowed set, resolution chain, isolation, audit)
+  · [tests/api/ai-usage.test.ts](tests/api/ai-usage.test.ts) (spend endpoint,
+  gating, totals, per-org and personal isolation).
 
 ## Consumers
 

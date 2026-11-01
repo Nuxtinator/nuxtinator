@@ -119,3 +119,21 @@ export interface AiOrgConfig {
   embeddingStale: boolean
   embeddingStoredModels: string[]
 }
+
+// Spend over a period, in USD. `unpriced` counts calls whose cost isn't
+// known, so `cost` leaves them out.
+export interface AiUsageTotals {
+  cost: number
+  calls: number
+  unpriced: number
+}
+
+// Full payload of GET /api/ai/org/usage.
+export interface AiUsageSummary {
+  month: AiUsageTotals
+  lastMonth: AiUsageTotals
+  allTime: AiUsageTotals
+  monthByFeature: (AiUsageTotals & { feature: string, label: string })[]
+  // The last 30 days, oldest first; `day` is YYYY-MM-DD.
+  daily: (AiUsageTotals & { day: string })[]
+}

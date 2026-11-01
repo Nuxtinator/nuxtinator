@@ -37,6 +37,16 @@ const { data, pending, refresh } = await useFetch<AiOrgConfig>('/api/ai/org/conf
   })
 })
 
+// The open tab rides in the URL (`?tab=spend`) so the spend view can be linked to.
+const tabs = [
+  { label: 'Settings', value: 'settings', icon: 'i-lucide-settings' },
+  { label: 'Spend', value: 'spend', icon: 'i-lucide-receipt' }
+]
+const tab = computed({
+  get: () => route.query.tab === 'spend' ? 'spend' : 'settings',
+  set: (v: string | number) => navigateTo({ query: { ...route.query, tab: v === 'spend' ? 'spend' : undefined } }, { replace: true })
+})
+
 const allowed = computed(() => data.value?.allowedModels ?? [])
 
 function allowedOfKind(kind: AiModelKind) {
@@ -239,8 +249,20 @@ onBeforeUnmount(() => {
         </p>
       </div>
 
+      <UTabs
+        v-model="tab"
+        :items="tabs"
+        :content="false"
+        variant="link"
+      />
+
+      <AiSpend
+        v-if="tab === 'spend'"
+        :org-slug="orgSlug"
+      />
+
       <div
-        v-if="pending && !data"
+        v-else-if="pending && !data"
         class="text-sm text-(--ui-text-muted)"
       >
         Loading...

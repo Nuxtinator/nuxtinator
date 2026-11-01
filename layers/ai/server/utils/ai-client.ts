@@ -37,6 +37,8 @@ import { fromAnthropicResponse, readAnthropicStream, toAnthropicBody } from './a
 import { aiFakeComplete, aiFakeDecide, aiFakeGenerate, aiFakeEmbed, aiFakeTranscribe } from './ai-test-fake'
 import { fromOpenRouterDecisionResponse, fromTinfoilDecisionResponse, toOpenRouterDecisionBody, toTinfoilDecisionBody } from './ai-decisions'
 import { withAiRetries } from './ai-retry'
+import { getEmbeddingModelInfo } from './ai-embedding-model-list'
+import { AI_USAGE_EMBEDDING_FEATURE, attachUsageScope, readUsageScope, recordUsage, usageScopeOf, type AiUsageScope } from './ai-usage'
 
 // Chat and transcription client for four providers, picked by the resolved
 // model id: OpenRouter and OpenAI (plain fetch to their OpenAI-compatible
@@ -54,6 +56,9 @@ import { withAiRetries } from './ai-retry'
 // themselves (ai-settings.ts): the org's own key and choices when it has them,
 // the host's otherwise. Under VITEST both route to the primeable fake in
 // ai-test-fake.ts instead of the network.
+//
+// Every provider round trip is logged to `ai_usage` with its cost
+// (ai-usage.ts), billed to the org and user the run was resolved for.
 //
 // `transcribe()` sends an audio file to a transcription-kind feature's model;
 // `decide()` asks a decision-kind feature's model typed questions about an
@@ -109,7 +114,8 @@ export async function resolveAiRun(tx: AiDbClient, feature: string, opts: { mode
       statusMessage: `AI is not configured (no ${AI_PROVIDER_LABELS[provider]} API key for this organization or the host).`
     })
   }
-  return { kind: 'completion', apiKey, model }
+  const scope = await readUsageScope(tx, feature, (await getOrgApiKey(tx, provider)).status === 'ok' ? 'org' : 'host')
+  return attachUsageScope({ kind: 'completion', apiKey, model }, scope)
 }
 
 // A run plus what the request builders need to know about its model.
@@ -118,6 +124,7 @@ interface ResolvedRun {
   apiKey: string
   model: string
   info: AiProviderModelInfo | undefined
+  usageScope: AiUsageScope | undefined
 }
 
 async function completionRun(opts: { tx?: AiDbClient, run?: AiCompletionRun, feature: string }): Promise<ResolvedRun> {
@@ -129,7 +136,7 @@ async function completionRun(opts: { tx?: AiDbClient, run?: AiCompletionRun, fea
     if (!opts.tx) throw new Error('AI call needs `tx` or `run`')
     run = await resolveAiRun(opts.tx, opts.feature)
   }
-  return { provider: providerOf(run.model), apiKey: run.apiKey, model: run.model, info: getModelInfo(run.model) }
+  return { provider: providerOf(run.model), apiKey: run.apiKey, model: run.model, info: getModelInfo(run.model), usageScope: usageScopeOf(run) }
 }
 
 export interface AiKeyCheck {
@@ -347,7 +354,7 @@ async function callChat(run: ResolvedRun, body: Record<string, unknown>): Promis
       }
       throw createError({ statusCode: 502, statusMessage: 'The AI provider reported an upstream error. Try again in a moment.' })
     }
-    logUsage(run.model, data?.usage)
+    logUsage(run, data?.usage)
     return data
   })
 }
@@ -379,7 +386,7 @@ async function streamChat(
     }
     throw err
   }
-  logUsage(run.model, turn.usage)
+  logUsage(run, turn.usage)
   return turn
 }
 
@@ -397,15 +404,18 @@ async function* textChunks(body: ReadableStream<Uint8Array>): AsyncIterable<stri
   }
 }
 
-// One line per round trip so prompt-cache hits can be verified from the server
-// log; OpenRouter reports cache reads and writes under prompt_tokens_details.
-function logUsage(model: string, usage: any): void {
-  if (!usage || typeof usage !== 'object') return
-  const details = usage.prompt_tokens_details ?? {}
-  const cost = typeof usage.cost === 'number' ? ` cost=$${usage.cost.toFixed(4)}` : ''
+// Records the round trip's spend, and logs one line per round trip so
+// prompt-cache hits can be verified from the server log; OpenRouter reports
+// cache reads and writes under prompt_tokens_details.
+function logUsage(run: ResolvedRun, usage: any): void {
+  const raw = usage && typeof usage === 'object' ? usage : null
+  recordUsage(run.usageScope, { model: run.model, provider: run.provider, usage: raw, prices: run.info })
+  if (!raw) return
+  const details = raw.prompt_tokens_details ?? {}
+  const cost = typeof raw.cost === 'number' ? ` cost=$${raw.cost.toFixed(4)}` : ''
   console.info(
-    `[ai] ${model} prompt=${usage.prompt_tokens ?? 0} cached=${details.cached_tokens ?? 0}`
-    + ` cache_write=${details.cache_write_tokens ?? 0} completion=${usage.completion_tokens ?? 0}${cost}`
+    `[ai] ${run.model} prompt=${raw.prompt_tokens ?? 0} cached=${details.cached_tokens ?? 0}`
+    + ` cache_write=${details.cache_write_tokens ?? 0} completion=${raw.completion_tokens ?? 0}${cost}`
   )
 }
 
@@ -566,11 +576,12 @@ export async function transcribe(opts: AiTranscribeOptions): Promise<AiTranscrib
     if (opts.prompt) form.append('prompt', opts.prompt)
     if (opts.language) form.append('language', opts.language)
     const res = await providerRequest(run, 'audio/transcriptions', form)
-    return await res.json() as { text?: unknown }
+    return await res.json() as { text?: unknown, usage?: unknown }
   })
   if (typeof data?.text !== 'string') {
     throw createError({ statusCode: 502, statusMessage: 'The AI did not return a transcript. Try again.' })
   }
+  logUsage(run, data.usage)
   console.info(`[ai] ${run.model} transcribed ${blob.size} bytes → ${data.text.length} chars`)
   return { text: data.text.trim(), model: run.model }
 }
@@ -612,6 +623,12 @@ export async function decide(opts: AiDecideOptions): Promise<AiDecideResult> {
     throw createError({ statusCode: 502, statusMessage: 'The AI provider returned an incomplete decision. Try again.' })
   }
   const usage = data?.usage ?? {}
+  recordUsage(run.usageScope, {
+    model: run.model,
+    provider: run.provider,
+    usage: { prompt_tokens: usage.input_tokens ?? usage.prompt_tokens, cost: usage.cost },
+    prices: run.info
+  })
   const cost = typeof usage.cost === 'number' ? ` cost=$${usage.cost.toFixed(6)}` : ''
   console.info(`[ai] ${run.model} decide questions=${names.length} input=${usage.input_tokens ?? 0}${cost}`)
   return { answers, model: run.model }
@@ -645,10 +662,10 @@ const EMBED_BATCH = 64
 // Under VITEST an org with no embedding model set still embeds with the fake.
 const AI_TEST_FALLBACK_EMBED_MODEL = 'test/embed-small'
 
-async function embedBatch(apiKey: string, model: string, input: string[]): Promise<number[][]> {
+async function embedBatch(apiKey: string, model: string, input: string[], usageScope?: AiUsageScope): Promise<number[][]> {
   const data = await withAiRetries(async () => {
     // Embedding models come from OpenRouter's catalog only.
-    const run: ResolvedRun = { provider: 'openrouter', apiKey, model, info: undefined }
+    const run: ResolvedRun = { provider: 'openrouter', apiKey, model, info: undefined, usageScope }
     const res = await providerRequest(run, 'embeddings', JSON.stringify({
       model,
       input,
@@ -679,6 +696,15 @@ async function embedBatch(apiKey: string, model: string, input: string[]): Promi
       })
     }
   }
+  if (usageScope) {
+    const info = getEmbeddingModelInfo(model)
+    recordUsage(usageScope, {
+      model,
+      provider: 'openrouter',
+      usage: data?.usage ?? null,
+      prices: info ? { promptPrice: info.promptPrice, completionPrice: null, requestPrice: null } : undefined
+    })
+  }
   if (data?.usage) {
     console.info(`[ai] ${model} embed inputs=${input.length} prompt=${data.usage.prompt_tokens ?? 0}`)
   }
@@ -697,7 +723,8 @@ export async function resolveAiEmbedRun(tx: AiDbClient): Promise<AiEmbeddingRun>
   if (!model) {
     throw createError({ statusCode: 503, statusMessage: 'No embedding model is configured.' })
   }
-  return { kind: 'embedding', apiKey, model }
+  const scope = await readUsageScope(tx, AI_USAGE_EMBEDDING_FEATURE, (await getOrgApiKey(tx, 'openrouter')).status === 'ok' ? 'org' : 'host')
+  return attachUsageScope({ kind: 'embedding', apiKey, model }, scope)
 }
 
 // Embed `input` with the org's resolved embedding model. Empty input → empty
@@ -711,9 +738,10 @@ export async function embed(opts: AiEmbedOptions): Promise<AiEmbedResult> {
   const { apiKey, model } = run
   if (process.env.VITEST) return aiFakeEmbed(opts, model)
   if (opts.input.length === 0) return { vectors: [], model }
+  const usageScope = usageScopeOf(run)
   const vectors: number[][] = []
   for (let i = 0; i < opts.input.length; i += EMBED_BATCH) {
-    vectors.push(...await embedBatch(apiKey, model, opts.input.slice(i, i + EMBED_BATCH)))
+    vectors.push(...await embedBatch(apiKey, model, opts.input.slice(i, i + EMBED_BATCH), usageScope))
   }
   return { vectors, model }
 }

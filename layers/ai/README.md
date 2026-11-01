@@ -35,9 +35,15 @@ own key per provider, pick that provider's models, and override those choices.
   the host default and the model per feature.
 - **Org settings → AI** page (`/@<slug>/settings/ai`, `org.settings.write`) —
   the same tabs with the org's own keys and models, plus the org's default and
-  per-feature models.
+  per-feature models. A Spend tab shows what the org's AI calls have cost in
+  USD, whichever key paid: this month, last month, all time, each of the last
+  30 days and this month by feature.
   Registered into the tenancy settings shell through core's
   org-settings-section registry; absent in single-tenant deployments.
+- **Spend log** — every provider call (chat, transcription, decisions,
+  embeddings) is recorded in `ai_usage` with its tokens and cost, attributed
+  to the org (or, for a personal app, the user) the run was resolved for.
+  Served to the org page by **`GET /api/ai/org/usage`** (`org.settings.write`).
 - **`GET /api/ai/status`** — org-aware readiness probe (`configured`,
   `hasEnabledModel`, `featureAvailable`) for consumer client UIs.
 - **`GET /api/ai/models`** — the live, tool-capable model list from every
