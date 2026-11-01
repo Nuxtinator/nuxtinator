@@ -16,9 +16,18 @@ interface ConnectedApp {
   scope: string
   // Each scope with the title people read it by.
   scopes: { scope: string, title: string, description: string }[]
+  // Every permission the app asked for, grouped by app, with whether it's
+  // granted.
+  groups: PermissionGroup[]
   granted_at: string
   last_used_at: string | null
   has_active_tokens: boolean
+}
+
+interface PermissionGroup {
+  key: string
+  title: string
+  scopes: { scope: string, title: string, description: string, granted: boolean }[]
 }
 
 interface ConnectedAppsResponse {
@@ -81,6 +90,65 @@ const handleRevoke = async () => {
     toast.add({ title: 'Error', description: message, color: 'error' })
   } finally {
     revoking.value = false
+  }
+}
+
+// ── Edit permissions modal ──────────────────────────────────────────
+const editTarget = ref<ConnectedApp | null>(null)
+const editTicked = ref<Set<string>>(new Set())
+const saving = ref(false)
+const editOpen = computed({
+  get: () => editTarget.value !== null,
+  set: (val: boolean) => {
+    if (!val && !saving.value) editTarget.value = null
+  }
+})
+
+const requestEdit = (app: ConnectedApp) => {
+  editTicked.value = new Set(app.groups.flatMap(g => g.scopes.filter(s => s.granted).map(s => s.scope)))
+  editTarget.value = app
+}
+
+const setTicked = (scopes: string[], on: boolean) => {
+  const next = new Set(editTicked.value)
+  for (const s of scopes) {
+    if (on) next.add(s)
+    else next.delete(s)
+  }
+  editTicked.value = next
+}
+
+const groupState = (group: PermissionGroup): boolean | 'indeterminate' => {
+  const on = group.scopes.filter(s => editTicked.value.has(s.scope)).length
+  if (on === 0) return false
+  return on === group.scopes.length ? true : 'indeterminate'
+}
+
+const editDirty = computed(() => {
+  const app = editTarget.value
+  if (!app) return false
+  return app.groups.some(g => g.scopes.some(s => s.granted !== editTicked.value.has(s.scope)))
+})
+
+const handleSaveEdit = async () => {
+  if (!editTarget.value) return
+  saving.value = true
+  const target = editTarget.value
+  try {
+    await $fetch(`/api/oauth/connected-apps/${encodeURIComponent(target.client_id)}`, {
+      method: 'PATCH',
+      body: { scopes: [...editTicked.value] }
+    })
+    toast.add({ title: 'Permissions updated', color: 'success' })
+    await refresh()
+    editTarget.value = null
+  } catch (err: unknown) {
+    const message = (err as { data?: { statusMessage?: string }; statusMessage?: string })?.data?.statusMessage
+      || (err as { statusMessage?: string })?.statusMessage
+      || 'Failed to update permissions'
+    toast.add({ title: 'Error', description: message, color: 'error' })
+  } finally {
+    saving.value = false
   }
 }
 
@@ -333,7 +401,15 @@ const columns: TableColumn<ConnectedApp>[] = [
   {
     id: 'actions',
     header: '',
-    cell: ({ row }) => h('div', { class: 'flex justify-end' }, [
+    cell: ({ row }) => h('div', { class: 'flex justify-end gap-2' }, [
+      h(resolveComponent('UButton'), {
+        color: 'neutral',
+        variant: 'outline',
+        size: 'sm',
+        icon: 'i-lucide-sliders-horizontal',
+        'aria-label': `Edit permissions for ${row.original.client_name}`,
+        onClick: () => requestEdit(row.original)
+      }, () => 'Edit'),
       h(resolveComponent('UButton'), {
         color: 'error',
         variant: 'soft',
@@ -482,6 +558,60 @@ const columns: TableColumn<ConnectedApp>[] = [
         </div>
       </template>
     </UCollapsible>
+
+    <UModal
+      v-model:open="editOpen"
+      :dismissible="!saving"
+      :title="`Permissions for ${editTarget?.client_name ?? ''}`"
+    >
+      <template #body>
+        <div class="space-y-3">
+          <div
+            v-for="group in editTarget?.groups ?? []"
+            :key="group.key"
+            class="rounded-lg border border-(--ui-border) p-3"
+          >
+            <UCheckbox
+              v-if="group.scopes.length > 1"
+              :model-value="groupState(group)"
+              :label="group.title"
+              :ui="{ label: 'font-semibold' }"
+              @update:model-value="(v) => setTicked(group.scopes.map(s => s.scope), v === true)"
+            />
+            <div :class="group.scopes.length > 1 ? 'mt-2 ps-6 space-y-2' : ''">
+              <UCheckbox
+                v-for="item in group.scopes"
+                :key="item.scope"
+                :model-value="editTicked.has(item.scope)"
+                :label="item.title"
+                :description="item.description || undefined"
+                :ui="group.scopes.length > 1 ? undefined : { label: 'font-semibold' }"
+                @update:model-value="(v) => setTicked([item.scope], v === true)"
+              />
+            </div>
+          </div>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex w-full justify-end gap-3">
+          <UButton
+            variant="ghost"
+            color="neutral"
+            :disabled="saving"
+            @click="editTarget = null"
+          >
+            Cancel
+          </UButton>
+          <UButton
+            :loading="saving"
+            :disabled="!editDirty"
+            @click="handleSaveEdit"
+          >
+            Save
+          </UButton>
+        </div>
+      </template>
+    </UModal>
 
     <UModal v-model:open="revokeOpen" :dismissible="!revoking">
       <template #content>

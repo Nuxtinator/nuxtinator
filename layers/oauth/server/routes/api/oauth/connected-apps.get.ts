@@ -2,15 +2,16 @@
 //
 // Surfaces what's needed by the user's "Connected apps" UI: the
 // client name, when it was granted, what permissions it carries (with
-// their titles), when it was last used, and whether any tokens are still
-// live.
+// their titles), the permissions it asked for grouped by app with whether
+// each is granted (for the editor), when it was last used, and whether any
+// tokens are still live.
 // Revoked consents are filtered out — once a user revokes, the row
 // stays in the DB for audit but disappears from this listing.
 
 import { sql } from 'kysely'
 import { requireAuth } from '#core/server/utils/auth'
 import { runInOrgTransaction } from '#tenant/server'
-import { oauthScopeLabel } from '../../../utils/oauth-scope-labels'
+import { groupScopeLabels, oauthScopeLabel } from '../../../utils/oauth-scope-labels'
 
 export default defineEventHandler(async (event) => {
   const user = requireAuth(event)
@@ -23,6 +24,7 @@ export default defineEventHandler(async (event) => {
     .select([
       'oauth_consents.client_id as client_id',
       'oauth_consents.scope as scope',
+      'oauth_consents.declined_scope as declined_scope',
       'oauth_consents.created as granted_at',
       'oauth_clients.client_name as client_name',
       'oauth_clients.dynamic as dynamic',
@@ -57,6 +59,7 @@ export default defineEventHandler(async (event) => {
     client_name: string
     dynamic: boolean
     scope: string
+    declined_scope: string
     granted_at: string
     last_used_at: string | null
     has_active_tokens: boolean
@@ -66,6 +69,8 @@ export default defineEventHandler(async (event) => {
     const existing = byClient.get(row.client_id)
     const scopes = new Set<string>((existing?.scope ?? '').split(/\s+/).filter(Boolean))
     for (const s of String(row.scope ?? '').split(/\s+/).filter(Boolean)) scopes.add(s)
+    const declined = new Set<string>((existing?.declined_scope ?? '').split(/\s+/).filter(Boolean))
+    for (const s of String(row.declined_scope ?? '').split(/\s+/).filter(Boolean)) declined.add(s)
     const grantedAtMs = new Date(row.granted_at as unknown as string).getTime()
     const newer = !existing || grantedAtMs < new Date(existing.granted_at).getTime()
       ? row.granted_at
@@ -84,6 +89,7 @@ export default defineEventHandler(async (event) => {
       client_name: row.client_name ?? row.client_id,
       dynamic: Boolean(row.dynamic),
       scope: Array.from(scopes).join(' '),
+      declined_scope: Array.from(declined).join(' '),
       granted_at: new Date(newer as unknown as string).toISOString(),
       last_used_at: lastUsed === null ? null : new Date(lastUsed).toISOString(),
       has_active_tokens: activeTokens
@@ -91,9 +97,17 @@ export default defineEventHandler(async (event) => {
   }
 
   return {
-    apps: Array.from(byClient.values()).map(app => ({
-      ...app,
-      scopes: app.scope.split(' ').filter(Boolean).map(oauthScopeLabel)
-    }))
+    apps: Array.from(byClient.values()).map(({ declined_scope, ...app }) => {
+      const granted = app.scope.split(' ').filter(Boolean)
+      const declined = declined_scope.split(' ').filter(s => s && !granted.includes(s))
+      return {
+        ...app,
+        scopes: granted.map(oauthScopeLabel),
+        groups: groupScopeLabels([...granted, ...declined]).map(group => ({
+          ...group,
+          scopes: group.scopes.map(label => ({ ...label, granted: granted.includes(label.scope) }))
+        }))
+      }
+    })
   }
 })

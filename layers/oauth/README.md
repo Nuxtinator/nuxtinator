@@ -7,7 +7,7 @@ A Nuxt layer that adds an OAuth 2.1 authorization server to your app, suitable f
 Routes:
 - `GET /oauth/authorize` — start the authorization-code flow
 - `POST /oauth/authorize` — consent submission
-- `GET /oauth/consent` — server-rendered consent page
+- `GET /oauth/consent` — server-rendered consent page. Permissions are grouped by app; the user unticks any they don't want the client to have. Unticked ones are saved as declined, so a client asking for the same set again skips the screen; it reappears only for a permission the user hasn't answered.
 - `POST /oauth/token` — token endpoint (authorization_code, refresh_token grants)
 - `POST /oauth/register` — Dynamic Client Registration (RFC 7591)
 - `GET /.well-known/oauth-authorization-server` — RFC 8414
@@ -15,6 +15,7 @@ Routes:
 
 User-facing routes (require `requireAuth`):
 - `GET /api/oauth/connected-apps` — list the current user's active grants
+- `PATCH /api/oauth/connected-apps/:client_id` — change which of the permissions the app asked for it holds (`{ scopes }`). A removed one stops working on its live tokens at once; an added one arrives with its next refresh.
 - `DELETE /api/oauth/connected-apps/:client_id` — revoke consent + cascade families
 
 Admin routes (require `users.manage`):
@@ -28,10 +29,12 @@ Pages (auto-discovered from the layer):
 - `/admin/oauth` — single-page dashboard for clients/families/events. Uses `definePageMeta({ layout: 'admin', middleware: ['auth', 'admin'] })`. Consumer must define both.
 
 Components (auto-imported):
-- `<OauthConnectedApps />` — drop-in `UCard` for the user's profile page. Lists active grants with revoke confirmation. Self-contained.
+- `<OauthConnectedApps />` — drop-in `UCard` for the user's profile page. Lists active grants, edits their permissions, revokes with confirmation. Self-contained.
+
+App-layer routes accept this layer's access tokens with no extra code: the layer registers itself with core's bearer-auth registry, so `defineTenantHandler` / `withOrgContext` / `withOrgPermission` and the personal-app handlers sign a token request in as its user. A token only reaches routes gated on a permission it carries, `ctx.perms` holds only the permissions it was granted, `ctx.clientId` names the client, and the activity log records the client on everything the request logs. The org comes from `X-Active-Org`, else the user's only org.
 
 Server utilities (auto-imported as Nitro server utils):
-- `requireBearerScope(event, scope)` — guard an MCP/API endpoint with a required scope
+- `requireBearerScope(event, scope)` — guard an endpoint outside the standard handlers with a required scope
 - `revokeFamily(familyId, reason)` — kill all tokens in a family
 - `revokeConsentAndFamilies(userId, clientId, reason)` — wipe everything for one user × client
 - `issueCode(...)` — internal use by routes; not typically called directly

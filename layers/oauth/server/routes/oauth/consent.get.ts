@@ -1,6 +1,7 @@
 import { getAuthUser } from '#core/server/utils/auth'
 import { loadConsentView } from '../../utils/oauth-consent-ssr'
 import { getOauthConfig } from '../../utils/oauth-config'
+import type { OauthScopeLabel } from '../../utils/oauth-scope-labels'
 
 function escapeHtml(input: string): string {
   return input
@@ -50,9 +51,13 @@ function page(status: number, body: string): string {
     .muted { color: var(--text-muted); font-size: 0.875rem; }
     ul { list-style: none; padding: 0; }
     li { padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.5rem; margin-bottom: 0.5rem; }
+    li li { border: 0; padding: 0.5rem 0 0 1.75rem; margin: 0; }
+    ul ul { margin: 0; }
+    label { display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer; }
+    input[type=checkbox] { margin-top: 0.2rem; width: 1rem; height: 1rem; flex-shrink: 0; }
     .scope-title { font-weight: 600; }
-    .scope-desc { color: var(--text-muted); font-size: 0.875rem; margin-top: 0.25rem; }
-    .scope { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; margin-top: 0.25rem; }
+    .scope-desc { display: block; color: var(--text-muted); font-size: 0.875rem; margin-top: 0.25rem; }
+    .scope { display: block; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; margin-top: 0.25rem; }
     .buttons { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1.5rem; }
     button { padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 1rem; font-weight: 600; cursor: pointer; border: 1px solid transparent; }
     button.primary { background: var(--primary); color: var(--primary-text); }
@@ -123,12 +128,31 @@ export default defineEventHandler(async (event) => {
     ? 'This app was registered automatically via Dynamic Client Registration.'
     : 'This app was registered by an administrator.'
 
-  const scopeList = (vm.scopeItems ?? []).map(item => `
+  const declined = new Set(vm.declined ?? [])
+  const scopeRow = (item: OauthScopeLabel, group: string) => `
+      <label>
+        <input type="checkbox" name="scope" value="${escapeHtml(item.scope)}" data-group="${escapeHtml(group)}"${declined.has(item.scope) ? '' : ' checked'}>
+        <span>
+          <span class="scope-title">${escapeHtml(item.title)}</span>
+          ${item.description ? `<span class="scope-desc">${escapeHtml(item.description)}</span>` : ''}
+          <span class="scope">${escapeHtml(item.scope)}</span>
+        </span>
+      </label>`
+
+  // One checkbox per app, with its permissions under it. An app with a single
+  // permission is just that permission's checkbox.
+  const scopeList = (vm.scopeGroups ?? []).map((group) => {
+    if (group.scopes.length === 1) return `<li>${scopeRow(group.scopes[0]!, group.key)}</li>`
+    const allDeclined = group.scopes.every(item => declined.has(item.scope))
+    return `
     <li>
-      <div class="scope-title">${escapeHtml(item.title)}</div>
-      ${item.description ? `<div class="scope-desc">${escapeHtml(item.description)}</div>` : ''}
-      <div class="scope">${escapeHtml(item.scope)}</div>
-    </li>`).join('')
+      <label>
+        <input type="checkbox" data-group-toggle="${escapeHtml(group.key)}"${allDeclined ? '' : ' checked'}>
+        <span class="scope-title">${escapeHtml(group.title)}</span>
+      </label>
+      <ul>${group.scopes.map(item => `<li>${scopeRow(item, group.key)}</li>`).join('')}</ul>
+    </li>`
+  }).join('')
 
   return page(200, `
     <div class="card">
@@ -136,10 +160,11 @@ export default defineEventHandler(async (event) => {
       <p><strong>${escapeHtml(vm.clientName!)}</strong> wants to access your account.</p>
       <p class="muted">${escapeHtml(registeredLabel)}</p>
 
-      <p style="margin-top:1.5rem;font-weight:600;color:var(--text)">The app is requesting permission to:</p>
-      <ul>${scopeList}</ul>
-
       <form method="POST" action="/oauth/authorize">
+        <p style="margin-top:1.5rem;font-weight:600;color:var(--text)">The app is requesting permission to:</p>
+        <p class="muted">Untick anything you don't want it to have.</p>
+        <ul>${scopeList}</ul>
+
         <input type="hidden" name="request_id" value="${escapeHtml(vm.requestId!)}">
         <input type="hidden" name="csrf_token" value="${escapeHtml(vm.csrfToken!)}">
         <div class="buttons">
@@ -147,5 +172,22 @@ export default defineEventHandler(async (event) => {
           <button type="submit" name="action" value="deny" class="neutral">Deny</button>
         </div>
       </form>
-    </div>`)
+    </div>
+    <script>
+      const members = key => [...document.querySelectorAll('input[name=scope]')].filter(i => i.dataset.group === key)
+      const sync = (toggle) => {
+        const boxes = members(toggle.dataset.groupToggle)
+        const on = boxes.filter(b => b.checked).length
+        toggle.checked = on > 0
+        toggle.indeterminate = on > 0 && on < boxes.length
+      }
+      for (const toggle of document.querySelectorAll('input[data-group-toggle]')) {
+        sync(toggle)
+        toggle.addEventListener('change', () => {
+          for (const b of members(toggle.dataset.groupToggle)) b.checked = toggle.checked
+          sync(toggle)
+        })
+        for (const b of members(toggle.dataset.groupToggle)) b.addEventListener('change', () => sync(toggle))
+      }
+    </script>`)
 })

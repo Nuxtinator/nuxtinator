@@ -29,6 +29,7 @@ import type { Permission } from '#core/app/utils/permissions'
 import { db } from './database'
 import { runTransaction } from './after-commit'
 import { requireAuth } from './auth'
+import { getBearerIdentity, narrowToScopes, requireBearerPermission, runAsOauthClient } from './bearer-auth'
 import { defineSettings, type DbClient } from './settings'
 import { getApps, type AppCatalogEntry } from './app-settings'
 import { isRegisteredPermission } from './permissions-registry'
@@ -146,8 +147,11 @@ export async function setUserAppGrant(
 
 export interface UserContext {
   userId: string
-  // Permissions from the personal apps that are on for the user.
+  // Permissions from the personal apps that are on for the user, narrowed to
+  // the token's scopes for an OAuth request.
   perms: Set<Permission>
+  // The OAuth client making the request; null for a session request.
+  clientId: string | null
 }
 
 export interface UserHandlerOpts {
@@ -171,15 +175,30 @@ export async function runInUserTransaction<T>(
       throw createError({ statusCode: 410, statusMessage: `App "${opts.appId}" is not enabled for you.` })
     }
     await sql`select set_config('app.current_user', ${userId}, true)`.execute(tx)
-    return await fn(tx, { userId, perms: permissionsOfApps(enabled) })
+    return await fn(tx, { userId, perms: permissionsOfApps(enabled), clientId: null })
   })
 }
 
-// Session-authenticated personal-app handler body. Ignores any org the
-// request names: personal apps are the same in every org.
+// Signs the request in with the session or an OAuth bearer token (see
+// `bearer-auth.ts`). `perm` is the permission the route is gated on, which an
+// OAuth request must carry as a scope.
+async function runAsCaller<T>(
+  event: H3Event,
+  opts: UserHandlerOpts,
+  perm: Permission | undefined,
+  fn: UserHandler<T>
+): Promise<T> {
+  const bearer = await getBearerIdentity(event)
+  if (!bearer) return await runInUserTransaction(requireAuth(event).userId, opts, fn)
+  requireBearerPermission(event, bearer, perm)
+  return await runAsOauthClient(bearer.clientId, () => runInUserTransaction(bearer.userId, opts, (tx, ctx) =>
+    fn(tx, { ...ctx, perms: narrowToScopes(ctx.perms, bearer.scopes), clientId: bearer.clientId })))
+}
+
+// Personal-app handler body. Ignores any org the request names: personal apps
+// are the same in every org.
 export async function withUserContext<T>(event: H3Event, opts: UserHandlerOpts, fn: UserHandler<T>): Promise<T> {
-  const authUser = requireAuth(event)
-  return await runInUserTransaction(authUser.userId, opts, fn)
+  return await runAsCaller(event, opts, undefined, fn)
 }
 
 // Same as `withUserContext` plus a permission gate on `ctx.perms`.
@@ -189,7 +208,7 @@ export async function withUserPermission<T>(
   perm: Permission,
   fn: UserHandler<T>
 ): Promise<T> {
-  return await withUserContext(event, opts, async (tx, ctx) => {
+  return await runAsCaller(event, opts, perm, async (tx, ctx) => {
     if (!ctx.perms.has(perm)) {
       throw createError({ statusCode: 403, statusMessage: `Permission required: ${perm}` })
     }
