@@ -110,10 +110,11 @@ export function __resetRateLimitConfigForTests(): void {
 }
 
 // Returns true if the tool is "read-only" for rate-limit purposes. A tool
-// counts as read-only iff its scope is in the project's mcpReadScopes list,
-// or it has no scope (scope-less tools are read-only by contract).
+// counts as read-only iff it declares `readOnly`, its scope is in the
+// project's mcpReadScopes list, or it has no scope (scope-less tools are
+// read-only by contract).
 function isReadTool(tool: McpToolDef<unknown, unknown>): boolean {
-  if (tool.scope === undefined) return true
+  if (tool.readOnly || tool.scope === undefined) return true
   const readScopes = (useRuntimeConfig().mcpReadScopes as string[] | undefined) ?? []
   return readScopes.includes(tool.scope)
 }

@@ -35,6 +35,11 @@ export interface InboxConversationFilters {
   // threading forks a thread per address).
   channelId?: string | string[]
   tag?: string
+  // Last activity on or after / before these moments.
+  since?: Date
+  until?: Date
+  // Matches the counterparty's From name or address.
+  sender?: string
   limit?: number
   offset?: number
 }
@@ -147,6 +152,18 @@ function filterConditions(eb: ConversationEb, filters: InboxConversationFilters)
   // Containment (@>) — a conversation matches when the slug is anywhere in its
   // tags array. Bound as text then cast to sidestep postgres-js jsonb encoding.
   if (filters.tag) conds.push(sql<SqlBool>`inbox_conversations.tags @> ${JSON.stringify([filters.tag])}::text::jsonb`)
+  if (filters.since) conds.push(eb('inbox_conversations.last_message_at', '>=', filters.since))
+  if (filters.until) conds.push(eb('inbox_conversations.last_message_at', '<', filters.until))
+  if (filters.sender) {
+    const term = `%${filters.sender}%`
+    conds.push(sql<SqlBool>`(
+      inbox_conversations.counterparty_name ILIKE ${term}
+      OR EXISTS (
+        SELECT 1 FROM crm_channels ch
+        WHERE ch.id = inbox_conversations.channel_id AND ch.value ILIKE ${term}
+      )
+    )`)
+  }
   if (filters.search) {
     const term = `%${filters.search}%`
     // Match the subject, the denormalized From name, the conversation's own

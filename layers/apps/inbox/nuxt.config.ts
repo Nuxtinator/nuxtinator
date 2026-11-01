@@ -13,11 +13,18 @@
 // so a future forms layer can create inbox conversations without reaching into
 // this layer's file layout. The barrel lives in server/exports/ (not
 // server/utils/) so nitro's auto-import scan doesn't double-import the names.
+//
+// The MCP tools in mcp/ are registered only when the MCP layer is loaded
+// (modules/inbox-mcp.ts).
 import { fileURLToPath } from 'node:url'
 
 const layerRoot = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineNuxtConfig({
+  modules: [
+    fileURLToPath(new URL('./modules/inbox-mcp.ts', import.meta.url))
+  ],
+
   alias: {
     '#inbox/server': fileURLToPath(new URL('./server/exports/index.ts', import.meta.url))
   },

@@ -8,6 +8,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { getEnabledAppsForRequest, getUserPermissionsAcrossOrgs, getUserPermissionsForRequest } from '#tenant/server'
 import type { Permission } from '#core/app/utils/permissions'
+import { runAsOauthClient } from '#core/server/utils/bearer-auth'
 // Cross-layer type import to the OAuth layer; see mcp-origin.ts for why we
 // use the `#oauth/*` aliases declared in the OAuth layer's nuxt.config.ts
 // instead of `~~/...` or `#imports`.
@@ -116,6 +117,9 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
         if (entry.outputJsonSchema) {
           tool.outputSchema = entry.outputJsonSchema
         }
+        if (entry.annotations) {
+          tool.annotations = entry.annotations
+        }
         return tool
       })
     }
@@ -210,7 +214,8 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
       }
 
       const parsedInput = await validateInput(args, tool.input)
-      const result = await tool.handler(parsedInput, toolCtx)
+      // Run as the client so activity-log rows record it in `client_id`.
+      const result = await runAsOauthClient(auth.clientId, () => tool.handler(parsedInput, toolCtx))
 
       // Server-side output validation when the tool declared an output schema.
       if (tool.output && result.structuredContent !== undefined) {

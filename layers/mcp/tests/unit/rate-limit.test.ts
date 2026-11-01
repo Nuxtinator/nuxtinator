@@ -123,6 +123,22 @@ describe('checkBuckets', () => {
     expect(await checkBuckets(ctx.tool, ctx)).toBeNull()
   })
 
+  it('treats a readOnly tool as read-only whatever its scope (no writes bucket)', async () => {
+    setTestRuntimeConfig({
+      mcpReadScopes: [],
+      mcpRateLimits: {
+        allToolsPerToken: null,
+        writesPerToken: { limit: 1, windowMs: 60_000 },
+        destructivePerUser: null
+      }
+    })
+    const ctx = makeCtx('list_pages', 'pages.write')
+    ctx.tool = { ...ctx.tool, readOnly: true }
+
+    expect(await checkBuckets(ctx.tool, ctx)).toBeNull()
+    expect(await checkBuckets(ctx.tool, ctx)).toBeNull()
+  })
+
   it('counts a write tool against the writes-per-token bucket', async () => {
     setTestRuntimeConfig({
       mcpReadScopes: [],

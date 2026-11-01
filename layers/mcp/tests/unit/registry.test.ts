@@ -51,6 +51,21 @@ describe('createRegistry', () => {
     expect(() => registry.register(bad)).toThrowError(/not.a.real.scope/)
   })
 
+  it('projects readOnly and destructive into MCP tool annotations', () => {
+    const handler = async () => ({ content: [{ type: 'text' as const, text: '' }] })
+    const input = z.object({}).strict()
+    registry.register(defineMcpTool({ name: 'r', description: 'r', scope: 'pages.view', readOnly: true, input, handler }))
+    registry.register(defineMcpTool({ name: 'd', description: 'd', scope: 'pages.view', destructive: true, input, handler }))
+    registry.register(defineMcpTool({ name: 'w', description: 'w', scope: 'pages.view', destructive: false, input, handler }))
+    registry.register(defineMcpTool({ name: 'u', description: 'u', scope: 'pages.view', input, handler }))
+
+    const byName = new Map(registry.tools.map(t => [t.def.name, t.annotations]))
+    expect(byName.get('r')).toEqual({ readOnlyHint: true, destructiveHint: false })
+    expect(byName.get('d')).toEqual({ readOnlyHint: false, destructiveHint: true })
+    expect(byName.get('w')).toEqual({ readOnlyHint: false, destructiveHint: false })
+    expect(byName.get('u')).toBeUndefined()
+  })
+
   it('caches the input JSON Schema at register-time', () => {
     const tool = defineMcpTool({
       name: 'a',

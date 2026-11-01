@@ -7,13 +7,12 @@
 //                            latest composer edits over the stored body)
 // A send auto-assigns an unassigned conversation to the sender, flips it to
 // 'pending' (waiting on the contact), and clears the needs-review flag; the
-// message row lands 'queued' and the send sweep delivers it. Saving a draft
-// does none of that — it only stores text.
+// message row lands 'queued' and the send sweep delivers it. A send to an
+// undeliverable address is refused (409). Saving a draft does none of that —
+// it only stores text.
 
 import { z } from 'zod'
-import { sql } from 'kysely'
 import { withOrgPermission } from '#tenant/server'
-import type { InboxMessageRow } from '../../../../../utils/inbox-messages'
 
 const Body = z.object({
   body: z.string().max(500_000).optional(),
@@ -77,79 +76,10 @@ export default defineEventHandler(async (event) => {
     }
 
     // --- Send: promote an existing draft, or queue a fresh reply. ---
-    let message: InboxMessageRow
-    if (draftId) {
-      const draft = await inboxGetMessage(tx, draftId)
-      if (!draft || draft.conversation_id !== id || draft.status !== 'draft') {
-        throw createError({ statusCode: 404, statusMessage: 'Draft not found' })
-      }
-      // Empty request body keeps the draft's stored body (send-as-is).
-      const promoted = await inboxPromoteDraft(tx, {
-        id: draftId,
-        conversationId: id,
-        bodyHtml: rawBody ? html : (draft.body_html ?? ''),
-        bodyText: rawBody ? text : (draft.body_text ?? ''),
-        senderUserId: ctx.userId
-      })
-      if (!promoted) throw createError({ statusCode: 404, statusMessage: 'Draft not found' })
-      message = promoted
-    } else {
-      if (!rawBody.trim()) {
-        throw createError({ statusCode: 400, statusMessage: 'Body is required' })
-      }
-      message = await inboxCreateMessage(tx, {
-        conversationId: conversation.id,
-        direction: 'outbound',
-        status: 'queued',
-        senderUserId: ctx.userId,
-        subject: replySubject,
-        bodyHtml: html,
-        bodyText: text
-      })
-    }
-
-    // From identity: snapshot the personal From onto the row at queue time
-    // (an admin removing the alias later can't change an already-queued send),
-    // and bake the signature into body_html only. Personal with no alias falls
-    // back to the contact address (from_email cleared → resolved at send) —
-    // clearing matters for promoted drafts, which may carry a previous
-    // author's alias snapshot the sender has no claim to.
-    if (parsed.data.fromIdentity === 'personal') {
-      const settings = await getInboxSettings(tx)
-      const { personalFrom, signature } = await inboxResolvePersonalIdentity(tx, ctx.userId, settings)
-      if (personalFrom) {
-        const sig = signature ? `<br><br>${inboxSanitizeEmailHtml(signature)}` : ''
-        await tx
-          .updateTable('inbox_messages')
-          .set({ from_email: personalFrom, body_html: sql`COALESCE(body_html, '') || ${sig}`, updated_at: new Date() })
-          .where('id', '=', message.id)
-          .execute()
-      } else {
-        await tx
-          .updateTable('inbox_messages')
-          .set({ from_email: null, updated_at: new Date() })
-          .where('id', '=', message.id)
-          .execute()
-      }
-    } else if (parsed.data.fromIdentity === 'contact') {
-      // An explicit shared-address choice must override a personal From that
-      // was saved onto the draft — otherwise the send rides the stale alias.
-      await tx
-        .updateTable('inbox_messages')
-        .set({ from_email: null, updated_at: new Date() })
-        .where('id', '=', message.id)
-        .execute()
-    }
-
-    await inboxAssignIfUnassigned(tx, conversation.id, ctx.userId)
-    await inboxUpdateConversationStatus(tx, conversation.id, 'pending')
-    await inboxSetNeedsReview(tx, conversation.id, false)
-    // A promoted draft carries its original created_at (possibly stale), so
-    // stamp the conversation's last activity with the actual send moment.
-    await inboxTouchLastMessage(tx, conversation.id, draftId ? new Date() : message.created_at, 'outbound')
-    await inboxLogConversationEvent(tx, conversation.id, 'inbox_reply_queued', 'Reply queued', {
-      userId: ctx.userId,
-      extra: { messageId: message.id, direction: 'outbound' }
+    const message = await inboxQueueReply(tx, conversation, ctx.userId, {
+      rawBody,
+      draftId,
+      fromIdentity: parsed.data.fromIdentity
     })
 
     return { id: message.id, status: message.status }

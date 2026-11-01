@@ -173,6 +173,10 @@ Set `appId` on every tool that reads or writes an org-scoped app's data. Leave i
 
 A tool may omit `scope` when it is read-only and safe for any valid bearer, such as `list_orgs` listing the bearer's own memberships. Gates 2 and 3 are skipped for it, it is listed for every token, it registers no OAuth scope, and it counts against the read rate-limit buckets.
 
+## Tool annotations
+
+A tool that sets `readOnly: true` or `destructive: true|false` is listed with the MCP `annotations` `{ readOnlyHint, destructiveHint }`, so clients can decide whether to ask before calling it. A tool that sets neither is listed without annotations, which the spec reads as possibly destructive. `readOnly: true` also keeps the tool out of the writes-per-token rate-limit bucket.
+
 ## Org selection in multi-tenant mode
 
 When the tenancy layer is loaded, every tool that touches org-scoped data accepts an optional `org` input: the slug of the org to operate in (the tenancy layer's `list_orgs` returns the bearer's memberships, each with the MCP apps switched on there; the tenancy layer registers it only when the MCP layer is loaded). Without it the tool falls back to the request's `X-Active-Org` header, so a client pinned to one org through a fixed header keeps working. Either way the tool runs inside `runInOrgTransaction(event, { org, userId }, ...)` from `#tenant/server`, which rejects an org the bearer's user is not a member of (404, indistinguishable from a non-existent org), a suspended org (423), and a call that names no org at all (400).
@@ -186,7 +190,7 @@ Three default buckets, all overridable via `runtimeConfig.mcpRateLimits`:
 | Bucket | Key | Default | Window |
 |---|---|---|---|
 | All tools | `auth.tokenId` | 120 | 60s |
-| Write tools (scope ∉ `mcpReadScopes`) | `auth.tokenId` | 20 | 60s |
+| Write tools (not `readOnly`, scope ∉ `mcpReadScopes`) | `auth.tokenId` | 20 | 60s |
 | Destructive tools (`destructive: true`) | `userId` | 20 | 1h |
 
 Per-tool overrides are **additive** — they layer on top of the defaults:
