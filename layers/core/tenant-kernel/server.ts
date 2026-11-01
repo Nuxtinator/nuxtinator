@@ -280,8 +280,7 @@ export interface OrgTransactionOpts {
 //
 // Used by code paths that aren't routed through `defineTenantHandler` but
 // still need to write to RLS-protected tables (the OAuth flow's non-`/api/`
-// endpoints, which can't go through the tenancy middleware, and MCP tool
-// handlers).
+// endpoints, which can't go through the tenancy middleware).
 export async function runInOrgTransaction<T>(event: H3Event, fn: OrgTransactionFn<T>): Promise<T>
 export async function runInOrgTransaction<T>(event: H3Event, opts: OrgTransactionOpts, fn: OrgTransactionFn<T>): Promise<T>
 export async function runInOrgTransaction<T>(

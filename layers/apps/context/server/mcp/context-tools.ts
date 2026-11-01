@@ -6,12 +6,13 @@
 // section definition requires the section permission.
 // All tools take an optional `org` slug (the tenancy layer's `list_orgs`
 // lists the bearer's orgs) and run inside
-// `runInOrgTransaction(event, { org, userId }, ...)` from `#tenant/server`,
-// which in multi mode resolves the org (the `org` input, else the
-// `X-Active-Org` header on the MCP HTTP request), enforces the bearer's
-// membership, and sets the active-org GUC; in single mode it is a plain
-// transaction. The transaction spans the whole handler, so a tool that
-// returns an error has written nothing.
+// `withOrgPermission(event, { appId, org }, scope, ...)` from `#tenant/server`,
+// the same handler the web routes use: it signs the bearer in, requires the
+// tool's scope on the token and in the user's permissions for the org, and
+// in multi mode resolves the org (the `org` input, else the `X-Active-Org`
+// header on the MCP HTTP request, else the user's only org), enforces
+// membership, and sets the active-org GUC. The transaction spans the whole
+// handler, so a tool that returns an error has written nothing.
 //
 // `read_organization` is the source-API name — it returns the whole portfolio
 // (sections + content) for a given portfolio_id. The name is preserved for
@@ -31,7 +32,7 @@ import { z } from 'zod'
 import { sql, type Kysely } from 'kysely'
 import { defineMcpTool, mcpError, mcpLog, type McpToolContext } from '#mcp-layer'
 import type { Database as CoreDatabase } from '#core/server/database/schema'
-import { runInOrgTransaction } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 import { getPortfolioSections } from '../utils/section-settings'
 import { loadSection, saveSectionContent, isKnownSectionKey, addSection, deleteSection } from '../utils/section-helpers'
 import { createPortfolio, getPortfolioById, listPortfolios } from '../utils/portfolio-helpers'
@@ -92,7 +93,7 @@ export const listPortfoliosTool = defineMcpTool({
   input: z.object({ org: orgInput }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx) => {
         const rows = await listPortfolios(tx)
         return textResult(`${rows.length} portfolio(s).`, { portfolios: rows })
       })
@@ -109,7 +110,7 @@ export const listSectionsTool = defineMcpTool({
   input: z.object({ org: orgInput, portfolio_id: z.string().uuid() }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx) => {
         const exists = await tx
           .selectFrom('context_portfolios')
           .select(['id', 'template'])
@@ -156,7 +157,7 @@ export const readSectionTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx) => {
         const exists = await tx
           .selectFrom('context_portfolios')
           .select(['id', 'template'])
@@ -198,7 +199,7 @@ export const bulkReadSectionsTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx) => {
         const exists = await tx
           .selectFrom('context_portfolios')
           .select(['id', 'template'])
@@ -246,7 +247,7 @@ export const readOrganizationTool = defineMcpTool({
   input: z.object({ org: orgInput, portfolio_id: z.string().uuid() }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx) => {
         const p = await tx
           .selectFrom('context_portfolios')
           .select(['id', 'slug', 'name', 'template'])
@@ -300,7 +301,7 @@ export const updateSectionTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.write', async (tx) => {
         const exists = await tx
           .selectFrom('context_portfolios')
           .select('id')
@@ -392,7 +393,7 @@ export const bulkUpdateSectionsTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.write', async (tx) => {
         const exists = await tx
           .selectFrom('context_portfolios')
           .select('id')
@@ -495,7 +496,7 @@ export const createPortfolioTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.portfolio.create', async (tx) => {
         const portfolio = await createPortfolio(tx, input, ctx.auth.userId)
 
         await mcpLog('CREATE', 'context_portfolios', portfolio.id, ctx, {
@@ -527,7 +528,7 @@ export const createSectionTool = defineMcpTool({
   }),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.section.custom', async (tx) => {
         const portfolio = await getPortfolioById(tx, input.portfolio_id)
         if (!portfolio) throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
 
@@ -587,7 +588,7 @@ export const bulkCreateSectionsTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.section.custom', async (tx) => {
         const portfolio = await getPortfolioById(tx, input.portfolio_id)
         if (!portfolio) throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
 
@@ -649,7 +650,7 @@ export const deleteSectionTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.section.custom', async (tx) => {
         const portfolio = await getPortfolioById(tx, input.portfolio_id)
         if (!portfolio) throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
 
@@ -689,7 +690,7 @@ export const listSuggestionsTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx) => {
         const rows = await listOwnSuggestions(tx, ctx.auth.userId, {
           portfolioId: input.portfolio_id,
           status: input.status,
@@ -718,7 +719,7 @@ export const withdrawSuggestionTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.write', async (tx) => {
         const row = await tx
           .selectFrom('context_suggestions')
           .select('set_id')
@@ -750,7 +751,7 @@ export const readSuggestionTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx) => {
         const set = await getSuggestionSetOr404(tx, input.suggestion_set_id, { userId: ctx.auth.userId, isReviewer: false })
         return textResult(`Suggestion on ${set.portfolio_name} with ${set.suggestions.length} section(s).`, {
           suggestion_set_id: set.id,
@@ -790,7 +791,7 @@ export const updateSuggestionTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.write', async (tx) => {
         if (!input.updates && input.note === undefined) {
           throw createError({ statusCode: 400, statusMessage: 'Provide updates, note, or both.' })
         }

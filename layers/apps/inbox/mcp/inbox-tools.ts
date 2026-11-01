@@ -3,8 +3,10 @@
 //
 // Scopes: reads use `inbox.read`, triage (status, assignment, tags, notes)
 // uses `inbox.access`, drafts and sends use `inbox.send`. Every tool takes an
-// optional `org` slug and runs inside `runInOrgTransaction`, which resolves
-// and enforces the org (multi mode) or is a plain transaction (single mode).
+// optional `org` slug and runs inside `withOrgPermission`, the same handler
+// the web routes use: it requires the tool's scope on the token and in the
+// user's permissions for the org, resolves and enforces the org (multi mode),
+// and hands over the tenant context the CRM checks take.
 //
 // Inbound mail is untrusted. Every value an outside sender wrote (bodies,
 // previews, subjects, From names and addresses, attachment names, contact
@@ -21,8 +23,7 @@ import { sql } from 'kysely'
 import type { Transaction } from 'kysely'
 import { createError } from 'h3'
 import { defineMcpTool, mcpError, type McpToolContext } from '#mcp-layer'
-import { runInOrgTransaction, type TenantContext } from '#tenant/server'
-import { db } from '#core/server/utils/database'
+import { withOrgPermission, type TenantContext } from '#tenant/server'
 import type { Database } from '#core/server/database/schema'
 import { resolveTypePermission } from '#crm/server'
 import {
@@ -115,40 +116,6 @@ function fromLine(name: string | null, email: string | null): string {
   return name || email || 'unknown'
 }
 
-async function currentOrgId(tx: Tx): Promise<string | null> {
-  const { rows } = await sql<{ org: string | null }>`
-    select nullif(current_setting('app.current_org', true), '') as org
-  `.execute(tx)
-  return rows[0]?.org ?? null
-}
-
-// The tenant context the CRM permission checks expect, built for the bearer's
-// user in the org this transaction runs in. Permissions come from the MCP
-// dispatcher, which resolved them for the same org.
-async function tenantContext(tx: Tx, ctx: McpToolContext): Promise<TenantContext> {
-  const userId = ctx.auth.userId
-  const orgId = await currentOrgId(tx)
-  let roles: string[]
-  if (orgId) {
-    const row = await tx.selectFrom('memberships').select('roles')
-      .where('user_id', '=', userId).where('org_id', '=', orgId).executeTakeFirst()
-    roles = row?.roles ?? []
-  } else {
-    const row = await tx.selectFrom('users').select(['roles', 'is_admin']).where('id', '=', userId).executeTakeFirst()
-    roles = [...(row?.roles ?? [])]
-    if (row?.is_admin && !roles.includes('admin')) roles.push('admin')
-  }
-  return {
-    userId,
-    orgId,
-    orgSlug: null,
-    orgName: '',
-    role: roles[0] ?? null,
-    roles,
-    perms: new Set(ctx.userPermissions)
-  } as unknown as TenantContext
-}
-
 interface Via {
   clientName: string
   suffix: string
@@ -156,11 +123,12 @@ interface Via {
 }
 
 // How a write made over MCP is labelled on the conversation timeline.
-async function viaClient(ctx: McpToolContext): Promise<Via> {
+async function viaClient(tx: Tx, tenant: TenantContext, ctx: McpToolContext): Promise<Via> {
+  const clientId = tenant.clientId ?? ctx.auth.clientId
   const { rows } = await sql<{ client_name: string | null }>`
-    select client_name from oauth_clients where client_id = ${ctx.auth.clientId}
-  `.execute(db)
-  const clientName = rows[0]?.client_name?.trim() || ctx.auth.clientId
+    select client_name from oauth_clients where client_id = ${clientId}
+  `.execute(tx)
+  const clientName = rows[0]?.client_name?.trim() || clientId
   return {
     clientName,
     suffix: ` · via ${clientName}`,
@@ -245,7 +213,7 @@ const listConversationsTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'inbox', org: input.org }, 'inbox.read', async (tx) => {
         const filters: InboxConversationFilters = {
           status: input.status,
           held: input.needsReview || undefined,
@@ -294,9 +262,8 @@ const readConversationTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'inbox', org: input.org }, 'inbox.read', async (tx, tenant) => {
         const conversation = await requireConversation(tx, input.conversationId)
-        const tenant = await tenantContext(tx, ctx)
         const u = untrustedMarkers()
 
         const channel = await tx.selectFrom('crm_channels').select(['value', 'verified'])
@@ -430,7 +397,7 @@ const listForRecordTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'inbox', org: input.org }, 'inbox.read', async (tx) => {
         const channels = await tx
           .selectFrom('crm_contact_channels')
           .innerJoin('crm_channels', 'crm_channels.id', 'crm_contact_channels.channel_id')
@@ -468,8 +435,8 @@ const listAssigneesTool = defineMcpTool({
   input: z.object({ org: orgInput }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
-        const ids = await inboxUsersWithAccess(tx, await currentOrgId(tx))
+      return await withOrgPermission(ctx.event, { appId: 'inbox', org: input.org }, 'inbox.read', async (tx, tenant) => {
+        const ids = await inboxUsersWithAccess(tx, tenant.orgId)
         const rows = ids.length
           ? await tx.selectFrom('users').select(['id', 'display_name', 'email'])
             .where('id', 'in', ids).orderBy('display_name', 'asc').execute()
@@ -493,7 +460,7 @@ const draftingBackgroundTool = defineMcpTool({
   input: z.object({ org: orgInput }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'inbox', org: input.org }, 'inbox.read', async (tx) => {
         const [docs, knowledge] = await Promise.all([
           inboxListGroundingDocuments(tx),
           inboxListActiveKnowledge(tx)
@@ -535,8 +502,8 @@ const saveDraftTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const via = await viaClient(ctx)
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'inbox', org: input.org }, 'inbox.send', async (tx, tenant) => {
+        const via = await viaClient(tx, tenant, ctx)
         const userId = ctx.auth.userId
         const conversation = await requireConversation(tx, input.conversationId)
         const html = inboxSanitizeEmailHtml(textToHtml(input.body))
@@ -609,8 +576,8 @@ const addCommentTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const via = await viaClient(ctx)
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'inbox', org: input.org }, 'inbox.access', async (tx, tenant) => {
+        const via = await viaClient(tx, tenant, ctx)
         const conversation = await requireConversation(tx, input.conversationId)
         const comment = await inboxAddComment(tx, conversation.id, ctx.auth.userId, inboxSanitizeNoteHtml(textToHtml(input.text)))
         await inboxLogConversationEvent(tx, conversation.id, 'inbox_note_added', `Note added${via.suffix}`, {
@@ -643,8 +610,8 @@ const updateConversationTool = defineMcpTool({
       if (input.status === undefined && input.assigneeId === undefined && input.tags === undefined) {
         throw createError({ statusCode: 400, statusMessage: 'Nothing to update: pass status, assigneeId or tags' })
       }
-      const via = await viaClient(ctx)
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'inbox', org: input.org }, 'inbox.access', async (tx, tenant) => {
+        const via = await viaClient(tx, tenant, ctx)
         const userId = ctx.auth.userId
         const conversation = await requireConversation(tx, input.conversationId)
         const id = conversation.id
@@ -669,7 +636,7 @@ const updateConversationTool = defineMcpTool({
 
         if (input.assigneeId !== undefined) {
           if (input.assigneeId) {
-            const allowed = await inboxUsersWithAccess(tx, await currentOrgId(tx))
+            const allowed = await inboxUsersWithAccess(tx, tenant.orgId)
             if (!allowed.includes(input.assigneeId)) {
               throw createError({ statusCode: 400, statusMessage: 'Assignee cannot access the inbox' })
             }
@@ -732,8 +699,8 @@ const sendReplyTool = defineMcpTool({
       if (!input.body && !input.draftId) {
         throw createError({ statusCode: 400, statusMessage: 'Pass body or draftId' })
       }
-      const via = await viaClient(ctx)
-      return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'inbox', org: input.org }, 'inbox.send', async (tx, tenant) => {
+        const via = await viaClient(tx, tenant, ctx)
         const conversation = await requireConversation(tx, input.conversationId)
         if (conversation.status === 'spam') {
           throw createError({ statusCode: 400, statusMessage: 'Cannot reply to a spam conversation' })

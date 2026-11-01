@@ -2,11 +2,12 @@
 //
 // Read tools use scope `files.read`; write tools use `files.write`. Every
 // tool takes an optional `org` slug and runs inside
-// `runInOrgTransaction(event, { org, userId }, ...)` from `#tenant/server`,
-// which in multi mode resolves the org (the `org` input, else the
-// `X-Active-Org` header on the MCP HTTP request), enforces the bearer's
-// membership, and sets the `app.current_org` GUC; in single mode it is a
-// plain transaction.
+// `withOrgPermission(event, { appId, org }, scope, ...)` from `#tenant/server`,
+// the same handler the web routes use: it signs the bearer in, requires the
+// tool's scope on the token and in the user's permissions for the org, and
+// in multi mode resolves the org (the `org` input, else the `X-Active-Org`
+// header on the MCP HTTP request, else the user's only org), enforces
+// membership, and sets the `app.current_org` GUC.
 //
 // Documents and sites are exposed for create/update. Binary files upload in
 // two steps: `files_begin_upload` hands out a presigned PUT URL the client
@@ -18,7 +19,7 @@ import { z } from 'zod'
 import { sql, type Kysely, type Transaction } from 'kysely'
 import { defineMcpTool, mcpError, mcpLog, type McpToolContext } from '#mcp-layer'
 import type { Database, Database as CoreDatabase } from '#core/server/database/schema'
-import { runInOrgTransaction } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 import { deleteFromS3, presignedPutUrl, statS3Object } from '#core/server/utils/storage'
 import {
   loadItem, saveDocContent, MAX_DOC_BYTES, MAX_SITE_BYTES, MAX_FILE_MB, RAW_LINK_TTL_SECONDS
@@ -104,7 +105,7 @@ export const listFilesTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     const limit = input.limit ?? 50
-    return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+    return await withOrgPermission(ctx.event, { appId: 'files', org: input.org }, 'files.read', async (tx) => {
       let qb = tx
         .selectFrom('files_items as f')
         .leftJoin('users as u', 'u.id', 'f.created_by')
@@ -143,7 +144,7 @@ export const readDocTool = defineMcpTool({
   scope: 'files.read',
   input: z.object({ org: orgInput, id: z.string().uuid() }).strict(),
   handler: async (input, ctx) => {
-    return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+    return await withOrgPermission(ctx.event, { appId: 'files', org: input.org }, 'files.read', async (tx) => {
       const item = await loadItem(tx, input.id)
       if (!item) throw createError({ statusCode: 404, statusMessage: 'Document not found.' })
       if (item.kind !== 'doc') {
@@ -167,7 +168,7 @@ export const readSiteTool = defineMcpTool({
   scope: 'files.read',
   input: z.object({ org: orgInput, id: z.string().uuid() }).strict(),
   handler: async (input, ctx) => {
-    return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+    return await withOrgPermission(ctx.event, { appId: 'files', org: input.org }, 'files.read', async (tx) => {
       const item = await loadItem(tx, input.id)
       if (!item) throw createError({ statusCode: 404, statusMessage: 'Site not found.' })
       if (item.kind !== 'site') {
@@ -200,7 +201,7 @@ export const createDocTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'files', org: input.org }, 'files.write', async (tx) => {
         const bodyMd = input.body_md ?? ''
         // z.string().max() caps UTF-16 units, not bytes — enforce the real
         // byte cap here so MCP matches the REST create + saveDocContent paths.
@@ -250,7 +251,7 @@ export const updateDocTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'files', org: input.org }, 'files.write', async (tx) => {
         const item = await loadItem(tx, input.id)
         if (!item) throw createError({ statusCode: 404, statusMessage: 'Document not found.' })
         if (item.kind !== 'doc') {
@@ -290,7 +291,7 @@ export const createSiteTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'files', org: input.org }, 'files.write', async (tx) => {
         const html = input.html ?? ''
         if (Buffer.byteLength(html, 'utf8') > MAX_SITE_BYTES) {
           throw createError({ statusCode: 413, statusMessage: 'Site content exceeds 2MB limit.' })
@@ -342,7 +343,7 @@ export const updateSiteTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'files', org: input.org }, 'files.write', async (tx) => {
         const item = await loadItem(tx, input.id)
         if (!item) throw createError({ statusCode: 404, statusMessage: 'Site not found.' })
         if (item.kind !== 'site') {
@@ -380,7 +381,7 @@ export const beginUploadTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'files', org: input.org }, 'files.write', async (tx) => {
         if (input.size_bytes > MAX_FILE_BYTES) {
           throw createError({ statusCode: 413, statusMessage: `File too large (max ${MAX_FILE_MB} MB).` })
         }
@@ -419,7 +420,7 @@ export const completeUploadTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'files', org: input.org }, 'files.write', async (tx) => {
         const prefix = `files/${await uploadOrgSegment(tx)}/`
         if (!input.key.startsWith(prefix) || !/^[0-9a-f-]{36}\.[a-z0-9]{1,16}$/.test(input.key.slice(prefix.length))) {
           throw createError({ statusCode: 400, statusMessage: 'Key was not issued for this org by files_begin_upload.' })
@@ -482,7 +483,7 @@ export const shareTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'files', org: input.org }, 'files.write', async (tx) => {
         const item = await loadItem(tx, input.id)
         if (!item) throw createError({ statusCode: 404, statusMessage: 'Not found.' })
         if (item.share_token && !input.reissue) {
@@ -515,7 +516,7 @@ export const unshareTool = defineMcpTool({
   input: z.object({ org: orgInput, id: z.string().uuid() }).strict(),
   handler: async (input, ctx) => {
     try {
-      await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      await withOrgPermission(ctx.event, { appId: 'files', org: input.org }, 'files.write', async (tx) => {
         const item = await loadItem(tx, input.id)
         if (!item) throw createError({ statusCode: 404, statusMessage: 'Not found.' })
         await tx

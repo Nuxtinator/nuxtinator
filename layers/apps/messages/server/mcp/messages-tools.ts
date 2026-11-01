@@ -2,11 +2,12 @@
 //
 // Read tools use scope `messages.read`; write tools use `messages.write`.
 // Every tool takes an optional `org` slug and runs inside
-// `runInOrgTransaction(event, { org, userId }, ...)` from `#tenant/server`,
-// which in multi mode resolves the org (the `org` input, else the
-// `X-Active-Org` header on the MCP HTTP request), enforces the bearer's
-// membership, and sets the `app.current_org` GUC; in single mode it is a
-// plain transaction.
+// `withOrgPermission(event, { appId, org }, scope, ...)` from `#tenant/server`,
+// the same handler the web routes use: it signs the bearer in, requires the
+// tool's scope on the token and in the user's permissions for the org, and
+// in multi mode resolves the org (the `org` input, else the `X-Active-Org`
+// header on the MCP HTTP request, else the user's only org), enforces
+// membership, and sets the `app.current_org` GUC.
 //
 // The data model stores raw markdown — there is no TipTap JSON ↔ markdown
 // round-trip needed for the body. Mention validation hard-fails on
@@ -19,7 +20,7 @@ import { z } from 'zod'
 import { sql, type Kysely } from 'kysely'
 import { defineMcpTool, mcpError, mcpLog, type McpToolContext } from '#mcp-layer'
 import type { Database as CoreDatabase } from '#core/server/database/schema'
-import { runInOrgTransaction } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 import { extractMentions } from '../utils/markdown-mentions'
 import { fanoutMentions } from '../utils/mention-fanout'
 import { notifyMessages } from '../utils/notification-creator'
@@ -64,7 +65,7 @@ export const listConversationsTool = defineMcpTool({
   scope: 'messages.read',
   input: z.object({ org: orgInput }).strict(),
   handler: async (input, ctx) => {
-    return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+    return await withOrgPermission(ctx.event, { appId: 'messages', org: input.org }, 'messages.read', async (tx) => {
       const userId = ctx.auth.userId
 
       const channels = await tx
@@ -161,7 +162,7 @@ export const listItemsTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     const limit = input.limit ?? 30
-    return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+    return await withOrgPermission(ctx.event, { appId: 'messages', org: input.org }, 'messages.read', async (tx) => {
       const conv = await requireConversationAccess(tx, ctx.auth.userId, input.conversation_id)
 
       let qb = tx
@@ -215,7 +216,7 @@ export const readItemTool = defineMcpTool({
   scope: 'messages.read',
   input: z.object({ org: orgInput, item_id: z.string().uuid() }).strict(),
   handler: async (input, ctx) => {
-    return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+    return await withOrgPermission(ctx.event, { appId: 'messages', org: input.org }, 'messages.read', async (tx) => {
       const item = await tx
         .selectFrom('messages_items as i')
         .innerJoin('users as u', 'u.id', 'i.author_id')
@@ -303,7 +304,7 @@ export const searchTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     const limit = input.limit ?? 20
-    return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+    return await withOrgPermission(ctx.event, { appId: 'messages', org: input.org }, 'messages.read', async (tx) => {
       const tsQuery = sql<unknown>`websearch_to_tsquery('english', ${input.q})`
 
       const itemRows = await tx
@@ -383,7 +384,7 @@ export const listNotificationsTool = defineMcpTool({
   handler: async (input, ctx) => {
     const limit = input.limit ?? 30
     const unreadOnly = input.unread_only ?? true
-    return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+    return await withOrgPermission(ctx.event, { appId: 'messages', org: input.org }, 'messages.read', async (tx) => {
       let qb = tx
         .selectFrom('notifications as n')
         .leftJoin('users as actor', 'actor.id', 'n.actor_id')
@@ -436,7 +437,7 @@ export const postItemTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'messages', org: input.org }, 'messages.write', async (tx) => {
         const orgId = getOrgId(ctx)
         const conv = await requireConversationAccess(tx, ctx.auth.userId, input.conversation_id)
         const bodyMd = await validateMcpMarkdown(tx, input.body_md, {
@@ -530,7 +531,7 @@ export const postCommentTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'messages', org: input.org }, 'messages.write', async (tx) => {
         const orgId = getOrgId(ctx)
         const item = await tx
           .selectFrom('messages_items')
@@ -654,7 +655,7 @@ export const reactTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'messages', org: input.org }, 'messages.write', async (tx) => {
         // Resolve the conversation of the target so we can do an access check.
         let conversationId: string | null = null
         if (input.target_kind === 'item') {
@@ -729,7 +730,7 @@ export const markReadTool = defineMcpTool({
       if (!!input.conversation_id === !!input.notification_ids) {
         throw createError({ statusCode: 400, statusMessage: 'Provide exactly one of conversation_id or notification_ids.' })
       }
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'messages', org: input.org }, 'messages.write', async (tx) => {
         if (input.conversation_id) {
           const conv = await loadConversation(tx, input.conversation_id)
           if (!conv) {

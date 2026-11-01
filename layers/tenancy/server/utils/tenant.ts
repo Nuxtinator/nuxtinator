@@ -311,9 +311,12 @@ export async function getUserPermissionsAcrossOrgs(userId: string): Promise<Set<
 // The user's effective permissions for the org a request targets. Org
 // discovery follows `runInOrgTransaction`: `opts.org`, then the middleware's
 // `event.context`, then the `X-Active-Org` header, then the `active-org-slug`
-// cookie — with the same membership and suspension checks (404 / 423). A
-// request that selects no org gets the across-orgs set, which is what
-// org-less surfaces (a tool that lists the user's orgs) need.
+// cookie — with the same membership and suspension checks (404 / 423). For a
+// selected org the set is what `withOrgPermission` grants there (membership
+// roles plus the user's grants in that org) plus personal-app permissions;
+// host-level roles and `is_admin` don't widen it. A request that selects no
+// org gets the across-orgs set, which is what org-less surfaces (a tool that
+// lists the user's orgs) need.
 export async function getUserPermissionsForRequest(
   event: H3Event,
   userId: string,
@@ -336,8 +339,7 @@ export async function getUserPermissionsForRequest(
   }
   if (!orgId) return await getUserPermissionsAcrossOrgs(userId)
 
-  const perms = await getUserPermissions(userId)
-  for (const perm of await resolveOrgPerms(userId, orgId)) perms.add(perm)
+  const perms = await resolveOrgPerms(userId, orgId)
   // Personal apps are the same in every org.
   for (const perm of await getPersonalAppPermissions(db, userId)) perms.add(perm)
   return perms
@@ -528,9 +530,8 @@ async function memberOrgIds(userId: string): Promise<string[]> {
 
 // Open a transaction and run `fn(tx)` inside it with the active org's GUC set.
 // Used by code paths that aren't routed through `defineTenantHandler` but
-// still need to write to RLS-protected tables: the OAuth flow's non-`/api/`
-// endpoints, which can't go through the tenancy middleware, and MCP tool
-// handlers, which authenticate with a bearer token instead of a session.
+// still need to write to RLS-protected tables, such as the OAuth flow's
+// non-`/api/` endpoints, which can't go through the tenancy middleware.
 //
 // Org discovery (in priority order):
 //   1. `opts.org` — a slug from the caller's own input
@@ -579,7 +580,7 @@ export async function runInOrgTransaction<T>(
 // way `runInOrgTransaction(event, { org, userId })` resolves it, so a gate on
 // this set checks the org the caller's transaction runs in. Null when no org
 // resolves (several memberships, none selected); org-scoped work then fails
-// with 400 in `runInOrgTransaction`. The MCP layer gates tools on it.
+// with 400. The MCP layer gates tools on it.
 export async function getEnabledAppsForRequest(
   event: H3Event,
   userId: string,

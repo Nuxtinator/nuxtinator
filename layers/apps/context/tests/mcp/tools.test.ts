@@ -64,7 +64,7 @@ describe('context MCP tools file', () => {
     const src = await fs.readFile(TOOLS_FILE, 'utf8')
     const orgInputs = src.match(/\borg: orgInput\b/g) ?? []
     expect(orgInputs.length).toBe(15)
-    const orgScopedCalls = src.match(/runInOrgTransaction\(ctx\.event, \{ org: input\.org, userId: ctx\.auth\.userId \}/g) ?? []
+    const orgScopedCalls = src.match(/withOrgPermission\(ctx\.event, \{ appId: 'context', org: input\.org \}/g) ?? []
     expect(orgScopedCalls.length).toBe(15)
   })
 

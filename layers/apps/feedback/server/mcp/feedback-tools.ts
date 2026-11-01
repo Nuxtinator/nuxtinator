@@ -2,11 +2,12 @@
 //
 // Read tools use scope `feedback.read`; write tools use `feedback.write`.
 // Every tool takes an optional `org` slug and runs inside
-// `runInOrgTransaction(event, { org, userId }, ...)` from `#tenant/server`,
-// which in multi mode resolves the org (the `org` input, else the
-// `X-Active-Org` header on the MCP HTTP request), enforces the bearer's
-// membership, and sets the `app.current_org` GUC; in single mode it is a
-// plain transaction.
+// `withOrgPermission(event, { appId, org }, scope, ...)` from `#tenant/server`,
+// the same handler the web routes use: it signs the bearer in, requires the
+// tool's scope on the token and in the user's permissions for the org, and
+// in multi mode resolves the org (the `org` input, else the `X-Active-Org`
+// header on the MCP HTTP request, else the user's only org), enforces
+// membership, and sets the `app.current_org` GUC.
 //
 // Board vocabulary (columns are global to the deployment, ordered by
 // position): FEEDBACK INBOX holds untriaged intake — new findings, ideas, and
@@ -19,7 +20,7 @@ import { z } from 'zod'
 import { sql, type Kysely, type Transaction } from 'kysely'
 import { defineMcpTool, mcpError, mcpLog } from '#mcp-layer'
 import type { Database as CoreDatabase } from '#core/server/database/schema'
-import { runInOrgTransaction } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 
 // The mcp-audit layer types its executor as `Kysely<CoreDatabase>` (core-only
 // schema), while feedback-layer transactions carry the augmented Database
@@ -73,7 +74,7 @@ export const listProjectsTool = defineMcpTool({
   scope: 'feedback.read',
   input: z.object({ org: orgInput }).strict(),
   handler: async (input, ctx) => {
-    return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+    return await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.read', async (tx) => {
       const projects = await tx
         .selectFrom('projects')
         .select(['id', 'name', 'description', 'created_at'])
@@ -110,7 +111,7 @@ export const listCardsTool = defineMcpTool({
     limit: z.number().int().min(1).max(200).optional()
   }).strict(),
   handler: async (input, ctx) => {
-    return await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+    return await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.read', async (tx) => {
       let qb = tx
         .selectFrom('cards as k')
         .leftJoin('columns as c', 'c.id', 'k.column_id')
@@ -163,7 +164,7 @@ export const createProjectTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx) => {
         const project = await tx
           .insertInto('projects')
           .values({
@@ -221,7 +222,7 @@ export const createCardTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx) => {
         const project = await tx
           .selectFrom('projects')
           .select('id')
@@ -284,7 +285,7 @@ export const moveCardTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx) => {
         const column = await resolveColumn(tx, input.column)
         const updated = await tx
           .updateTable('cards')
@@ -335,7 +336,7 @@ export const updateCardTool = defineMcpTool({
   ),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, { org: input.org, userId: ctx.auth.userId }, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx) => {
         const card = await tx
           .selectFrom('cards')
           .select(['id', 'description', 'post_meta'])
