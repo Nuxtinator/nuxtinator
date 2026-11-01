@@ -21,6 +21,9 @@ own key per provider, pick that provider's models, and override those choices.
   - `generate({ tx, feature, tool, … })` — force a single tool call, return its
     parsed arguments as structured output (the pattern for AI-drafting,
     extraction, classification).
+  - `decide({ tx, feature, input, questions })` — ask a decision model typed
+    questions (yes/no, choice, score) about an input and get probabilities
+    back instead of text (see [Decisions](#decisions)).
   - Both take the caller's `tx` and a feature key and resolve the key and model
     themselves: the org's own when it has them, the host's otherwise.
   - `resolveFeatureModel(tx, featureKey)` / `getAllowedModels(tx)` — the model a
@@ -186,12 +189,50 @@ await generate({
 const { text } = await transcribe({ tx, feature: 'notes.transcribe', audio: bytes, mimeType: 'audio/mp4' })
 ```
 
+### Decisions
+
+Decision models answer typed questions about an input with probabilities
+instead of generating text: cheap, fast classification, routing, triage and
+rubric scoring. OpenRouter lists them under the `decisions` output modality;
+Tinfoil's are `decision-small`, `-medium` and `-large` (text only). Both join
+the pickers with a **Decision** badge; register a feature with
+`kind: 'decision'` to get a picker for one.
+
+```ts
+import { decide, registerAiFeature } from '#ai/server'
+
+registerAiFeature({ key: 'inbox.triage', label: 'Inbox — triage', kind: 'decision' })
+
+const { answers } = await decide({
+  tx,
+  feature: 'inbox.triage',
+  input: 'Charged three times for one $49 order, wants a refund.', // or a JSON object
+  questions: {
+    escalate: { type: 'predicate', instructions: 'Should a human handle this?',
+      criteria: { true: 'Angry, legal or safety', false: 'Routine' } },          // criteria optional
+    team: { type: 'choice', instructions: 'Which team owns this?',
+      choices: [{ value: 'billing', description: 'Charges, refunds' }, { value: 'shipping' }] },
+    urgency: { type: 'score', instructions: 'How urgent?', levels: ['routine', 'soon', 'critical'] }
+  }
+})
+answers.escalate // { type: 'predicate', probability: 0.66 }
+answers.team     // { type: 'choice', choice: 'billing', confidence: 0.99, probabilities: { billing: 0.99, shipping: 0.01 } }
+answers.urgency  // { type: 'score', score: 0.98, confidence: 0.75, probabilities: [0.14, 0.75, 0.12] }
+```
+
+`score` is the probability-weighted level index (0 = the first level). Every
+question gets an answer, or the call fails with 502. They bill input tokens
+only, once per question.
+
 ## Testing against the fake
 
-Under VITEST the client never touches the network: `complete()` and `generate()`
-route to a primeable fake, the model list is a fixed three-model set
-(`test/alpha`, `test/beta`, `test/gamma`), and any key other than the literal
-`invalid` verifies. A feature with no configured model runs on `test/alpha`.
+Under VITEST the client never touches the network: `complete()`, `generate()`
+and `decide()` route to a primeable fake, the model list is a fixed set
+(chat `test/alpha`, `test/beta`, `test/gamma`, decision `test/decider`), and
+any key other than the literal `invalid` verifies. A feature with no
+configured model runs on `test/alpha` (a decision feature on `test/decider`).
+Unscripted, `decide()` answers yes, the first choice and the lowest level;
+script answers by question name with `primeAiFake({ decisions: { … } })`.
 Script the fake over `/api/_test/ai` (only served under VITEST) with the helpers
 exported from this layer's `tests/helpers`:
 

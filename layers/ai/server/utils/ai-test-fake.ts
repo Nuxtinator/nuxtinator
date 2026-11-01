@@ -1,5 +1,5 @@
 // The VITEST stand-in for the provider network boundary. `complete()`,
-// `generate()` and `transcribe()` route here whenever `process.env.VITEST` is
+// `generate()`, `transcribe()` and `decide()` route here whenever `process.env.VITEST` is
 // set, so suites run without a key. Tests script the next answers over the
 // control endpoint (`/api/_test/ai`, see server/routes/api/_test/ai.ts) and
 // read back a log of every call the fake served, including the tool calls it
@@ -19,6 +19,9 @@ import type {
 } from '#core/ai-fallback/types'
 import { AI_EMBED_DIMENSIONS } from '#core/ai-fallback/vectors'
 import type {
+  AiDecideOptions,
+  AiDecideResult,
+  AiDecisionAnswer,
   AiRichCompleteOptions,
   AiRichGenerateOptions,
   AiTranscribeOptions,
@@ -47,6 +50,9 @@ export interface AiFakeScript {
   failWith?: number
   // Transcript `transcribe()` returns. Default: `[[transcript:<model>]]`.
   transcript?: string
+  // Answers `decide()` returns, by question name. Unscripted questions get
+  // the first answer with certainty: yes, the first choice, the lowest level.
+  decisions?: Record<string, AiDecisionAnswer>
 }
 
 export interface AiFakeToolResult extends AiToolCallRecord {
@@ -54,7 +60,7 @@ export interface AiFakeToolResult extends AiToolCallRecord {
 }
 
 export interface AiFakeCall {
-  kind: 'complete' | 'generate' | 'embed' | 'transcribe'
+  kind: 'complete' | 'generate' | 'embed' | 'transcribe' | 'decide'
   model: string
   system: AiRichCompleteOptions['system']
   messages: AiRichCompleteOptions['messages']
@@ -69,6 +75,8 @@ export interface AiFakeCall {
   reasoning?: AiRichCompleteOptions['reasoning']
   // For `transcribe`: the audio's media type, size and prompt.
   audio?: { mimeType: string, bytes: number, prompt?: string }
+  // For `decide`: the input and the questions asked.
+  decision?: Pick<AiDecideOptions, 'input' | 'questions'>
 }
 
 interface AiFakeState {
@@ -173,6 +181,38 @@ export function aiFakeTranscribe(opts: AiTranscribeOptions, model: string): AiTr
     audio: { mimeType: opts.mimeType, bytes, prompt: opts.prompt }
   })
   return { text: state.script.transcript ?? `[[transcript:${model}]]`, model }
+}
+
+export function aiFakeDecide(opts: AiDecideOptions, model: string): AiDecideResult {
+  const state = getState()
+  state.log.push({
+    kind: 'decide',
+    model,
+    system: undefined,
+    messages: [],
+    tools: [],
+    toolResults: [],
+    decision: { input: opts.input, questions: opts.questions }
+  })
+  const answers: Record<string, AiDecisionAnswer> = {}
+  for (const [name, q] of Object.entries(opts.questions)) {
+    const scripted = state.script.decisions?.[name]
+    if (scripted) {
+      answers[name] = scripted
+    } else if (q.type === 'predicate') {
+      answers[name] = { type: 'predicate', probability: 1 }
+    } else if (q.type === 'choice') {
+      answers[name] = {
+        type: 'choice',
+        choice: q.choices[0]!.value,
+        confidence: 1,
+        probabilities: Object.fromEntries(q.choices.map((c, i) => [c.value, i === 0 ? 1 : 0]))
+      }
+    } else {
+      answers[name] = { type: 'score', score: 0, confidence: 1, probabilities: q.levels.map((_, i) => (i === 0 ? 1 : 0)) }
+    }
+  }
+  return { answers, model }
 }
 
 // Deterministic schema-shaped stub: fills each declared property with a value

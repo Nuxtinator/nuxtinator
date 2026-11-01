@@ -1,6 +1,6 @@
 // Type surface this layer adds on top of core's `#core/ai-fallback/types`:
-// providers, model kinds (chat vs transcription), image content, reasoning
-// levels and transcription. Pure types, outside `server/utils/` so auto-import
+// providers, model kinds (chat, transcription, decision), image content,
+// reasoning levels, transcription and decisions. Pure types, outside `server/utils/` so auto-import
 // ignores it; imported by both the server code and the `#ai` client alias.
 
 import type {
@@ -16,9 +16,9 @@ import type {
 
 export type AiProvider = 'openrouter' | 'tinfoil' | 'openai' | 'anthropic'
 
-// What a model is used for: chat completions (complete/generate) or
-// speech-to-text (transcribe).
-export type AiModelKind = 'chat' | 'transcription'
+// What a model is used for: chat completions (complete/generate),
+// speech-to-text (transcribe) or typed answers about an input (decide).
+export type AiModelKind = 'chat' | 'transcription' | 'decision'
 
 // Per-call reasoning request. Sent only to models whose catalog entry says how
 // to turn reasoning on or off; ignored elsewhere.
@@ -96,5 +96,40 @@ export type AiTranscribeOptions = AiScoped<AiCompletionRun> & {
 
 export interface AiTranscribeResult {
   text: string
+  model: string
+}
+
+// --- Decisions ---
+
+// A question a decision model answers about the input with probabilities
+// instead of text. `instructions` is the question itself.
+export type AiDecisionQuestion =
+  // Yes or no. `criteria` describes what makes each answer right.
+  | { type: 'predicate', instructions: string, criteria?: { true: string, false: string } }
+  // One of `choices` (at least two).
+  | { type: 'choice', instructions: string, choices: { value: string, description?: string }[] }
+  // A position on an ordered scale of `levels` (at least two, lowest first).
+  | { type: 'score', instructions: string, levels: string[] }
+
+export type AiDecisionAnswer =
+  // Probability that the answer is yes.
+  | { type: 'predicate', probability: number }
+  // The most likely choice, its probability, and every choice's probability.
+  | { type: 'choice', choice: string, confidence: number, probabilities: Record<string, number> }
+  // The probability-weighted level index (0 = the first level), the most
+  // likely level's probability, and each level's probability by index.
+  | { type: 'score', score: number, confidence: number, probabilities: number[] }
+
+export type AiDecideOptions = AiScoped<AiCompletionRun> & {
+  // A registered feature of kind 'decision'. Ignored when `run` is given.
+  feature: string
+  // What the questions are about: text, or a JSON object / array.
+  input: string | Record<string, unknown> | unknown[]
+  // Keyed by a name of your choosing; the answers come back under the same keys.
+  questions: Record<string, AiDecisionQuestion>
+}
+
+export interface AiDecideResult {
+  answers: Record<string, AiDecisionAnswer>
   model: string
 }

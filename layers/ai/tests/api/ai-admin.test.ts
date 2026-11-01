@@ -4,7 +4,7 @@
 // stub (fixed model list, no key needed).
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
-import { getHostAdminDb, createAiOrg, cleanupAiTestData, clearAiHostConfig, AI_TEST_MODEL_IDS, AI_TEST_TRANSCRIPTION_MODEL_ID } from '../helpers'
+import { getHostAdminDb, createAiOrg, cleanupAiTestData, clearAiHostConfig, AI_TEST_MODEL_IDS, AI_TEST_TRANSCRIPTION_MODEL_ID, AI_TEST_DECISION_MODEL_ID } from '../helpers'
 
 interface AiEnabled {
   id: string
@@ -28,6 +28,7 @@ interface AiConfig {
 const sql = getHostAdminDb()
 const [ALPHA, BETA, GAMMA] = AI_TEST_MODEL_IDS
 const WHISPER = AI_TEST_TRANSCRIPTION_MODEL_ID
+const DECIDER = AI_TEST_DECISION_MODEL_ID
 
 async function getConfig(opts: object): Promise<AiConfig> {
   return $fetch<AiConfig>('/api/ai/admin/config', { ...opts })
@@ -126,6 +127,18 @@ describe('ai admin config', () => {
     const { models } = await $fetch<{ models: { id: string, provider: string, kind: string }[] }>('/api/ai/models', { ...opts })
     expect(models.find(m => m.id === ALPHA)).toMatchObject({ provider: 'openrouter', kind: 'chat' })
     expect(models.find(m => m.id === WHISPER)).toMatchObject({ kind: 'transcription' })
+    expect(models.find(m => m.id === DECIDER)).toMatchObject({ kind: 'decision' })
+  })
+
+  it('refuses a decision model as the default or for a chat feature', async () => {
+    const { opts } = await createAiOrg(sql)
+    await putConfig(opts, { enabled_models: [ALPHA, DECIDER] })
+    await expect(putConfig(opts, { default_model: DECIDER })).rejects.toMatchObject({ statusCode: 400 })
+
+    const { features } = await getConfig(opts)
+    const chat = features.find(f => f.kind === 'chat')
+    if (!chat) return
+    await expect(putConfig(opts, { feature_models: { [chat.key]: DECIDER } })).rejects.toMatchObject({ statusCode: 400 })
   })
 
   it('refuses a transcription model as the default or for a chat feature', async () => {

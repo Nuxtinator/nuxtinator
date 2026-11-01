@@ -56,6 +56,15 @@ const emit = defineEmits<{ remove: [model: Row] }>()
           >
             Transcription
           </UBadge>
+          <UBadge
+            v-if="model.kind === 'decision'"
+            color="info"
+            variant="subtle"
+            size="sm"
+            icon="i-lucide-split"
+          >
+            Decision
+          </UBadge>
         </div>
         <div class="text-xs text-(--ui-text-muted) font-mono break-all">
           {{ model.id }}

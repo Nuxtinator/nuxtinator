@@ -89,6 +89,22 @@ describe('parseOpenRouterModels', () => {
     expect(out.find(m => m.id === 'c/none')!.reasoning).toBeNull()
   })
 
+  it('keeps decision models, which list no tools, as text-only decision models', () => {
+    const out = parseOpenRouterModels({
+      data: [
+        model({
+          id: 'typesafe/jev-1.14',
+          name: 'TypeSafe: Jev 1.14',
+          supported_parameters: [],
+          pricing: { prompt: '0.000000042', completion: '0' },
+          architecture: { input_modalities: ['text', 'image'], output_modalities: ['decisions'] }
+        })
+      ]
+    })
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ id: 'typesafe/jev-1.14', kind: 'decision', promptPrice: 0.042, supportsImages: false, reasoning: null })
+  })
+
   it('returns an empty list for a payload with no data array', () => {
     expect(parseOpenRouterModels(null)).toEqual([])
     expect(parseOpenRouterModels({})).toEqual([])

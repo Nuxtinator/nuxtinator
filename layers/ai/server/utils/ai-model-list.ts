@@ -10,7 +10,8 @@ import { openAiModelsFrom, parseAnthropicModels, parseProviderModelIds } from '.
 // OpenAI and Anthropic (see direct-models.ts). The catalogs are the only source
 // of which models exist, what they're called, what they cost, and which
 // parameters they accept — nothing model-specific lives in code. Only
-// tool-capable chat models and file-upload transcription models are kept.
+// tool-capable chat models, file-upload transcription models and decision
+// models are kept.
 //
 // OpenAI and Anthropic list models only to a caller with a key, so their
 // catalogs load once some key for them is passed in (`CatalogKeys`) and
@@ -78,6 +79,7 @@ export const AI_TEST_MODELS: AiProviderModelInfo[] = [
   testModel({ id: 'test/beta', name: 'Test Beta', promptPrice: 0.5, completionPrice: 2, contextLength: 128_000, supportsTemperature: true }),
   testModel({ id: 'test/gamma', name: 'Test Gamma' }),
   testModel({ id: 'test/whisper', name: 'Test Whisper', kind: 'transcription', requestPrice: 0.01 }),
+  testModel({ id: 'test/decider', name: 'Test Decider', kind: 'decision', promptPrice: 0.02, completionPrice: 0 }),
   testModel({ id: 'tinfoil/test-tau', name: 'Test Tau', provider: 'tinfoil' }),
   testModel({ id: 'openai-api/test-omega', name: 'Test Omega', provider: 'openai', supportsTemperature: true }),
   testModel({ id: 'anthropic-api/test-sigma', name: 'Test Sigma', provider: 'anthropic', supportsCaching: true, supportsImages: true })
@@ -118,8 +120,8 @@ function perMillion(value: unknown): number | null {
   return Math.round(n * 1e6 * 1e4) / 1e4
 }
 
-// Pure: an OpenRouter `GET /models` payload → the tool-capable models, sorted
-// by name. Temperature and reasoning support come from `supported_parameters`;
+// Pure: an OpenRouter `GET /models` payload → the tool-capable models and the
+// decision models (output modality `decisions`), sorted by name. Temperature and reasoning support come from `supported_parameters`;
 // caching support from the presence of cache-read pricing, which OpenRouter
 // reports only for models that honour prompt caching; image input from
 // `architecture.input_modalities`; whether reasoning can be switched off from
@@ -137,10 +139,12 @@ export function parseOpenRouterModels(payload: unknown): AiProviderModelInfo[] {
     const params = Array.isArray(m.supported_parameters)
       ? (m.supported_parameters.filter(p => typeof p === 'string') as string[])
       : []
-    if (!params.includes('tools')) continue
+    const architecture = (m.architecture && typeof m.architecture === 'object' ? m.architecture : {}) as Record<string, unknown>
+    const outputs = Array.isArray(architecture.output_modalities) ? architecture.output_modalities : []
+    const isDecision = outputs.includes('decisions')
+    if (!isDecision && !params.includes('tools')) continue
     seen.add(id)
     const pricing = (m.pricing && typeof m.pricing === 'object' ? m.pricing : {}) as Record<string, unknown>
-    const architecture = (m.architecture && typeof m.architecture === 'object' ? m.architecture : {}) as Record<string, unknown>
     const inputs = Array.isArray(architecture.input_modalities) ? architecture.input_modalities : []
     const reasoningMeta = (m.reasoning && typeof m.reasoning === 'object' ? m.reasoning : {}) as Record<string, unknown>
     const name = typeof m.name === 'string' && m.name.trim() ? m.name.trim() : id
@@ -153,10 +157,11 @@ export function parseOpenRouterModels(payload: unknown): AiProviderModelInfo[] {
       supportsTemperature: params.includes('temperature'),
       supportsCaching: perMillion(pricing.input_cache_read) !== null,
       provider: 'openrouter',
-      kind: 'chat',
-      supportsImages: inputs.includes('image'),
+      kind: isDecision ? 'decision' : 'chat',
+      // decide() sends text or JSON only.
+      supportsImages: !isDecision && inputs.includes('image'),
       requestPrice: null,
-      reasoning: params.includes('reasoning')
+      reasoning: !isDecision && params.includes('reasoning')
         ? {
             enable: { reasoning: { effort: '$EFFORT' } },
             // A model that reasons mandatorily rejects `effort: 'none'`.
@@ -178,8 +183,7 @@ async function fetchCatalog(provider: AiProvider, key: string): Promise<unknown>
       url = getTinfoilConfig().catalogUrl
       break
     case 'openrouter':
-      url = `${getOpenRouterConfig().baseUrl}/models`
-      break
+      return await fetchOpenRouterCatalog()
     case 'openai':
       url = `${getOpenAiConfig().baseUrl}/models`
       headers = { Authorization: `Bearer ${key}` }
@@ -195,6 +199,27 @@ async function fetchCatalog(provider: AiProvider, key: string): Promise<unknown>
 }
 
 export const ANTHROPIC_VERSION = '2023-06-01'
+
+// OpenRouter lists only text-output models unless asked for another output
+// modality, so decision models come from a second request. That request
+// failing leaves the decision models out rather than failing the catalog.
+async function fetchOpenRouterCatalog(): Promise<unknown> {
+  const base = `${getOpenRouterConfig().baseUrl}/models`
+  const get = async (url: string) => {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) })
+    if (!res.ok) throw new Error(`openrouter catalog ${res.status}`)
+    return await res.json() as { data?: unknown }
+  }
+  const [main, decisions] = await Promise.all([
+    get(base),
+    get(`${base}?output_modalities=decisions`).catch((err) => {
+      console.error('[ai] openrouter decision model list failed:', (err as Error)?.message ?? err)
+      return { data: [] }
+    })
+  ])
+  const list = (p: { data?: unknown }) => (Array.isArray(p?.data) ? p.data : [])
+  return { data: [...list(main), ...list(decisions)] }
+}
 
 // A fetched payload → the provider's models. Keyed providers are built
 // against OpenRouter's current catalog.
@@ -256,7 +281,7 @@ async function ensureSource(state: ModelListState, provider: AiProvider): Promis
   await source.inflight
 }
 
-// Every model this deployment can list (chat and transcription), refreshing
+// Every model this deployment can list (chat, transcription and decision), refreshing
 // catalogs older than an hour. `keys` lets the Tinfoil, OpenAI and Anthropic
 // catalogs load; without a key for them they serve whatever was last loaded.
 export async function getAllModels(keys: CatalogKeys = {}): Promise<AiProviderModelInfo[]> {
@@ -288,6 +313,10 @@ export async function getModelList(): Promise<AiModelInfo[]> {
 
 export async function getTranscriptionModels(): Promise<AiProviderModelInfo[]> {
   return (await getAllModels()).filter(m => m.kind === 'transcription')
+}
+
+export async function getDecisionModels(): Promise<AiProviderModelInfo[]> {
+  return (await getAllModels()).filter(m => m.kind === 'decision')
 }
 
 // Synchronous reads of the cached list. Callers that need the list to be

@@ -1,8 +1,9 @@
 import type { AiProvider, AiProviderModelInfo } from '../../types/ai-ext'
 
 // One-line price + context summary for a model, shared by the pickers and the
-// enabled-models list: "$3 in · $15 out /M · 200K ctx", or "$0.01 / request"
-// for request-priced models.
+// enabled-models list: "$3 in · $15 out /M · 200K ctx", "$0.01 / request"
+// for request-priced models, or "$0.02 in /M" for decision models, which
+// bill input only.
 
 function price(n: number | null): string {
   if (n === null) return '—'
@@ -18,7 +19,9 @@ function context(n: number | null): string {
 export function modelMeta(m: AiProviderModelInfo): string {
   const parts = m.requestPrice !== null
     ? [`${price(m.requestPrice)} / request`]
-    : [`${price(m.promptPrice)} in · ${price(m.completionPrice)} out /M`]
+    : m.kind === 'decision'
+      ? [`${price(m.promptPrice)} in /M`]
+      : [`${price(m.promptPrice)} in · ${price(m.completionPrice)} out /M`]
   const ctx = context(m.contextLength)
   if (ctx) parts.push(ctx)
   return parts.join(' · ')

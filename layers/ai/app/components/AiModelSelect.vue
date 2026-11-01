@@ -32,6 +32,7 @@ interface Option {
   tinfoil?: boolean
   direct?: string
   transcription?: boolean
+  decision?: boolean
   unavailable?: boolean
 }
 
@@ -48,7 +49,8 @@ const options = computed<Option[]>(() => {
     meta: modelMeta(m),
     tinfoil: m.provider === 'tinfoil',
     direct: directProviderBadge(m.provider),
-    transcription: m.kind === 'transcription'
+    transcription: m.kind === 'transcription',
+    decision: m.kind === 'decision'
   }))
   if (props.modelValue && !props.items.some(m => m.id === props.modelValue)) {
     out.unshift({ id: props.modelValue, name: props.modelValue, meta: 'No longer available', unavailable: true })
@@ -117,6 +119,15 @@ function onUpdate(value: unknown) {
             icon="i-lucide-audio-lines"
           >
             Transcription
+          </UBadge>
+          <UBadge
+            v-if="item.decision"
+            color="info"
+            variant="subtle"
+            size="sm"
+            icon="i-lucide-split"
+          >
+            Decision
           </UBadge>
         </div>
         <div

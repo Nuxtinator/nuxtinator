@@ -12,7 +12,8 @@ import {
   cleanupAiTestData,
   clearAiHostConfig,
   AI_TEST_MODEL_IDS,
-  AI_TEST_TRANSCRIPTION_MODEL_ID
+  AI_TEST_TRANSCRIPTION_MODEL_ID,
+  AI_TEST_DECISION_MODEL_ID
 } from '../helpers'
 
 interface OrgConfig {
@@ -122,7 +123,7 @@ describe('ai org config', () => {
 
     let config = await getOrgConfig(opts)
     expect(ownKey(config)).toEqual({ status: 'ok', last4: '1234' })
-    expect(config.catalog.map(m => m.id).sort()).toEqual([...AI_TEST_MODEL_IDS, AI_TEST_TRANSCRIPTION_MODEL_ID].sort())
+    expect(config.catalog.map(m => m.id).sort()).toEqual([...AI_TEST_MODEL_IDS, AI_TEST_TRANSCRIPTION_MODEL_ID, AI_TEST_DECISION_MODEL_ID].sort())
     // Nothing enabled on its own key yet, so OpenRouter offers nothing.
     expect(config.allowedModels).toEqual([])
     expect(JSON.stringify(config)).not.toContain('sk-or-test')

@@ -25,9 +25,10 @@ export * from '@nuxtinator/tenancy/test-helpers'
 
 // The ids of the fixed model list the booted host serves under VITEST
 // (server/utils/ai-model-list.ts AI_TEST_MODELS): the chat models alpha, beta,
-// gamma, and one transcription model.
+// gamma, one transcription model and one decision model.
 export const AI_TEST_MODEL_IDS = ['test/alpha', 'test/beta', 'test/gamma'] as const
 export const AI_TEST_TRANSCRIPTION_MODEL_ID = 'test/whisper'
+export const AI_TEST_DECISION_MODEL_ID = 'test/decider'
 
 // An operator-admin user (users.is_admin) in a fresh org with membership, plus
 // X-Active-Org opts so calls look like normal in-org traffic. Pass
@@ -87,15 +88,17 @@ export interface AiFakeScript {
   text?: string
   toolCalls?: Array<{ name: string, input: Record<string, unknown> }>
   generateInput?: Record<string, unknown>
+  decisions?: Record<string, Record<string, unknown>>
 }
 
 export interface AiFakeCall {
-  kind: 'complete' | 'generate'
+  kind: 'complete' | 'generate' | 'embed' | 'transcribe' | 'decide'
   model: string
   system: unknown
   messages: Array<{ role: string, content: unknown }>
   tools: string[]
   toolResults: Array<{ name: string, input: Record<string, unknown>, result: string }>
+  decision?: { input: unknown, questions: Record<string, Record<string, unknown>> }
 }
 
 export async function primeAiFake(script: AiFakeScript): Promise<void> {

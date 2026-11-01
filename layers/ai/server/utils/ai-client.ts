@@ -13,6 +13,9 @@ import type {
 import { AI_EMBED_DIMENSIONS } from '#core/ai-fallback/vectors'
 import type {
   AiContentPart,
+  AiDecideOptions,
+  AiDecideResult,
+  AiDecisionQuestion,
   AiProvider,
   AiProviderModelInfo,
   AiRichCompleteOptions,
@@ -31,7 +34,8 @@ import { tinfoilFetch } from './tinfoil-client'
 import { runCompletionLoop, type ProviderCall, type ProviderToolCall, type ProviderTurn } from './ai-tool-loop'
 import { readCompletionStream, type StreamedTurn } from './ai-stream'
 import { fromAnthropicResponse, readAnthropicStream, toAnthropicBody } from './anthropic-messages'
-import { aiFakeComplete, aiFakeGenerate, aiFakeEmbed, aiFakeTranscribe } from './ai-test-fake'
+import { aiFakeComplete, aiFakeDecide, aiFakeGenerate, aiFakeEmbed, aiFakeTranscribe } from './ai-test-fake'
+import { fromOpenRouterDecisionResponse, fromTinfoilDecisionResponse, toOpenRouterDecisionBody, toTinfoilDecisionBody } from './ai-decisions'
 import { withAiRetries } from './ai-retry'
 
 // Chat and transcription client for four providers, picked by the resolved
@@ -51,7 +55,9 @@ import { withAiRetries } from './ai-retry'
 // the host's otherwise. Under VITEST both route to the primeable fake in
 // ai-test-fake.ts instead of the network.
 //
-// `transcribe()` sends an audio file to a transcription-kind feature's model.
+// `transcribe()` sends an audio file to a transcription-kind feature's model;
+// `decide()` asks a decision-kind feature's model typed questions about an
+// input and returns probabilities (OpenRouter and Tinfoil, ai-decisions.ts).
 //
 // Error contract (consumers branch on these): 400 = the request can't run on
 // the resolved model (e.g. images to a text-only model); 503 = not configured;
@@ -62,6 +68,7 @@ import { withAiRetries } from './ai-retry'
 // Under VITEST a feature with no configured model still runs against the fake.
 const AI_TEST_FALLBACK_MODEL = 'test/alpha'
 const AI_TEST_FALLBACK_TRANSCRIPTION_MODEL = 'test/whisper'
+const AI_TEST_FALLBACK_DECISION_MODEL = 'test/decider'
 
 // Whether live generation is possible for the active org: for some provider,
 // its own key, or the host's when it has none. Under VITEST it's always
@@ -85,7 +92,10 @@ export async function resolveAiRun(tx: AiDbClient, feature: string, opts: { mode
   await loadModelList(tx)
   const model = await resolveFeatureModel(tx, feature, opts.model)
   if (process.env.VITEST) {
-    const fallback = getAiFeatureKind(feature) === 'transcription' ? AI_TEST_FALLBACK_TRANSCRIPTION_MODEL : AI_TEST_FALLBACK_MODEL
+    const kind = getAiFeatureKind(feature)
+    const fallback = kind === 'transcription'
+      ? AI_TEST_FALLBACK_TRANSCRIPTION_MODEL
+      : kind === 'decision' ? AI_TEST_FALLBACK_DECISION_MODEL : AI_TEST_FALLBACK_MODEL
     return { kind: 'completion', apiKey: 'test', model: model || fallback }
   }
   if (!model) {
@@ -238,7 +248,7 @@ const ANTHROPIC_THINKING_MAX_TOKENS = 16_000
 
 // Upper bound on one provider request, body included (a stream that stalls
 // mid-reply is cut off too). Generous: long replies stream for a while.
-const REQUEST_TIMEOUT_MS = { 'chat/completions': 120_000, 'audio/transcriptions': 120_000, 'embeddings': 60_000 } as Record<string, number>
+const REQUEST_TIMEOUT_MS = { 'chat/completions': 120_000, 'audio/transcriptions': 120_000, 'embeddings': 60_000, 'decisions': 60_000 } as Record<string, number>
 
 // URL and auth headers for a plain-fetch provider. Anthropic's chat endpoint
 // is `messages`; the body is already in its shape (see chatRequest).
@@ -254,7 +264,10 @@ function directEndpoint(run: ResolvedRun, endpoint: string): { url: string, head
   }
   const cfg = getOpenRouterConfig()
   return {
-    url: `${cfg.baseUrl}/${endpoint}`,
+    // OpenRouter serves decisions beside its versioned API, not under it.
+    url: endpoint === 'decisions'
+      ? `${cfg.baseUrl.replace(/\/v1$/, '')}/alpha/decisions`
+      : `${cfg.baseUrl}/${endpoint}`,
     headers: {
       Authorization: `Bearer ${run.apiKey}`,
       ...(cfg.referer ? { 'HTTP-Referer': cfg.referer } : {}),
@@ -560,6 +573,56 @@ export async function transcribe(opts: AiTranscribeOptions): Promise<AiTranscrib
   }
   console.info(`[ai] ${run.model} transcribed ${blob.size} bytes → ${data.text.length} chars`)
   return { text: data.text.trim(), model: run.model }
+}
+
+// Ask the feature's decision model `opts.questions` about `opts.input`.
+// Retried on transient failure like a non-streaming chat call. A question
+// missing from the provider's answer is a 502, so every key in `questions`
+// has an answer on success.
+export async function decide(opts: AiDecideOptions): Promise<AiDecideResult> {
+  const names = Object.keys(opts.questions)
+  if (!names.length) throw createError({ statusCode: 400, statusMessage: 'decide() needs at least one question.' })
+  for (const [name, q] of Object.entries(opts.questions)) checkDecisionQuestion(name, q)
+
+  const run = await completionRun(opts)
+  if (process.env.VITEST) return aiFakeDecide(opts, run.model)
+  if ((run.info && run.info.kind !== 'decision') || (run.provider !== 'openrouter' && run.provider !== 'tinfoil')) {
+    throw createError({ statusCode: 400, statusMessage: `The model ${run.info?.name ?? run.model} is not a decision model.` })
+  }
+
+  const wire = wireModelId(run.model)
+  const body = run.provider === 'tinfoil'
+    ? toTinfoilDecisionBody(wire, opts.input, opts.questions)
+    : toOpenRouterDecisionBody(wire, opts.input, opts.questions)
+  const data = await withAiRetries(async () => {
+    const res = await providerRequest(run, 'decisions', JSON.stringify(body), 'application/json')
+    const json = await res.json()
+    if (json?.error) {
+      if (!process.env.VITEST) {
+        console.error(`[ai] ${AI_PROVIDER_LABELS[run.provider]} decisions upstream error (HTTP ${res.status}): ${JSON.stringify(json.error).slice(0, 500)}`)
+      }
+      throw createError({ statusCode: 502, statusMessage: 'The AI provider reported an upstream error. Try again in a moment.' })
+    }
+    return json
+  })
+  const answers = run.provider === 'tinfoil'
+    ? fromTinfoilDecisionResponse(data, opts.questions)
+    : fromOpenRouterDecisionResponse(data, opts.questions)
+  if (names.some(n => !answers[n])) {
+    throw createError({ statusCode: 502, statusMessage: 'The AI provider returned an incomplete decision. Try again.' })
+  }
+  const usage = data?.usage ?? {}
+  const cost = typeof usage.cost === 'number' ? ` cost=$${usage.cost.toFixed(6)}` : ''
+  console.info(`[ai] ${run.model} decide questions=${names.length} input=${usage.input_tokens ?? 0}${cost}`)
+  return { answers, model: run.model }
+}
+
+function checkDecisionQuestion(name: string, q: AiDecisionQuestion): void {
+  const bad = (why: string) => createError({ statusCode: 400, statusMessage: `Decision question "${name}" ${why}.` })
+  if (!q || typeof q.instructions !== 'string' || !q.instructions.trim()) throw bad('needs instructions')
+  if (q.type === 'choice' && (!Array.isArray(q.choices) || q.choices.length < 2)) throw bad('needs at least two choices')
+  if (q.type === 'score' && (!Array.isArray(q.levels) || q.levels.length < 2)) throw bad('needs at least two levels')
+  if (q.type !== 'predicate' && q.type !== 'choice' && q.type !== 'score') throw bad('has an unknown type')
 }
 
 // --- Embeddings ---

@@ -2,8 +2,8 @@
 // live model list, org/host model + key resolution, and the feature registry
 // for consumer layers. A superset of core's `#ai/server` fallback
 // (ai-fallback/ai.ts): the shared names behave the same whether or not this
-// layer is loaded; `transcribe`, image parts, reasoning levels, providers and
-// model kinds exist only here.
+// layer is loaded; `transcribe`, `decide`, image parts, reasoning levels,
+// providers and model kinds exist only here.
 //
 // Lives in server/exports/ (not server/utils/) so nitro's auto-import scan
 // doesn't double-import these names — the source files ARE auto-imported inside
@@ -22,6 +22,7 @@ export {
   complete,
   generate,
   transcribe,
+  decide,
   validateApiKey,
   isEmbeddingConfigured,
   embed,
@@ -66,6 +67,7 @@ export {
   getAllModels,
   getModelList,
   getTranscriptionModels,
+  getDecisionModels,
   getModelInfo,
   isKnownModel,
   isCatalogLoaded,

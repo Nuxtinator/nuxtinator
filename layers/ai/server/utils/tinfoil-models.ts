@@ -1,7 +1,8 @@
-// Pure: Tinfoil's model catalog (the JSON its pricing page reads) → the chat
-// and transcription models this layer can run. Chat models must support tool
-// calling on /v1/chat/completions; transcription models must take a file on
-// /v1/audio/transcriptions (streaming-only audio models are skipped). Reasoning
+// Pure: Tinfoil's model catalog (the JSON its pricing page reads) → the chat,
+// transcription and decision models this layer can run. Chat models must
+// support tool calling on /v1/chat/completions; transcription models must take
+// a file on /v1/audio/transcriptions (streaming-only audio models are
+// skipped); decision models must serve /v1/decisions. Reasoning
 // on/off request fragments are read from each model's `chatConfig`, so no model
 // name lives in code.
 import type { AiProviderModelInfo, AiReasoningSpec } from '../../types/ai-ext'
@@ -9,6 +10,7 @@ import { TINFOIL_MODEL_PREFIX } from './ai-provider'
 
 const CHAT_ENDPOINT = '/v1/chat/completions'
 const TRANSCRIPTION_ENDPOINT = '/v1/audio/transcriptions'
+const DECISION_ENDPOINT = '/v1/decisions'
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
@@ -45,7 +47,8 @@ export function parseTinfoilModels(payload: unknown): AiProviderModelInfo[] {
     const endpoints = Array.isArray(m.endpoints) ? m.endpoints.filter(e => typeof e === 'string') as string[] : []
     const isChat = m.type === 'chat' && m.toolCalling === true && endpoints.includes(CHAT_ENDPOINT)
     const isTranscription = m.type === 'audio' && endpoints.includes(TRANSCRIPTION_ENDPOINT)
-    if (!isChat && !isTranscription) continue
+    const isDecision = m.type === 'decision' && endpoints.includes(DECISION_ENDPOINT)
+    if (!isChat && !isTranscription && !isDecision) continue
     seen.add(name)
     const pricing = asRecord(m.pricing) ?? {}
     const requestPrice = price(pricing.requestPrice)
@@ -54,7 +57,7 @@ export function parseTinfoilModels(payload: unknown): AiProviderModelInfo[] {
       id: `${TINFOIL_MODEL_PREFIX}${name}`,
       name: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : name,
       provider: 'tinfoil',
-      kind: isChat ? 'chat' : 'transcription',
+      kind: isChat ? 'chat' : isTranscription ? 'transcription' : 'decision',
       promptPrice: price(pricing.inputTokenPricePer1M),
       completionPrice: price(pricing.outputTokenPricePer1M),
       requestPrice: requestPrice && requestPrice > 0 ? requestPrice : null,

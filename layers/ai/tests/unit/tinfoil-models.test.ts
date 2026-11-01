@@ -61,6 +61,15 @@ describe('parseTinfoilModels', () => {
     })
   })
 
+  it('keeps decision models that serve /v1/decisions', () => {
+    const out = parseTinfoilModels([
+      { modelName: 'decision-small', name: 'Decision Small', type: 'decision', toolCalling: false, endpoints: ['/v1/decisions'], contextWindowTokens: 32768, pricing: { inputTokenPricePer1M: 0.02, outputTokenPricePer1M: 0, requestPrice: 0 } },
+      { modelName: 'decision-other', name: 'Other', type: 'decision', endpoints: ['/v1/other'] }
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ id: 'tinfoil/decision-small', kind: 'decision', promptPrice: 0.02, requestPrice: null, contextLength: 32768, supportsTemperature: false, supportsImages: false, reasoning: null })
+  })
+
   it('returns an empty list for a non-array payload', () => {
     expect(parseTinfoilModels(null)).toEqual([])
     expect(parseTinfoilModels({ models: [] })).toEqual([])

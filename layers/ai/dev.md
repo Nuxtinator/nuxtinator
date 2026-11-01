@@ -92,10 +92,22 @@ This is the shared AI backend built for Phase 10a of the inbox plan
   unchanged. Catalogs need a key, so they load with whichever org or host key
   is in hand ([server/utils/direct-models.ts](server/utils/direct-models.ts));
   both lean on OpenRouter's catalog for prices.
-- **Model kinds.** Models are `chat` or `transcription`; features declare a
-  `kind` (default chat, or `embedding` for a vector index). Transcription
-  features resolve org choice → host choice only (the default model is a chat
-  model). Pickers and the config PUTs enforce kind.
+- **Model kinds.** Models are `chat`, `transcription` or `decision`; features
+  declare a `kind` (default chat, or `embedding` for a vector index).
+  Transcription and decision features resolve org choice → host choice only
+  (the default model is a chat model). Pickers and the config PUTs enforce kind.
+- **Decision models, one shape over two APIs.** OpenRouter
+  (`POST /api/alpha/decisions`, models listed only under
+  `GET /models?output_modalities=decisions`) and Tinfoil (`POST /v1/decisions`,
+  catalog `type: 'decision'`) ask the same three question types in different
+  shapes: OpenRouter keys questions by name, calls yes/no `noul` and takes
+  criteria per answer; Tinfoil takes a named list with `choices`/`levels` and
+  no criteria, so criteria and option descriptions are written into its
+  instructions. `decide()` speaks one shape and
+  [server/utils/ai-decisions.ts](server/utils/ai-decisions.ts) (pure,
+  unit-tested) translates both ways. Input is text or JSON only (OpenRouter's
+  image `assets` and Jev's `box` question aren't wired; Tinfoil's decision
+  models are text-only).
 - **Layer-only types.** Image parts, reasoning levels, provider/kind fields
   and `transcribe` types live in [types/ai-ext.ts](types/ai-ext.ts), on top of
   core's `#core/ai-fallback/types` (the surface the throwing fallback shares).
@@ -113,7 +125,9 @@ This is the shared AI backend built for Phase 10a of the inbox plan
    true under VITEST (no key needed); `generate`/`complete` route to the
    primeable fake in [server/utils/ai-test-fake.ts](server/utils/ai-test-fake.ts);
    the model list is the fixed `AI_TEST_MODELS` (alpha/beta/gamma, plus the
-   `test/whisper` transcription model); `validateApiKey`
+   `test/whisper` transcription model and `test/decider` decision model);
+   `decide` answers yes / the first choice / the lowest level unless scripted
+   with `decisions`; `validateApiKey`
    accepts anything but the literal `invalid`; a feature with nothing configured
    runs on `test/alpha` so consumer suites need no host config. Unprimed,
    `complete` returns `[[stub:<model>]]` and `generate` a schema-shaped stub.
@@ -157,6 +171,7 @@ This is the shared AI backend built for Phase 10a of the inbox plan
   · feature registry [server/utils/ai-feature-registry.ts](server/utils/ai-feature-registry.ts)
   · provider routing [server/utils/ai-provider.ts](server/utils/ai-provider.ts)
   · Anthropic translation [server/utils/anthropic-messages.ts](server/utils/anthropic-messages.ts) (pure, unit-tested)
+  · decisions translation [server/utils/ai-decisions.ts](server/utils/ai-decisions.ts) (pure, unit-tested)
   · OpenAI/Anthropic catalog parsers [server/utils/direct-models.ts](server/utils/direct-models.ts) (pure, unit-tested)
   · Tinfoil transport [server/utils/tinfoil-client.ts](server/utils/tinfoil-client.ts)
   + catalog parser [server/utils/tinfoil-models.ts](server/utils/tinfoil-models.ts) (pure, unit-tested).
@@ -180,6 +195,7 @@ This is the shared AI backend built for Phase 10a of the inbox plan
   · [tests/unit/ai-tool-loop.test.ts](tests/unit/ai-tool-loop.test.ts) (pure)
   · [tests/unit/ai-stream.test.ts](tests/unit/ai-stream.test.ts) (pure)
   · [tests/unit/tinfoil-models.test.ts](tests/unit/tinfoil-models.test.ts) (Tinfoil catalog parser)
+  · [tests/unit/ai-decisions.test.ts](tests/unit/ai-decisions.test.ts) (decisions translation)
   · [tests/api/ai-admin.test.ts](tests/api/ai-admin.test.ts) (host endpoints,
   gating, validation, cross-org sharing)
   · [tests/api/ai-org.test.ts](tests/api/ai-org.test.ts) (org key lifecycle,
@@ -195,3 +211,5 @@ This is the shared AI backend built for Phase 10a of the inbox plan
 
 - Real generation is only exercisable with a key set (tests use the VITEST
   stub). Smoke-test live once a key is wired.
+- `decide()` is built from the published docs and not yet run against either
+  live API.
