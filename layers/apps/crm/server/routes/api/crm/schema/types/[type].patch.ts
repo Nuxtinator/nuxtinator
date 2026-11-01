@@ -1,7 +1,9 @@
 // PATCH /api/crm/schema/types/:type
 // Updates a record type's presentation: label/labelSingular/icon (null
 // reverts a code type to its manifest value), hidden, and sectionOrder
-// (stored in config; null clears). For code-declared types only actual
+// (stored in config; null clears), and closedReasonField (the key_select
+// that holds why a closed record was closed; null reverts to the code
+// default). For code-declared types only actual
 // overrides are persisted; for custom types the row is the definition.
 // Returns { type } in the GET summary shape. Permission: crm.schema.manage.
 
@@ -14,7 +16,8 @@ const Body = z.object({
   labelSingular: z.string().trim().min(1).max(80).nullish(),
   icon: z.string().trim().min(1).max(80).nullish(),
   hidden: z.boolean().optional(),
-  sectionOrder: z.array(z.string().trim().min(1).max(60)).max(50).nullish()
+  sectionOrder: z.array(z.string().trim().min(1).max(60)).max(50).nullish(),
+  closedReasonField: z.string().trim().min(1).max(41).nullish()
 })
 
 export default defineEventHandler(async (event) => {
@@ -35,7 +38,8 @@ export default defineEventHandler(async (event) => {
         hidden: type.hidden,
         custom: type.custom,
         orphan: type.orphan,
-        statusField: type.statusField ?? null
+        statusField: type.statusField ?? null,
+        closedReasonField: type.closedReasonField ?? null
       }
     }
   })

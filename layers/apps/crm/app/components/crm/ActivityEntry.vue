@@ -96,6 +96,10 @@ const showValues = computed(() => props.activity.action === 'field_changed')
       <p class="text-sm text-(--ui-text-muted)">
         <span class="font-medium text-(--ui-text)">{{ activity.actorName }}</span>
         {{ sentence }}
+        <span
+          v-if="activity.viaClient"
+          class="text-xs whitespace-nowrap"
+        > · via {{ activity.viaClient }}</span>
         <span class="text-xs whitespace-nowrap"> · {{ crmRelativeTime(activity.createdAt) }}</span>
       </p>
       <p

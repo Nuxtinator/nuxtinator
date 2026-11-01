@@ -15,7 +15,11 @@ const Option = z.object({
   label: z.string().trim().min(1).max(60),
   color: z.enum(['primary', 'secondary', 'success', 'info', 'warning', 'error', 'neutral']).optional(),
   description: z.string().trim().max(200).optional(),
-  deleted: z.boolean().optional()
+  deleted: z.boolean().optional(),
+  // Status options only.
+  closed: z.boolean().optional(),
+  // Code-owned: accepted so merged options round-trip, then dropped.
+  revokesConsent: z.boolean().optional()
 }).strict()
 
 const Body = z.object({

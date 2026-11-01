@@ -12,6 +12,7 @@
 // asks for a record refetch instead of emitting a patch). Any action that
 // writes activity rows (field patch, rename, channel/consent change, share
 // change) refreshes the timeline so it stays in step without a full reload.
+// Setting a closed status asks for the reason first (CrmCloseRecordModal).
 import type { CrmChannelEntry } from '#crm'
 import { getCrmDetailPanels } from '#crm'
 import type { CrmTypeFields } from '../../../composables/useCrmTypes'
@@ -73,6 +74,18 @@ const statusField = computed(() =>
   fieldSettings.value?.fields.find(f => f.column === 'status') ?? null
 )
 
+// Closing: a status option flagged `closed` archives the record. When the
+// type has a reason field, closing asks for the reason first, and the reason
+// row only shows while the record is closed.
+const reasonField = computed(() => {
+  const key = fieldSettings.value?.closedReasonField
+  return key ? fieldSettings.value?.fields.find(f => f.key === key) ?? null : null
+})
+function isClosedStatus(value: unknown): boolean {
+  return typeof value === 'string' && !!statusField.value?.options?.[value]?.closed
+}
+const recordClosed = computed(() => isClosedStatus(record.value?.status))
+
 interface SectionGroup {
   key: string
   label: string
@@ -86,7 +99,9 @@ interface SectionGroup {
 const sectionGroups = computed<SectionGroup[]>(() => {
   const def = fieldSettings.value
   if (!def) return []
-  const visible = def.fields.filter(f => !f.hidden && !f.orphan && f.column !== 'name')
+  const visible = def.fields.filter(f =>
+    !f.hidden && !f.orphan && f.column !== 'name'
+    && (f.key !== reasonField.value?.key || recordClosed.value))
   const known = new Set(Object.keys(def.sections))
   const groups = Object.entries(def.sections)
     .sort((a, b) => (a[1].order ?? 0) - (b[1].order ?? 0))
@@ -121,7 +136,16 @@ function onChannelsChanged() {
   refreshTimeline()
 }
 
+const closing = ref<{ status: string } | null>(null)
+const closingOpen = ref(false)
+const closingSaving = ref(false)
+
 async function commitField(field: CrmFieldSetting, value: unknown) {
+  if (field.column === 'status' && reasonField.value && isClosedStatus(value) && !recordClosed.value) {
+    closing.value = { status: value as string }
+    closingOpen.value = true
+    return
+  }
   try {
     await patchFields({ [field.key]: value })
     refreshTimeline()
@@ -131,6 +155,25 @@ async function commitField(field: CrmFieldSetting, value: unknown) {
       description: crmErrorMessage(err, `Failed to update ${field.label}`),
       color: 'error'
     })
+  }
+}
+
+async function closeRecord(reason: string) {
+  if (!closing.value || !statusField.value || !reasonField.value) return
+  closingSaving.value = true
+  try {
+    await patchFields({ [statusField.value.key]: closing.value.status, [reasonField.value.key]: reason })
+    closingOpen.value = false
+    refresh()
+    refreshTimeline()
+  } catch (err) {
+    toast.add({
+      title: 'Close failed',
+      description: crmErrorMessage(err, 'Failed to close record'),
+      color: 'error'
+    })
+  } finally {
+    closingSaving.value = false
   }
 }
 
@@ -263,6 +306,15 @@ async function removeRecord() {
         :type-key="typeKey"
         :record-id="recordId"
         :can-comment="canEdit"
+      />
+
+      <CrmCloseRecordModal
+        v-if="reasonField"
+        v-model:open="closingOpen"
+        :record-name="record.name"
+        :reason-field="reasonField"
+        :saving="closingSaving"
+        @confirm="closeRecord"
       />
 
       <p class="text-xs text-(--ui-text-muted)">

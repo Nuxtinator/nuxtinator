@@ -150,6 +150,11 @@ export interface UpdateRecordTypePatch {
   hidden?: boolean
   /** Section keys in display order; null clears the override. */
   sectionOrder?: string[] | null
+  /**
+   * Field key of the key_select that holds why a closed record was closed;
+   * null reverts to the code default. Types with a status field only.
+   */
+  closedReasonField?: string | null
 }
 
 // The code-default section ordering a sectionOrder override is compared
@@ -238,6 +243,20 @@ export async function updateRecordType(
     }
   }
   if (patch.hidden !== undefined) hidden = patch.hidden
+  if (patch.closedReasonField !== undefined) {
+    if (!type.statusField) bad('Only record types with a status field can have a closed reason')
+    const fallback = manifest?.closedReasonField ?? null
+    if (patch.closedReasonField === null || patch.closedReasonField === fallback) {
+      delete config.closedReasonField
+    } else {
+      const fields = await getRecordTypeFields(tx, typeKey)
+      const field = fields.find(f => f.key === patch.closedReasonField && !f.orphan)
+      if (!field || field.kind !== 'key_select' || field.column) {
+        bad(`${patch.closedReasonField} is not a single-choice field of ${typeKey}`)
+      }
+      config.closedReasonField = patch.closedReasonField
+    }
+  }
 
   const hasOverrides = label !== null
     || labelSingular !== null
@@ -407,6 +426,9 @@ function validateOptionRecord(options: Record<string, CrmFieldOption>): void {
   for (const [key, option] of Object.entries(options)) {
     if (!CRM_OPTION_KEY_RE.test(key)) bad(`Invalid option key: ${key}`)
     if (!option.label || option.label.trim().length === 0) bad(`Option '${key}' requires a label`)
+    // Custom fields are never the status column, so no option means closed.
+    if (option.closed) bad(`Only status options can count as closed`)
+    delete option.revokesConsent
   }
 }
 
@@ -525,6 +547,7 @@ function diffOption(desired: CrmFieldOption, base: CrmFieldOption): Partial<CrmF
   if (desired.color !== undefined && desired.color !== base.color) diff.color = desired.color
   if (desired.description !== undefined && desired.description !== base.description) diff.description = desired.description
   if ((desired.deleted ?? false) !== (base.deleted ?? false)) diff.deleted = desired.deleted ?? false
+  if (desired.closed !== undefined && desired.closed !== (base.closed ?? false)) diff.closed = desired.closed
   return diff
 }
 
@@ -534,13 +557,16 @@ function applyManifestOptionPatch(
   patch: Record<string, CrmFieldOption | null>
 ): void {
   const overrides = { ...((config.options as Record<string, Partial<CrmFieldOption>> | undefined) ?? {}) }
-  for (const [key, desired] of Object.entries(patch)) {
+  for (const [key, raw] of Object.entries(patch)) {
     if (!CRM_OPTION_KEY_RE.test(key)) bad(`Invalid option key: ${key}`)
-    if (desired === null) {
+    if (raw === null) {
       // Revert a manifest option to its code default / drop a custom option.
       delete overrides[key]
       continue
     }
+    // Which reasons revoke consent is code-owned; admins can't set it.
+    const { revokesConsent: _revokes, ...desired } = raw
+    if (desired.closed && def.column !== 'status') bad(`Only status options can count as closed`)
     const base = def.options?.[key]
     if (base) {
       const diff = diffOption(desired, base)
@@ -561,13 +587,15 @@ function applyCustomOptionPatch(
   patch: Record<string, CrmFieldOption | null>
 ): void {
   const options = { ...((config.options as Record<string, CrmFieldOption> | undefined) ?? {}) }
-  for (const [key, desired] of Object.entries(patch)) {
+  for (const [key, raw] of Object.entries(patch)) {
     if (!CRM_OPTION_KEY_RE.test(key)) bad(`Invalid option key: ${key}`)
-    if (desired === null) {
+    if (raw === null) {
       delete options[key]
       continue
     }
+    const { revokesConsent: _revokes, ...desired } = raw
     if (!desired.label || desired.label.trim().length === 0) bad(`Option '${key}' requires a label`)
+    if (desired.closed) bad(`Only status options can count as closed`)
     options[key] = desired
   }
   if (Object.keys(options).length > 0) config.options = options

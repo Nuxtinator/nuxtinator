@@ -17,7 +17,11 @@ export const CRM_PERMISSIONS = [
   'crm.records.share',
   'crm.records.view_all',
   // Org-level schema builder (record types, fields, channel types).
-  'crm.schema.manage'
+  'crm.schema.manage',
+  // What a connected app (MCP / OAuth client) may do, across every record
+  // type. Which records it can touch is still the per-type answer above.
+  'crm.read',
+  'crm.write'
 ] as const
 
 export type CrmPermission = typeof CRM_PERMISSIONS[number]
@@ -78,6 +82,14 @@ export const CRM_PERMISSION_META: Record<string, { title: string, description: s
   'crm.schema.manage': {
     title: 'Manage CRM schema',
     description: 'Create and customize record types, fields, and channel types.'
+  },
+  'crm.read': {
+    title: 'Read CRM in connected apps',
+    description: 'Let AI assistants and other connected apps read the records you can see.'
+  },
+  'crm.write': {
+    title: 'Change CRM in connected apps',
+    description: 'Let AI assistants and other connected apps create, edit and close the records you can edit.'
   }
 }
 
@@ -91,7 +103,9 @@ export const CRM_DEFAULT_GRANTS: Record<'member' | 'admin', CrmPermission[]> = {
     'crm.records.read',
     'crm.records.create',
     'crm.records.update',
-    'crm.records.share'
+    'crm.records.share',
+    'crm.read',
+    'crm.write'
   ],
   admin: [...CRM_PERMISSIONS]
 }

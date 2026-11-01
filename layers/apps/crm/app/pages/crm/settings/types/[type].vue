@@ -96,6 +96,27 @@ async function toggleTypeHidden(hidden: boolean) {
   }
 }
 
+// --- Closing -----------------------------------------------------------------
+
+// Single-choice fields that can hold why a record was closed.
+const reasonFieldItems = computed(() =>
+  (fieldSettings.value?.fields ?? [])
+    .filter(f => f.kind === 'key_select' && !f.column && !f.orphan)
+    .map(f => ({ label: f.label, value: f.key }))
+)
+
+async function setReasonField(key: string | null) {
+  busy.value = true
+  pageError.value = null
+  try {
+    await admin.updateType(typeKey.value, { closedReasonField: key })
+  } catch (err) {
+    pageError.value = crmErrorMessage(err, 'Failed to update the reason field')
+  } finally {
+    busy.value = false
+  }
+}
+
 // --- Type deletion (custom/stale only) --------------------------------------
 
 const confirmingDelete = ref(false)
@@ -298,6 +319,42 @@ async function moveField(field: CrmFieldSetting, dir: -1 | 1) {
               }"
               @submit="onSaveMeta"
             />
+          </section>
+
+          <section
+            v-if="!isOrphan && typeInfo.statusField"
+            class="space-y-3"
+          >
+            <h2 class="text-base font-semibold">
+              Closing
+              <InfoTip text="Records are closed (archived) by setting a status marked as closed in the status field's options. Pick the field that holds why: closing then asks for a reason, and reopening clears it." />
+            </h2>
+            <UFormField label="Reason closed field">
+              <div class="flex items-center gap-2">
+                <USelectMenu
+                  :model-value="typeInfo.closedReasonField ?? undefined"
+                  :items="reasonFieldItems"
+                  value-key="value"
+                  label-key="label"
+                  placeholder="No reason field"
+                  :search-input="false"
+                  class="w-full sm:w-72"
+                  :disabled="busy"
+                  @update:model-value="setReasonField(String($event))"
+                />
+                <UButton
+                  v-if="typeInfo.closedReasonField"
+                  icon="i-lucide-x"
+                  variant="ghost"
+                  color="neutral"
+                  size="sm"
+                  aria-label="Reset the reason field to the default"
+                  title="Reset to the default"
+                  :disabled="busy"
+                  @click="setReasonField(null)"
+                />
+              </div>
+            </UFormField>
           </section>
 
           <section

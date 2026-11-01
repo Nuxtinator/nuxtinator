@@ -142,6 +142,8 @@ export interface CrmRecordActivityTable {
   old_value: unknown
   new_value: unknown
   note: string | null
+  // The OAuth client the change came through; null for browser requests.
+  client_id: ColumnType<string | null, string | null | undefined, string | null>
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
@@ -151,6 +153,8 @@ export interface CrmRecordCommentsTable {
   author_id: string | null
   author_label: string | null
   body: string
+  // The OAuth client the comment came through; null for browser requests.
+  client_id: ColumnType<string | null, string | null | undefined, string | null>
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>
   edited_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>

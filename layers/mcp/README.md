@@ -183,6 +183,8 @@ When the tenancy layer is loaded, every tool that touches org-scoped data accept
 
 A tool opts in by adding an `org` field to its Zod input and passing `{ org: input.org, userId: ctx.auth.userId }` as the second argument; the single-mode kernel accepts the option and ignores it.
 
+A tool that needs the full tenant context (roles, permissions narrowed to the token's scopes, `clientId`) runs inside `withOrgPermission(ctx.event, { appId, org: input.org }, scope, (tx, tenant) => …)` instead. The `/mcp` request carries the bearer token, so the kernel signs it in the same way it does for an `/api` route; `org` selects the org ahead of the header, with the same membership and suspension checks.
+
 ## Rate limits
 
 Three default buckets, all overridable via `runtimeConfig.mcpRateLimits`:

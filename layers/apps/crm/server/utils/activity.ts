@@ -17,6 +17,7 @@ import {
   encodeTimelineCursor,
   type CrmTimelineListOpts
 } from './comments'
+import { resolveClientNames } from './client-names'
 
 type Tx = Transaction<Database>
 
@@ -33,6 +34,8 @@ export interface CrmActivityItem {
   note: string | null
   actorUserId: string | null
   actorName: string
+  /** Name of the connected app the change came through; null for the web. */
+  viaClient: string | null
   createdAt: Date
 }
 
@@ -63,6 +66,7 @@ export async function listActivity(
       'a.actor_user_id as actor_user_id',
       'a.actor_label as actor_label',
       'a.created_at as created_at',
+      'a.client_id as client_id',
       'u.display_name as user_name',
       'u.email as user_email'
     ])
@@ -78,6 +82,7 @@ export async function listActivity(
     .limit(limit + 1)
     .execute()
   const page = rows.slice(0, limit)
+  const clients = await resolveClientNames(tx, page.map(r => r.client_id))
   const items = page.map(r => ({
     id: r.id,
     action: r.action,
@@ -87,6 +92,7 @@ export async function listActivity(
     note: r.note,
     actorUserId: r.actor_user_id,
     actorName: r.actor_label ?? r.user_name ?? r.user_email ?? 'Unknown',
+    viaClient: r.client_id ? clients.get(r.client_id) ?? r.client_id : null,
     createdAt: r.created_at
   }))
   const last = rows.length > limit ? page[page.length - 1]! : null

@@ -71,6 +71,9 @@ export type { CrmUserGrantEntry } from '../utils/user-grants'
 export { listRecords, requireRecordType, assertRecordVisible } from '../utils/list-records'
 export type { CrmListOpts, CrmRecordListItem, CrmListResult } from '../utils/list-records'
 
+export { closingRulesOf, isClosedStatus } from '../utils/closing'
+export type { CrmClosingRules } from '../utils/closing'
+
 export { recordCrmActivity } from '../utils/crm-activity'
 export type { CrmActivityAction, CrmActivityOpts } from '../utils/crm-activity'
 
