@@ -14,7 +14,7 @@ import {
 
 const sql = getHostAdminDb()
 
-const MCP_APPS = ['context', 'messages', 'files', 'feedback', 'inbox']
+const MCP_APPS = ['context', 'messages', 'files', 'feedback', 'inbox', 'crm']
 const ALL_SCOPES = [
   'context.read', 'context.write', 'context.portfolio.create', 'context.section.custom',
   'messages.read', 'messages.write', 'files.read', 'files.write', 'feedback.read', 'feedback.write'

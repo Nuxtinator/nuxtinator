@@ -49,6 +49,9 @@ export interface TenantContext {
 
 export interface DefineTenantHandlerOpts {
   appId?: string
+  // Org slug an OAuth request selects (multi mode). Single mode has one
+  // tenant and ignores it.
+  org?: string
 }
 
 export type TenantHandler<T> = (

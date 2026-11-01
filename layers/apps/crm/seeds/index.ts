@@ -156,7 +156,7 @@ const CONTACTS: ContactSeed[] = [
   {
     name: 'Tom Bennett',
     status: 'closed',
-    data: { gender: 'male' },
+    data: { gender: 'male', reason_closed: 'moved' },
     channels: [
       {
         field: 'contact_email',

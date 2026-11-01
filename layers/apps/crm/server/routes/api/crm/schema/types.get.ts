@@ -1,7 +1,7 @@
 // GET /api/crm/schema/types
 // Merged record-type catalog (code manifests ⊳ DB overrides). Returns
 // { types: [{ key, label, labelSingular, icon, hidden, custom, orphan,
-//   statusField, canRead, canCreate }] }. canRead/canCreate are the caller's
+//   statusField, closedReasonField, canRead, canCreate }] }. canRead/canCreate are the caller's
 // type-evaluator answers — per-type role-grant rows make client-side slug
 // checks unreliable, so the server is the only truthful source. Hidden,
 // stale (orphan), and non-readable entries only appear for schema managers —
@@ -30,6 +30,7 @@ export default defineEventHandler(async (event) => {
         custom: t.custom,
         orphan: t.orphan,
         statusField: t.statusField ?? null,
+        closedReasonField: t.closedReasonField ?? null,
         canRead: caps.read,
         canCreate: caps.create
       })

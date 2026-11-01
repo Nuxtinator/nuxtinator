@@ -36,6 +36,8 @@ export interface CrmListOpts {
   filters?: Record<string, unknown>
   /** Text search over record names and linked channel values. */
   q?: string
+  /** Leaves out records whose status is one of these (records with no status stay). */
+  excludeStatuses?: string[]
   /** Field key — or created_at / updated_at — to sort by. */
   sort?: string
   dir?: 'asc' | 'desc'
@@ -382,6 +384,13 @@ export async function listRecords(
   }
   const q = opts.q?.trim()
   if (q) preds.push(eb => qPredicate(eb, q))
+  const excluded = opts.excludeStatuses ?? []
+  if (excluded.length > 0) {
+    preds.push(eb => eb.or([
+      eb('crm_records.status', 'is', null),
+      eb('crm_records.status', 'not in', excluded)
+    ]))
+  }
   if (!(await resolveTypePermission(tx, ctx, typeKey, 'view_all'))) {
     preds.push(eb => visibilityPredicate(eb, ctx.userId))
   }

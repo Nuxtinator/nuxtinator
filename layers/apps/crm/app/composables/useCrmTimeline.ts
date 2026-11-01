@@ -15,6 +15,8 @@ export interface CrmCommentItem {
   body: string
   createdAt: string
   editedAt: string | null
+  /** Name of the connected app the comment came through; null for the web. */
+  viaClient: string | null
 }
 
 /** An activity row as served by /api/crm/records/:type/:id/activity. */
@@ -27,6 +29,8 @@ export interface CrmActivityItem {
   note: string | null
   actorUserId: string | null
   actorName: string
+  /** Name of the connected app the change came through; null for the web. */
+  viaClient: string | null
   createdAt: string
 }
 

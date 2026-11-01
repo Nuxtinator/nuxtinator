@@ -4,7 +4,8 @@
 // persists only what differs from the code manifest (rename/recolor become
 // per-option overrides; brand-new keys become admin-added custom options).
 // Removal is soft: `deleted` keeps historical values renderable while the
-// option stops being offered.
+// option stops being offered. On a status field, options can be marked as
+// meaning the record is closed.
 import type { CrmFieldOption } from '#crm'
 import type { CrmBadgeColor } from '../../../utils/field-kinds'
 
@@ -12,6 +13,8 @@ const options = defineModel<Record<string, CrmFieldOption>>({ required: true })
 
 const props = defineProps<{
   disabled?: boolean
+  /** Status field: options can be marked as meaning the record is closed. */
+  closable?: boolean
 }>()
 
 const COLOR_ITEMS: Array<{ label: string, value: string }> = [
@@ -107,6 +110,18 @@ function badgeColor(option: CrmFieldOption): CrmBadgeColor {
           class="w-28 shrink-0"
           :disabled="disabled || option.deleted"
           @update:model-value="setColor(key, String($event))"
+        />
+        <UButton
+          v-if="closable"
+          icon="i-lucide-archive"
+          :variant="option.closed ? 'soft' : 'ghost'"
+          :color="option.closed ? 'primary' : 'neutral'"
+          size="xs"
+          :aria-label="`${option.label} counts as closed`"
+          :aria-pressed="!!option.closed"
+          :title="option.closed ? 'Counts as closed' : 'Mark as closed'"
+          :disabled="disabled || option.deleted"
+          @click="patchOption(key, { closed: !option.closed })"
         />
         <UButton
           :icon="option.deleted ? 'i-lucide-rotate-ccw' : 'i-lucide-trash-2'"

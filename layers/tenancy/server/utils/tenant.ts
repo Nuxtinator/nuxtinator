@@ -68,6 +68,10 @@ export interface TenantContext {
 
 export interface DefineTenantHandlerOpts {
   appId?: string
+  // Org slug an OAuth request selects, ahead of the path and header (e.g. an
+  // MCP tool's `org` input). Membership is checked like any other selection.
+  // A session request always runs in the org the middleware resolved.
+  org?: string
 }
 
 export type TenantHandler<T> = (
@@ -97,12 +101,13 @@ function middlewareOrg(event: H3Event): RequestOrg {
   }
 }
 
-// The org of an OAuth request: an `/api/o/<slug>/` path or the
-// `X-Active-Org` header, else the user's only active org. Membership and
-// suspension are checked as the middleware checks them for a session.
-async function bearerOrg(event: H3Event, userId: string): Promise<RequestOrg> {
+// The org of an OAuth request: the caller's `org` option, an `/api/o/<slug>/`
+// path or the `X-Active-Org` header, else the user's only active org.
+// Membership and suspension are checked as the middleware checks them for a
+// session.
+async function bearerOrg(event: H3Event, userId: string, org?: string): Promise<RequestOrg> {
   const pathSlug = (event.path || '').match(/^\/api\/o\/([^/?]+)/)?.[1]
-  const slug = pathSlug ? decodeURIComponent(pathSlug) : getRequestHeader(event, 'x-active-org')
+  const slug = org || (pathSlug ? decodeURIComponent(pathSlug) : getRequestHeader(event, 'x-active-org'))
   let orgId: string | undefined
   if (!slug) {
     const owned = await memberOrgIds(userId)
@@ -139,7 +144,7 @@ async function runWithOrgContext<T>(
   const userId = bearer?.userId ?? requireAuth(event).userId
   const clientId = bearer?.clientId ?? null
   const { orgId, orgSlug, orgName, roles: memberRoles } = bearer
-    ? await bearerOrg(event, bearer.userId)
+    ? await bearerOrg(event, bearer.userId, opts.org)
     : middlewareOrg(event)
 
   return await runAsOauthClient(clientId, () => runTransaction(db, async (tx) => {

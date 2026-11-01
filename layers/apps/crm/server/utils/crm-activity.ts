@@ -52,7 +52,8 @@ export async function recordCrmActivity(
       // Postgres then parses the text into the real jsonb value.
       old_value: sql`${JSON.stringify(opts.old ?? null)}::text::jsonb`,
       new_value: sql`${JSON.stringify(opts.new ?? null)}::text::jsonb`,
-      note: opts.note ?? null
+      note: opts.note ?? null,
+      client_id: ctx.clientId ?? null
     })
     .execute()
 }
