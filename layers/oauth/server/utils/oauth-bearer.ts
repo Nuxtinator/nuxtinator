@@ -74,6 +74,12 @@ function sendAuthError(event: H3Event, status: number, opts: UnauthorizedOpts, e
   })
 }
 
+// 403 for a valid token that lacks `scope`, with the `insufficient_scope`
+// challenge clients use to ask the user for more.
+export function rejectInsufficientScope(event: H3Event, scope: string): never {
+  sendAuthError(event, 403, { requiredScope: scope, error: 'insufficient_scope' }, 'Forbidden')
+}
+
 // Validates token + audience + family + client-enabled. Does NOT enforce a
 // specific scope or RBAC permission — callers that need that gate use the
 // `requireBearerScope` wrapper below. The MCP transport boundary uses this
@@ -148,7 +154,7 @@ export async function requireBearerScope(event: H3Event, requiredScope: string):
   const auth = await requireValidBearer(event, requiredScope)
 
   if (!auth.scopes.includes(requiredScope)) {
-    sendAuthError(event, 403, { requiredScope, error: 'insufficient_scope' }, 'Forbidden')
+    rejectInsufficientScope(event, requiredScope)
   }
 
   // RBAC check: scope alone does not grant — current user permission is source of truth.
