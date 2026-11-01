@@ -164,7 +164,7 @@ async function viaClient(ctx: McpToolContext): Promise<Via> {
   return {
     clientName,
     suffix: ` · via ${clientName}`,
-    extra: { source: 'mcp', clientId: ctx.auth.clientId, tool: ctx.tool.name }
+    extra: { source: 'mcp', tool: ctx.tool.name }
   }
 }
 

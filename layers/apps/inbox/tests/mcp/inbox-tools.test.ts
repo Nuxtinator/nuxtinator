@@ -211,11 +211,12 @@ describe('inbox MCP write tools', () => {
     const [convo] = await sql`SELECT status, assigned_user_id FROM inbox_conversations WHERE id = ${conversationId}`
     expect(convo).toMatchObject({ status: 'pending', assigned_user_id: user.id })
 
-    const [log] = await sql<{ user_id: string, metadata: Record<string, unknown> }[]>`
-      SELECT user_id, metadata FROM activity_logs
+    const [log] = await sql<{ user_id: string, client_id: string, metadata: Record<string, unknown> }[]>`
+      SELECT user_id, client_id, metadata FROM activity_logs
       WHERE record_id = ${conversationId} AND event_type = 'inbox_reply_queued'
     `
     expect(log!.user_id).toBe(user.id)
+    expect(log!.client_id).toMatch(/^test-inbox-/)
     expect(log!.metadata).toMatchObject({ source: 'mcp', tool: 'inbox_send_reply' })
     expect(log!.metadata.message).toBe(`Reply queued · via ${INBOX_TEST_MCP_CLIENT_NAME}`)
   })
