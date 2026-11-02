@@ -128,12 +128,59 @@ export interface AiUsageTotals {
   unpriced: number
 }
 
-// Full payload of GET /api/ai/org/usage.
+// The span the spend breakdowns cover: this calendar month, last month, the
+// last 30 days, or everything.
+export const AI_USAGE_PERIODS = ['month', 'last_month', '30d', 'all'] as const
+export type AiUsagePeriod = typeof AI_USAGE_PERIODS[number]
+
+// One row of a breakdown: a layer, feature, model, user, key source or org.
+export interface AiUsageGroup extends AiUsageTotals {
+  key: string
+  label: string
+}
+
+export interface AiUsageBreakdowns {
+  layer: AiUsageGroup[]
+  feature: AiUsageGroup[]
+  model: AiUsageGroup[]
+  user: AiUsageGroup[]
+  keySource: AiUsageGroup[]
+  // The host view in multi-tenant mode only; personal-app calls have no org.
+  org?: AiUsageGroup[]
+}
+
+// Full payload of GET /api/ai/org/usage and GET /api/ai/admin/usage.
 export interface AiUsageSummary {
   month: AiUsageTotals
   lastMonth: AiUsageTotals
   allTime: AiUsageTotals
-  monthByFeature: (AiUsageTotals & { feature: string, label: string })[]
-  // The last 30 days, oldest first; `day` is YYYY-MM-DD.
-  daily: (AiUsageTotals & { day: string })[]
+  period: AiUsagePeriod
+  // The period's spend, each list ordered by cost.
+  by: AiUsageBreakdowns
+  // The last 30 days, oldest first; `day` is YYYY-MM-DD and `layers` is that
+  // day's cost per layer key.
+  daily: (AiUsageTotals & { day: string, layers: Record<string, number> })[]
+  // The layers in `daily`, ordered by their 30-day cost.
+  dailyLayers: AiUsageGroup[]
+}
+
+// One AI round trip, for the org's recent-calls log.
+export interface AiUsageCall {
+  id: string
+  at: string
+  layer: string
+  feature: string
+  model: string
+  keySource: string
+  user: string
+  promptTokens: number
+  completionTokens: number
+  cost: number | null
+}
+
+// Full payload of GET /api/ai/org/usage-calls; `next` is the cursor for the
+// following page, null on the last.
+export interface AiUsageCalls {
+  calls: AiUsageCall[]
+  next: string | null
 }

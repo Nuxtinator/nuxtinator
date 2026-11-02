@@ -83,7 +83,7 @@ export async function indexSectionScoped(scope: TxScope, sectionId: string): Pro
     }
     try {
       const def = (await getPortfolioSections(tx, section.portfolio_id)).find(d => d.key === section.section_key)
-      return { section, run: await resolveAiEmbedRun(tx), title: def?.title ?? section.section_key }
+      return { section, run: await resolveAiEmbedRun(tx, CONTEXT_EMBEDDINGS_FEATURE), title: def?.title ?? section.section_key }
     } catch (err) {
       const message = errorMessage(err)
       await setState(tx, section.id, 'stale', message)
@@ -179,7 +179,7 @@ export async function searchSections(
   let model = opts.queryModel
   if (!vector || !model) {
     if (!opts.query?.trim() || !(await isEmbeddingConfigured(tx))) return []
-    const embedded = await embed({ tx, input: [opts.query] })
+    const embedded = await embed({ tx, feature: CONTEXT_EMBEDDINGS_FEATURE, input: [opts.query] })
     vector = embedded.vectors[0]!
     model = embedded.model
   }

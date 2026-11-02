@@ -75,6 +75,13 @@ export default defineNitroPlugin(() => {
     icon: 'i-lucide-sparkles',
     order: 60
   })
+  registerAdminSection({
+    appId: 'ai',
+    title: 'Spend',
+    path: '/admin/ai/spend',
+    icon: 'i-lucide-receipt',
+    parent: '/admin/ai'
+  })
 
   registerOrgSettingsSection({
     appId: 'ai',

@@ -46,7 +46,7 @@ export async function resolveAiRun(_tx: AiDbClient, _feature: string, _opts: { m
   notConfigured()
 }
 
-export async function resolveAiEmbedRun(_tx: AiDbClient): Promise<AiEmbeddingRun> {
+export async function resolveAiEmbedRun(_tx: AiDbClient, _feature: string): Promise<AiEmbeddingRun> {
   notConfigured()
 }
 

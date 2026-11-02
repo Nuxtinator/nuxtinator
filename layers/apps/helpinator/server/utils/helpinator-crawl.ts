@@ -23,6 +23,7 @@ import { safeFetch } from '#core/server/utils/safe-fetch'
 import { helpinatorExtractFrom, helpinatorParseDom, type HelpinatorDomNode } from './helpinator-extract'
 import { helpinatorScope, type HelpinatorScope } from './helpinator-guards'
 import { helpinatorEmbedRun } from './helpinator-search'
+import { HELPINATOR_EMBEDDINGS_FEATURE } from './helpinator-bot'
 
 type Tx = Transaction<Database>
 
@@ -594,7 +595,7 @@ export function helpinatorSyncRunning(sourceId: string): boolean {
 export async function helpinatorReindexLibraries(scope: HelpinatorScope, progress?: AiReindexProgress): Promise<{ chunks: number }> {
   const { pages, run } = await scope(async tx => ({
     pages: await tx.selectFrom('helpinator_library_pages').select(['id', 'library_id', 'title', 'content', 'content_hash']).execute(),
-    run: await resolveAiEmbedRun(tx)
+    run: await resolveAiEmbedRun(tx, HELPINATOR_EMBEDDINGS_FEATURE)
   }))
   progress?.total(pages.length)
   let chunks = 0

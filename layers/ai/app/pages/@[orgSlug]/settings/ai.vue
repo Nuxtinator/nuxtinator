@@ -258,6 +258,7 @@ onBeforeUnmount(() => {
 
       <AiSpend
         v-if="tab === 'spend'"
+        view="org"
         :org-slug="orgSlug"
       />
 

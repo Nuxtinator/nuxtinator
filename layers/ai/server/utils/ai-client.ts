@@ -712,8 +712,9 @@ async function embedBatch(apiKey: string, model: string, input: string[], usageS
 }
 
 // Resolve the key and embedding model through the caller's tx, for `embed()`
-// calls made after the transaction has committed.
-export async function resolveAiEmbedRun(tx: AiDbClient): Promise<AiEmbeddingRun> {
+// calls made after the transaction has committed. `feature` is the layer's
+// registered embedding feature, which its spend is logged under.
+export async function resolveAiEmbedRun(tx: AiDbClient, feature: string): Promise<AiEmbeddingRun> {
   const model = await resolveEmbeddingModel(tx)
   if (process.env.VITEST) return { kind: 'embedding', apiKey: 'test', model: model || AI_TEST_FALLBACK_EMBED_MODEL }
   const apiKey = await getProviderApiKey(tx, 'openrouter')
@@ -723,7 +724,8 @@ export async function resolveAiEmbedRun(tx: AiDbClient): Promise<AiEmbeddingRun>
   if (!model) {
     throw createError({ statusCode: 503, statusMessage: 'No embedding model is configured.' })
   }
-  const scope = await readUsageScope(tx, AI_USAGE_EMBEDDING_FEATURE, (await getOrgApiKey(tx, 'openrouter')).status === 'ok' ? 'org' : 'host')
+  // A consumer layer built against an older `#ai/server` passes no feature.
+  const scope = await readUsageScope(tx, feature || AI_USAGE_EMBEDDING_FEATURE, (await getOrgApiKey(tx, 'openrouter')).status === 'ok' ? 'org' : 'host')
   return attachUsageScope({ kind: 'embedding', apiKey, model }, scope)
 }
 
@@ -733,7 +735,7 @@ export async function embed(opts: AiEmbedOptions): Promise<AiEmbedResult> {
   let run = opts.run
   if (!run) {
     if (!opts.tx) throw new Error('embed() needs `tx` or `run`')
-    run = await resolveAiEmbedRun(opts.tx)
+    run = await resolveAiEmbedRun(opts.tx, opts.feature)
   }
   const { apiKey, model } = run
   if (process.env.VITEST) return aiFakeEmbed(opts, model)

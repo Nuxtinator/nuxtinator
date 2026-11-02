@@ -164,8 +164,11 @@ export interface AiFeature {
 // fits the same column.
 
 // Same contract as AiCompleteOptions: `tx` (the org whose key and embedding
-// model choice apply) or a run resolved through one.
-export type AiEmbedOptions = AiScoped<AiEmbeddingRun> & {
+// model choice apply) or a run resolved through one. With `tx`, `feature` is
+// the registered embedding feature the calls are billed to.
+export type AiEmbedOptions = (
+  { tx: AiDbClient, feature: string, run?: never } | { run: AiEmbeddingRun, tx?: never, feature?: never }
+) & {
   input: string[]
 }
 

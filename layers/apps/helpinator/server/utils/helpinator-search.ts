@@ -12,6 +12,7 @@ import type { Database } from '#core/server/database/schema'
 import { isEmbeddingConfigured, resolveAiEmbedRun, embed, cosineDistance, vectorSql, prepareFilteredVectorSearch, type AiEmbeddingRun } from '#ai/server'
 import type { HelpinatorLibraryRow } from './helpinator-libraries'
 import type { HelpinatorScope } from './helpinator-guards'
+import { HELPINATOR_EMBEDDINGS_FEATURE } from './helpinator-bot'
 
 type Tx = Transaction<Database>
 
@@ -20,7 +21,7 @@ type Tx = Transaction<Database>
 export async function helpinatorEmbedRun(tx: Tx): Promise<AiEmbeddingRun | null> {
   try {
     if (!(await isEmbeddingConfigured(tx))) return null
-    return await resolveAiEmbedRun(tx)
+    return await resolveAiEmbedRun(tx, HELPINATOR_EMBEDDINGS_FEATURE)
   } catch {
     return null
   }
