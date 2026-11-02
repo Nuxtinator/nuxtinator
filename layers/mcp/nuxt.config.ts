@@ -41,6 +41,13 @@ export default defineNuxtConfig({
   },
 
   nitro: {
+    // Bundle zod and the packages here that import it into the server build.
+    // The MCP SDK accepts zod 3 or 4, so a host that pins a different zod than
+    // the layers gets a second copy nested under the SDK; left external, Nitro
+    // hoists one copy over the other and the server crashes.
+    externals: {
+      inline: ['zod', 'zod-to-json-schema', '@modelcontextprotocol/sdk']
+    },
     typescript: {
       tsConfig: {
         compilerOptions: {

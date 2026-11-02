@@ -1,4 +1,4 @@
-import { zodToJsonSchema } from 'zod-to-json-schema'
+import { z } from 'zod'
 import { isPermission } from '#core/app/utils/permissions'
 import { isRegisteredPermission } from '#core/server/utils/permissions-registry'
 import { registerScope } from '#oauth/scopes'
@@ -76,10 +76,11 @@ export function getRegistry(): McpRegistry {
   return _singleton
 }
 
-function projectSchema(schema: unknown): Record<string, unknown> {
-  return zodToJsonSchema(schema as Parameters<typeof zodToJsonSchema>[0], {
-    target: 'jsonSchema7',
-    $refStrategy: 'none'
+function projectSchema(schema: z.ZodType, io: 'input' | 'output'): Record<string, unknown> {
+  return z.toJSONSchema(schema, {
+    target: 'draft-7',
+    io,
+    unrepresentable: 'any'
   }) as Record<string, unknown>
 }
 
@@ -113,7 +114,7 @@ export function createRegistry(): McpRegistry {
       )
     }
 
-    const inputJsonSchema = projectSchema(tool.input)
+    const inputJsonSchema = projectSchema(tool.input, 'input')
     // The MCP spec requires a tool's inputSchema to be a JSON Schema object.
     // A top-level z.union() (bare anyOf) or similar wrapper erases the object
     // type, and strict clients (Claude Code) reject the server's ENTIRE tool
@@ -125,7 +126,7 @@ export function createRegistry(): McpRegistry {
         + `input and validate variants in the handler.`
       )
     }
-    const outputJsonSchema = tool.output ? projectSchema(tool.output) : undefined
+    const outputJsonSchema = tool.output ? projectSchema(tool.output, 'output') : undefined
     const annotations = toolAnnotations(tool as McpToolDef)
     const entry: RegisteredTool = {
       def: tool as McpToolDef,

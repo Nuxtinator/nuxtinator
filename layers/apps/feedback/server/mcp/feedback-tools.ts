@@ -160,7 +160,7 @@ export const createProjectTool = defineMcpTool({
     org: orgInput,
     name: z.string().trim().min(1).max(200),
     description: z.string().max(2000).optional(),
-    post_meta: z.record(z.unknown()).optional()
+    post_meta: z.record(z.string(), z.unknown()).optional()
   }).strict(),
   handler: async (input, ctx) => {
     try {
@@ -218,7 +218,7 @@ export const createCardTool = defineMcpTool({
     post_type: z.enum(POST_TYPES).optional(),
     priority: z.enum(PRIORITIES).optional(),
     column: z.string().min(1).optional(),
-    post_meta: z.record(z.unknown()).optional()
+    post_meta: z.record(z.string(), z.unknown()).optional()
   }).strict(),
   handler: async (input, ctx) => {
     try {
@@ -329,7 +329,7 @@ export const updateCardTool = defineMcpTool({
     description: z.string().max(20000).optional(),
     append_description: z.string().min(1).max(20000).optional(),
     priority: z.enum(PRIORITIES).optional(),
-    post_meta_merge: z.record(z.unknown()).optional()
+    post_meta_merge: z.record(z.string(), z.unknown()).optional()
   }).strict().refine(
     v => !(v.description && v.append_description),
     { message: 'Provide either description or append_description, not both.' }

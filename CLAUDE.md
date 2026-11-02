@@ -42,7 +42,7 @@ go-saas/                          ← repo root (bun workspace)
     │   └── package.json             deps: nodemailer, nodemailer-mailgun-transport
     ├── oauth/                    ← OPTIONAL OAuth 2.1 server (peer-deps only)
     ├── mcp/                      ← OPTIONAL MCP transport
-    │   └── package.json             deps: @modelcontextprotocol/sdk, zod, zod-to-json-schema
+    │   └── package.json             deps: @modelcontextprotocol/sdk, zod
     ├── dev/                      ← OPTIONAL UI sandbox layer (@nuxtinator/dev — distinct
     │                                from the top-level dev/ host folder above). /kitchen pages.
     └── apps/                     ← per-app feature layers

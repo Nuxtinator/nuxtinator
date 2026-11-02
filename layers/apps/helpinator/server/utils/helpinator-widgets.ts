@@ -94,7 +94,7 @@ export const HelpinatorWidgetInput = z.object({
   allowed_origins: z.array(z.string().max(500)).max(50).default([]),
   daily_message_cap: z.number().int().min(1).max(100_000).default(500),
   enabled: z.boolean().default(true),
-  appearance: z.record(z.unknown()).default({}),
+  appearance: z.record(z.string(), z.unknown()).default({}),
   extra_instructions: z.string().max(4000).default(''),
   starter_questions: z.array(z.string().max(STARTER_QUESTION_MAX)).max(HELPINATOR_MAX_STARTER_QUESTIONS).default([]),
   // Own chat model; null / '' follows the org's `helpinator.chat` choice.

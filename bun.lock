@@ -50,7 +50,7 @@
     },
     "layers/ai": {
       "name": "@nuxtinator/ai",
-      "version": "0.5.0",
+      "version": "0.8.0",
       "dependencies": {
         "tinfoil": "^1.2.1",
       },
@@ -63,12 +63,12 @@
         "kysely": "^0.28.0",
         "nuxt": "^4.0.0",
         "vue": "^3.0.0",
-        "zod": "^3.23.0",
+        "zod": "^4.1.8",
       },
     },
     "layers/apps/context": {
       "name": "@nuxtinator/context",
-      "version": "1.10.1",
+      "version": "1.12.2",
       "dependencies": {
         "archiver": "^7.0.1",
         "diff": "^9.0.0",
@@ -92,28 +92,29 @@
         "nuxt": "^4.0.0",
         "postgres": "^3.4.0",
         "vue": "^3.0.0",
-        "zod": "^3.23.0",
+        "zod": "^4.1.8",
       },
     },
     "layers/apps/crm": {
       "name": "@nuxtinator/crm",
-      "version": "0.2.1",
+      "version": "0.4.0",
       "optionalDependencies": {
         "@nuxtinator/core": "*",
       },
       "peerDependencies": {
+        "@nuxt/kit": "^4.0.0",
         "h3": "^1.0.0",
         "kysely": "^0.28.0",
         "nuxt": "^4.0.0",
         "vue": "^3.0.0",
-        "zod": "^3.23.0",
+        "zod": "^4.1.8",
       },
     },
     "layers/apps/feedback": {
       "name": "@nuxtinator/feedback",
-      "version": "1.5.0",
+      "version": "1.10.0",
       "dependencies": {
-        "zod": "^3.23.0",
+        "zod": "^4.1.8",
       },
       "optionalDependencies": {
         "@nuxtinator/core": "*",
@@ -127,7 +128,7 @@
     },
     "layers/apps/files": {
       "name": "@nuxtinator/files",
-      "version": "1.5.1",
+      "version": "1.6.3",
       "dependencies": {
         "dompurify": "^3.4.13",
         "marked": "^18.1.1",
@@ -140,12 +141,12 @@
         "kysely": "^0.28.0",
         "nuxt": "^4.0.0",
         "vue": "^3.0.0",
-        "zod": "^3.23.0",
+        "zod": "^4.1.8",
       },
     },
     "layers/apps/helpinator": {
       "name": "@nuxtinator/helpinator",
-      "version": "0.3.2",
+      "version": "0.5.0",
       "dependencies": {
         "@mozilla/readability": "^0.6.0",
         "croner": "^10.0.1",
@@ -171,12 +172,12 @@
         "kysely": "^0.28.0",
         "nuxt": "^4.0.0",
         "vue": "^3.0.0",
-        "zod": "^3.23.0",
+        "zod": "^4.1.8",
       },
     },
     "layers/apps/inbox": {
       "name": "@nuxtinator/inbox",
-      "version": "0.5.1",
+      "version": "0.7.0",
       "dependencies": {
         "croner": "^10.0.1",
         "dompurify": "^3.4.13",
@@ -192,16 +193,17 @@
         "@nuxtinator/crm": "*",
       },
       "peerDependencies": {
+        "@nuxt/kit": "^4.0.0",
         "h3": "^1.0.0",
         "kysely": "^0.28.0",
         "nuxt": "^4.0.0",
         "vue": "^3.0.0",
-        "zod": "^3.23.0",
+        "zod": "^4.1.8",
       },
     },
     "layers/apps/list-of-100": {
       "name": "@nuxtinator/list-of-100",
-      "version": "1.0.2",
+      "version": "1.1.1",
       "dependencies": {
         "apexcharts": "^8.2.0",
         "vue3-apexcharts": "^1.11.0",
@@ -214,12 +216,12 @@
         "kysely": "^0.28.0",
         "nuxt": "^4.0.0",
         "vue": "^3.0.0",
-        "zod": "^3.23.0",
+        "zod": "^4.1.8",
       },
     },
     "layers/apps/messages": {
       "name": "@nuxtinator/messages",
-      "version": "1.2.1",
+      "version": "1.2.4",
       "dependencies": {
         "@emoji-mart/data": "^1.2.1",
         "croner": "^10.0.1",
@@ -235,12 +237,12 @@
         "kysely": "^0.28.0",
         "nuxt": "^4.0.0",
         "vue": "^3.0.0",
-        "zod": "^3.23.0",
+        "zod": "^4.1.8",
       },
     },
     "layers/apps/videos": {
       "name": "@nuxtinator/videos",
-      "version": "1.2.3",
+      "version": "1.2.5",
       "dependencies": {
         "fix-webm-duration": "^1.0.6",
         "mediabunny": "^1.25.1",
@@ -258,7 +260,7 @@
     },
     "layers/core": {
       "name": "@nuxtinator/core",
-      "version": "2.2.0",
+      "version": "3.1.0",
       "dependencies": {
         "@bradenmacdonald/s3-lite-client": "^1.0.0",
         "@nuxtjs/i18n": "^10.6.0",
@@ -266,6 +268,7 @@
         "croner": "^10.0.1",
         "jsonwebtoken": "^9.0.2",
         "semver": "^7.6.0",
+        "zod": "^4.1.8",
       },
       "devDependencies": {
         "@types/bcrypt": "^6.0.0",
@@ -310,11 +313,10 @@
     },
     "layers/mcp": {
       "name": "@nuxtinator/mcp",
-      "version": "1.2.0",
+      "version": "1.5.0",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.30.0",
-        "zod": "^3.23.0",
-        "zod-to-json-schema": "^3.23.0",
+        "zod": "^4.1.8",
       },
       "devDependencies": {
         "@nuxt/test-utils": "^4.3.3",
@@ -338,7 +340,7 @@
     },
     "layers/oauth": {
       "name": "@nuxtinator/oauth",
-      "version": "1.2.0",
+      "version": "1.4.1",
       "optionalDependencies": {
         "@nuxtinator/core": "*",
       },
@@ -352,7 +354,7 @@
     },
     "layers/social-auth": {
       "name": "@nuxtinator/social-auth",
-      "version": "0.3.0",
+      "version": "0.5.2",
       "dependencies": {
         "jsonwebtoken": "^9.0.2",
       },
@@ -372,7 +374,7 @@
     },
     "layers/tenancy": {
       "name": "@nuxtinator/tenancy",
-      "version": "2.0.0",
+      "version": "3.6.0",
       "optionalDependencies": {
         "@nuxtinator/core": "*",
       },
@@ -384,7 +386,7 @@
         "nuxt": "^4.0.0",
         "postgres": "^3.4.7",
         "vue": "^3.0.0",
-        "zod": "^3.23.0",
+        "zod": "^4.1.8",
       },
       "optionalPeers": [
         "zod",
@@ -2747,7 +2749,7 @@
 
     "zip-stream": ["zip-stream@6.0.1", "", { "dependencies": { "archiver-utils": "^5.0.0", "compress-commons": "^6.0.2", "readable-stream": "^4.0.0" } }, "sha512-zK7YHHz4ZXpW89AHXUPbQVGKI7uvkd3hzusTdotCg1UxyaVtg0zFJSTfW/Dq5f7OBBVnq6cZIaC8Ti4hb6dtCA=="],
 
-    "zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
+    "zod": ["zod@4.6.7", "", {}, "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg=="],
 
     "zod-to-json-schema": ["zod-to-json-schema@3.25.2", "", { "peerDependencies": { "zod": "^3.25.28 || ^4" } }, "sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA=="],
 
@@ -2790,12 +2792,6 @@
     "@isaacs/cliui/string-width": ["string-width@5.1.2", "", { "dependencies": { "eastasianwidth": "^0.2.0", "emoji-regex": "^9.2.2", "strip-ansi": "^7.0.1" } }, "sha512-HnLOCR3vjcY8beoNLtcjZ5/nxn2afmME6lhrDrebokqMap+XbeW8n9TXpPDOqdGK5qcI3oT0GKTW6wC7EMiVqA=="],
 
     "@isaacs/cliui/wrap-ansi": ["wrap-ansi@8.1.0", "", { "dependencies": { "ansi-styles": "^6.1.0", "string-width": "^5.0.1", "strip-ansi": "^7.0.1" } }, "sha512-si7QWI6zUMq56bESFvagtmzMdGOtoxfR+Sez11Mobfc7tm+VkUckk9bW2UeffTGVUbOksxmSw0AA2gs8g71NCQ=="],
-
-    "@modelcontextprotocol/client/zod": ["zod@4.6.7", "", {}, "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg=="],
-
-    "@modelcontextprotocol/core/zod": ["zod@4.6.7", "", {}, "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg=="],
-
-    "@modelcontextprotocol/server/zod": ["zod@4.6.7", "", {}, "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg=="],
 
     "@nuxt/cli/confbox": ["confbox@0.3.1", "", {}, "sha512-cKUSoKa8YxFZZSmraVi7onONx3amu77ngK3kGpsYHDH7drPwCRkQE1RYMPlLRrMtnciRj274XNRxcHxnKmDSnA=="],
 
