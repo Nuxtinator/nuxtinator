@@ -13,6 +13,8 @@ interface RuntimeConfig {
   mcpReadScopes?: string[]
   mcpRateLimits?: Record<string, unknown>
   mcpAdditionalOrigins?: string[]
+  mcpDisabledApps?: string[]
+  mcpDisabledTools?: string[]
   [key: string]: unknown
 }
 

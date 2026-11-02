@@ -111,6 +111,44 @@ describe('OAuth bearer tokens on tenant routes', () => {
   })
 })
 
+describe('refresh_token grant', () => {
+  const sql = getHostAdminDb()
+
+  afterEach(async () => {
+    await cleanupTestOauthClients(sql)
+    await cleanupTenancyTestData(sql)
+  })
+
+  async function refresh(dynamic: boolean) {
+    const { user } = await createOrgWithAdmin(sql)
+    const scopes = ['context.read', 'org.roles.read', 'offline_access']
+    const clientId = await createTestOauthClient(sql, { scopes })
+    await sql`UPDATE oauth_clients SET dynamic = ${dynamic} WHERE client_id = ${clientId}`
+    const issued = await createTestOauthToken(sql, user, scopes, { clientId, refresh: true })
+    const res = await fetch('/oauth/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: issued.refreshToken!,
+        client_id: clientId,
+        resource: await getOauthResource()
+      }).toString()
+    })
+    expect(res.status).toBe(200)
+    return ((await res.json()) as { scope: string }).scope.split(' ').sort()
+  }
+
+  // `org.roles.read` is a registered permission but no MCP tool's scope, so it isn't advertised.
+  it('drops scopes the server no longer advertises from a dynamic client\'s tokens', async () => {
+    expect(await refresh(true)).toEqual(['context.read', 'offline_access'])
+  })
+
+  it('keeps an admin-registered client\'s scopes', async () => {
+    expect(await refresh(false)).toEqual(['context.read', 'offline_access', 'org.roles.read'])
+  })
+})
+
 describe('connected-app permission edits', () => {
   const sql = getHostAdminDb()
 

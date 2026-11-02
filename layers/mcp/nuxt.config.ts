@@ -14,6 +14,8 @@
 // - runtimeConfig.mcpRateLimits: McpRateLimitConfig (optional; deep-merged with defaults).
 // - runtimeConfig.mcpAdditionalOrigins: string[] (optional; extra Origin allowlist for
 //   browser front-ends served from a different origin than the MCP resource).
+// - runtimeConfig.mcpDisabledApps / mcpDisabledTools: string[] (optional; app ids and tool
+//   names whose MCP tools and resources are never registered).
 // - useStorage('cache') configured. Memory driver is fine for single-replica deployments;
 //   multi-replica needs a shared driver (Redis, KV, etc.) for buckets to be deployment-wide.
 import { fileURLToPath } from 'node:url'
@@ -66,6 +68,8 @@ export default defineNuxtConfig({
     // resolveRateLimitConfig() casts the value back to McpRateLimitConfig
     // before merging with the defaults, so the runtime contract is preserved.
     mcpRateLimits: {},
-    mcpAdditionalOrigins: [] as string[]
+    mcpAdditionalOrigins: [] as string[],
+    mcpDisabledApps: [] as string[],
+    mcpDisabledTools: [] as string[]
   }
 })
