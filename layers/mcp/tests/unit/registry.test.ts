@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { z } from 'zod'
 import { createRegistry } from '../../server/mcp-layer/registry'
 import { defineMcpTool, defineMcpResource } from '../../server/mcp-layer/define'
+import { setTestRuntimeConfig } from '../stubs/nitro-globals'
+import { getRegisteredScopes, __resetScopesForTests } from '../stubs/server/utils/scopes-registry'
 
 describe('createRegistry', () => {
   let registry: ReturnType<typeof createRegistry>
@@ -213,6 +215,50 @@ describe('createRegistry', () => {
     // Re-registering after reset should also clear the duplicate-name index.
     registry.register(t)
     expect(registry.tools).toHaveLength(1)
+  })
+
+  describe('mcpDisabledApps / mcpDisabledTools', () => {
+    const handler = async () => ({ content: [{ type: 'text' as const, text: '' }] })
+    const input = z.object({}).strict()
+
+    beforeEach(() => {
+      __resetScopesForTests()
+    })
+
+    it('skips every tool and resource of a disabled app and leaves its scopes unregistered', () => {
+      setTestRuntimeConfig({ mcpDisabledApps: ['pages'] })
+      registry.register(defineMcpTool({ name: 'pages_list', description: 'x', appId: 'pages', scope: 'pages.view', input, handler }))
+      registry.register(defineMcpTool({ name: 'users_list', description: 'x', appId: 'users', scope: 'users.view', input, handler }))
+      registry.register(defineMcpTool({ name: 'list_orgs', description: 'x', input, handler }))
+      registry.registerResource(defineMcpResource({
+        uriPattern: 'pages://page/{slug}',
+        appId: 'pages',
+        scope: 'pages.write',
+        list: async () => [],
+        read: async () => ({ contents: [] })
+      }))
+
+      expect(registry.tools.map(t => t.def.name)).toEqual(['users_list', 'list_orgs'])
+      expect(registry.resources).toHaveLength(0)
+      expect(getRegisteredScopes()).toEqual(['users.view'])
+    })
+
+    it('skips a disabled tool by name, with or without an appId', () => {
+      setTestRuntimeConfig({ mcpDisabledTools: ['list_orgs', 'pages_publish'] })
+      registry.register(defineMcpTool({ name: 'list_orgs', description: 'x', input, handler }))
+      registry.register(defineMcpTool({ name: 'pages_publish', description: 'x', appId: 'pages', scope: 'pages.publish', input, handler }))
+      registry.register(defineMcpTool({ name: 'pages_list', description: 'x', appId: 'pages', scope: 'pages.view', input, handler }))
+
+      expect(registry.tools.map(t => t.def.name)).toEqual(['pages_list'])
+      expect(getRegisteredScopes()).toEqual(['pages.view'])
+    })
+
+    it('reports disabled entries that matched no registration', () => {
+      setTestRuntimeConfig({ mcpDisabledApps: ['pages', 'crn'], mcpDisabledTools: ['pages_list', 'typo_tool'] })
+      registry.register(defineMcpTool({ name: 'pages_list', description: 'x', appId: 'pages', scope: 'pages.view', input, handler }))
+
+      expect(registry.unmatchedDisabled()).toEqual({ apps: ['crn'], tools: ['typo_tool'] })
+    })
   })
 
   it('__resetForTests refuses to run in production', () => {

@@ -47,7 +47,9 @@ runtimeConfig: {
     allToolsPerToken: { limit: 200, windowMs: 60_000 },
     destructivePerUser: null                      // explicit null disables a bucket
   },
-  mcpAdditionalOrigins: ['https://admin.example.com']
+  mcpAdditionalOrigins: ['https://admin.example.com'],
+  mcpDisabledApps: ['crm'],                       // keep these apps' tools and resources off the MCP server
+  mcpDisabledTools: ['some_tool']                 // keep single tools off, by name
 }
 ```
 
@@ -172,6 +174,17 @@ Gates 2 and 3 reference the same string but check different surfaces. A user dem
 Set `appId` on every tool that reads or writes an org-scoped app's data. Leave it off tools that work across orgs, such as the tenancy layer's `list_orgs`, and off tools of personal (`scope: 'user'`) apps, which are never on per org.
 
 A tool may omit `scope` when it is read-only and safe for any valid bearer, such as `list_orgs` listing the bearer's own memberships. Gates 2 and 3 are skipped for it, it is listed for every token, it registers no OAuth scope, and it counts against the read rate-limit buckets.
+
+## Turning tools off
+
+A host keeps an app layer's MCP surface off without changing the layer:
+
+- `mcpDisabledApps` skips every tool and resource whose `appId` is listed.
+- `mcpDisabledTools` skips single tools by name, including tools without an `appId` such as `list_orgs`. Resources have no name, so only `mcpDisabledApps` reaches them.
+
+A skipped tool is never registered: it isn't in `tools/list`, calling it returns an unknown-tool error, `list_orgs` leaves its app out of each org's `apps`, and its scope isn't registered with the OAuth layer, so it drops out of `scopes_supported`, dynamic client registration and the consent screen (unless another enabled tool or `oauthAdvertisedScopes` still uses it). Dynamically registered clients that already hold the scope lose it at their next token refresh. Admin-registered clients keep the scopes an admin gave them, and a token carrying an app's permission can still call that app's `/api` routes.
+
+Each skipped tool is logged at boot. On the first request the layer warns about any listed app or tool that matched nothing, so a misspelt id doesn't go unnoticed. Both settings can come from the environment as JSON, e.g. `NUXT_MCP_DISABLED_APPS='["crm"]'`.
 
 ## Tool annotations
 

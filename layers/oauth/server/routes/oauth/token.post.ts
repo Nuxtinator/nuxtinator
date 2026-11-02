@@ -14,6 +14,7 @@ import {
 } from '../../utils/oauth-crypto'
 import {
   filterScopesByPermissions,
+  getAdvertisedScopes,
   hasAnyPermissionScope,
   parseScopeString,
   OFFLINE_ACCESS_SCOPE
@@ -399,7 +400,7 @@ async function handleRefreshTokenGrant(event: H3Event, cfg: ReturnType<typeof ge
 
   const client = await db
     .selectFrom('oauth_clients')
-    .select(['enabled'])
+    .select(['enabled', 'dynamic'])
     .where('client_id', '=', clientId)
     .executeTakeFirst()
   if (!client?.enabled) {
@@ -429,7 +430,11 @@ async function handleRefreshTokenGrant(event: H3Event, cfg: ReturnType<typeof ge
 
   const userPerms = await getUserPermissionsAcrossOrgs(claimed.user_id)
   const originalScopes = parseScopeString(claimed.scope)
-  const grantedScopes = filterScopesByPermissions(originalScopes, userPerms)
+  // A dynamic client's cap is the advertised set (see authorize.get.ts), so a
+  // scope the server stopped advertising drops out of its refreshed tokens.
+  const advertised = client.dynamic ? new Set(getAdvertisedScopes()) : null
+  const cappedScopes = advertised ? originalScopes.filter(s => advertised.has(s)) : originalScopes
+  const grantedScopes = filterScopesByPermissions(cappedScopes, userPerms)
   if (grantedScopes.length !== originalScopes.length) {
     logOauthEvent({
       event: OAUTH_EVENTS.SCOPE_REDUCED,

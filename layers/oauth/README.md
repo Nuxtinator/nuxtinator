@@ -8,7 +8,7 @@ Routes:
 - `GET /oauth/authorize` — start the authorization-code flow
 - `POST /oauth/authorize` — consent submission
 - `GET /oauth/consent` — server-rendered consent page. Permissions are grouped by app; the user unticks any they don't want the client to have. Unticked ones are saved as declined, so a client asking for the same set again skips the screen; it reappears only for a permission the user hasn't answered.
-- `POST /oauth/token` — token endpoint (authorization_code, refresh_token grants)
+- `POST /oauth/token` — token endpoint (authorization_code, refresh_token grants). A refresh drops any scope the user no longer holds and, for a dynamically registered client, any scope the server no longer advertises.
 - `POST /oauth/register` — Dynamic Client Registration (RFC 7591)
 - `GET /.well-known/oauth-authorization-server` — RFC 8414
 - `GET /.well-known/oauth-protected-resource` — RFC 9728

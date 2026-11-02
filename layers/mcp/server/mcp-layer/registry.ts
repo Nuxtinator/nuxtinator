@@ -46,7 +46,18 @@ export interface McpRegistry {
   // once stored — narrow I/O is preserved on the def for the dispatcher.
   register: <I, O>(tool: McpToolDef<I, O>) => void
   registerResource: (resource: McpResourceDef) => void
+  // Entries of `mcpDisabledApps` / `mcpDisabledTools` that no registration
+  // matched, so a misspelt id doesn't silently leave an app's tools on.
+  unmatchedDisabled: () => { apps: string[], tools: string[] }
   __resetForTests: () => void
+}
+
+function disabledConfig(): { apps: ReadonlySet<string>, tools: ReadonlySet<string> } {
+  const cfg = useRuntimeConfig()
+  return {
+    apps: new Set((cfg.mcpDisabledApps as string[] | undefined) ?? []),
+    tools: new Set((cfg.mcpDisabledTools as string[] | undefined) ?? [])
+  }
 }
 
 // Module-level singleton. The registry is a per-process value, so backing
@@ -76,8 +87,25 @@ export function createRegistry(): McpRegistry {
   const tools: RegisteredTool[] = []
   const resources: RegisteredResource[] = []
   const toolsByName = new Map<string, number>()
+  const matchedApps = new Set<string>()
+  const matchedTools = new Set<string>()
+
+  // Hosts keep an app's or a tool's MCP surface off with `mcpDisabledApps` /
+  // `mcpDisabledTools`; a skipped entry is never listed, callable or advertised as a scope.
+  function isDisabled(label: string, appId: string | undefined, name?: string): boolean {
+    const disabled = disabledConfig()
+    const byApp = appId !== undefined && disabled.apps.has(appId)
+    const byName = name !== undefined && disabled.tools.has(name)
+    if (!byApp && !byName) return false
+    if (byApp) matchedApps.add(appId)
+    if (byName) matchedTools.add(name)
+    console.info(`[mcp-layer] Skipping disabled ${label}${byApp ? ` (app "${appId}")` : ''}`)
+    return true
+  }
 
   function register<I, O>(tool: McpToolDef<I, O>): void {
+    if (isDisabled(`tool "${tool.name}"`, tool.appId, tool.name)) return
+
     if (tool.scope !== undefined && !isAcceptableScope(tool.scope)) {
       throw new Error(
         `MCP tool "${tool.name}" declares scope "${tool.scope}" which is not in the project's PERMISSIONS list. `
@@ -127,6 +155,8 @@ export function createRegistry(): McpRegistry {
   }
 
   function registerResource(resource: McpResourceDef): void {
+    if (isDisabled(`resource "${resource.uriPattern}"`, resource.appId)) return
+
     if (!isAcceptableScope(resource.scope)) {
       throw new Error(
         `MCP resource "${resource.uriPattern}" declares scope "${resource.scope}" which is not in the project's PERMISSIONS list.`
@@ -143,6 +173,16 @@ export function createRegistry(): McpRegistry {
     tools.length = 0
     resources.length = 0
     toolsByName.clear()
+    matchedApps.clear()
+    matchedTools.clear()
+  }
+
+  function unmatchedDisabled(): { apps: string[], tools: string[] } {
+    const disabled = disabledConfig()
+    return {
+      apps: [...disabled.apps].filter(id => !matchedApps.has(id)),
+      tools: [...disabled.tools].filter(name => !matchedTools.has(name))
+    }
   }
 
   return {
@@ -154,6 +194,7 @@ export function createRegistry(): McpRegistry {
     },
     register,
     registerResource,
+    unmatchedDisabled,
     __resetForTests
   }
 }
