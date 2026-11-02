@@ -1,11 +1,9 @@
 // What a user chose for a connected app: the scopes it may use (`scope`) and
 // the ones they turned down (`declined_scope`), which the consent screen
-// doesn't ask about again. One set of choices per connection: in multi mode
-// consents are stored per org, so a change is written to the connection's
-// consent in every org scope.
+// doesn't ask about again. One set of choices per connection, written to each
+// of its live consents.
 import { sql } from 'kysely'
 import { db } from '#core/server/utils/database'
-import { listOrgScopes, withOrgScope } from '#tenant/server'
 import { parseScopeString } from './oauth-validation'
 
 export interface ConsentChoices {
@@ -39,41 +37,35 @@ export function choicesCover(choices: ConsentChoices | null, requested: string[]
   return requested.every(s => answered.has(s))
 }
 
-// The connection's choices across every org scope it has a live consent in.
+// The connection's choices across its live consents (one per resource).
 export async function loadConsentChoices(userId: string, clientId: string): Promise<ConsentChoices | null> {
+  const rows = await db
+    .selectFrom('oauth_consents')
+    .select(['scope', 'declined_scope'])
+    .where('user_id', '=', userId)
+    .where('client_id', '=', clientId)
+    .where('revoked', '=', false)
+    .execute()
+  if (rows.length === 0) return null
   const granted = new Set<string>()
   const declined = new Set<string>()
-  let found = false
-  for (const orgId of await listOrgScopes()) {
-    const rows = await withOrgScope(orgId, tx => tx
-      .selectFrom('oauth_consents')
-      .select(['scope', 'declined_scope'])
-      .where('user_id', '=', userId)
-      .where('client_id', '=', clientId)
-      .where('revoked', '=', false)
-      .execute())
-    for (const row of rows) {
-      found = true
-      for (const s of parseScopeString(row.scope)) granted.add(s)
-      for (const s of parseScopeString(row.declined_scope)) declined.add(s)
-    }
+  for (const row of rows) {
+    for (const s of parseScopeString(row.scope)) granted.add(s)
+    for (const s of parseScopeString(row.declined_scope)) declined.add(s)
   }
-  if (!found) return null
   for (const s of granted) declined.delete(s)
   return { granted: [...granted], declined: [...declined] }
 }
 
-// Writes `choices` to the connection's live consent in every org scope.
+// Writes `choices` to each of the connection's live consents.
 export async function saveConsentChoices(userId: string, clientId: string, choices: ConsentChoices): Promise<void> {
-  for (const orgId of await listOrgScopes()) {
-    await withOrgScope(orgId, tx => tx
-      .updateTable('oauth_consents')
-      .set({ scope: choices.granted.join(' '), declined_scope: choices.declined.join(' '), updated: new Date() })
-      .where('user_id', '=', userId)
-      .where('client_id', '=', clientId)
-      .where('revoked', '=', false)
-      .execute())
-  }
+  await db
+    .updateTable('oauth_consents')
+    .set({ scope: choices.granted.join(' '), declined_scope: choices.declined.join(' '), updated: new Date() })
+    .where('user_id', '=', userId)
+    .where('client_id', '=', clientId)
+    .where('revoked', '=', false)
+    .execute()
 }
 
 function scopeArray(scopes: string[]) {

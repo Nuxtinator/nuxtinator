@@ -119,7 +119,7 @@ The `@` prefix is the disambiguator: no slug can collide with any system top-lev
 
 ## OAuth + multi-tenancy
 
-The OAuth layer's `oauth_consents` and `oauth_pending_requests` tables are org-scoped via the per-app tenancy migration [layers/oauth/migrations/oauth_T010_enable_tenancy.ts](../layers/oauth/migrations/oauth_T010_enable_tenancy.ts). Token tables (`oauth_token_families`, `oauth_authorization_codes`, `oauth_access_tokens`, `oauth_refresh_tokens`) stay user-scoped — they represent the user's identity to a third party.
+The OAuth layer's tables are all user-scoped, with no `org_id` and no RLS ([layers/oauth/migrations/oauth_T011_user_scoped_consents.ts](../layers/oauth/migrations/oauth_T011_user_scoped_consents.ts)). A consent covers the permissions the user holds across every org, and a token picks its org per call, so a user with no membership can still connect a client for their personal-app permissions, and a consent given while one org is active still applies under another.
 
 OAuth flows that need org binding use `encodeFlowOrg(state, slug)` / `decodeFlowOrg(state)` from `#tenant/server`. The encoded state survives third-party redirects and tab switches.
 

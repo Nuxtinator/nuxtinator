@@ -1,6 +1,5 @@
 import { db } from '#core/server/utils/database'
 import { requireAuth } from '#core/server/utils/auth'
-import { runInOrgTransaction } from '#tenant/server'
 import { getOauthConfig } from '../../utils/oauth-config'
 import { sha256Hex, constantTimeEqual } from '../../utils/oauth-crypto'
 import { buildRedirect, hasAnyPermissionScope, parseScopeString } from '../../utils/oauth-validation'
@@ -30,11 +29,7 @@ export default defineEventHandler(async (event) => {
     abort(400, 'action must be approve or deny')
   }
 
-  // Reads + writes against oauth_pending_requests and oauth_consents are
-  // RLS-scoped in multi-tenant mode. Single mode: plain transaction, no GUC.
-  // `userId` resolves the org the same way `authorize.get.ts` did, so this
-  // step reads the pending row it wrote.
-  const { row: pending, chosen } = await runInOrgTransaction(event, { userId: user.userId }, async (tx) => {
+  const { row: pending, chosen } = await db.transaction().execute(async (tx) => {
     const row = await tx
       .selectFrom('oauth_pending_requests')
       .selectAll()
@@ -68,9 +63,8 @@ export default defineEventHandler(async (event) => {
     const chosen = action === 'approve' ? requested.filter(s => ticked.has(s)) : []
     if (!hasAnyPermissionScope(chosen)) return { row, chosen: null }
 
-    // Upsert consent — must run in the same txn so the GUC scopes the row
-    // to the active org via the column DEFAULT. Unticked scopes are kept as
-    // declined so the screen doesn't ask about them again.
+    // Upsert consent in the same txn as consuming the request. Unticked
+    // scopes are kept as declined so the screen doesn't ask about them again.
     const prev = await tx
       .selectFrom('oauth_consents')
       .select(['scope', 'declined_scope'])

@@ -1,7 +1,7 @@
 import { sql } from 'kysely'
 import { db } from '#core/server/utils/database'
 import { getAuthUser } from '#core/server/utils/auth'
-import { runInOrgTransaction, getUserPermissionsAcrossOrgs } from '#tenant/server'
+import { getUserPermissionsAcrossOrgs } from '#tenant/server'
 import { consumeRateLimit, logRateLimitExceeded } from '#core/server/utils/rate-limit'
 import { getOauthConfig } from '../../utils/oauth-config'
 import {
@@ -180,86 +180,49 @@ export default defineEventHandler(async (event) => {
   // set after.
   const csrfPlaintext = newCsrfToken()
 
-  // The next two operations touch RLS-protected tables (oauth_consents,
-  // oauth_pending_requests). In multi-tenant mode we open a transaction with
-  // `app.current_org` set so RLS scopes correctly and the DEFAULT picks up
-  // the active org for the pending-request INSERT. Single mode: just a plain
-  // transaction (no GUC, no RLS).
-  //
-  // `userId` is what lets the org resolve at all here: this endpoint is a
-  // browser navigation on a non-`/api/` path, so it carries no `X-Active-Org`
-  // header and the tenancy middleware never populates `event.context`. That
-  // leaves the `active-org-slug` cookie, which is unset until some other
-  // org-scoped request has written it. Passing the user lets the kernel fall
-  // back to their sole membership, and lets a stale cookie fall back too.
-  let pendingRequestId: string | null
+  // Consents and pending requests belong to the user, not an org: consent
+  // covers the across-orgs permission set, and tokens pick their org per call.
   // Scopes an existing consent already answers, when it answers them all.
   let consentedScopes: string[] = []
-  try {
-    pendingRequestId = await runInOrgTransaction(event, { userId: authUser.userId }, async (tx) => {
-      // Existing consent short-circuit: the user already said yes or no to
-      // every requested scope, and said yes to at least one permission.
-      const existingConsent = await tx
-        .selectFrom('oauth_consents')
-        .selectAll()
-        .where('client_id', '=', client.client_id)
-        .where('user_id', '=', authUser.userId)
-        .where('resource', '=', cfg.mcpResource)
-        .where('revoked', '=', false)
-        .executeTakeFirst()
+  const pendingRequestId = await db.transaction().execute(async (tx) => {
+    // Existing consent short-circuit: the user already said yes or no to
+    // every requested scope, and said yes to at least one permission.
+    const existingConsent = await tx
+      .selectFrom('oauth_consents')
+      .selectAll()
+      .where('client_id', '=', client.client_id)
+      .where('user_id', '=', authUser.userId)
+      .where('resource', '=', cfg.mcpResource)
+      .where('revoked', '=', false)
+      .executeTakeFirst()
 
-      const choices = choicesFromRow(existingConsent)
-      if (choices && choicesCover(choices, grantedScopes)) {
-        const previouslyGranted = grantedScopes.filter(s => choices.granted.includes(s))
-        if (hasAnyPermissionScope(previouslyGranted)) {
-          consentedScopes = previouslyGranted
-          return null // Signals the caller to issue a code directly.
-        }
+    const choices = choicesFromRow(existingConsent)
+    if (choices && choicesCover(choices, grantedScopes)) {
+      const previouslyGranted = grantedScopes.filter(s => choices.granted.includes(s))
+      if (hasAnyPermissionScope(previouslyGranted)) {
+        consentedScopes = previouslyGranted
+        return null // Signals the caller to issue a code directly.
       }
-
-      const csrfHash = sha256Hex(csrfPlaintext)
-      const pendingRow = await tx
-        .insertInto('oauth_pending_requests')
-        .values({
-          expires: sql<Date>`now() + interval '${sql.raw(String(cfg.pendingRequestTtl))} seconds'`,
-          client_id: client.client_id,
-          user_id: authUser.userId,
-          redirect_uri: normalizedRedirect,
-          scope: grantedScopes.join(' '),
-          resource: cfg.mcpResource,
-          state,
-          code_challenge: codeChallenge,
-          csrf_token_hash: csrfHash
-        })
-        .returning('id')
-        .executeTakeFirstOrThrow()
-      return pendingRow.id
-    })
-  } catch (err) {
-    // The kernel rejects an unresolvable org with a 4xx: the user belongs to
-    // no active org, or to several with nothing selecting one. The second is
-    // sent to the org picker; the rest are reported to the client as an OAuth
-    // error instead of rendering as an error page mid-flow. Anything else (a
-    // DB fault) propagates.
-    const status = (err as { statusCode?: number }).statusCode
-    if (typeof status !== 'number' || status < 400 || status >= 500) throw err
-    // 400 = nothing selected an org. Let the user pick one on /oauth/continue,
-    // which sets the active-org cookie this request resolves the org from.
-    if (status === 400) {
-      await sendRedirect(event, `/oauth/continue?pick_org=1&to=${encodeURIComponent(self)}`)
-      return
     }
-    logOauthEvent({
-      event: OAUTH_EVENTS.AUTHORIZE_ORG_UNRESOLVED,
-      userId: authUser.userId,
-      event3: event,
-      metadata: { client_id: client.client_id, status }
-    })
-    const desc = (err as { statusMessage?: string }).statusMessage
-      || 'No organization could be resolved for this authorization'
-    await sendRedirect(event, errRedirect('access_denied', desc))
-    return
-  }
+
+    const csrfHash = sha256Hex(csrfPlaintext)
+    const pendingRow = await tx
+      .insertInto('oauth_pending_requests')
+      .values({
+        expires: sql<Date>`now() + interval '${sql.raw(String(cfg.pendingRequestTtl))} seconds'`,
+        client_id: client.client_id,
+        user_id: authUser.userId,
+        redirect_uri: normalizedRedirect,
+        scope: grantedScopes.join(' '),
+        resource: cfg.mcpResource,
+        state,
+        code_challenge: codeChallenge,
+        csrf_token_hash: csrfHash
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    return pendingRow.id
+  })
 
   if (pendingRequestId === null) {
     // Skip consent UI — issue a code directly.

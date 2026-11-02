@@ -11,7 +11,6 @@ export const OAUTH_EVENTS = {
   CONSENT_REVOKED: 'oauth.consent_revoked',
   CONSENT_UPDATED: 'oauth.consent_updated',
   SCOPE_REDUCED: 'oauth.scope_reduced',
-  AUTHORIZE_ORG_UNRESOLVED: 'oauth.authorize_org_unresolved',
   AUTHORIZATION_CODE_ISSUED: 'oauth.authorization_code_issued',
   AUTHORIZATION_CODE_REUSED: 'oauth.authorization_code_reused',
   TOKEN_ISSUED: 'oauth.token_issued',

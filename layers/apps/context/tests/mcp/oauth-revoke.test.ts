@@ -1,6 +1,6 @@
-// Revoking a connected app from the user's account clears its consent in
-// every org, so the next authorize request asks for consent again instead
-// of issuing a code silently.
+// Revoking a connected app from the user's account clears its consent, so the
+// next authorize request asks for consent again instead of issuing a code
+// silently.
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch, url as nuxtUrl } from '@nuxt/test-utils/e2e'
 import { createHash, randomBytes } from 'node:crypto'
@@ -24,7 +24,7 @@ describe('OAuth connected-app revoke', () => {
     await sql`DELETE FROM oauth_clients WHERE client_name LIKE 'test-context revoke %'`
   })
 
-  it('revokes the consent in its org, so authorize shows consent again', async () => {
+  it('revokes the consent whichever org is active, so authorize shows consent again', async () => {
     const reg = await fetch(nuxtUrl('/oauth/register'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -44,8 +44,8 @@ describe('OAuth connected-app revoke', () => {
 
     const meta = await (await fetch(nuxtUrl('/.well-known/oauth-protected-resource'))).json() as { resource: string }
     await sql`
-      INSERT INTO oauth_consents (client_id, user_id, resource, scope, org_id)
-      VALUES (${clientId}, ${user.id}, ${meta.resource}, ${SCOPE}, ${orgB.id})
+      INSERT INTO oauth_consents (client_id, user_id, resource, scope)
+      VALUES (${clientId}, ${user.id}, ${meta.resource}, ${SCOPE})
     `
 
     const authorize = async (): Promise<string> => {
@@ -72,7 +72,7 @@ describe('OAuth connected-app revoke', () => {
     expect(first.startsWith(`${REDIRECT_URI}?`), first).toBe(true)
     expect(new URL(first).searchParams.get('code')).toBeTruthy()
 
-    // Active org A; the consent sits in org B.
+    // Active org A; authorize ran with org B active.
     const res = await $fetch<{ consents_revoked: number }>(
       `/api/oauth/connected-apps/${clientId}`,
       { method: 'DELETE', ...withOrgHeader(getAuthHeaders(user), orgA.slug) }

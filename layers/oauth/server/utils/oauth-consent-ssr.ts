@@ -1,7 +1,6 @@
 import type { H3Event } from 'h3'
 import { db } from '#core/server/utils/database'
 import { getAuthUser } from '#core/server/utils/auth'
-import { runInOrgTransaction } from '#tenant/server'
 import { getOauthConfig } from './oauth-config'
 import { verifyCookiePayload } from './oauth-crypto'
 import { parseScopeString } from './oauth-validation'
@@ -23,10 +22,7 @@ export async function loadConsentView(event: H3Event, requestId: string): Promis
   const authUser = getAuthUser(event)
   if (!authUser) return { status: 'unauthorized' }
 
-  // RLS-scoped in multi mode (oauth_pending_requests has org_id + policy).
-  // Single mode: plain transaction. `userId` resolves the org the same way
-  // `authorize.get.ts` did, so this read sees the pending row it wrote.
-  const { pending, consent } = await runInOrgTransaction(event, { userId: authUser.userId }, async (tx) => {
+  const { pending, consent } = await db.transaction().execute(async (tx) => {
     const pending = await tx
       .selectFrom('oauth_pending_requests')
       .selectAll()

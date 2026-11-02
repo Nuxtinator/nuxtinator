@@ -10,15 +10,13 @@
 
 import { sql } from 'kysely'
 import { requireAuth } from '#core/server/utils/auth'
-import { runInOrgTransaction } from '#tenant/server'
+import { db } from '#core/server/utils/database'
 import { groupScopeLabels, oauthScopeLabel } from '../../../utils/oauth-scope-labels'
 
 export default defineEventHandler(async (event) => {
   const user = requireAuth(event)
 
-  // RLS-scoped in multi mode — the user only sees consents granted in their
-  // currently-active org. Single mode: plain transaction over global table.
-  const consents = await runInOrgTransaction(event, async tx => tx
+  const consents = await db
     .selectFrom('oauth_consents')
     .leftJoin('oauth_clients', 'oauth_clients.client_id', 'oauth_consents.client_id')
     .select([
@@ -51,7 +49,7 @@ export default defineEventHandler(async (event) => {
     .where('oauth_consents.user_id', '=', user.userId)
     .where('oauth_consents.revoked', '=', false)
     .orderBy('oauth_consents.created', 'desc')
-    .execute())
+    .execute()
 
   // Merge multi-resource rows by client_id (rare, but possible).
   const byClient = new Map<string, {

@@ -8,6 +8,8 @@ import {
   cleanupTenancyTestData,
   cleanupTestOauthClients,
   createOrgWithAdmin,
+  createTenancyUser,
+  getAuthHeaders,
   createTestOrg,
   addTestMembership,
   createTestOauthClient,
@@ -123,8 +125,8 @@ describe('connected-app permission edits', () => {
     const { org, user, auth } = await createOrgWithAdmin(sql)
     const issued = await createTestOauthToken(sql, user, scopes, { refresh: true })
     await sql`
-      INSERT INTO oauth_consents (client_id, user_id, resource, scope, org_id)
-      VALUES (${issued.clientId}, ${user.id}, ${await getOauthResource()}, ${scopes.join(' ')}, ${org.id})
+      INSERT INTO oauth_consents (client_id, user_id, resource, scope)
+      VALUES (${issued.clientId}, ${user.id}, ${await getOauthResource()}, ${scopes.join(' ')})
     `
     return { org, user, auth, ...issued }
   }
@@ -210,6 +212,23 @@ describe('consent screen choices', () => {
     })
   }
 
+  async function approve(start: Response, session: string, ticked: string[]) {
+    const consentUrl = start.headers.get('location')!
+    const consentCookie = start.headers.getSetCookie().find(c => c.startsWith('oauth_consent_token_'))!.split(';')[0]!
+    const cookie = `${session}; ${consentCookie}`
+    const page = await (await fetch(consentUrl, { headers: { cookie } })).text()
+    const csrf = page.match(/name="csrf_token" value="([^"]+)"/)![1]!
+    const requestId = new URL(consentUrl, 'http://x').searchParams.get('request_id')!
+    const form = new URLSearchParams({ request_id: requestId, csrf_token: csrf, action: 'approve' })
+    for (const s of ticked) form.append('scope', s)
+    return await fetch('/oauth/authorize', {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: form.toString()
+    })
+  }
+
   it('saves unticked permissions as declined and skips the screen when asked again', async () => {
     const { user, auth } = await createOrgWithAdmin(sql)
     const scopes = ['context.read', 'org.roles.read', 'offline_access']
@@ -253,15 +272,48 @@ describe('consent screen choices', () => {
   })
 
   it('shows the screen again for a permission the user has not answered', async () => {
-    const { org, user, auth } = await createOrgWithAdmin(sql)
+    const { user, auth } = await createOrgWithAdmin(sql)
     const clientId = await createTestOauthClient(sql, { scopes: ['context.read', 'org.roles.read'] })
     await sql`
-      INSERT INTO oauth_consents (client_id, user_id, resource, scope, org_id)
-      VALUES (${clientId}, ${user.id}, ${await getOauthResource()}, 'context.read', ${org.id})
+      INSERT INTO oauth_consents (client_id, user_id, resource, scope)
+      VALUES (${clientId}, ${user.id}, ${await getOauthResource()}, 'context.read')
     `
 
     const res = await authorize(clientId, ['context.read', 'org.roles.read'], auth.headers.cookie)
     expect(res.status).toBe(302)
     expect(res.headers.get('location')).toContain('/oauth/consent')
+  })
+
+  it('lets a user who belongs to no org approve a client and see it connected', async () => {
+    const user = await createTenancyUser(sql, { is_admin: true })
+    const session = getAuthHeaders(user).headers.cookie
+    const clientId = await createTestOauthClient(sql, { scopes: ['context.read'] })
+
+    const start = await authorize(clientId, ['context.read'], session)
+    expect(start.headers.get('location')).toContain('/oauth/consent')
+    const approved = await approve(start, session, ['context.read'])
+    expect(approved.status).toBe(302)
+    expect(approved.headers.get('location')).toContain('code=')
+
+    const again = await authorize(clientId, ['context.read'], session)
+    expect(again.headers.get('location')).toMatch(/^http:\/\/127\.0\.0\.1:9\/callback\?code=/)
+
+    const listed = await $fetch<{ apps: { client_id: string }[] }>('/api/oauth/connected-apps', { headers: { cookie: session } })
+    expect(listed.apps.map(a => a.client_id)).toContain(clientId)
+  })
+
+  it('does not ask again when another org is active', async () => {
+    const { org, user, auth } = await createOrgWithAdmin(sql)
+    const second = await createTestOrg(sql)
+    await addTestMembership(sql, { user_id: user.id, org_id: second.id, roles: ['admin'] })
+    const clientId = await createTestOauthClient(sql, { scopes: ['context.read'] })
+    const session = auth.headers.cookie
+
+    const start = await authorize(clientId, ['context.read'], `${session}; active-org-slug=${org.slug}`)
+    const approved = await approve(start, session, ['context.read'])
+    expect(approved.headers.get('location')).toContain('code=')
+
+    const again = await authorize(clientId, ['context.read'], `${session}; active-org-slug=${second.slug}`)
+    expect(again.headers.get('location')).toMatch(/^http:\/\/127\.0\.0\.1:9\/callback\?code=/)
   })
 })

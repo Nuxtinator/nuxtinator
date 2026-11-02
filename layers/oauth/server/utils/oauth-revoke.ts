@@ -8,7 +8,6 @@
 // already revoked) and never throws.
 
 import { db } from '#core/server/utils/database'
-import { listOrgScopes, withOrgScope } from '#tenant/server'
 
 export interface RevokeConsentResult {
   consentsRevoked: number
@@ -54,9 +53,6 @@ export async function revokeFamily(familyId: string, reason: string): Promise<vo
 // Consent revoke spans every resource — a consent row is keyed by
 // (client_id, user_id, resource), but from the user's POV "revoke X"
 // means "cut off X entirely," so we hit every resource.
-//
-// In multi mode consents are RLS-scoped per org, so the revoke runs once
-// in every org scope; otherwise RLS would hide the rows from the update.
 export async function revokeConsentAndFamilies(
   userId: string,
   clientId: string,
@@ -74,17 +70,14 @@ export async function revokeConsentAndFamilies(
     .where('revoked', '=', false)
     .execute()
 
-  let consentsRevoked = 0
-  for (const orgId of await listOrgScopes()) {
-    const consentResult = await withOrgScope(orgId, tx => tx
-      .updateTable('oauth_consents')
-      .set({ revoked: true, updated: new Date() })
-      .where('user_id', '=', userId)
-      .where('client_id', '=', clientId)
-      .where('revoked', '=', false)
-      .executeTakeFirst())
-    consentsRevoked += Number(consentResult.numUpdatedRows ?? 0)
-  }
+  const consentResult = await db
+    .updateTable('oauth_consents')
+    .set({ revoked: true, updated: new Date() })
+    .where('user_id', '=', userId)
+    .where('client_id', '=', clientId)
+    .where('revoked', '=', false)
+    .executeTakeFirst()
+  const consentsRevoked = Number(consentResult.numUpdatedRows ?? 0)
 
   for (const f of families) {
     await revokeFamily(f.family_id, reason)
