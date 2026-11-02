@@ -16,7 +16,8 @@ interface InboxAdminSettings {
   contactFormApiKey: string
   groundingSourceUrls: string[]
   notifyUserIds: string[]
-  autoCloseDays: number
+  // Null while the number input is cleared.
+  autoCloseDays: number | null
   // False for org admins in multi mode: only an operator sets these two.
   mailIdentityEditable: boolean
 }
@@ -27,6 +28,47 @@ const forbidden = ref(false)
 const saving = ref(false)
 // Textarea-friendly view of the URL list (one per line).
 const urlsText = ref('')
+// Field errors from the last rejected save, keyed by request field.
+const serverErrors = ref<Record<string, string[] | undefined>>({})
+
+const FIELD_LABELS: Record<string, string> = {
+  inboundDomain: 'Inbound mail domain',
+  contactAddress: 'Shared contact address',
+  brandFromName: 'Brand From name',
+  autoAckEnabled: 'Auto-acknowledge',
+  contactFormApiKey: 'Contact-form API key',
+  groundingSourceUrls: 'AI grounding source URLs',
+  notifyUserIds: 'Email on unassigned mail',
+  autoCloseDays: 'Auto-close after (days)'
+}
+
+// Mirrors the PUT route's checks so bad input is flagged before saving.
+const DOMAIN_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+const domainError = computed(() => {
+  const v = form.value?.inboundDomain.trim() ?? ''
+  if (!v || DOMAIN_RE.test(v)) return serverErrors.value.inboundDomain?.[0]
+  const afterAt = v.split('@').pop() ?? ''
+  if (v.includes('@') && DOMAIN_RE.test(afterAt)) return `Enter only the domain: ${afterAt}`
+  return 'Must be a bare domain, e.g. mail.example.com'
+})
+
+const contactError = computed(() => {
+  const v = form.value?.contactAddress.trim().toLowerCase() ?? ''
+  if (!v) return serverErrors.value.contactAddress?.[0]
+  if (!EMAIL_RE.test(v)) return 'Must be an email address'
+  const domain = form.value?.inboundDomain.trim().toLowerCase() ?? ''
+  if (!domain) return 'Set the inbound mail domain first'
+  if (!domainError.value && v.split('@')[1] !== domain) return `Must be an address on ${domain}`
+  return serverErrors.value.contactAddress?.[0]
+})
+
+const autoCloseError = computed(() =>
+  form.value?.autoCloseDays == null
+    ? 'Enter a number of days (0 never auto-closes)'
+    : serverErrors.value.autoCloseDays?.[0]
+)
 
 // Sending identities (settings managers): every inbox user with their alias,
 // joined from the assignees list (names) and the identities list (aliases).
@@ -98,6 +140,12 @@ await load()
 
 async function save() {
   if (!form.value) return
+  serverErrors.value = {}
+  const identityError = form.value.mailIdentityEditable && (domainError.value || contactError.value)
+  if (identityError || autoCloseError.value) {
+    toast.add({ title: 'Save failed', description: 'Fix the highlighted fields.', color: 'error' })
+    return
+  }
   saving.value = true
   try {
     const updated = await $fetch<InboxAdminSettings>('/api/inbox/settings', {
@@ -118,10 +166,19 @@ async function save() {
     urlsText.value = updated.groundingSourceUrls.join('\n')
     toast.add({ title: 'Inbox settings saved', icon: 'i-lucide-save', color: 'success' })
   } catch (err) {
-    const e = err as { statusCode?: number, data?: { statusMessage?: string } }
+    const e = err as {
+      statusCode?: number
+      data?: { statusMessage?: string, data?: { fieldErrors?: Record<string, string[]> } }
+    }
+    const fieldErrors = e.data?.data?.fieldErrors ?? {}
+    serverErrors.value = fieldErrors
+    const details = Object.entries(fieldErrors)
+      .map(([field, msgs]) => `${FIELD_LABELS[field] ?? field}: ${msgs.join(', ')}`)
     toast.add({
       title: 'Save failed',
-      description: e.data?.statusMessage || (e.statusCode === 400 ? 'Check the domain and address formats.' : undefined),
+      description: details.length
+        ? details.join('\n')
+        : e.data?.statusMessage || (e.statusCode === 400 ? 'Check the domain and address formats.' : undefined),
       color: 'error'
     })
   } finally {
@@ -165,7 +222,7 @@ function generateApiKey() {
 
     <template v-else-if="form">
       <div class="space-y-4">
-        <UFormField>
+        <UFormField :error="form.mailIdentityEditable ? domainError : undefined">
           <template #label>
             Inbound mail domain
             <InfoTip text="The (sub)domain inbound mail arrives on, e.g. mail.example.com. Mail on it is routed to this organization." />
@@ -173,7 +230,10 @@ function generateApiKey() {
           <UInput v-model="form.inboundDomain" placeholder="mail.example.com" class="w-full" :disabled="!form.mailIdentityEditable" />
         </UFormField>
 
-        <UFormField :help="form.mailIdentityEditable ? undefined : 'Set by the platform operator.'">
+        <UFormField
+          :help="form.mailIdentityEditable ? undefined : 'Set by the platform operator.'"
+          :error="form.mailIdentityEditable ? contactError : undefined"
+        >
           <template #label>
             Shared contact address
             <InfoTip text="The From address for team replies and the base of contact+token reply addresses. Must be on the inbound domain." />
@@ -197,7 +257,7 @@ function generateApiKey() {
           <USwitch v-model="form.autoAckEnabled" />
         </UFormField>
 
-        <UFormField>
+        <UFormField :error="autoCloseError">
           <template #label>
             Auto-close after (days)
             <InfoTip>
