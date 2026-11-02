@@ -120,4 +120,34 @@ describe('runCompletionLoop text discard', () => {
     expect(res.text).toBe('final')
     expect(discards).toBe(1)
   })
+
+  it('keeps discarded text out of the history sent back to the model', async () => {
+    const { call, seen } = scripted([
+      {
+        text: 'The answer is 42.',
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'c1', name: 'load', arguments: '{}' }],
+        native: [
+          { type: 'thinking', thinking: 'hmm', signature: 'sig' },
+          { type: 'text', text: 'The answer is 42.' },
+          { type: 'tool_use', id: 'c1', name: 'load', input: {} }
+        ]
+      },
+      { text: 'final', finishReason: 'stop', toolCalls: [] }
+    ])
+    await runCompletionLoop(call, {
+      apiMessages: [],
+      tools: [TOOL],
+      onToolCall: async () => 'r',
+      maxToolRounds: 4
+    })
+    expect(seen[1]!.messages[0]).toMatchObject({
+      role: 'assistant',
+      content: null,
+      native: [
+        { type: 'thinking', thinking: 'hmm', signature: 'sig' },
+        { type: 'tool_use', id: 'c1', name: 'load', input: {} }
+      ]
+    })
+  })
 })

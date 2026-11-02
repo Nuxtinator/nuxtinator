@@ -89,15 +89,17 @@ export async function runCompletionLoop(
     }
     if (turn.text) opts.onTextDiscard?.()
 
+    // The discarded text stays out of the history too, or the model takes it
+    // as already said and its reply points at text nobody saw.
     messages.push({
       role: 'assistant',
-      content: turn.text || null,
+      content: null,
       tool_calls: turn.toolCalls.map(tc => ({
         id: tc.id,
         type: 'function',
         function: { name: tc.name, arguments: tc.arguments || '{}' }
       })),
-      ...(turn.native ? { native: turn.native } : {})
+      ...(turn.native ? { native: turn.native.filter(b => (b as { type?: unknown })?.type !== 'text') } : {})
     })
 
     for (const tc of turn.toolCalls) {
