@@ -1,6 +1,6 @@
 {
   "name": "@nuxtinator/context",
-  "version": "1.12.3",
+  "version": "1.13.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -21,7 +21,7 @@
   },
   "nuxtinator": {
     "requires": {
-      "@nuxtinator/core": ">=3.1.0"
+      "@nuxtinator/core": ">=3.3.0"
     }
   },
   "devDependencies": {
