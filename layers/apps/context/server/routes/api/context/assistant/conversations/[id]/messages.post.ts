@@ -15,7 +15,7 @@ import { createEventStream, getRequestHeader, type H3Event } from 'h3'
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import { withOrgPermission } from '#tenant/server'
-import { isAiConfigured, complete, type AiMessage, type AiToolHandler } from '#ai/server'
+import { isAiConfigured, complete, resolveAiRun, type AiMessage, type AiToolHandler } from '#ai/server'
 import {
   getOwnedConversationOr404,
   listMessages,
@@ -27,6 +27,7 @@ import { getPortfolioById } from '../../../../../../utils/portfolio-helpers'
 import {
   CONTEXT_ASSISTANT_FEATURE,
   buildAssistantContext,
+  contextAssistantSubject,
   historyToMessages,
   scopeFromConversation,
   stripUpdateBlocks,
@@ -59,8 +60,9 @@ async function runTurn(tx: Tx, args: TurnArgs, hooks?: TurnHooks) {
   const { conversation, message, canApply, history, assistant } = args
   const userMessage = await insertMessage(tx, { conversationId: conversation.id, role: 'user', content: message })
 
+  const run = await resolveAiRun(tx, CONTEXT_ASSISTANT_FEATURE, { subject: contextAssistantSubject(conversation.portfolio_id) })
   const result = await complete({
-    tx,
+    run,
     feature: CONTEXT_ASSISTANT_FEATURE,
     system: assistant.system,
     messages: [...history, { role: 'user', content: message }],

@@ -1,6 +1,6 @@
 // GET /api/ai/admin/usage?period=month|last_month|30d|all
 // The whole deployment's AI spend, every org's and every personal app's, for
-// the operator's spend page. Reads totals through `ai_usage_host_daily`, which
+// the operator's spend page. Reads totals through `ai_usage_host_daily_totals`, which
 // sees past RLS.
 import { getQuery } from 'h3'
 import { requireOperatorAdmin } from '#tenant/server'

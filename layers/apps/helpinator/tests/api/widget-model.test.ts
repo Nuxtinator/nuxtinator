@@ -72,6 +72,21 @@ describe('per-widget chat model', () => {
     return (await getAiFakeLog()).filter(c => c.kind === 'complete').at(-1)?.model
   }
 
+  it('logs a turn\'s spend under its widget, named on the AI spend page', async () => {
+    const { org, opts, widget } = await setup()
+    await primeAiFake({ text: 'Hi.' })
+    await sendTurn(widget.id, 'Hello')
+    const subject = `helpinator-widget:${widget.id}`
+    expect((await getAiFakeLog()).filter(c => c.kind === 'complete').at(-1)?.subject).toBe(subject)
+
+    await sql`
+      INSERT INTO ai_usage (org_id, feature, subject, model, provider, key_source, cost)
+      VALUES (${org.id}, 'helpinator.chat', ${subject}, ${ALPHA}, 'openrouter', 'org', 1)
+    `
+    const usage = await $fetch<{ by: { subject: { key: string, label: string }[] } }>('/api/ai/org/usage', { ...opts })
+    expect(usage.by.subject.find(s => s.key === subject)?.label).toBe('Test widget')
+  })
+
   it('a widget with no model runs on the org\'s helpinator.chat choice', async () => {
     const { widget } = await setup()
     await primeAiFake({ text: 'Hi.' })

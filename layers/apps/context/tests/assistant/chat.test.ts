@@ -134,6 +134,25 @@ describe('assistant conversations', () => {
     expect(detail.messages[1]!.proposals[0]!.status).toBe('pending')
   })
 
+  it('logs the assistant\'s spend per portfolio, named on the AI spend page', async () => {
+    const { org, auth, user } = await createContextOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    const p = await createTestPortfolio(sql, { org_id: org.id, name: 'Acme Portfolio', created_by: user.id })
+    await primeAiFake({ text: 'Hi.' })
+    await sendMessage(opts, (await startConversation(opts, { portfolio: p.slug })).id, 'Hello')
+    await sendMessage(opts, (await startConversation(opts)).id, 'Hello')
+    const subject = `context-portfolio:${p.id}`
+    expect((await getAiFakeLog()).filter(c => c.kind === 'complete').map(c => c.subject)).toEqual([subject, 'context-portfolio:all'])
+
+    await sql`
+      INSERT INTO ai_usage (org_id, feature, subject, model, provider, key_source, cost)
+      VALUES (${org.id}, 'context.assistant', ${subject}, 'test/alpha', 'openrouter', 'host', 1),
+             (${org.id}, 'context.assistant', 'context-portfolio:all', 'test/alpha', 'openrouter', 'host', 2)
+    `
+    const usage = await $fetch<{ by: { subject: { key: string, label: string }[] } }>('/api/ai/org/usage', { ...opts })
+    expect(usage.by.subject.map(s => [s.key, s.label])).toEqual([['context-portfolio:all', 'All portfolios'], [subject, 'Acme Portfolio']])
+  })
+
   it('applying a proposal writes the section with a version and records the decision', async () => {
     const { org, auth, user } = await createContextOrgWith(sql, ['admin'])
     const opts = withOrgHeader(auth, org.slug)

@@ -12,7 +12,7 @@
 
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
-import type { AiTool, AiToolHandler, AiMessage, AiTextPart } from '#ai/server'
+import { aiUsageSubject, type AiDbClient, type AiTool, type AiToolHandler, type AiMessage, type AiTextPart } from '#ai/server'
 import { listPortfolios, type PortfolioRow } from './portfolio-helpers'
 import { getPortfolioSections, type MergedSection } from './section-settings'
 import { searchSections, type SectionSearchHit } from './section-index'
@@ -23,6 +23,27 @@ type Tx = Transaction<Database>
 
 // The `#ai/server` feature key; the admin AI page shows a model picker for it.
 export const CONTEXT_ASSISTANT_FEATURE = 'context.assistant'
+
+// The assistant's spend is logged per portfolio as `context-portfolio:<id>`,
+// or `context-portfolio:all` for chats about every portfolio; the AI spend
+// page names those ids through `contextPortfolioNames`.
+export const CONTEXT_PORTFOLIO_SUBJECT = 'context-portfolio'
+const ALL_PORTFOLIOS = 'all'
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function contextAssistantSubject(portfolioId: string | null): string {
+  return aiUsageSubject(CONTEXT_PORTFOLIO_SUBJECT, portfolioId ?? ALL_PORTFOLIOS)
+}
+
+export async function contextPortfolioNames(tx: AiDbClient, ids: string[]): Promise<Map<string, string>> {
+  const names = new Map<string, string>()
+  if (ids.includes(ALL_PORTFOLIOS)) names.set(ALL_PORTFOLIOS, 'All portfolios')
+  const valid = ids.filter(id => UUID_RE.test(id))
+  if (!valid.length) return names
+  const rows = await tx.selectFrom('context_portfolios').select(['id', 'name']).where('id', 'in', valid).execute()
+  for (const r of rows) names.set(r.id, r.name)
+  return names
+}
 
 export type AssistantScope =
   | { kind: 'section', portfolio: PortfolioRow, sectionKey: string }

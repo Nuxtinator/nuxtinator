@@ -14,7 +14,7 @@
 import { z } from 'zod'
 import { createEventStream, getHeader, getRequestHeader, type H3Event } from 'h3'
 import { sql } from 'kysely'
-import { complete, resolveAiRun } from '#ai/server'
+import { aiUsageSubject, complete, resolveAiRun } from '#ai/server'
 import { helpinatorWithWidget } from '../../../../../../utils/helpinator-public'
 import {
   HELPINATOR_MAX_MESSAGE_CHARS,
@@ -46,6 +46,7 @@ import {
   helpinatorHistoryToMessages
 } from '../../../../../../utils/helpinator-bot'
 import { helpinatorGetLibraries } from '../../../../../../utils/helpinator-libraries'
+import { HELPINATOR_WIDGET_SUBJECT } from '../../../../../../utils/helpinator-widgets'
 import { helpinatorEmbedRun } from '../../../../../../utils/helpinator-search'
 
 const Body = z.object({
@@ -148,7 +149,10 @@ export default defineEventHandler(async (event) => {
         session: { token: token!, conversationId: conversation.id, reset },
         history,
         libraries,
-        chatRun: await resolveAiRun(tx, HELPINATOR_CHAT_FEATURE, { model: widget.chat_model }),
+        chatRun: await resolveAiRun(tx, HELPINATOR_CHAT_FEATURE, {
+          model: widget.chat_model,
+          subject: aiUsageSubject(HELPINATOR_WIDGET_SUBJECT, widget.id)
+        }),
         embedRun: await helpinatorEmbedRun(tx),
         handoffAvailable: await helpinatorHandoffAvailable(tx),
         scope: helpinatorScope(await helpinatorCurrentScope(tx))

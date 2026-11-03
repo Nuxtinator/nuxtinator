@@ -15,12 +15,12 @@ interface Summary {
   lastMonth: Totals
   allTime: Totals
   period: string
-  by: { layer: Group[], feature: Group[], model: Group[], user: Group[], keySource: Group[], org?: Group[] }
+  by: { layer: Group[], feature: Group[], subject: Group[], model: Group[], user: Group[], keySource: Group[], org?: Group[] }
   daily: (Totals & { day: string, layers: Record<string, number> })[]
   dailyLayers: Group[]
 }
 interface Calls {
-  calls: { id: string, feature: string, model: string, user: string, cost: number | null }[]
+  calls: { id: string, feature: string, subject: string | null, model: string, user: string, cost: number | null }[]
   next: string | null
 }
 
@@ -40,11 +40,11 @@ async function getCalls(opts: object, cursor?: string): Promise<Calls> {
 
 async function seed(row: {
   org_id: string | null, user_id?: string | null, feature: string, cost: number | null,
-  model?: string, key_source?: 'org' | 'host', created_at?: string
+  model?: string, key_source?: 'org' | 'host', created_at?: string, subject?: string
 }) {
   await sql`
-    INSERT INTO ai_usage (org_id, user_id, feature, model, provider, key_source, prompt_tokens, completion_tokens, cost, created_at)
-    VALUES (${row.org_id}, ${row.user_id ?? null}, ${row.feature}, ${row.model ?? 'test/alpha'}, 'openrouter', ${row.key_source ?? 'host'}, 10, 5, ${row.cost},
+    INSERT INTO ai_usage (org_id, user_id, feature, subject, model, provider, key_source, prompt_tokens, completion_tokens, cost, created_at)
+    VALUES (${row.org_id}, ${row.user_id ?? null}, ${row.feature}, ${row.subject ?? null}, ${row.model ?? 'test/alpha'}, 'openrouter', ${row.key_source ?? 'host'}, 10, 5, ${row.cost},
       ${sql.unsafe(row.created_at ?? 'now()')})
   `
 }
@@ -123,6 +123,24 @@ describe('ai org usage', () => {
     expect(usage.daily.at(-1)!.layers).toEqual({ alpha: 3, beta: 0.5, ai: 0.25 })
   })
 
+  it('breaks the period down by subject and shows it on each call', async () => {
+    const { org, opts } = await createAiOrg(sql)
+    await seed({ org_id: org.id, feature: 'test.run', subject: 'test:one', cost: 1 })
+    await seed({ org_id: org.id, feature: 'test.run', subject: 'test:one', cost: 2 })
+    await seed({ org_id: org.id, feature: 'test.summary', subject: 'test:two', cost: 0.5 })
+    await seed({ org_id: org.id, feature: 'test.run', cost: 0.25, created_at: `now() - interval '1 minute'` })
+
+    const usage = await getUsage(opts)
+    expect(usage.by.subject.map(s => [s.key, s.label, s.cost, s.calls])).toEqual([
+      ['test:one', 'test:one', 3, 2],
+      ['test:two', 'test:two', 0.5, 1],
+      ['', 'Not recorded', 0.25, 1]
+    ])
+    const calls = (await getCalls(opts)).calls
+    expect(calls[0]!.subject).not.toBeNull()
+    expect(calls.at(-1)!.subject).toBeNull()
+  })
+
   it('lists the org\'s calls newest first, a page at a time', async () => {
     const a = await createAiOrg(sql)
     const b = await createAiOrg(sql)
@@ -198,5 +216,15 @@ describe('ai host usage', () => {
     expect(usage.by.org!.find(o => o.key === a.org.id)!.label).toBe('Test AI Org')
     expect(usage.by.org!.find(o => o.key === '')!.label).toBe('Personal apps')
     expect(totalsOf(usage.by.user, b.user.id)).toEqual({ cost: 100, calls: 1, unpriced: 0 })
+  })
+
+  it('breaks every org\'s spend down by subject', async () => {
+    const a = await createAiOrg(sql)
+    const b = await createAiOrg(sql, { admin: false })
+    await seed({ org_id: a.org.id, feature: 'test.run', subject: 'test:host-one', cost: 1 })
+    await seed({ org_id: b.org.id, feature: 'test.run', subject: 'test:host-one', cost: 2 })
+
+    const usage = await getHostUsage(a.auth)
+    expect(totalsOf(usage.by.subject, 'test:host-one')).toEqual({ cost: 3, calls: 2, unpriced: 0 })
   })
 })

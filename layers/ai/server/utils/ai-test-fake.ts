@@ -18,6 +18,7 @@ import type {
   AiToolCallRecord
 } from '#core/ai-fallback/types'
 import { AI_EMBED_DIMENSIONS } from '#core/ai-fallback/vectors'
+import { usageScopeOf } from './ai-usage'
 import type {
   AiDecideOptions,
   AiDecideResult,
@@ -73,6 +74,8 @@ export interface AiFakeCall {
   input?: string[]
   // The reasoning level the caller asked for.
   reasoning?: AiRichCompleteOptions['reasoning']
+  // For a call made with a resolved run: the subject it was resolved for.
+  subject?: string | null
   // For `transcribe`: the audio's media type, size and prompt.
   audio?: { mimeType: string, bytes: number, prompt?: string }
   // For `decide`: the input and the questions asked.
@@ -126,7 +129,8 @@ export async function aiFakeComplete(opts: AiRichCompleteOptions, model: string)
     tools: (opts.tools ?? []).map(t => t.name),
     toolResults: [],
     streamed: !!opts.onTextDelta,
-    reasoning: opts.reasoning
+    reasoning: opts.reasoning,
+    subject: opts.run ? usageScopeOf(opts.run)?.subject ?? null : null
   }
   const scriptedCalls = opts.onToolCall ? state.script.toolCalls ?? [] : []
   const preface = opts.onTextDelta && scriptedCalls.length ? state.script.discardedText ?? '' : ''
