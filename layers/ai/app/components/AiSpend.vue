@@ -2,7 +2,7 @@
 import type { AiUsageBreakdowns, AiUsageCall, AiUsageCalls, AiUsageGroup, AiUsagePeriod, AiUsageSummary, AiUsageTotals } from '#ai'
 
 // AI spend: period totals, a bar per day for the last 30 days split by layer,
-// the chosen period broken down by layer, feature, model, user, key source
+// the chosen period broken down by layer, feature, source, model, user, key source
 // and (host view) org, and, for an org, a log of its recent calls.
 
 const props = defineProps<{ view: 'org' | 'host', orgSlug?: string }>()
@@ -56,20 +56,27 @@ const maxDay = computed(() => Math.max(0, ...daily.value.map(d => d.cost)))
 
 type Dimension = keyof AiUsageBreakdowns
 const dimension = ref<Dimension>('layer')
+// Source appears once some call in the period recorded what it ran for.
+const hasSubjects = computed(() => !!usage.value?.by.subject.some(g => g.key !== ''))
 const dimensionItems = computed(() => [
   { label: 'Layer', value: 'layer' },
   { label: 'Feature', value: 'feature' },
+  ...(hasSubjects.value ? [{ label: 'Source', value: 'subject' }] : []),
   { label: 'Model', value: 'model' },
   { label: 'User', value: 'user' },
   { label: 'Key', value: 'keySource' },
   ...(usage.value?.by.org ? [{ label: 'Organization', value: 'org' }] : [])
 ])
+watch(dimensionItems, (items) => {
+  if (!items.some(i => i.value === dimension.value)) dimension.value = 'layer'
+})
 const groups = computed<AiUsageGroup[]>(() => usage.value?.by[dimension.value] ?? [])
 const groupMax = computed(() => Math.max(0, ...groups.value.map(g => g.cost)))
 
 const calls = ref<AiUsageCall[]>([])
 const nextCursor = ref<string | null>(null)
 const loadingCalls = ref(false)
+const callSubjects = computed(() => calls.value.some(c => c.subject))
 
 async function loadCalls(more = false) {
   if (props.view !== 'org') return
@@ -307,6 +314,12 @@ function barHeight(cost: number): string {
                 <th class="font-normal px-4 py-2">
                   Feature
                 </th>
+                <th
+                  v-if="callSubjects"
+                  class="font-normal px-4 py-2"
+                >
+                  Source
+                </th>
                 <th class="font-normal px-4 py-2">
                   Model
                 </th>
@@ -334,6 +347,12 @@ function barHeight(cost: number): string {
                   <div class="text-xs text-(--ui-text-muted)">
                     {{ c.keySource }}
                   </div>
+                </td>
+                <td
+                  v-if="callSubjects"
+                  class="px-4 py-2"
+                >
+                  {{ c.subject ?? '—' }}
                 </td>
                 <td class="px-4 py-2 break-all">
                   {{ c.model }}

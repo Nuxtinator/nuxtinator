@@ -45,6 +45,7 @@ export interface AiFakeCall {
   tools: string[]
   toolResults: Array<{ name: string, input: Record<string, unknown>, result: string }>
   streamed?: boolean
+  subject?: string | null
 }
 
 export async function primeAiFake(script: AiFakeScript): Promise<void> {

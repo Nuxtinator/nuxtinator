@@ -91,8 +91,10 @@ export async function isAiConfigured(tx: AiDbClient): Promise<boolean> {
 // Resolve the key and model for `feature` through the caller's tx. Pass the
 // result to `complete()` / `generate()` / `transcribe()` as `run` to make the
 // provider call after the transaction has committed. `opts.model` overrides
-// the feature's model when the org may use it (see resolveFeatureModel).
-export async function resolveAiRun(tx: AiDbClient, feature: string, opts: { model?: string | null } = {}): Promise<AiCompletionRun> {
+// the feature's model when the org may use it (see resolveFeatureModel);
+// `opts.subject` records what inside the feature the run is for (see
+// ai-usage-subjects).
+export async function resolveAiRun(tx: AiDbClient, feature: string, opts: { model?: string | null, subject?: string | null } = {}): Promise<AiCompletionRun> {
   // Warm the list so the synchronous capability lookups in buildBody see it.
   await loadModelList(tx)
   const model = await resolveFeatureModel(tx, feature, opts.model)
@@ -101,7 +103,8 @@ export async function resolveAiRun(tx: AiDbClient, feature: string, opts: { mode
     const fallback = kind === 'transcription'
       ? AI_TEST_FALLBACK_TRANSCRIPTION_MODEL
       : kind === 'decision' ? AI_TEST_FALLBACK_DECISION_MODEL : AI_TEST_FALLBACK_MODEL
-    return { kind: 'completion', apiKey: 'test', model: model || fallback }
+    const run: AiCompletionRun = { kind: 'completion', apiKey: 'test', model: model || fallback }
+    return attachUsageScope(run, await readUsageScope(tx, feature, 'host', opts.subject))
   }
   if (!model) {
     throw createError({ statusCode: 503, statusMessage: 'No AI model is enabled for this feature.' })
@@ -114,7 +117,7 @@ export async function resolveAiRun(tx: AiDbClient, feature: string, opts: { mode
       statusMessage: `AI is not configured (no ${AI_PROVIDER_LABELS[provider]} API key for this organization or the host).`
     })
   }
-  const scope = await readUsageScope(tx, feature, (await getOrgApiKey(tx, provider)).status === 'ok' ? 'org' : 'host')
+  const scope = await readUsageScope(tx, feature, (await getOrgApiKey(tx, provider)).status === 'ok' ? 'org' : 'host', opts.subject)
   return attachUsageScope({ kind: 'completion', apiKey, model }, scope)
 }
 
