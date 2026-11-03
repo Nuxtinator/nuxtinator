@@ -72,16 +72,22 @@ function parseArguments(raw: unknown): Json {
   }
 }
 
+// An assistant turn's text, from a string or text parts (keeping their cache
+// control), then its tool calls. A single plain text block goes as a string.
 function assistantContent(m: NativeAssistantMessage): string | Json[] {
   if (Array.isArray(m.native)) return m.native as Json[]
-  const blocks: Json[] = []
-  const text = typeof m.content === 'string' ? m.content : ''
-  if (text) blocks.push({ type: 'text', text })
+  const content = toContent(m.content)
+  const blocks: Json[] = typeof content === 'string'
+    ? (content ? [{ type: 'text', text: content }] : [])
+    : content.filter(b => b.type === 'text' && b.text)
   for (const tc of (m.tool_calls ?? []) as Json[]) {
     const fn = (tc.function ?? {}) as Json
     blocks.push({ type: 'tool_use', id: String(tc.id ?? ''), name: String(fn.name ?? ''), input: parseArguments(fn.arguments) })
   }
-  if (blocks.length === 1 && blocks[0]!.type === 'text') return text
+  if (Array.isArray(m.content) && m.content.length && blocks.length === 0) {
+    throw createError({ statusCode: 500, statusMessage: 'An assistant message has content parts but none could be sent to Anthropic.' })
+  }
+  if (blocks.length === 1 && blocks[0]!.type === 'text' && !blocks[0]!.cache_control) return String(blocks[0]!.text)
   return blocks
 }
 

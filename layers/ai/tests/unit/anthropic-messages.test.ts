@@ -57,6 +57,30 @@ describe('toAnthropicBody', () => {
     expect((messages[4]!.content as unknown[]).length).toBe(2)
   })
 
+  it('sends assistant text given as parts, keeping cache control', () => {
+    const body = toAnthropicBody({
+      model: 'm',
+      max_tokens: 10,
+      messages: [
+        { role: 'user', content: 'Can you search the web?' },
+        { role: 'assistant', content: [{ type: 'text', text: 'No.', cache_control: { type: 'ephemeral' } }] },
+        { role: 'user', content: 'Can you see the board?' },
+        { role: 'assistant', content: [{ type: 'text', text: 'Yes.' }] }
+      ]
+    })
+    const messages = body.messages as { role: string, content: unknown }[]
+    expect(messages[1]!.content).toEqual([{ type: 'text', text: 'No.', cache_control: { type: 'ephemeral' } }])
+    expect(messages[3]!.content).toBe('Yes.')
+  })
+
+  it('refuses an assistant turn whose parts carry no text', () => {
+    expect(() => toAnthropicBody({
+      model: 'm',
+      max_tokens: 10,
+      messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] }]
+    })).toThrow(/none could be sent/)
+  })
+
   it('sends a forced tool call as auto with an instruction, and tool_choice none as none', () => {
     const tools = [{ type: 'function', function: { name: 'submit', description: 'Submit', parameters: { type: 'object' } } }]
     const forced = toAnthropicBody({ model: 'm', max_tokens: 10, messages: [{ role: 'user', content: 'x' }], tools, tool_choice: { type: 'function', function: { name: 'submit' } } })
