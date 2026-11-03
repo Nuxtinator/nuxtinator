@@ -113,7 +113,7 @@ const suppressionMeta = computed(() => {
 })
 const canDeliver = computed(() => !!replyStatus.value.email && !replyStatus.value.suppression)
 
-watch(() => props.thread.conversation.id, () => {
+function openConversation() {
   replyBody.value = ''
   currentDraftId.value = null
   showCreateContact.value = false
@@ -125,7 +125,11 @@ watch(() => props.thread.conversation.id, () => {
   // composer on open (drafts arrive oldest-first).
   const latest = props.thread.drafts[props.thread.drafts.length - 1]
   if (latest) loadDraft(latest)
-}, { immediate: true })
+}
+watch(() => props.thread.conversation.id, openConversation)
+// UEditor builds its editor on mount from the body it had at setup and ignores
+// body changes before then, so the first draft loads once it exists.
+onMounted(openConversation)
 
 function draftPreview(d: InboxThreadDraft): string {
   const text = (d.bodyText || d.bodyHtml || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
