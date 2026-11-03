@@ -5,6 +5,7 @@
 // (scope/status/q) lives in the URL query.
 import type { InboxTagColor } from '../../composables/useInboxTags'
 import type { InboxAiMetadata } from '../../composables/useInboxThread'
+import type { DropdownMenuItem } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -55,6 +56,16 @@ const aiMeta = ref<InboxAiMetadata | null>(null)
 // The canned-response manager is a compose/reply-authority tool.
 const canManageCanned = computed(() => hasPermission('inbox.send'))
 
+// Inbox-wide tools, kept in one menu beside New email.
+const toolItems = computed(() => {
+  const items: DropdownMenuItem[] = []
+  if (me.value) items.push({ label: 'Your identity', icon: 'i-lucide-signature', onSelect: () => { showIdentity.value = true } })
+  if (canManageCanned.value) items.push({ label: 'Canned responses', icon: 'i-lucide-message-square-text', onSelect: () => { showCanned.value = true } })
+  if (aiAvailable.value) items.push({ label: 'Knowledge base', icon: 'i-lucide-book-open', onSelect: () => { showKnowledge.value = true } })
+  if (canManageCanned.value) items.push({ label: 'Suppressions', icon: 'i-lucide-mail-x', onSelect: () => { showSuppressions.value = true } })
+  return items
+})
+
 // The middle-pane heading follows the active folder: a tag name when one is
 // selected, otherwise the scope.
 const viewLabel = computed(() => {
@@ -73,21 +84,11 @@ function onComposeCreated(id: string) {
   open(id)
 }
 
-// Mobile folder access: the rail is hidden below lg, so the list header's
-// view label doubles as a folder menu there (scopes + tag folders).
-const mobileFolders = computed(() => {
-  const scopeItems = [
-    { label: 'Needs review', icon: 'i-lucide-shield-alert', onSelect: () => { scope.value = 'held' } },
-    { label: 'All', icon: 'i-lucide-inbox', onSelect: () => { scope.value = 'all' } },
-    { label: 'Unassigned', icon: 'i-lucide-user-x', onSelect: () => { scope.value = 'unassigned' } },
-    { label: 'Mine', icon: 'i-lucide-user-check', onSelect: () => { scope.value = 'mine' } }
-  ]
-  const tagItems = palette.value.map(t => ({
-    label: t.name,
-    icon: 'i-lucide-tag',
-    onSelect: () => { tag.value = t.slug }
-  }))
-  return tagItems.length ? [scopeItems, tagItems] : [scopeItems]
+// Below lg the rail is a drawer, opened from the list header; picking a
+// folder or leaving the page closes it.
+const railOpen = ref(false)
+watch([scope, tag, () => route.path], () => {
+  railOpen.value = false
 })
 
 function withQuery(path: string) {
@@ -348,7 +349,28 @@ async function onSaveIdentity(patch: { alias?: string | null, signature?: string
 
 <template>
   <div class="flex h-[calc(100vh-57px)] -mx-4 sm:-mx-6 lg:-mx-8 -my-6 lg:-my-8">
-    <InboxRail v-model:scope="scope" v-model:tag="tag" :counts="counts" :tags="palette" :tag-counts="tagCounts" :show-settings="me?.canManageSettings ?? false" />
+    <InboxRail
+      v-model:scope="scope"
+      v-model:tag="tag"
+      :counts="counts"
+      :tags="palette"
+      :tag-counts="tagCounts"
+      :show-settings="me?.canManageSettings ?? false"
+      class="w-52 shrink-0 hidden lg:flex"
+    />
+    <USlideover v-model:open="railOpen" side="left" :ui="{ content: 'max-w-64' }">
+      <template #content>
+        <InboxRail
+          v-model:scope="scope"
+          v-model:tag="tag"
+          :counts="counts"
+          :tags="palette"
+          :tag-counts="tagCounts"
+          :show-settings="me?.canManageSettings ?? false"
+          class="border-r-0"
+        />
+      </template>
+    </USlideover>
 
     <section class="flex-1 flex flex-col min-w-0 overflow-hidden">
       <InboxUnconfiguredBanner
@@ -360,56 +382,22 @@ async function onSaveIdentity(patch: { alias?: string | null, signature?: string
         <div class="flex flex-col min-h-0" :class="selectedId ? 'hidden lg:flex' : 'flex w-full lg:w-auto'">
           <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-(--ui-border)">
             <div class="flex items-center gap-1.5 min-w-0">
-              <UDropdownMenu :items="mobileFolders" class="lg:hidden">
-                <UButton
-                  :label="viewLabel"
-                  trailing-icon="i-lucide-chevron-down"
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  class="capitalize"
-                />
-              </UDropdownMenu>
-              <span class="hidden lg:inline text-sm font-medium text-(--ui-text-muted) capitalize truncate">{{ viewLabel }}</span>
+              <UButton
+                icon="i-lucide-menu"
+                size="sm"
+                color="neutral"
+                variant="ghost"
+                class="lg:hidden -ml-1"
+                aria-label="Open inbox folders"
+                @click="railOpen = true"
+              />
+              <span class="text-sm font-medium text-(--ui-text-muted) capitalize truncate">{{ viewLabel }}</span>
               <span class="text-xs text-(--ui-text-dimmed) shrink-0">{{ total }}</span>
             </div>
-            <div class="flex items-center gap-1.5">
-              <UButton
-                v-if="me"
-                label="Identity"
-                icon="i-lucide-signature"
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                @click="showIdentity = true"
-              />
-              <UButton
-                v-if="canManageCanned"
-                label="Canned"
-                icon="i-lucide-message-square-text"
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                @click="showCanned = true"
-              />
-              <UButton
-                v-if="canManageCanned"
-                label="Suppressions"
-                icon="i-lucide-mail-x"
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                @click="showSuppressions = true"
-              />
-              <UButton
-                v-if="aiAvailable"
-                label="Knowledge"
-                icon="i-lucide-book-open"
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                @click="showKnowledge = true"
-              />
+            <div class="flex items-center gap-1">
+              <UDropdownMenu v-if="toolItems.length" :items="toolItems" :content="{ align: 'end' }">
+                <UButton icon="i-lucide-ellipsis" size="xs" color="neutral" variant="ghost" aria-label="Inbox tools" />
+              </UDropdownMenu>
               <UButton label="New email" icon="i-lucide-pen-line" size="xs" @click="showCompose = true" />
             </div>
           </div>
@@ -486,9 +474,6 @@ async function onSaveIdentity(patch: { alias?: string | null, signature?: string
         </div>
 
         <template v-if="selectedId">
-          <div class="lg:hidden absolute top-2 left-2 z-10">
-            <UButton icon="i-lucide-arrow-left" variant="ghost" color="neutral" size="sm" :to="withQuery(inboxPath('/inbox'))" />
-          </div>
           <InboxThread
             v-if="thread"
             v-model:draft-id="currentDraftId"
@@ -516,7 +501,19 @@ async function onSaveIdentity(patch: { alias?: string | null, signature?: string
             @add-knowledge="showAddKb = true"
             @dismiss-ai-meta="aiMeta = null"
             @load-draft-meta="aiMeta = $event"
-          />
+          >
+            <template #back>
+              <UButton
+                icon="i-lucide-arrow-left"
+                size="sm"
+                color="neutral"
+                variant="ghost"
+                class="lg:hidden -ml-2"
+                aria-label="Back to conversations"
+                :to="withQuery(inboxPath('/inbox'))"
+              />
+            </template>
+          </InboxThread>
           <UEmpty
             v-else-if="threadError"
             icon="i-lucide-alert-triangle"

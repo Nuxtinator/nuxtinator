@@ -8,6 +8,7 @@ import type { InboxAssignee } from '../../composables/useInboxThread'
 import type { InboxTag, InboxTagColor } from '../../composables/useInboxTags'
 import type { InboxCannedResponse } from '../../composables/useInboxCanned'
 import type { InboxMe } from '../../composables/useInboxMe'
+import type { DropdownMenuItem } from '@nuxt/ui'
 
 const props = defineProps<{
   thread: InboxThread
@@ -159,6 +160,11 @@ function onDeleteDraft(d: InboxThreadDraft) {
   }
 }
 
+const currentDraft = computed(() => props.thread.drafts.find(d => d.id === currentDraftId.value) ?? null)
+// The draft being edited is already in the composer, so the picker only shows
+// when there is another draft to switch to.
+const showDraftChips = computed(() => props.thread.drafts.some(d => d.id !== currentDraftId.value))
+
 // Attachments belong to the draft being edited; the parent creates a draft
 // first if there isn't one yet, so files always have a row to bind to.
 const currentDraftAttachments = computed(() =>
@@ -285,99 +291,98 @@ const appliedTags = computed(() =>
     props.palette.find(t => t.slug === slug) ?? { slug, name: slug, color: 'neutral' as const }
   )
 )
+
+// Less frequent conversation actions, kept behind the header's "more" menu.
+const headerMenuItems = computed(() => {
+  const items: DropdownMenuItem[] = []
+  if (!props.thread.conversation.needsReview) {
+    items.push({ label: 'Flag for review', icon: 'i-lucide-flag', onSelect: () => emit('patch', { needsReview: true }) })
+  }
+  if (!props.thread.contacts.length && props.thread.capabilities.canCreateContact) {
+    items.push({
+      label: 'Create contact',
+      icon: 'i-lucide-user-plus',
+      onSelect: () => {
+        contactName.value = props.thread.conversation.counterpartyName || ''
+        showCreateContact.value = true
+      }
+    })
+  }
+  if (canAddKnowledge.value) {
+    items.push({ label: 'Add to knowledge base', icon: 'i-lucide-book-plus', onSelect: () => emit('addKnowledge') })
+  }
+  return items
+})
+
+const viewTabs = [
+  { key: 'conversation' as const, label: 'Conversation' },
+  { key: 'notes' as const, label: 'Notes & activity' }
+]
 </script>
 
 <template>
   <div class="flex-1 flex flex-col min-w-0 min-h-0">
-    <header class="px-4 py-3 border-b border-(--ui-border) space-y-2">
-      <div class="flex items-center gap-2 min-w-0">
-        <h2 class="font-semibold truncate flex-1 text-(--ui-text-highlighted)">
+    <header class="px-4 pt-3 border-b border-(--ui-border)">
+      <div class="flex items-center flex-wrap lg:flex-nowrap gap-1.5 min-w-0">
+        <slot name="back" />
+        <h2 class="font-semibold truncate flex-1 min-w-0 text-(--ui-text-highlighted)">
           {{ thread.conversation.subject || '(no subject)' }}
         </h2>
-        <UButton
-          v-if="thread.conversation.needsReview"
-          label="Mark reviewed"
-          icon="i-lucide-shield-check"
-          size="xs"
-          color="warning"
-          variant="subtle"
-          @click="emit('patch', { needsReview: false })"
-        />
-        <UButton
-          v-else
-          label="Flag for review"
-          icon="i-lucide-flag"
-          size="xs"
-          color="neutral"
-          variant="ghost"
-          @click="emit('patch', { needsReview: true })"
-        />
-        <UButton
-          v-if="canAddKnowledge"
-          label="Add to KB"
-          icon="i-lucide-book-plus"
-          size="xs"
-          color="info"
-          variant="ghost"
-          @click="emit('addKnowledge')"
-        />
-        <USelect v-model="statusValue" :items="statusItems" size="xs" class="w-28" />
-        <USelect v-model="assigneeValue" :items="assigneeItems" size="xs" class="w-36" />
+        <!-- Below lg the triage controls drop to their own row under the subject. -->
+        <div class="flex items-center gap-1.5 order-last basis-full -ml-2 lg:order-none lg:basis-auto lg:ml-0">
+          <USelect v-model="statusValue" :items="statusItems" size="xs" variant="ghost" class="w-24" aria-label="Status" />
+          <USelect v-model="assigneeValue" :items="assigneeItems" size="xs" variant="ghost" class="w-36" aria-label="Assignee" />
+          <UButton
+            v-if="thread.conversation.needsReview"
+            label="Mark reviewed"
+            icon="i-lucide-shield-check"
+            size="xs"
+            color="warning"
+            variant="subtle"
+            class="ml-auto lg:ml-0 lg:order-first"
+            @click="emit('patch', { needsReview: false })"
+          />
+        </div>
+        <UDropdownMenu v-if="headerMenuItems.length" :items="headerMenuItems" :content="{ align: 'end' }">
+          <UButton icon="i-lucide-ellipsis" size="xs" color="neutral" variant="ghost" aria-label="More actions" />
+        </UDropdownMenu>
       </div>
-      <div class="flex items-center gap-2 flex-wrap text-sm">
-        <span v-if="thread.conversation.counterpartyName" class="font-medium text-(--ui-text) truncate">
+      <div class="flex items-center gap-x-2 gap-y-1 flex-wrap text-sm mt-0.5">
+        <span v-if="thread.conversation.counterpartyName" class="text-(--ui-text) truncate">
           {{ thread.conversation.counterpartyName }}
         </span>
         <span class="text-(--ui-text-muted) truncate">{{ thread.channel?.value }}</span>
-        <UBadge
-          v-if="sourceMeta"
-          :label="sourceMeta.label"
-          :icon="sourceMeta.icon"
-          color="neutral"
-          size="sm"
-          variant="subtle"
-        />
         <UTooltip v-if="thread.channel?.verified" text="Address ownership verified — authenticated inbound mail or a confirmed link">
-          <UBadge label="Verified" color="success" size="sm" variant="subtle" icon="i-lucide-badge-check" />
+          <UIcon name="i-lucide-badge-check" class="size-4 shrink-0 text-(--ui-success)" />
         </UTooltip>
-        <UTooltip v-else-if="thread.channel" text="Ownership not yet proven — no authenticated mail or confirmation click from this address">
-          <UBadge label="Unverified" color="warning" size="sm" variant="subtle" icon="i-lucide-badge-alert" />
+        <UTooltip v-else-if="thread.channel" text="Unverified — no authenticated mail or confirmation click from this address yet">
+          <UIcon name="i-lucide-badge-alert" class="size-4 shrink-0 text-(--ui-warning)" />
+        </UTooltip>
+        <UTooltip v-if="sourceMeta" :text="`Came in by ${sourceMeta.label.toLowerCase()}`">
+          <UIcon :name="sourceMeta.icon" class="size-4 shrink-0 text-(--ui-text-dimmed)" />
         </UTooltip>
         <UTooltip v-if="suppressionMeta" :text="`${suppressionMeta.label} · since ${suppressionMeta.since}`">
           <UBadge label="Not receiving" color="error" size="sm" variant="solid" icon="i-lucide-mail-x" />
         </UTooltip>
         <UBadge v-if="thread.channel?.blocked" label="Blocked sender" color="error" size="sm" variant="subtle" />
-        <template v-if="thread.contacts.length">
-          <UButton
-            v-for="contact in thread.contacts"
-            :key="contact.id"
-            :label="contact.name"
-            icon="i-lucide-contact"
-            size="xs"
-            variant="subtle"
-            color="primary"
-            :to="crmPath(`/contacts/${contact.id}`)"
-          />
-        </template>
-        <UButton
-          v-else-if="thread.capabilities.canCreateContact"
-          label="Create contact"
-          icon="i-lucide-user-plus"
-          size="xs"
-          variant="outline"
-          color="neutral"
-          @click="contactName = thread.conversation.counterpartyName || ''; showCreateContact = true"
-        />
-        <UBadge
+        <ULink
+          v-for="contact in thread.contacts"
+          :key="contact.id"
+          :to="crmPath(`/contacts/${contact.id}`)"
+          class="flex items-center gap-1 text-sm text-(--ui-primary) hover:underline"
+        >
+          <UIcon name="i-lucide-contact" class="size-3.5 shrink-0" />
+          {{ contact.name }}
+        </ULink>
+        <span
           v-for="t in appliedTags"
           :key="t.slug"
-          :label="t.name"
-          :color="t.color"
-          size="sm"
-          variant="subtle"
-        />
+          class="flex items-center gap-1 text-xs text-(--ui-text-muted)"
+        >
+          <span class="size-1.5 rounded-full" :style="{ backgroundColor: inboxTagDotColor(t.color) }" />
+          {{ t.name }}
+        </span>
         <InboxTagPicker
-          class="ml-auto"
           :palette="palette"
           :selected="thread.conversation.tags"
           @set-tags="emit('setTags', $event)"
@@ -385,25 +390,21 @@ const appliedTags = computed(() =>
           @delete-tag="emit('deleteTag', $event)"
         />
       </div>
+      <nav class="flex gap-4 mt-1">
+        <button
+          v-for="tab in viewTabs"
+          :key="tab.key"
+          type="button"
+          class="py-2 text-xs border-b-2 -mb-px transition-colors"
+          :class="view === tab.key
+            ? 'border-(--ui-primary) text-(--ui-text-highlighted) font-medium'
+            : 'border-transparent text-(--ui-text-muted) hover:text-(--ui-text)'"
+          @click="view = tab.key"
+        >
+          {{ tab.label }}
+        </button>
+      </nav>
     </header>
-
-    <div class="flex items-center gap-1 px-3 py-1.5 border-b border-(--ui-border)">
-      <UButton
-        label="Conversation"
-        size="xs"
-        :variant="view === 'conversation' ? 'solid' : 'ghost'"
-        :color="view === 'conversation' ? 'primary' : 'neutral'"
-        @click="view = 'conversation'"
-      />
-      <UButton
-        label="Notes & Activity"
-        icon="i-lucide-sticky-note"
-        size="xs"
-        :variant="view === 'notes' ? 'solid' : 'ghost'"
-        :color="view === 'notes' ? 'primary' : 'neutral'"
-        @click="view = 'notes'"
-      />
-    </div>
 
     <template v-if="view === 'conversation'">
       <div class="flex-1 overflow-y-auto p-4 space-y-3">
@@ -425,34 +426,18 @@ const appliedTags = computed(() =>
       v-if="thread.capabilities.canSend && thread.conversation.status !== 'spam'"
       class="border-t border-(--ui-border) p-3 space-y-2"
     >
-      <div v-if="thread.drafts.length" class="flex flex-wrap items-center gap-1.5">
-        <span class="text-xs text-(--ui-text-muted)">Drafts:</span>
+      <div v-if="showDraftChips" class="flex flex-wrap items-center gap-1.5">
+        <span class="text-xs text-(--ui-text-muted)">Drafts</span>
         <UButtonGroup v-for="d in thread.drafts" :key="d.id" size="xs">
           <UButton
             :label="draftPreview(d)"
             icon="i-lucide-file-pen-line"
             color="neutral"
-            :variant="currentDraftId === d.id ? 'solid' : 'subtle'"
+            :variant="currentDraftId === d.id ? 'soft' : 'ghost'"
             @click="loadDraft(d)"
           />
-          <UButton icon="i-lucide-x" color="neutral" variant="subtle" aria-label="Discard draft" @click="onDeleteDraft(d)" />
+          <UButton icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Discard draft" @click="onDeleteDraft(d)" />
         </UButtonGroup>
-      </div>
-      <div class="flex items-center gap-2 text-xs flex-wrap">
-        <span class="text-(--ui-text-muted) shrink-0">To:</span>
-        <span v-if="replyStatus.email" class="truncate">{{ replyStatus.email }}</span>
-        <span v-else class="text-(--ui-text-dimmed)">no address</span>
-        <template v-if="replyStatus.email">
-          <UBadge
-            :label="replyStatus.verified ? 'Verified' : 'Unverified'"
-            :color="replyStatus.verified ? 'success' : 'warning'"
-            size="sm"
-            variant="subtle"
-          />
-          <UTooltip v-if="suppressionMeta" :text="`${suppressionMeta.label} · since ${suppressionMeta.since}`">
-            <UBadge label="Not receiving" color="error" size="sm" variant="solid" icon="i-lucide-mail-x" />
-          </UTooltip>
-        </template>
       </div>
       <UAlert
         v-if="suppressionMeta"
@@ -470,35 +455,16 @@ const appliedTags = computed(() =>
         title="No address to reply to"
         description="This conversation's address record is missing, so a reply has no recipient."
       />
-      <div v-if="me?.personalFrom" class="flex items-center gap-2 text-xs">
-        <span class="text-(--ui-text-muted) shrink-0">From:</span>
-        <USelect v-model="fromIdentity" :items="fromOptions" size="xs" class="w-64" />
-        <span class="text-(--ui-text-dimmed) truncate">· {{ signatureNotice }}</span>
-        <UButton
-          v-if="fromIdentity === 'personal' && me?.signature"
-          :label="showSignaturePreview ? 'hide signature' : 'preview signature'"
-          size="xs"
-          color="neutral"
-          variant="link"
-          class="shrink-0"
-          @click="showSignaturePreview = !showSignaturePreview"
-        />
-      </div>
-      <!-- eslint-disable-next-line vue/no-v-html -- sanitized, and it is the agent's own signature (self-XSS only) -->
-      <div
-        v-if="showSignaturePreview && fromIdentity === 'personal' && me?.signature"
-        class="border border-(--ui-border) rounded-md p-2 prose prose-sm dark:prose-invert max-w-none text-xs"
-        v-html="inboxSanitizeDisplayHtml(me?.signature)"
-      />
       <!-- AI review panel — reviewer-only (uncertainty, English gloss, sources);
            never part of the outbound email. -->
       <div
         v-if="aiMeta"
-        class="rounded-md border border-(--ui-info)/40 bg-(--ui-info)/5 p-2 space-y-2 text-sm"
+        class="rounded-md bg-(--ui-info)/5 border-l-2 border-(--ui-info) pl-3 pr-1 py-2 space-y-1.5 text-xs"
       >
-        <div class="flex items-center gap-2">
-          <UBadge label="AI draft" icon="i-lucide-sparkles" color="info" variant="subtle" size="sm" />
-          <span class="text-xs text-(--ui-text-muted)">Reviewer notes — not emailed</span>
+        <div class="flex items-center gap-1.5">
+          <UIcon name="i-lucide-sparkles" class="size-3.5 text-(--ui-info)" />
+          <span class="font-medium text-(--ui-text)">AI draft</span>
+          <span class="text-(--ui-text-dimmed)">· notes for you, not emailed</span>
           <UButton
             icon="i-lucide-x"
             size="xs"
@@ -509,24 +475,15 @@ const appliedTags = computed(() =>
             @click="emit('dismissAiMeta')"
           />
         </div>
-        <div
-          v-if="aiMeta.uncertainty.length"
-          class="text-xs"
-        >
-          <span class="font-medium text-(--ui-warning)">Confirm before sending:</span>
-          <ul class="list-disc pl-4 mt-0.5">
-            <li
-              v-for="(u, i) in aiMeta.uncertainty"
-              :key="i"
-            >
+        <div v-if="aiMeta.uncertainty.length">
+          <span class="font-medium text-(--ui-warning)">Check before sending</span>
+          <ul class="list-disc pl-4 mt-0.5 text-(--ui-text-muted)">
+            <li v-for="(u, i) in aiMeta.uncertainty" :key="i">
               {{ u }}
             </li>
           </ul>
         </div>
-        <details
-          v-if="showAiGloss"
-          class="text-xs"
-        >
+        <details v-if="showAiGloss">
           <summary class="cursor-pointer text-(--ui-text-muted)">
             English translation ({{ aiMeta.language }} draft)
           </summary>
@@ -534,11 +491,8 @@ const appliedTags = computed(() =>
             {{ aiMeta.gloss }}
           </div>
         </details>
-        <div
-          v-if="aiMeta.sources.length"
-          class="flex flex-wrap items-center gap-1"
-        >
-          <span class="text-xs text-(--ui-text-muted)">Grounded on:</span>
+        <div v-if="aiMeta.sources.length" class="flex flex-wrap items-center gap-1">
+          <span class="text-(--ui-text-muted)">Grounded on:</span>
           <UBadge
             v-for="(s, i) in aiMeta.sources"
             :key="i"
@@ -549,79 +503,123 @@ const appliedTags = computed(() =>
           />
         </div>
       </div>
-      <UEditor
-        ref="replyEditor"
-        v-model="replyBody"
-        content-type="html"
-        placeholder="Write your reply…"
-        :image="true"
-        :mention="false"
-        class="inbox-composer-editor min-h-24 max-h-64 overflow-y-auto rounded-md border border-(--ui-border)"
-      />
-      <p v-if="!hasSendAddress" class="flex items-center gap-1.5 text-xs text-(--ui-text-warning)">
-        <UIcon name="i-lucide-mail-warning" class="shrink-0" />
-        <span>Sending is unavailable until this inbox has a shared contact address. You can still save this as a draft.</span>
-      </p>
-      <div class="flex items-center justify-between gap-2">
-        <div class="flex items-center gap-1.5 flex-wrap min-w-0">
-          <UButton
-            icon="i-lucide-paperclip"
-            label="Attach"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            :disabled="props.sending"
-            @click="pickFiles"
-          />
-          <input ref="fileInput" type="file" multiple class="hidden" @change="onFilesPicked">
-          <UButton
-            v-if="props.uploadInlineImage"
-            icon="i-lucide-image"
-            label="Image"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            :loading="insertingImage"
-            :disabled="props.sending || insertingImage"
-            @click="pickImage"
-          />
-          <input ref="imageInput" type="file" accept="image/jpeg,image/png,image/gif,image/webp" class="hidden" @change="onImagePicked">
-          <InboxCannedPicker :items="canned" @insert="insertCanned" />
-          <UButton
-            v-if="aiAvailable"
-            icon="i-lucide-sparkles"
-            label="AI draft"
-            size="xs"
-            color="info"
-            variant="ghost"
-            :disabled="props.sending"
-            @click="emit('aiDraft')"
-          />
+
+      <div class="rounded-lg border border-(--ui-border) focus-within:border-(--ui-border-accented) transition-colors">
+        <div class="flex items-center flex-wrap gap-x-1.5 gap-y-1 px-3 py-1.5 border-b border-(--ui-border) text-xs min-w-0">
+          <span class="text-(--ui-text-dimmed) shrink-0">To</span>
+          <span v-if="replyStatus.email" class="truncate text-(--ui-text)">{{ replyStatus.email }}</span>
+          <span v-else class="text-(--ui-text-dimmed)">no address</span>
+          <template v-if="me?.personalFrom">
+            <span class="text-(--ui-text-dimmed) shrink-0 ml-3">From</span>
+            <USelect v-model="fromIdentity" :items="fromOptions" size="xs" variant="ghost" class="w-56 min-w-0" />
+            <UButton
+              v-if="fromIdentity === 'personal' && me?.signature"
+              :label="showSignaturePreview ? 'Hide signature' : 'Signature'"
+              size="xs"
+              color="neutral"
+              variant="link"
+              class="shrink-0 ml-auto"
+              @click="showSignaturePreview = !showSignaturePreview"
+            />
+            <span v-else class="text-(--ui-text-dimmed) truncate ml-auto">{{ signatureNotice }}</span>
+          </template>
+        </div>
+        <!-- eslint-disable-next-line vue/no-v-html -- sanitized, and it is the agent's own signature (self-XSS only) -->
+        <div
+          v-if="showSignaturePreview && fromIdentity === 'personal' && me?.signature"
+          class="px-3 py-2 border-b border-(--ui-border) prose prose-sm dark:prose-invert max-w-none text-xs"
+          v-html="inboxSanitizeDisplayHtml(me?.signature)"
+        />
+        <UEditor
+          ref="replyEditor"
+          v-model="replyBody"
+          content-type="html"
+          placeholder="Write your reply…"
+          :image="true"
+          :mention="false"
+          :ui="{ base: 'px-3 sm:px-3 py-2 *:my-3' }"
+          class="inbox-composer-editor min-h-24 max-h-40 lg:max-h-72 overflow-y-auto"
+        />
+        <div v-if="currentDraftAttachments.length" class="flex flex-wrap gap-1.5 px-3 pb-2">
           <UButtonGroup v-for="a in currentDraftAttachments" :key="a.id" size="xs">
             <UButton :label="a.filename || 'attachment'" icon="i-lucide-paperclip" color="neutral" variant="subtle" />
             <UButton icon="i-lucide-x" color="neutral" variant="subtle" aria-label="Remove attachment" @click="emit('removeAttachment', a.id)" />
           </UButtonGroup>
         </div>
-        <div class="flex items-center gap-2 shrink-0">
-          <UButton
-            label="Save draft"
-            icon="i-lucide-save"
-            size="sm"
-            color="neutral"
-            variant="ghost"
-            :disabled="props.sending"
-            @click="onSaveDraft"
-          />
-          <UButton
-            :label="currentDraftId ? 'Send draft' : 'Send'"
-            icon="i-lucide-send"
-            size="sm"
-            :loading="props.sending"
-            :disabled="props.sending || !hasSendAddress || !canDeliver"
-            @click="submitReply"
-          />
+        <div class="flex items-center justify-between gap-2 px-2 py-1.5 border-t border-(--ui-border)">
+          <div class="flex items-center gap-0.5 min-w-0">
+            <UTooltip text="Attach files">
+              <UButton
+                icon="i-lucide-paperclip"
+                size="sm"
+                color="neutral"
+                variant="ghost"
+                aria-label="Attach files"
+                :disabled="props.sending"
+                @click="pickFiles"
+              />
+            </UTooltip>
+            <input ref="fileInput" type="file" multiple class="hidden" @change="onFilesPicked">
+            <UTooltip v-if="props.uploadInlineImage" text="Insert image">
+              <UButton
+                icon="i-lucide-image"
+                size="sm"
+                color="neutral"
+                variant="ghost"
+                aria-label="Insert image"
+                :loading="insertingImage"
+                :disabled="props.sending || insertingImage"
+                @click="pickImage"
+              />
+            </UTooltip>
+            <input ref="imageInput" type="file" accept="image/jpeg,image/png,image/gif,image/webp" class="hidden" @change="onImagePicked">
+            <InboxCannedPicker :items="canned" @insert="insertCanned" />
+            <UButton
+              v-if="aiAvailable"
+              icon="i-lucide-sparkles"
+              label="AI draft"
+              size="sm"
+              color="info"
+              variant="ghost"
+              :disabled="props.sending"
+              @click="emit('aiDraft')"
+            />
+          </div>
+          <div class="flex items-center gap-1 shrink-0">
+            <UTooltip v-if="currentDraft" text="Discard draft">
+              <UButton
+                icon="i-lucide-trash-2"
+                size="sm"
+                color="neutral"
+                variant="ghost"
+                aria-label="Discard draft"
+                :disabled="props.sending"
+                @click="onDeleteDraft(currentDraft)"
+              />
+            </UTooltip>
+            <UButton
+              label="Save draft"
+              size="sm"
+              color="neutral"
+              variant="ghost"
+              :disabled="props.sending"
+              @click="onSaveDraft"
+            />
+            <UButton
+              label="Send"
+              icon="i-lucide-send"
+              size="sm"
+              :loading="props.sending"
+              :disabled="props.sending || !hasSendAddress || !canDeliver"
+              @click="submitReply"
+            />
+          </div>
         </div>
       </div>
+      <p v-if="!hasSendAddress" class="flex items-center gap-1.5 text-xs text-(--ui-text-warning)">
+        <UIcon name="i-lucide-mail-warning" class="shrink-0" />
+        <span>Sending is unavailable until this inbox has a shared contact address. You can still save this as a draft.</span>
+      </p>
     </footer>
     </template>
 

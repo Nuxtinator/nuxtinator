@@ -18,6 +18,8 @@ const menuItems = computed(() =>
 
 <template>
   <UDropdownMenu v-if="items.length" :items="menuItems" :content="{ align: 'start' }">
-    <UButton icon="i-lucide-message-square-text" label="Canned" size="xs" color="neutral" variant="ghost" />
+    <UTooltip text="Canned responses">
+      <UButton icon="i-lucide-message-square-text" size="sm" color="neutral" variant="ghost" aria-label="Canned responses" />
+    </UTooltip>
   </UDropdownMenu>
 </template>

@@ -24,6 +24,10 @@ const tagBySlug = computed(() => {
 function rowTags(slugs: string[]): InboxTag[] {
   return slugs.map(s => tagBySlug.value.get(s) ?? { slug: s, name: s, color: 'neutral' as const })
 }
+// Rows carry a status badge only on the All tab; elsewhere every row shares it.
+function hasMeta(c: InboxConversationListRow): boolean {
+  return status.value === 'all' || c.needsReview || c.messageCount === 0 || c.tags.length > 0 || !!c.assigneeName
+}
 
 const status = defineModel<string>('status', { required: true })
 const q = defineModel<string>('q', { required: true })
@@ -51,29 +55,30 @@ const statusTabs = computed(() => [
 
 <template>
   <div class="w-full lg:w-96 shrink-0 flex flex-col min-h-0 border-r border-(--ui-border)">
-    <div class="p-2 border-b border-(--ui-border) space-y-2">
+    <div class="px-2 pt-2 border-b border-(--ui-border)">
       <UInput
         v-model="q"
         icon="i-lucide-search"
-        placeholder="Search subject, name, email…"
+        placeholder="Search"
         size="sm"
+        variant="soft"
         class="w-full"
       />
-      <div class="flex gap-1 overflow-x-auto">
-        <UButton
+      <nav class="flex gap-3 px-1 mt-1 overflow-x-auto">
+        <button
           v-for="tab in statusTabs"
           :key="tab.key"
-          :label="tab.label"
-          size="xs"
-          :variant="status === tab.key ? 'solid' : 'ghost'"
-          :color="status === tab.key ? 'primary' : 'neutral'"
+          type="button"
+          class="flex items-center gap-1 py-2 text-xs whitespace-nowrap border-b-2 -mb-px transition-colors"
+          :class="status === tab.key
+            ? 'border-(--ui-primary) text-(--ui-text-highlighted) font-medium'
+            : 'border-transparent text-(--ui-text-muted) hover:text-(--ui-text)'"
           @click="status = tab.key"
         >
-          <template #trailing>
-            <UBadge v-if="tab.count" :label="tab.count" size="sm" variant="subtle" color="neutral" />
-          </template>
-        </UButton>
-      </div>
+          {{ tab.label }}
+          <span v-if="tab.count" class="text-(--ui-text-dimmed) font-normal">{{ tab.count }}</span>
+        </button>
+      </nav>
     </div>
 
     <div class="flex-1 overflow-y-auto">
@@ -117,9 +122,11 @@ const statusTabs = computed(() => [
             </span>
             <span class="text-xs text-(--ui-text-dimmed) shrink-0">{{ inboxRelativeTime(c.lastMessageAt || c.createdAt) }}</span>
           </div>
-          <div class="text-sm truncate text-(--ui-text-muted)">{{ c.subject || '(no subject)' }}</div>
-          <div class="flex items-center gap-1.5 mt-1 flex-wrap">
+          <div class="text-sm truncate text-(--ui-text)">{{ c.subject || '(no subject)' }}</div>
+          <p v-if="c.snippet" class="text-xs text-(--ui-text-dimmed) truncate mt-0.5">{{ c.snippet }}</p>
+          <div v-if="hasMeta(c)" class="flex items-center gap-1.5 mt-1.5 flex-wrap">
             <UBadge
+              v-if="status === 'all'"
               :label="INBOX_STATUS_META[c.status]?.label ?? c.status"
               :color="INBOX_STATUS_META[c.status]?.color ?? 'neutral'"
               size="sm"
@@ -127,17 +134,19 @@ const statusTabs = computed(() => [
             />
             <UBadge v-if="c.needsReview" label="Review" color="warning" size="sm" variant="subtle" icon="i-lucide-shield-alert" />
             <UBadge v-if="c.messageCount === 0" label="No message" color="error" size="sm" variant="subtle" />
-            <UBadge
+            <span
               v-for="t in rowTags(c.tags)"
               :key="t.slug"
-              :label="t.name"
-              :color="t.color"
-              size="sm"
-              variant="subtle"
-            />
-            <span v-if="c.assigneeName" class="text-xs text-(--ui-text-dimmed) truncate ml-auto">{{ c.assigneeName }}</span>
+              class="flex items-center gap-1 text-xs text-(--ui-text-muted)"
+            >
+              <span class="size-1.5 rounded-full" :style="{ backgroundColor: inboxTagDotColor(t.color) }" />
+              {{ t.name }}
+            </span>
+            <span v-if="c.assigneeName" class="flex items-center gap-1 text-xs text-(--ui-text-dimmed) truncate ml-auto">
+              <UIcon name="i-lucide-user" class="size-3 shrink-0" />
+              {{ c.assigneeName }}
+            </span>
           </div>
-          <p v-if="c.snippet" class="text-xs text-(--ui-text-dimmed) truncate mt-1">{{ c.snippet }}</p>
         </button>
       </div>
     </div>

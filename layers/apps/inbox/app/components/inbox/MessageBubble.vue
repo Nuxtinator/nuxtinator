@@ -40,21 +40,21 @@ const statusBadge = computed(() => {
   <div
     class="rounded-lg border p-3"
     :class="[
-      isOutbound ? 'bg-(--ui-bg-elevated) ml-6' : 'bg-(--ui-bg) mr-6',
+      isOutbound ? 'bg-(--ui-bg-elevated) sm:ml-6' : 'bg-(--ui-bg) sm:mr-6',
       message.status === 'held' ? 'border-(--ui-warning)' : 'border-(--ui-border)'
     ]"
   >
     <div class="flex items-center gap-2 text-xs text-(--ui-text-muted) mb-2">
       <UIcon :name="isOutbound ? 'i-lucide-corner-up-right' : 'i-lucide-corner-down-left'" class="size-3.5" />
-      <span class="font-medium text-(--ui-text)">
+      <span class="font-medium text-(--ui-text) truncate">
         {{ isOutbound ? (message.senderName || 'Team') : (message.fromName || message.fromEmail) }}
       </span>
-      <span v-if="!isOutbound && message.fromName" class="truncate">&lt;{{ message.fromEmail }}&gt;</span>
+      <span v-if="!isOutbound && message.fromName" class="hidden sm:inline truncate">&lt;{{ message.fromEmail }}&gt;</span>
       <!-- Address line: which of our addresses received it / which it left on
            (outbound from_email is null on shared-address sends until queue-time
            snapshotting — nothing to show then). -->
-      <span v-if="!isOutbound && message.toEmail" class="truncate text-(--ui-text-dimmed)">To: {{ message.toEmail }}</span>
-      <span v-if="isOutbound && message.fromEmail" class="truncate text-(--ui-text-dimmed)">From: {{ message.fromEmail }}</span>
+      <span v-if="!isOutbound && message.toEmail" class="hidden md:inline truncate text-(--ui-text-dimmed)">To: {{ message.toEmail }}</span>
+      <span v-if="isOutbound && message.fromEmail" class="hidden md:inline truncate text-(--ui-text-dimmed)">From: {{ message.fromEmail }}</span>
       <UTooltip v-if="!isOutbound && message.authenticated" text="Sender authenticated (DKIM/DMARC)">
         <UIcon name="i-lucide-badge-check" class="size-3.5 text-(--ui-success)" />
       </UTooltip>

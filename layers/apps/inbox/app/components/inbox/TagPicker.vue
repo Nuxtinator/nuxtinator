@@ -59,13 +59,14 @@ watch(open, (v) => {
 </script>
 
 <template>
-  <UPopover v-model:open="open" :content="{ align: 'end' }">
+  <UPopover v-model:open="open" :content="{ align: 'start' }">
     <UButton
-      icon="i-lucide-tag"
-      :label="selectedTags.length ? `${selectedTags.length} tag${selectedTags.length > 1 ? 's' : ''}` : 'Tags'"
+      :icon="selectedTags.length ? 'i-lucide-pencil' : 'i-lucide-tag'"
+      :label="selectedTags.length ? undefined : 'Add tag'"
+      :aria-label="selectedTags.length ? 'Edit tags' : undefined"
       size="xs"
       color="neutral"
-      variant="subtle"
+      variant="ghost"
     />
 
     <template #content>
