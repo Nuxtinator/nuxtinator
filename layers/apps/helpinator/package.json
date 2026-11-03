@@ -1,6 +1,6 @@
 {
   "name": "@nuxtinator/helpinator",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -29,7 +29,7 @@
   },
   "nuxtinator": {
     "requires": {
-      "@nuxtinator/ai": "*",
+      "@nuxtinator/ai": ">=0.10.0",
       "@nuxtinator/context": "*"
     }
   },
