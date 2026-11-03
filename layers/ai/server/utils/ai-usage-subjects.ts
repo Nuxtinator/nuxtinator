@@ -1,19 +1,10 @@
-import type { AiDbClient } from '#core/ai-fallback/types'
+import type { AiDbClient, AiUsageSubjectDef } from '#core/ai-fallback/types'
 
 // Runtime registry of usage subjects: what, inside a feature, an AI call ran
 // for (a bot, an inbox, a board). A call's `subject` is `<prefix>:<id>`; the
 // layer that owns the prefix registers how to name its ids on the spend page.
 // The log stores only the key, so a renamed or deleted subject reads as it is
 // now.
-export interface AiUsageSubjectDef {
-  prefix: string
-  // What one subject is, e.g. 'Bot'; names an id the resolver doesn't know.
-  label: string
-  // Names for the ids it knows, read through the summary's transaction: the
-  // active org's in the org view, no org's (so RLS hides tenant rows) in the
-  // host view.
-  resolve: (tx: AiDbClient, ids: string[]) => Promise<Map<string, string>>
-}
 
 const _subjects = new Map<string, AiUsageSubjectDef>()
 

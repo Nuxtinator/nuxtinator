@@ -20,7 +20,7 @@ interface Summary {
   dailyLayers: Group[]
 }
 interface Calls {
-  calls: { id: string, feature: string, subject: string, model: string, user: string, cost: number | null }[]
+  calls: { id: string, feature: string, subject: string | null, model: string, user: string, cost: number | null }[]
   next: string | null
 }
 
@@ -136,7 +136,9 @@ describe('ai org usage', () => {
       ['test:two', 'test:two', 0.5, 1],
       ['', 'Not recorded', 0.25, 1]
     ])
-    expect((await getCalls(opts)).calls.at(-1)!.subject).toBe('Not recorded')
+    const calls = (await getCalls(opts)).calls
+    expect(calls[0]!.subject).not.toBeNull()
+    expect(calls.at(-1)!.subject).toBeNull()
   })
 
   it('lists the org\'s calls newest first, a page at a time', async () => {

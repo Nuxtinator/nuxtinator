@@ -56,21 +56,27 @@ const maxDay = computed(() => Math.max(0, ...daily.value.map(d => d.cost)))
 
 type Dimension = keyof AiUsageBreakdowns
 const dimension = ref<Dimension>('layer')
+// Source appears once some call in the period recorded what it ran for.
+const hasSubjects = computed(() => !!usage.value?.by.subject.some(g => g.key !== ''))
 const dimensionItems = computed(() => [
   { label: 'Layer', value: 'layer' },
   { label: 'Feature', value: 'feature' },
-  { label: 'Source', value: 'subject' },
+  ...(hasSubjects.value ? [{ label: 'Source', value: 'subject' }] : []),
   { label: 'Model', value: 'model' },
   { label: 'User', value: 'user' },
   { label: 'Key', value: 'keySource' },
   ...(usage.value?.by.org ? [{ label: 'Organization', value: 'org' }] : [])
 ])
+watch(dimensionItems, (items) => {
+  if (!items.some(i => i.value === dimension.value)) dimension.value = 'layer'
+})
 const groups = computed<AiUsageGroup[]>(() => usage.value?.by[dimension.value] ?? [])
 const groupMax = computed(() => Math.max(0, ...groups.value.map(g => g.cost)))
 
 const calls = ref<AiUsageCall[]>([])
 const nextCursor = ref<string | null>(null)
 const loadingCalls = ref(false)
+const callSubjects = computed(() => calls.value.some(c => c.subject))
 
 async function loadCalls(more = false) {
   if (props.view !== 'org') return
@@ -308,7 +314,10 @@ function barHeight(cost: number): string {
                 <th class="font-normal px-4 py-2">
                   Feature
                 </th>
-                <th class="font-normal px-4 py-2">
+                <th
+                  v-if="callSubjects"
+                  class="font-normal px-4 py-2"
+                >
                   Source
                 </th>
                 <th class="font-normal px-4 py-2">
@@ -339,8 +348,11 @@ function barHeight(cost: number): string {
                     {{ c.keySource }}
                   </div>
                 </td>
-                <td class="px-4 py-2">
-                  {{ c.subject }}
+                <td
+                  v-if="callSubjects"
+                  class="px-4 py-2"
+                >
+                  {{ c.subject ?? '—' }}
                 </td>
                 <td class="px-4 py-2 break-all">
                   {{ c.model }}

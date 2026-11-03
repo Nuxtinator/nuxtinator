@@ -107,13 +107,13 @@ function addTotals(into: AiUsageTotals, t: AiUsageTotals): void {
 
 // Whose spend a summary covers: the org (or personal user) the transaction
 // runs as, read through RLS; or the whole deployment, read through the
-// `ai_usage_host_daily` function, with orgs broken out when tenancy is loaded.
+// `ai_usage_host_daily_totals` function, with orgs broken out when tenancy is loaded.
 export type AiUsageView = { kind: 'org' } | { kind: 'host', orgs: boolean }
 
 // `ai_usage` summed per day, org, user, feature, subject, model and key source, from
 // `from` on (everything when null) — the same rows in both views.
 function dailySource(view: AiUsageView, from: RawBuilder<unknown> | null) {
-  if (view.kind === 'host') return sql`ai_usage_host_daily(${from ?? sql`null`})`
+  if (view.kind === 'host') return sql`ai_usage_host_daily_totals(${from ?? sql`null`})`
   return sql`(
     select date_trunc('day', created_at) as day, null::uuid as org_id, user_id, feature, subject, model, key_source,
            sum(cost) as cost, count(*) as calls, count(*) filter (where cost is null) as unpriced
@@ -279,14 +279,14 @@ export async function getUsageCalls(tx: AiDbClient, cursor: string | null): Prom
   const page = rows.rows.slice(0, CALLS_PAGE)
   const users = await userLabels(tx, [...new Set(page.flatMap(r => r.user_id ? [r.user_id] : []))])
   const features = featureLabels()
-  const subjects = await usageSubjectLabels(tx, page.map(r => r.subject ?? ''))
+  const subjects = await usageSubjectLabels(tx, page.flatMap(r => r.subject ? [r.subject] : []))
   return {
     calls: page.map(r => ({
       id: r.id,
       at: new Date(r.at).toISOString(),
       layer: layerLabel(usageLayerOf(r.feature)),
       feature: features.get(r.feature) ?? r.feature,
-      subject: subjects.get(r.subject ?? '') ?? r.subject ?? '',
+      subject: r.subject ? subjects.get(r.subject) ?? r.subject : null,
       model: r.model,
       keySource: KEY_SOURCE_LABELS[r.key_source] ?? r.key_source,
       user: r.user_id ? users.get(r.user_id) ?? r.user_id : NO_USER_LABEL,

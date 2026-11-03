@@ -157,6 +157,19 @@ export interface AiFeature {
   kind?: 'chat' | 'embedding'
 }
 
+// How a layer names what, inside a feature, its AI calls ran for (a widget, a
+// portfolio), registered with `registerAiUsageSubjects`. A call's subject is
+// `<prefix>:<id>` (see `aiUsageSubject`).
+export interface AiUsageSubjectDef {
+  prefix: string
+  // What one subject is, e.g. 'Bot'; names an id the resolver doesn't know.
+  label: string
+  // Names for the ids it knows, read through the summary's transaction: the
+  // active org's in the org view, no org's (so RLS hides tenant rows) in the
+  // host view.
+  resolve: (tx: AiDbClient, ids: string[]) => Promise<Map<string, string>>
+}
+
 // --- Embeddings ---
 
 // Every vector column is AI_EMBED_DIMENSIONS wide (vectors.ts); `embed()`

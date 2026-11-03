@@ -2,9 +2,10 @@ import { registerPermissions } from '#core/server/utils/permissions-registry'
 import { registerDefaultGrants } from '#core/server/utils/default-grants-registry'
 import { registerApp } from '#core/server/utils/app-registry'
 import { registerNavItem } from '#core/server/utils/nav-registry'
-import { registerAiFeature, registerAiReindexer } from '#ai/server'
+import { registerAiFeature, registerAiReindexer, registerAiUsageSubjects } from '#ai/server'
 import { HELPINATOR_CHAT_FEATURE, HELPINATOR_EMBEDDINGS_FEATURE } from '../utils/helpinator-bot'
 import { HELPINATOR_REINDEXER } from '../utils/helpinator-crawl'
+import { HELPINATOR_WIDGET_SUBJECT, helpinatorWidgetNames } from '../utils/helpinator-widgets'
 import {
   HELPINATOR_PERMISSIONS,
   HELPINATOR_PERMISSION_META,
@@ -30,6 +31,8 @@ export default defineNitroPlugin(() => {
     kind: 'embedding'
   })
   registerAiReindexer(HELPINATOR_REINDEXER)
+  // Breaks chat spend down by widget on the AI spend page.
+  registerAiUsageSubjects({ prefix: HELPINATOR_WIDGET_SUBJECT, label: 'Widget', resolve: helpinatorWidgetNames })
 
   registerApp({
     id: 'helpinator',

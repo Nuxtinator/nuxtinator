@@ -103,7 +103,8 @@ export async function resolveAiRun(tx: AiDbClient, feature: string, opts: { mode
     const fallback = kind === 'transcription'
       ? AI_TEST_FALLBACK_TRANSCRIPTION_MODEL
       : kind === 'decision' ? AI_TEST_FALLBACK_DECISION_MODEL : AI_TEST_FALLBACK_MODEL
-    return { kind: 'completion', apiKey: 'test', model: model || fallback }
+    const run: AiCompletionRun = { kind: 'completion', apiKey: 'test', model: model || fallback }
+    return attachUsageScope(run, await readUsageScope(tx, feature, 'host', opts.subject))
   }
   if (!model) {
     throw createError({ statusCode: 503, statusMessage: 'No AI model is enabled for this feature.' })

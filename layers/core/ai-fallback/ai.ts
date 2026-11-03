@@ -21,7 +21,8 @@ import type {
   AiGenerateOptions,
   AiGenerateResult,
   AiModelInfo,
-  AiReindexer
+  AiReindexer,
+  AiUsageSubjectDef
 } from './types'
 
 // Re-export the shared types and the pure vector/chunk helpers so `#ai/server`
@@ -42,7 +43,7 @@ export async function isAiConfigured(_tx: AiDbClient): Promise<boolean> {
   return false
 }
 
-export async function resolveAiRun(_tx: AiDbClient, _feature: string, _opts: { model?: string | null } = {}): Promise<AiCompletionRun> {
+export async function resolveAiRun(_tx: AiDbClient, _feature: string, _opts: { model?: string | null, subject?: string | null } = {}): Promise<AiCompletionRun> {
   notConfigured()
 }
 
@@ -67,6 +68,13 @@ export function registerAiFeature(_feature: AiFeature): void {}
 
 export function getAiFeatures(): AiFeature[] {
   return []
+}
+
+// Nothing records spend with no AI layer, so there is nothing to name.
+export function registerAiUsageSubjects(_def: AiUsageSubjectDef): void {}
+
+export function aiUsageSubject(prefix: string, id: string): string {
+  return `${prefix}:${id}`
 }
 
 export async function getModelList(): Promise<AiModelInfo[]> {

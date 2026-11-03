@@ -2,8 +2,8 @@ import { registerPermissions } from '#core/server/utils/permissions-registry'
 import { registerDefaultGrants } from '#core/server/utils/default-grants-registry'
 import { registerApp } from '#core/server/utils/app-registry'
 import { registerNavItem } from '#core/server/utils/nav-registry'
-import { registerAiFeature, registerAiReindexer } from '#ai/server'
-import { CONTEXT_ASSISTANT_FEATURE } from '../utils/assistant'
+import { registerAiFeature, registerAiReindexer, registerAiUsageSubjects } from '#ai/server'
+import { CONTEXT_ASSISTANT_FEATURE, CONTEXT_PORTFOLIO_SUBJECT, contextPortfolioNames } from '../utils/assistant'
 import { CONTEXT_EMBEDDINGS_FEATURE, CONTEXT_REINDEXER } from '../utils/section-index'
 import {
   CONTEXT_PERMISSIONS,
@@ -22,6 +22,8 @@ export default defineNitroPlugin(() => {
     label: 'Context — portfolio assistant',
     description: 'Chats about portfolios and proposes section updates.'
   })
+  // Breaks the assistant's spend down by portfolio on the AI spend page.
+  registerAiUsageSubjects({ prefix: CONTEXT_PORTFOLIO_SUBJECT, label: 'Portfolio', resolve: contextPortfolioNames })
 
   // Section search index: switches the embedding-model section on in the AI
   // settings pages, and lets them rebuild this index after a model change.

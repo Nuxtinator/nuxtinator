@@ -4,6 +4,7 @@
 import { z } from 'zod'
 import { sql, type Selectable, type Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
+import type { AiDbClient } from '#ai/server'
 import type { HelpinatorAppearance } from '../database/schema'
 import { helpinatorAssertLibraries } from './helpinator-libraries'
 import { helpinatorParseOriginEntry } from './helpinator-origins'
@@ -148,6 +149,17 @@ export async function helpinatorListWidgets(tx: Tx): Promise<HelpinatorWidgetRow
 }
 
 export const HELPINATOR_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// Each widget's chat spend is logged under `helpinator-widget:<id>`; the AI
+// spend page names those ids through `helpinatorWidgetNames`.
+export const HELPINATOR_WIDGET_SUBJECT = 'helpinator-widget'
+
+export async function helpinatorWidgetNames(tx: AiDbClient, ids: string[]): Promise<Map<string, string>> {
+  const valid = ids.filter(id => HELPINATOR_UUID_RE.test(id))
+  if (!valid.length) return new Map()
+  const rows = await tx.selectFrom('helpinator_widgets').select(['id', 'name']).where('id', 'in', valid).execute()
+  return new Map(rows.map(r => [r.id, r.name]))
+}
 
 export async function helpinatorGetWidget(tx: Tx, id: string): Promise<HelpinatorWidgetRow | null> {
   if (!HELPINATOR_UUID_RE.test(id)) return null

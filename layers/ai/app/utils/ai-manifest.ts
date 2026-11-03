@@ -172,7 +172,8 @@ export interface AiUsageCall {
   at: string
   layer: string
   feature: string
-  subject: string
+  // null when the call didn't say what it ran for.
+  subject: string | null
   model: string
   keySource: string
   user: string

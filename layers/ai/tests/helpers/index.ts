@@ -100,6 +100,7 @@ export interface AiFakeCall {
   tools: string[]
   toolResults: Array<{ name: string, input: Record<string, unknown>, result: string }>
   decision?: { input: unknown, questions: Record<string, Record<string, unknown>> }
+  subject?: string | null
 }
 
 export async function primeAiFake(script: AiFakeScript): Promise<void> {
