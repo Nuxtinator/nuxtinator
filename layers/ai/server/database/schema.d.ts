@@ -8,6 +8,8 @@ export interface AiUsageTable {
   // Who made the call, when it ran as a user; null once they are deleted.
   user_id: ColumnType<string | null, string | null | undefined, string | null>
   feature: string
+  // What inside the feature the call ran for, as `<prefix>:<id>`; null when not recorded.
+  subject: ColumnType<string | null, string | null | undefined, string | null>
   model: string
   provider: AiProvider
   // Whose key paid: the org's own, or the host's.

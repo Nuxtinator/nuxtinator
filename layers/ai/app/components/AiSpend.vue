@@ -2,7 +2,7 @@
 import type { AiUsageBreakdowns, AiUsageCall, AiUsageCalls, AiUsageGroup, AiUsagePeriod, AiUsageSummary, AiUsageTotals } from '#ai'
 
 // AI spend: period totals, a bar per day for the last 30 days split by layer,
-// the chosen period broken down by layer, feature, model, user, key source
+// the chosen period broken down by layer, feature, source, model, user, key source
 // and (host view) org, and, for an org, a log of its recent calls.
 
 const props = defineProps<{ view: 'org' | 'host', orgSlug?: string }>()
@@ -59,6 +59,7 @@ const dimension = ref<Dimension>('layer')
 const dimensionItems = computed(() => [
   { label: 'Layer', value: 'layer' },
   { label: 'Feature', value: 'feature' },
+  { label: 'Source', value: 'subject' },
   { label: 'Model', value: 'model' },
   { label: 'User', value: 'user' },
   { label: 'Key', value: 'keySource' },
@@ -308,6 +309,9 @@ function barHeight(cost: number): string {
                   Feature
                 </th>
                 <th class="font-normal px-4 py-2">
+                  Source
+                </th>
+                <th class="font-normal px-4 py-2">
                   Model
                 </th>
                 <th class="font-normal px-4 py-2">
@@ -334,6 +338,9 @@ function barHeight(cost: number): string {
                   <div class="text-xs text-(--ui-text-muted)">
                     {{ c.keySource }}
                   </div>
+                </td>
+                <td class="px-4 py-2">
+                  {{ c.subject }}
                 </td>
                 <td class="px-4 py-2 break-all">
                   {{ c.model }}

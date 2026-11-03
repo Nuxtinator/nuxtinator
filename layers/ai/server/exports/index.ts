@@ -77,6 +77,12 @@ export {
 export type { CatalogKeys } from '../utils/ai-model-list'
 
 export {
+  registerAiUsageSubjects,
+  aiUsageSubject
+} from '../utils/ai-usage-subjects'
+export type { AiUsageSubjectDef } from '../utils/ai-usage-subjects'
+
+export {
   registerAiFeature,
   getAiFeatures,
   getAiFeatureKind

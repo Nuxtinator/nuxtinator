@@ -133,7 +133,7 @@ export interface AiUsageTotals {
 export const AI_USAGE_PERIODS = ['month', 'last_month', '30d', 'all'] as const
 export type AiUsagePeriod = typeof AI_USAGE_PERIODS[number]
 
-// One row of a breakdown: a layer, feature, model, user, key source or org.
+// One row of a breakdown: a layer, feature, subject, model, user, key source or org.
 export interface AiUsageGroup extends AiUsageTotals {
   key: string
   label: string
@@ -142,6 +142,8 @@ export interface AiUsageGroup extends AiUsageTotals {
 export interface AiUsageBreakdowns {
   layer: AiUsageGroup[]
   feature: AiUsageGroup[]
+  // What inside a feature the calls ran for (a bot, an inbox); '' when not recorded.
+  subject: AiUsageGroup[]
   model: AiUsageGroup[]
   user: AiUsageGroup[]
   keySource: AiUsageGroup[]
@@ -170,6 +172,7 @@ export interface AiUsageCall {
   at: string
   layer: string
   feature: string
+  subject: string
   model: string
   keySource: string
   user: string

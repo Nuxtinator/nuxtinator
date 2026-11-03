@@ -44,6 +44,11 @@ own key per provider, pick that provider's models, and override those choices.
   embeddings) is recorded in `ai_usage` with its tokens and cost, attributed
   to the org (or, for a personal app, the user) the run was resolved for.
   Served to the org page by **`GET /api/ai/org/usage`** (`org.settings.write`).
+  A call can also name what inside its feature it ran for (a bot, an inbox):
+  pass `resolveAiRun(tx, feature, { subject: aiUsageSubject('bots', bot.id) })`
+  and register how to name those ids with
+  `registerAiUsageSubjects({ prefix: 'bots', label: 'Bot', resolve: (tx, ids) => … })`.
+  The Spend page breaks spend down by source and shows it on each call.
 - **`GET /api/ai/status`** — org-aware readiness probe (`configured`,
   `hasEnabledModel`, `featureAvailable`) for consumer client UIs.
 - **`GET /api/ai/models`** — the live, tool-capable model list from every
