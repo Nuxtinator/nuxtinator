@@ -96,7 +96,7 @@ async function assertPortfolio(
   if (kind !== 'portfolio') return null
   if (!portfolioId) throw createError({ statusCode: 400, statusMessage: 'A portfolio library needs a portfolio.' })
   const row = await tx.selectFrom('context_portfolios').select('id').where('id', '=', portfolioId).executeTakeFirst()
-  if (!row) throw createError({ statusCode: 400, statusMessage: 'Unknown portfolio' })
+  if (!row) throw createError({ statusCode: 404, statusMessage: 'Portfolio not found' })
   if (portfolioId !== currentId) await assertTeamAccess(tx, contextScope, 'context_portfolios', portfolioId, 'Portfolio not found')
   return portfolioId
 }

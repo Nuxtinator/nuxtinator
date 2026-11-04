@@ -25,7 +25,7 @@ import * as tenantKernel from '#tenant/server'
 import type { Database } from '#core/server/database/schema'
 import type { Permission } from '#core/app/utils/permissions'
 import type { DbClient } from './settings'
-import { getGroupMode, getUserGroups, registerGroupUsage, type GroupMode } from './groups'
+import { getGroupMode, getUserGroups, listGroups, registerGroupUsage, type GroupMode } from './groups'
 
 export interface TeamContainer {
   appId: string
@@ -167,6 +167,49 @@ export function teamVisible(scope: TeamScope, table: string, alias?: string): Ex
   }
   if (c.ownerColumn) branches.push(sql<SqlBool>`${col(c.ownerColumn)} = ${scope.userId}::uuid`)
   return sql<SqlBool>`(${sql.join(branches, sql` or `)})`
+}
+
+export interface PickableTeam {
+  id: string
+  name: string
+  archived: boolean
+  mine: boolean
+}
+
+// The teams the caller can pick: their own, or every team of the org when
+// they hold the app's `all_teams` permission. Empty unless the org's groups
+// run as teams. Archived teams are flagged: they keep working for what
+// already uses them but can't be picked.
+export async function listPickableTeams(
+  tx: DbClient,
+  scope: Pick<TeamScope, 'userId' | 'orgId' | 'mode' | 'canShowAll'>
+): Promise<PickableTeam[]> {
+  if (scope.mode !== 'teams') return []
+  const mine = await getUserGroups(tx, scope.userId, scope.orgId)
+  const mineIds = new Set(mine.map(t => t.id))
+  const teams = scope.canShowAll ? await listGroups(tx, scope.orgId) : mine
+  return teams.map(t => ({ id: t.id, name: t.name, archived: !!t.archived_at, mine: mineIds.has(t.id) }))
+}
+
+// Team ids for team names (case-insensitive) among the caller's pickable
+// teams, for clients that name teams rather than pass ids. 400 naming the
+// pickable teams when one doesn't match.
+export async function resolveTeamNames(tx: DbClient, scope: TeamScope, names: string[]): Promise<string[]> {
+  if (scope.mode !== 'teams') {
+    throw createError({ statusCode: 400, statusMessage: 'Teams are off here, so content can\'t be limited to them.' })
+  }
+  const live = (await listPickableTeams(tx, scope)).filter(t => !t.archived)
+  const byName = new Map(live.map(t => [t.name.toLowerCase(), t.id]))
+  const ids: string[] = []
+  for (const name of names) {
+    const id = byName.get(name.trim().toLowerCase())
+    if (!id) {
+      const known = live.map(t => t.name).join(', ') || 'none'
+      throw createError({ statusCode: 400, statusMessage: `Unknown team '${name}'. Teams you can pick: ${known}.` })
+    }
+    ids.push(id)
+  }
+  return [...new Set(ids)]
 }
 
 // For anything loaded by id or slug: 404 unless the caller may see container

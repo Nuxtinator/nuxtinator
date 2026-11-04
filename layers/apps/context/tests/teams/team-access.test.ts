@@ -173,7 +173,6 @@ describe('team-limited portfolios', () => {
       ['GET', `/api/context/assistant/conversations/${c.allConversationId}`],
       ['POST', `/api/context/assistant/conversations/${c.allConversationId}/messages`, { message: 'Hi' }],
       ['POST', `/api/context/assistant/conversations/${c.allConversationId}/proposals`, { message_id: c.allMessageId, index: 0, action: 'apply' }],
-      ['DELETE', `/api/context/assistant/conversations/${c.conversationId}`],
       ['DELETE', base]
     ]
     // The admin holds every permission (so no route stops at 403) but isn't on
@@ -274,6 +273,45 @@ describe('team-limited portfolios', () => {
     await $fetch(`/api/o/${s.org.slug}/groups/${s.group.id}/members/${s.teamMember.user.id}`, { method: 'DELETE', ...s.adminH })
     expect(await listed(s.teamH)).not.toContain(conversation.id)
     expect(await status($fetch(`/api/context/assistant/conversations/${conversation.id}`, s.teamH))).toBe(404)
+
+    await $fetch(`/api/context/assistant/conversations/${conversation.id}`, { method: 'DELETE', ...s.teamH })
+    expect(await sql`SELECT 1 FROM context_assistant_conversations WHERE id = ${conversation.id}`).toHaveLength(0)
+  })
+
+  it('keeps an older all-portfolio conversation visible only when it predates every hidden portfolio', async () => {
+    const s = await setup()
+    const [{ created_at: hiddenAt }] = await sql<{ created_at: Date }[]>`SELECT created_at FROM context_portfolios WHERE id = ${s.hidden.id}`
+    async function legacyChat(at: Date) {
+      const [conv] = await sql<{ id: string }[]>`
+        INSERT INTO context_assistant_conversations (user_id, portfolio_id, org_id)
+        VALUES (${s.outsider.user.id}, NULL, ${s.org.id}) RETURNING id
+      `
+      await sql`
+        INSERT INTO context_assistant_messages (conversation_id, role, content, created_at)
+        VALUES (${conv!.id}, 'assistant', 'An answer', ${at})
+      `
+      return conv!.id
+    }
+    const before = await legacyChat(new Date(hiddenAt.getTime() - 86_400_000))
+    const after = await legacyChat(new Date(hiddenAt.getTime() + 1000))
+
+    const { conversations } = await $fetch<{ conversations: { id: string }[] }>('/api/context/assistant/conversations', s.outsiderH)
+    expect(conversations.map(x => x.id)).toContain(before)
+    expect(conversations.map(x => x.id)).not.toContain(after)
+    expect(await status($fetch(`/api/context/assistant/conversations/${after}`, s.outsiderH))).toBe(404)
+  })
+
+  it('creates a team-limited portfolio through MCP by team name', async () => {
+    const s = await setup()
+    const [{ name: teamName }] = await sql<{ name: string }[]>`SELECT name FROM groups WHERE id = ${s.group.id}`
+    const token = await issueMcpBearer(sql, s.teamMember.user.id, ['context.read', 'context.portfolio.create'])
+    await sql`UPDATE memberships SET roles = ${['admin']} WHERE user_id = ${s.teamMember.user.id} AND org_id = ${s.org.id}`
+    const res = await callMcpTool(token, 'create_portfolio', { org: s.org.slug, name: 'Team Notes', teams: [teamName!] })
+    expect(res.isError).toBeFalsy()
+    const { portfolio } = res.structuredContent as { portfolio: { slug: string, visibility: string, teams: string[] } }
+    expect(portfolio).toMatchObject({ visibility: 'teams', teams: [teamName] })
+    expect(await status($fetch(`/api/context/portfolios/${portfolio.slug}`, s.outsiderH))).toBe(404)
+    expect(await status($fetch(`/api/context/portfolios/${portfolio.slug}`, s.teamH))).toBe(200)
   })
 
   it('keeps the assistant\'s all-portfolio context and search to visible portfolios', async () => {

@@ -21,7 +21,7 @@ import { sql, type Kysely, type Transaction } from 'kysely'
 import { defineMcpTool, mcpError, mcpLog } from '#mcp-layer'
 import type { Database as CoreDatabase } from '#core/server/database/schema'
 import { withOrgPermission } from '#tenant/server'
-import { teamVisible } from '#core/server/utils/team-access'
+import { resolveTeamNames, setContainerTeams, teamVisible } from '#core/server/utils/team-access'
 import {
   assertFeedbackCardAccess,
   assertFeedbackProjectAccess,
@@ -168,18 +168,19 @@ export const listCardsTool = defineMcpTool({
 export const createProjectTool = defineMcpTool({
   name: 'feedback_create_project',
   title: 'Create Board',
-  description: 'Create a kanban project (board) in the active org, along with its default swimlane. Columns are global to the deployment, so the new board immediately uses the existing FEEDBACK INBOX / DISCUSS / TODO / DOING / DONE / ARCHIVE workflow. Board names are not unique — call feedback_list_projects first and reuse the existing board rather than creating a near-duplicate. Returns the project_id that feedback_create_card and feedback_list_cards need.',
+  description: 'Create a kanban project (board) in the active org, along with its default swimlane. Columns are global to the deployment, so the new board immediately uses the existing FEEDBACK INBOX / DISCUSS / TODO / DOING / DONE / ARCHIVE workflow. Board names are not unique — call feedback_list_projects first and reuse the existing board rather than creating a near-duplicate. Returns the project_id that feedback_create_card and feedback_list_cards need. `teams` (team names, as feedback_list_projects shows them) limits the board to those teams; omit it for a board everyone in the org sees.',
   appId: 'feedback',
   scope: 'feedback.write',
   input: z.object({
     org: orgInput,
     name: z.string().trim().min(1).max(200),
     description: z.string().max(2000).optional(),
-    post_meta: z.record(z.string(), z.unknown()).optional()
+    post_meta: z.record(z.string(), z.unknown()).optional(),
+    teams: z.array(z.string().trim().min(1).max(80)).min(1).max(20).optional()
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx, tctx) => {
         const project = await tx
           .insertInto('projects')
           .values({
@@ -202,13 +203,24 @@ export const createProjectTool = defineMcpTool({
           .returning('id')
           .executeTakeFirstOrThrow()
 
+        let teams: string[] = []
+        if (input.teams) {
+          const scope = await getFeedbackTeamScope(ctx.event, tx, tctx)
+          const teamIds = await resolveTeamNames(tx, scope, input.teams)
+          await setContainerTeams(tx, scope, 'projects', project.id, { visibility: 'teams', teamIds })
+          teams = (await withFeedbackProjectTeams(tx, [project]))[0]!.teams.map(t => t.name)
+        }
+
         await mcpLog('CREATE', 'projects', project.id, ctx, {
-          name: project.name
+          name: project.name,
+          teams
         }, asAuditExecutor(tx))
         return {
           id: project.id,
           name: project.name,
           description: project.description,
+          visibility: input.teams ? 'teams' : 'org',
+          teams,
           swimlane_id: swimlane.id
         }
       })

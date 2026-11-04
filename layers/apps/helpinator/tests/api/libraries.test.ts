@@ -53,7 +53,7 @@ describe('libraries admin API', () => {
     const mine = await seedPortfolio(sql, org.id, 'Mine', { faq: 'x' })
 
     expect((await $fetch('/api/helpinator/libraries', { method: 'POST', body: { name: 'P', kind: 'portfolio' }, ...opts }).catch(e => e)).statusCode).toBe(400)
-    expect((await $fetch('/api/helpinator/libraries', { method: 'POST', body: { name: 'P', kind: 'portfolio', portfolio_id: foreign.id }, ...opts }).catch(e => e)).statusCode).toBe(400)
+    expect((await $fetch('/api/helpinator/libraries', { method: 'POST', body: { name: 'P', kind: 'portfolio', portfolio_id: foreign.id }, ...opts }).catch(e => e)).statusCode).toBe(404)
     const ok = await $fetch<{ portfolio_id: string }>('/api/helpinator/libraries', { method: 'POST', body: { name: 'P', kind: 'portfolio', portfolio_id: mine.id }, ...opts })
     expect(ok.portfolio_id).toBe(mine.id)
   })

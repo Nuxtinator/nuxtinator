@@ -238,6 +238,24 @@ describe('feedback team-limited projects', () => {
     expect((insiderCards.structuredContent?.cards as { id: string }[]).map(c => c.id)).toEqual([s.card.id])
   })
 
+  it('creates a team-limited board through MCP by team name', async () => {
+    const s = await setup()
+    const token = await issueMcpBearer(sql, s.insider.user.id, ['feedback.read', 'feedback.write'])
+    const org = s.org.slug
+
+    const res = await callMcpTool(token, 'feedback_create_project', { org, name: 'test-feedback-mcp-board', teams: ['TEST-FEEDBACK-DEV'] })
+    expect(res.isError).toBeFalsy()
+    const created = res.structuredContent as { id: string, visibility: string, teams: string[] }
+    expect(created).toMatchObject({ visibility: 'teams', teams: ['test-feedback-dev'] })
+    const outsiderToken = await issueMcpBearer(sql, s.outsider.user.id, ['feedback.read'])
+    const listed = await callMcpTool(outsiderToken, 'feedback_list_projects', { org })
+    expect((listed.structuredContent?.projects as { id: string }[]).map(p => p.id)).not.toContain(created.id)
+
+    const unknown = await callMcpTool(token, 'feedback_create_project', { org, name: 'test-feedback-x', teams: ['test-feedback-ops'] })
+    expect(unknown.isError).toBe(true)
+    expect(unknown.content[0]?.text).toMatch(/Teams you can pick: test-feedback-dev/)
+  })
+
   it('saves visibility and teams on create and edit, with the save guard', async () => {
     const s = await setup()
 

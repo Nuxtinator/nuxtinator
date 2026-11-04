@@ -526,7 +526,7 @@ An org app can let editors limit a container (a project, a portfolio) to some of
    })
    ```
 
-   Moves check both containers. Create and update read `{ visibility, teamIds }` with `readContainerTeamsInput` and save them with `setContainerTeams`, which refuses teams the caller isn't on and saves that would lock them out. Notifications and emails about a container go through `filterRecipients`. Paths with no user (a public widget, a bot, a job looping over `listOrgScopes`) skip the helper and keep reaching every container.
+   Moves check both containers. Create and update read `{ visibility, teamIds }` with `readContainerTeamsInput` and save them with `setContainerTeams`, which refuses teams the caller isn't on and saves that would lock them out. MCP tools take team names instead and turn them into ids with `resolveTeamNames`; `listPickableTeams` lists what the caller may pick. Notifications and emails about a container go through `filterRecipients`. Paths with no user (a public widget, a bot, a job looping over `listOrgScopes`) skip the helper and keep reaching every container.
 4. In the UI, put `<TeamAccessField app-id v-model:visibility v-model:team-ids :current-teams>` in the container's create and settings forms and `<ShowAllTeamsToggle app-id @change>` in the app's chrome for holders of `<app>.all_teams`.
 5. Test every route that takes an id or slug with a caller off the team, expecting 404.
 

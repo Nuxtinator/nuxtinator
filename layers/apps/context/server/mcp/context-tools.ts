@@ -35,8 +35,8 @@ import type { Database as CoreDatabase } from '#core/server/database/schema'
 import { withOrgPermission } from '#tenant/server'
 import { getPortfolioSections } from '../utils/section-settings'
 import { loadSection, saveSectionContent, isKnownSectionKey, addSection, deleteSection } from '../utils/section-helpers'
-import { createPortfolio, getContextTeamScope, getPortfolioByIdOr404, listPortfolios } from '../utils/portfolio-helpers'
-import { assertTeamAccess } from '#core/server/utils/team-access'
+import { createPortfolio, getContextTeamScope, getPortfolioByIdOr404, listPortfolios, withContextPortfolioTeams } from '../utils/portfolio-helpers'
+import { assertTeamAccess, resolveTeamNames, setContainerTeams } from '#core/server/utils/team-access'
 import {
   assertSuggestionSetVisible,
   createSuggestionSet,
@@ -89,15 +89,15 @@ function textResult(text: string, structured?: Record<string, unknown>) {
 export const listPortfoliosTool = defineMcpTool({
   name: 'list_portfolios',
   title: 'List Portfolios',
-  description: 'List portfolios in the active organization. Returns portfolio id, slug, name, color, icon_url, template (null = the default template), created_at, updated_at.',
+  description: 'List portfolios in the active organization. Returns portfolio id, slug, name, color, icon_url, template (null = the default template), visibility, teams (names; empty when everyone in the org sees it), created_at, updated_at.',
   appId: 'context',
   scope: 'context.read',
   input: z.object({ org: orgInput }).strict(),
   handler: async (input, ctx) => {
     try {
       return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx, org) => {
-        const rows = await listPortfolios(tx, await getContextTeamScope(ctx.event, tx, org))
-        return textResult(`${rows.length} portfolio(s).`, { portfolios: rows })
+        const rows = await withContextPortfolioTeams(tx, await listPortfolios(tx, await getContextTeamScope(ctx.event, tx, org)))
+        return textResult(`${rows.length} portfolio(s).`, { portfolios: rows.map(r => ({ ...r, teams: r.teams.map(t => t.name) })) })
       })
     } catch (err) { return mcpError(err) }
   }
@@ -455,7 +455,7 @@ export const bulkUpdateSectionsTool = defineMcpTool({
 export const createPortfolioTool = defineMcpTool({
   name: 'create_portfolio',
   title: 'Create Portfolio',
-  description: `Create a portfolio in the active organization. The slug is derived from the name unless one is given, and a colliding slug is auto-suffixed (-2, -3) — read the returned slug and id rather than assuming them. \`template\` picks a registered portfolio template (omit for the default template; an unknown id is rejected with the registered ids). \`builtin_sections\` picks which of the template's sections the portfolio starts with (omit for all, [] for none; default template keys: ${BUILTIN_KEY_LIST}). Sections start with no content; write content with update_section.`,
+  description: `Create a portfolio in the active organization. The slug is derived from the name unless one is given, and a colliding slug is auto-suffixed (-2, -3) — read the returned slug and id rather than assuming them. \`template\` picks a registered portfolio template (omit for the default template; an unknown id is rejected with the registered ids). \`builtin_sections\` picks which of the template's sections the portfolio starts with (omit for all, [] for none; default template keys: ${BUILTIN_KEY_LIST}). Sections start with no content; write content with update_section. \`teams\` (team names, as list_portfolios shows them) limits the portfolio to those teams; omit it for a portfolio everyone in the org sees.`,
   appId: 'context',
   scope: 'context.portfolio.create',
   input: z.object({
@@ -464,16 +464,27 @@ export const createPortfolioTool = defineMcpTool({
     color: z.string().trim().max(20).nullable().optional(),
     slug: z.string().trim().regex(/^[a-z][a-z0-9-]{1,39}$/).optional(),
     template: z.string().min(1).max(64).optional(),
-    builtin_sections: z.array(z.string().min(1).max(64)).max(50).optional()
+    builtin_sections: z.array(z.string().min(1).max(64)).max(50).optional(),
+    teams: z.array(z.string().trim().min(1).max(80)).min(1).max(20).optional()
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.portfolio.create', async (tx) => {
-        const portfolio = await createPortfolio(tx, input, ctx.auth.userId)
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.portfolio.create', async (tx, org) => {
+        const { teams: teamNames, ...fields } = input
+        let created = await createPortfolio(tx, fields, ctx.auth.userId)
+        if (teamNames) {
+          const scope = await getContextTeamScope(ctx.event, tx, org)
+          const teamIds = await resolveTeamNames(tx, scope, teamNames)
+          await setContainerTeams(tx, scope, 'context_portfolios', created.id, { visibility: 'teams', teamIds })
+          created = { ...created, visibility: 'teams' }
+        }
+        const [withTeams] = await withContextPortfolioTeams(tx, [created])
+        const portfolio = { ...withTeams!, teams: withTeams!.teams.map(t => t.name) }
 
         await mcpLog('CREATE', 'context_portfolios', portfolio.id, ctx, {
           slug: portfolio.slug,
-          name: portfolio.name
+          name: portfolio.name,
+          teams: portfolio.teams
         }, asAuditExecutor(tx))
 
         return textResult(`Created portfolio "${portfolio.name}" (${portfolio.slug}).`, { portfolio })

@@ -129,9 +129,9 @@ export async function getOwnedConversationOr404(tx: Tx, id: string, userId: stri
 }
 
 // The conversations, among `rows`, that are bound to or drew on a portfolio
-// hidden from the caller's teams. Replies record the portfolios they drew on;
-// older replies that don't are matched by their proposals' portfolio slugs and
-// their loaded-context labels ("Portfolio › Section").
+// hidden from the caller's teams. Replies record the portfolios they drew on.
+// Older replies kept no record and may have read search snippets from any
+// portfolio, so they count as drawing on every portfolio that existed then.
 export async function hiddenConversationIds(
   tx: Tx,
   scope: TeamScope | null,
@@ -141,13 +141,12 @@ export async function hiddenConversationIds(
   if (!scope || scope.allTeams || rows.length === 0) return out
   const hidden = await tx
     .selectFrom('context_portfolios')
-    .select(['id', 'slug', 'name'])
+    .select(['id', 'created_at'])
     .where(eb => eb.not(teamVisible(scope, 'context_portfolios')))
     .execute()
   if (hidden.length === 0) return out
   const hiddenIds = new Set(hidden.map(p => p.id))
-  const hiddenSlugs = new Set(hidden.map(p => p.slug))
-  const hiddenPrefixes = hidden.map(p => `${p.name} › `)
+  const oldestHidden = Math.min(...hidden.map(p => new Date(p.created_at).getTime()))
 
   for (const r of rows) if (r.portfolio_id && hiddenIds.has(r.portfolio_id)) out.add(r.id)
   const workspace = rows.filter(r => !r.portfolio_id && !out.has(r.id)).map(r => r.id)
@@ -155,16 +154,14 @@ export async function hiddenConversationIds(
 
   const messages = await tx
     .selectFrom('context_assistant_messages')
-    .select(['conversation_id', 'portfolio_ids', 'proposals', 'context_loaded'])
+    .select(['conversation_id', 'portfolio_ids', 'created_at'])
     .where('conversation_id', 'in', workspace)
     .where('role', '=', 'assistant')
     .execute()
   for (const m of messages) {
-    if (out.has(m.conversation_id)) continue
     const drewOnHidden = m.portfolio_ids
       ? m.portfolio_ids.some(id => hiddenIds.has(id))
-      : (m.proposals ?? []).some(p => hiddenSlugs.has(p.portfolio_slug))
-        || (m.context_loaded ?? []).some(label => hiddenPrefixes.some(prefix => label.startsWith(prefix)))
+      : new Date(m.created_at).getTime() >= oldestHidden
     if (drewOnHidden) out.add(m.conversation_id)
   }
   return out
