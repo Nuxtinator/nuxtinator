@@ -170,6 +170,8 @@ describe('team-limited portfolios', () => {
       ['GET', `/api/context/assistant/conversations/${c.conversationId}`],
       ['POST', `/api/context/assistant/conversations/${c.conversationId}/messages`, { message: 'Hi' }],
       ['POST', `/api/context/assistant/conversations/${c.conversationId}/proposals`, { message_id: c.messageId, index: 0, action: 'apply' }],
+      ['GET', `/api/context/assistant/conversations/${c.allConversationId}`],
+      ['POST', `/api/context/assistant/conversations/${c.allConversationId}/messages`, { message: 'Hi' }],
       ['POST', `/api/context/assistant/conversations/${c.allConversationId}/proposals`, { message_id: c.allMessageId, index: 0, action: 'apply' }],
       ['DELETE', `/api/context/assistant/conversations/${c.conversationId}`],
       ['DELETE', base]
@@ -240,12 +242,38 @@ describe('team-limited portfolios', () => {
 
   it('keeps hidden portfolios in place when someone off their teams reorders', async () => {
     const s = await setup()
-    await $fetch('/api/context/portfolio-order', { method: 'PUT', body: { ids: [s.open.id] }, ...s.adminH })
+    const last = await createTestPortfolio(sql, { org_id: s.org.id, name: 'Last', builtin_sections: ['identity'] })
+    await sql`UPDATE context_portfolios SET "order" = CASE id WHEN ${s.open.id} THEN 0 WHEN ${s.hidden.id} THEN 1 ELSE 2 END WHERE org_id = ${s.org.id}`
+
+    await $fetch('/api/context/portfolio-order', { method: 'PUT', body: { ids: [last.id, s.open.id] }, ...s.adminH })
     const rows = await sql<{ id: string, order: number }[]>`
       SELECT id, "order" FROM context_portfolios WHERE org_id = ${s.org.id} ORDER BY "order"
     `
-    expect(rows.map(r => r.id)).toEqual([s.hidden.id, s.open.id])
-    expect(await status($fetch('/api/context/portfolio-order', { method: 'PUT', body: { ids: [s.open.id, s.hidden.id] }, ...s.adminH }))).toBe(400)
+    expect(rows.map(r => r.id)).toEqual([last.id, s.hidden.id, s.open.id])
+    expect(await status($fetch('/api/context/portfolio-order', { method: 'PUT', body: { ids: [s.open.id, s.hidden.id, last.id] }, ...s.adminH }))).toBe(400)
+  })
+
+  it('hides an all-portfolio conversation once a portfolio it drew on is hidden', async () => {
+    const s = await setup()
+    const c = await seedChildren(s)
+    const listed = async (h: Opts) => (await $fetch<{ conversations: { id: string }[] }>('/api/context/assistant/conversations', h)).conversations.map(x => x.id)
+    expect(await listed(s.adminH)).not.toContain(c.allConversationId)
+    expect(await listed(showAll(s.adminH))).toContain(c.allConversationId)
+    expect(await status($fetch(`/api/context/assistant/conversations/${c.allConversationId}`, showAll(s.adminH)))).toBe(200)
+
+    await $fetch(`/api/context/portfolios/${s.hidden.slug}/sections/identity`, { method: 'PUT', body: { content: 'Secret anvils roadmap for the dev team.' }, ...s.teamH })
+    const { conversation } = await $fetch<{ conversation: { id: string } }>('/api/context/assistant/conversations', { method: 'POST', body: {}, ...s.teamH })
+    await primeAiFake({ text: 'The roadmap is anvils.', toolCalls: [{ name: 'load_section', input: { portfolio: s.hidden.slug, section_key: 'identity' } }] })
+    await $fetch(`/api/context/assistant/conversations/${conversation.id}/messages`, { method: 'POST', body: { message: 'What is the roadmap?' }, ...s.teamH })
+    const [reply] = await sql<{ portfolio_ids: string[] }[]>`
+      SELECT portfolio_ids FROM context_assistant_messages WHERE conversation_id = ${conversation.id} AND role = 'assistant'
+    `
+    expect(reply!.portfolio_ids).toEqual([s.hidden.id])
+    expect(await listed(s.teamH)).toContain(conversation.id)
+
+    await $fetch(`/api/o/${s.org.slug}/groups/${s.group.id}/members/${s.teamMember.user.id}`, { method: 'DELETE', ...s.adminH })
+    expect(await listed(s.teamH)).not.toContain(conversation.id)
+    expect(await status($fetch(`/api/context/assistant/conversations/${conversation.id}`, s.teamH))).toBe(404)
   })
 
   it('keeps the assistant\'s all-portfolio context and search to visible portfolios', async () => {

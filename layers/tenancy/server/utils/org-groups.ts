@@ -95,6 +95,25 @@ export async function listOrgGroupMembers(event: H3Event, tx: Tx, orgId: string)
   return { members: await listGroupMembers(tx, group.id) }
 }
 
+// Org members whose name or email matches `q`, for the add-member search.
+export async function searchOrgGroupCandidates(tx: Tx, orgId: string, q: unknown) {
+  const term = typeof q === 'string' ? q.trim() : ''
+  const pattern = term ? `%${term.replace(/[\\%_]/g, c => `\\${c}`)}%` : null
+  const users = await tx
+    .selectFrom('memberships')
+    .innerJoin('users', 'users.id', 'memberships.user_id')
+    .select(['users.id', 'users.display_name', 'users.email'])
+    .where('memberships.org_id', '=', orgId)
+    .$if(!!pattern, qb => qb.where(eb => eb.or([
+      eb('users.display_name', 'ilike', pattern!),
+      eb('users.email', 'ilike', pattern!)
+    ])))
+    .orderBy('users.display_name')
+    .limit(10)
+    .execute()
+  return { users }
+}
+
 // Only members of the org can join its groups.
 export async function addOrgGroupMember(event: H3Event, tx: Tx, orgId: string, actorId: string) {
   const group = await requireOrgGroup(tx, orgId, getRouterParam(event, 'id'))

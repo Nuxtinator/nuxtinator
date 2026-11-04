@@ -3,7 +3,7 @@ import { sql } from 'kysely'
 import { withOrgPermission } from '#tenant/server'
 import { logUpdate } from '#core/server/utils/activity-logger'
 import { markCardNotificationsRead } from '../../../../../utils/notify-recipients'
-import { assertFeedbackCardAccess, assertFeedbackProjectAccess, getFeedbackTeamScope } from '../../../../../utils/project-teams'
+import { assertFeedbackCardAccess, assertFeedbackProjectAccess, assertSwimlaneInProject, getFeedbackTeamScope } from '../../../../../utils/project-teams'
 
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
@@ -40,7 +40,10 @@ export default defineEventHandler(async (event) => {
       last_moved_at: sql`now()`,
       updated_at: sql`now()`
     }
-    if (swimlaneId) updates.swimlane_id = swimlaneId
+    if (swimlaneId && !isCrossProject) {
+      await assertSwimlaneInProject(tx, card.project_id, swimlaneId)
+      updates.swimlane_id = swimlaneId
+    }
 
     // Moving to another project keeps the card's id, so its attachments,
     // history and notification links follow it. The card lands in the given

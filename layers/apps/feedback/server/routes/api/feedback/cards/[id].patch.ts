@@ -3,7 +3,7 @@ import { sql } from 'kysely'
 import { withOrgPermission } from '#tenant/server'
 import { logUpdate } from '#core/server/utils/activity-logger'
 import { markCardNotificationsRead } from '../../../../utils/notify-recipients'
-import { assertFeedbackCardAccess, getFeedbackTeamScope } from '../../../../utils/project-teams'
+import { assertFeedbackCardAccess, assertSwimlaneInProject, getFeedbackTeamScope } from '../../../../utils/project-teams'
 
 const ALLOWED_TYPES = ['task', 'feature', 'bug', 'artifact', 'feedback'] as const
 
@@ -21,7 +21,7 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event) ?? {}
 
   return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
-    await assertFeedbackCardAccess(tx, await getFeedbackTeamScope(event, tx, ctx), id)
+    const projectId = await assertFeedbackCardAccess(tx, await getFeedbackTeamScope(event, tx, ctx), id)
 
     const updates: Record<string, any> = {}
 
@@ -48,6 +48,7 @@ export default defineEventHandler(async (event) => {
       movedColumn = true
     }
     if (typeof body.swimlane_id === 'string' && body.swimlane_id) {
+      await assertSwimlaneInProject(tx, projectId, body.swimlane_id)
       updates.swimlane_id = body.swimlane_id
     }
 

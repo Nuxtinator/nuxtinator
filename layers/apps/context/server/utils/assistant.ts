@@ -59,6 +59,8 @@ export interface AssistantContext {
   onToolCall: AiToolHandler
   // Human labels of everything the model has read, in load order.
   contextLoaded: string[]
+  // Ids of the portfolios whose content reached the model this turn.
+  portfoliosUsed: Set<string>
   parseProposals: (reply: string) => ProposalDraft[]
   // What a tool call would read, for progress display: 'Team', 'Acme › Team'
   // in the all scope, or 'all of Acme'. Null when it would load nothing.
@@ -303,6 +305,7 @@ export async function buildAssistantContext(
   const bySlug = new Map(entries.map(e => [e.portfolio.slug, e]))
   const scopedSlug = scope.kind === 'all' ? null : scope.portfolio.slug
   const contextLoaded: string[] = []
+  const portfoliosUsed = new Set<string>()
   const portfolioIds = entries.map(e => e.portfolio.id)
 
   // Preload per scope. Only sections with content count as loaded, so an
@@ -316,6 +319,7 @@ export async function buildAssistantContext(
       if (visible.has(key) && entry.content.has(key)) {
         entry.loaded.add(key)
         contextLoaded.push(sectionLabel(scope, entry, key))
+        portfoliosUsed.add(entry.portfolio.id)
       }
     }
   }
@@ -331,6 +335,7 @@ export async function buildAssistantContext(
   if (caps.search > 0 && opts.userMessage?.trim()) {
     try {
       autoHits = await searchSections(tx, { portfolioIds, query: opts.userMessage, limit: SEARCH_HITS, teamScope })
+      for (const h of autoHits) portfoliosUsed.add(h.portfolio_id)
     } catch (err) {
       console.error('[context] assistant auto-search failed:', (err as Error)?.message ?? err)
     }
@@ -380,6 +385,7 @@ export async function buildAssistantContext(
       entry.loaded.add(key)
       contextLoaded.push(sectionLabel(scope, entry, key))
     }
+    portfoliosUsed.add(entry.portfolio.id)
     return `## ${sectionLabel(scope, entry, key)}\n\n${body}`
   }
 
@@ -391,6 +397,7 @@ export async function buildAssistantContext(
       searches++
       try {
         const hits = await searchSections(tx, { portfolioIds, query, limit: SEARCH_HITS, teamScope })
+        for (const h of hits) portfoliosUsed.add(h.portfolio_id)
         return `## Search hits for "${query}":\n${renderHits(scope, entries, hits)}`
       } catch (err) {
         return `Error: search is unavailable right now (${(err as { statusMessage?: string })?.statusMessage ?? 'embedding failed'}).`
@@ -445,6 +452,7 @@ export async function buildAssistantContext(
       const entry = slug ? bySlug.get(slug) : undefined
       const def = entry?.sections.find(s => s.key === key)
       if (!entry || !def) continue
+      portfoliosUsed.add(entry.portfolio.id)
       out.push({
         portfolio_slug: entry.portfolio.slug,
         portfolio_name: entry.portfolio.name,
@@ -457,7 +465,7 @@ export async function buildAssistantContext(
     return out
   }
 
-  return { system, tools, onToolCall, contextLoaded, parseProposals, describeToolCall }
+  return { system, tools, onToolCall, contextLoaded, portfoliosUsed, parseProposals, describeToolCall }
 }
 
 const SECTION_UPDATE_PATTERN = /```\s*section-update\s*\r?\n(?:\s*PORTFOLIO:\s*(.+?)\s*\r?\n)?\s*SECTION_KEY:\s*(.+?)\s*\r?\n\s*SECTION_TITLE:\s*(.+?)\s*\r?\n\s*---\s*\r?\n([\s\S]*?)```/g

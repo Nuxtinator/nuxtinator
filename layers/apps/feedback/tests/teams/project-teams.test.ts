@@ -283,13 +283,17 @@ describe('feedback team-limited projects', () => {
   })
 
   it('refuses to limit a project to teams in an audiences org', async () => {
-    const { org, auth } = await createFeedbackOrgWith(sql, ['admin'])
+    const { org, user, auth } = await createFeedbackOrgWith(sql, ['admin'])
+    const h = withOrgHeader(auth, org.slug)
+    const group = await createGroup(org.slug, h, 'test-feedback-audience', [user.id])
     const project = await createTestProject(sql, { org_id: org.id })
-    expect(await status($fetch(`/api/feedback/projects/${project.id}`, {
+    const err = await $fetch(`/api/feedback/projects/${project.id}`, {
       method: 'PATCH',
-      body: { visibility: 'teams', teamIds: [] },
-      ...withOrgHeader(auth, org.slug)
-    }))).toBe(400)
+      body: { visibility: 'teams', teamIds: [group.id] },
+      ...h
+    }).catch(e => e)
+    expect(err.statusCode).toBe(400)
+    expect(err.statusMessage).toMatch(/Teams are off/)
   })
 
   it('notifies only people who can see the project', async () => {
@@ -311,11 +315,49 @@ describe('feedback team-limited projects', () => {
     `
     expect(rows.map(r => r.user_id).sort()).toEqual([s.insider.user.id, allTeams.user.id].sort())
 
+    // `all_teams` held as a direct grant, with no role permissions, counts too.
+    const granted = await addFeedbackMember(sql, s.org.id, [])
+    for (const permission of ['feedback.read', 'feedback.all_teams']) {
+      await sql`INSERT INTO user_permission_grants (user_id, permission, org_id) VALUES (${granted.user.id}, ${permission}, ${s.org.id})`
+    }
+    await sql`DELETE FROM notifications WHERE org_id = ${s.org.id}`
+    await sql`
+      UPDATE projects SET post_meta = ${sql.json({ notify_user_ids: [granted.user.id, s.outsider.user.id] })}
+      WHERE id = ${s.project.id}
+    `
+    await $fetch('/api/v1/feedback', {
+      method: 'POST',
+      body: { project_id: s.project.id, problem_description: 'broken again', submitter_name: 'Tester', feedback_sub_type: 'bug' }
+    })
+    const again = await sql<{ user_id: string }[]>`
+      SELECT user_id FROM notifications WHERE org_id = ${s.org.id} AND app_id = 'feedback'
+    `
+    expect(again.map(r => r.user_id)).toEqual([granted.user.id])
+
     const picker = await $fetch<{ users: { id: string }[] }>(`/api/feedback/assignees?project_id=${s.project.id}`, s.insiderH)
     const ids = picker.users.map(u => u.id)
     expect(ids).toContain(s.insider.user.id)
     expect(ids).toContain(allTeams.user.id)
     expect(ids).not.toContain(s.outsider.user.id)
+  })
+
+  it('refuses a swimlane from another project', async () => {
+    const s = await setup()
+    const h = s.insiderH
+    const create = $fetch('/api/feedback/cards', {
+      method: 'POST',
+      body: { project_id: s.open.id, swimlane_id: s.lane.id, column_id: s.inbox.id, title: 'stray' },
+      ...h
+    })
+    expect(await status(create)).toBe(400)
+    expect(await status($fetch(`/api/feedback/cards/${s.openCard.id}`, { method: 'PATCH', body: { swimlane_id: s.lane.id }, ...h }))).toBe(400)
+    expect(await status($fetch(`/api/feedback/cards/${s.openCard.id}/move`, {
+      method: 'PATCH',
+      body: { column_id: s.inbox.id, swimlane_id: s.lane.id, project_id: s.open.id },
+      ...h
+    }))).toBe(400)
+    const [card] = await sql<{ swimlane_id: string }[]>`SELECT swimlane_id FROM cards WHERE id = ${s.openCard.id}`
+    expect(card!.swimlane_id).toBe(s.open.default_swimlane_id)
   })
 
   it('takes widget feedback into a team-limited project', async () => {

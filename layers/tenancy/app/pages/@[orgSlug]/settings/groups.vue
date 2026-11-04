@@ -9,11 +9,11 @@ const route = useRoute()
 const orgSlug = computed(() => route.params.orgSlug as string)
 
 const searchUsers = async (q: string): Promise<GroupsManagerUser[]> => {
-  const res = await $fetch<{ rows: { user_id: string, display_name: string, email: string | null }[] }, string>(
-    `/api/o/${orgSlug.value}/members`,
-    { query: { q, pageSize: 10, sort: 'display_name', dir: 'asc' } }
+  const res = await $fetch<{ users: GroupsManagerUser[] }, string>(
+    `/api/o/${orgSlug.value}/groups/candidates`,
+    { query: { q } }
   )
-  return res.rows.map(r => ({ id: r.user_id, display_name: r.display_name, email: r.email }))
+  return res.users
 }
 </script>
 

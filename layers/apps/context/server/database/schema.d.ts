@@ -140,6 +140,7 @@ export interface ContextAssistantMessagesTable {
   content: string
   proposals: Generated<ContextAssistantProposal[]>
   context_loaded: Generated<string[]>
+  portfolio_ids: string[] | null
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 

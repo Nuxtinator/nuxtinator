@@ -43,6 +43,17 @@ export async function assertFeedbackCardAccess(tx: Tx, scope: TeamScope, cardId:
   return card.project_id
 }
 
+// 400 unless `swimlaneId` is one of the project's swimlanes.
+export async function assertSwimlaneInProject(tx: Tx, projectId: string, swimlaneId: string): Promise<void> {
+  const lane = await tx
+    .selectFrom('swimlanes')
+    .select('id')
+    .where('id', '=', swimlaneId)
+    .where('project_id', '=', projectId)
+    .executeTakeFirst()
+  if (!lane) throw createError({ statusCode: 400, statusMessage: 'That swimlane is not in this project' })
+}
+
 // Adds each project's teams (`[]` for org-wide projects) for display.
 export async function withFeedbackProjectTeams<T extends { id: string }>(
   tx: Tx,

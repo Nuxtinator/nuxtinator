@@ -58,6 +58,22 @@ describe('org groups', () => {
     expect(listed.groups.find(g => g.id === group.id)?.member_count).toBe(1)
   })
 
+  it('lets a role with only org.groups.manage find members to add', async () => {
+    const { org, adminH, member } = await setup()
+    const role = await $fetch<{ name: string }>(`/api/o/${org.slug}/roles`, {
+      method: 'POST',
+      body: { name: 'Group keeper', permissions: ['org.groups.manage'] },
+      ...adminH
+    })
+    const keeper = await createTenancyUser(sql)
+    await addTestMembership(sql, { user_id: keeper.id, org_id: org.id, roles: [role.name] })
+    const keeperH = withOrgHeader(getAuthHeaders(keeper), org.slug)
+
+    expect(await status($fetch(`/api/o/${org.slug}/members`, keeperH))).toBe(403)
+    const { users } = await $fetch<{ users: { id: string }[] }>(`/api/o/${org.slug}/groups/candidates`, { query: { q: '' }, ...keeperH })
+    expect(users.map(u => u.id)).toContain(member.id)
+  })
+
   it('refuses to add someone who isn\'t in the org', async () => {
     const { org, adminH } = await setup()
     const group = await createGroup(org.slug, adminH)
@@ -140,6 +156,27 @@ describe('org groups', () => {
 
       await $fetch(`/api/o/${org.slug}/apps/messages/groups`, { method: 'PUT', body: { groupIds: [] }, ...adminH })
       expect(await status($fetch('/api/messages/org-users', memberH))).toBe(200)
+    })
+
+    it('shows an app\'s groups only to people who manage apps or groups', async () => {
+      const { org, adminH, memberH } = await setup()
+      const group = await createGroup(org.slug, adminH)
+      await $fetch(`/api/o/${org.slug}/apps/messages/groups`, { method: 'PUT', body: { groupIds: [group.id] }, ...adminH })
+      const { apps } = await $fetch<{ apps: { appId: string, groups: string[] }[] }>(`/api/o/${org.slug}/apps`, memberH)
+      expect(apps.every(a => a.groups.length === 0)).toBe(true)
+    })
+
+    it('refuses to delete a group while an app\'s access names it', async () => {
+      const { org, adminH } = await setup()
+      const group = await createGroup(org.slug, adminH)
+      await $fetch(`/api/o/${org.slug}/apps/messages/groups`, { method: 'PUT', body: { groupIds: [group.id] }, ...adminH })
+
+      expect(await status($fetch(`/api/o/${org.slug}/groups/${group.id}`, { method: 'DELETE', ...adminH }))).toBe(409)
+      const [gate] = await sql`SELECT 1 FROM app_groups WHERE group_id = ${group.id}`
+      expect(gate).toBeTruthy()
+
+      await $fetch(`/api/o/${org.slug}/apps/messages/groups`, { method: 'PUT', body: { groupIds: [] }, ...adminH })
+      await $fetch(`/api/o/${org.slug}/groups/${group.id}`, { method: 'DELETE', ...adminH })
     })
 
     it('refuses another org\'s group on an app\'s list', async () => {

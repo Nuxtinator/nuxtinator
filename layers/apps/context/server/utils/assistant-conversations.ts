@@ -5,7 +5,7 @@
 
 import { sql, type Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
-import { canSeeContainer, type TeamScope } from '#core/server/utils/team-access'
+import { teamVisible, type TeamScope } from '#core/server/utils/team-access'
 import type { ContextAssistantProposal, ContextAssistantProposalStatus } from '../database/schema'
 
 type Tx = Transaction<Database>
@@ -118,16 +118,56 @@ export async function getOwnedConversation(
   return (row as ConversationRow | undefined) ?? null
 }
 
-// Also 404 when the conversation is bound to a portfolio the caller's teams
-// can no longer see.
+// Also 404 when the conversation drew on a portfolio the caller's teams can
+// no longer see (see `hiddenConversationIds`).
 export async function getOwnedConversationOr404(tx: Tx, id: string, userId: string, scope: TeamScope | null): Promise<ConversationRow> {
   const row = await getOwnedConversation(tx, id, userId)
-  const hidden = !!row?.portfolio_id && scope !== null
-    && !(await canSeeContainer(tx, scope, 'context_portfolios', row.portfolio_id))
-  if (!row || hidden) {
+  if (!row || (await hiddenConversationIds(tx, scope, [row])).has(row.id)) {
     throw createError({ statusCode: 404, statusMessage: 'Conversation not found.' })
   }
   return row
+}
+
+// The conversations, among `rows`, that are bound to or drew on a portfolio
+// hidden from the caller's teams. Replies record the portfolios they drew on;
+// older replies that don't are matched by their proposals' portfolio slugs and
+// their loaded-context labels ("Portfolio › Section").
+export async function hiddenConversationIds(
+  tx: Tx,
+  scope: TeamScope | null,
+  rows: Array<Pick<ConversationRow, 'id' | 'portfolio_id'>>
+): Promise<Set<string>> {
+  const out = new Set<string>()
+  if (!scope || scope.allTeams || rows.length === 0) return out
+  const hidden = await tx
+    .selectFrom('context_portfolios')
+    .select(['id', 'slug', 'name'])
+    .where(eb => eb.not(teamVisible(scope, 'context_portfolios')))
+    .execute()
+  if (hidden.length === 0) return out
+  const hiddenIds = new Set(hidden.map(p => p.id))
+  const hiddenSlugs = new Set(hidden.map(p => p.slug))
+  const hiddenPrefixes = hidden.map(p => `${p.name} › `)
+
+  for (const r of rows) if (r.portfolio_id && hiddenIds.has(r.portfolio_id)) out.add(r.id)
+  const workspace = rows.filter(r => !r.portfolio_id && !out.has(r.id)).map(r => r.id)
+  if (workspace.length === 0) return out
+
+  const messages = await tx
+    .selectFrom('context_assistant_messages')
+    .select(['conversation_id', 'portfolio_ids', 'proposals', 'context_loaded'])
+    .where('conversation_id', 'in', workspace)
+    .where('role', '=', 'assistant')
+    .execute()
+  for (const m of messages) {
+    if (out.has(m.conversation_id)) continue
+    const drewOnHidden = m.portfolio_ids
+      ? m.portfolio_ids.some(id => hiddenIds.has(id))
+      : (m.proposals ?? []).some(p => hiddenSlugs.has(p.portfolio_slug))
+        || (m.context_loaded ?? []).some(label => hiddenPrefixes.some(prefix => label.startsWith(prefix)))
+    if (drewOnHidden) out.add(m.conversation_id)
+  }
+  return out
 }
 
 export async function deleteConversation(tx: Tx, id: string, userId: string): Promise<boolean> {
@@ -170,6 +210,7 @@ export interface InsertMessageInput {
   content: string
   proposals?: ContextAssistantProposal[]
   contextLoaded?: string[]
+  portfolioIds?: string[]
 }
 
 export async function insertMessage(tx: Tx, input: InsertMessageInput): Promise<MessageRow> {
@@ -183,6 +224,7 @@ export async function insertMessage(tx: Tx, input: InsertMessageInput): Promise<
       // string scalar.
       proposals: sql`${JSON.stringify(input.proposals ?? [])}::text::jsonb`,
       context_loaded: sql`${JSON.stringify(input.contextLoaded ?? [])}::text::jsonb`,
+      portfolio_ids: sql<string[]>`array(select jsonb_array_elements_text(${JSON.stringify(input.portfolioIds ?? [])}::text::jsonb))::uuid[]`,
       // Wall-clock time rather than the column default: both turns of an
       // exchange are inserted in one transaction, where `now()` is the same
       // for each, and the list orders by this column.

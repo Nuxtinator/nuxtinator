@@ -83,7 +83,8 @@ async function runTurn(tx: Tx, args: TurnArgs, hooks?: TurnHooks) {
     role: 'assistant',
     content: stripUpdateBlocks(result.text),
     proposals,
-    contextLoaded: assistant.contextLoaded
+    contextLoaded: assistant.contextLoaded,
+    portfolioIds: [...assistant.portfoliosUsed]
   })
   await touchConversation(tx, conversation.id, history.length === 0 ? message : undefined)
 

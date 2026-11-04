@@ -305,8 +305,14 @@ export async function getMemberPermissions(
   `.execute(tx)
   const orgId = result.rows[0]?.org_id
   if (!orgId) return new Set()
-  const perms = await computePermsForOrg(tx, userId, orgId)
-  if (perms.size === 0) return perms
+  const membership = await tx
+    .selectFrom('memberships')
+    .select('roles')
+    .where('user_id', '=', userId)
+    .where('org_id', '=', orgId)
+    .executeTakeFirst()
+  if (!membership) return new Set()
+  const perms = await getRolePermissions(tx, membership.roles, orgId)
   for (const perm of await getUserGrantedPermissions(tx, userId)) perms.add(perm)
   return perms
 }

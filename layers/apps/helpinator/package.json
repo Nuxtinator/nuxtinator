@@ -22,8 +22,7 @@
   },
   "optionalDependencies": {
     "@nuxtinator/ai": "*",
-    "@nuxtinator/context": ">=1.14.0",
-      "@nuxtinator/core": ">=3.4.0",
+    "@nuxtinator/context": "*",
     "@nuxtinator/core": "*",
     "@nuxtinator/inbox": "*",
     "@nuxtinator/tenancy": "*"

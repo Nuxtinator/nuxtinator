@@ -5,16 +5,20 @@ import { getOrgApps } from '../../../../../utils/app-settings'
 // `server/utils/app-settings.ts`. UI for `/@<slug>/settings/apps`.
 // A host-controlled app is listed only while it's on for the org. `groups`
 // names the org groups an app is limited to (the team gate); empty means open.
+// It's filled only for callers who manage the org's apps or groups.
 export default defineEventHandler((event) => {
   return withOrgContext(event, async (tx, ctx) => {
     const apps = await getOrgApps(tx, { orgId: ctx.orgId })
-    const limits = await tx
-      .selectFrom('app_groups')
-      .innerJoin('groups', 'groups.id', 'app_groups.group_id')
-      .select(['app_groups.app_id', 'groups.name'])
-      .where('groups.org_id', '=', ctx.orgId)
-      .orderBy('groups.name')
-      .execute()
+    const seesGroups = ctx.perms.has('org.apps.manage') || ctx.perms.has('org.groups.manage')
+    const limits = seesGroups
+      ? await tx
+          .selectFrom('app_groups')
+          .innerJoin('groups', 'groups.id', 'app_groups.group_id')
+          .select(['app_groups.app_id', 'groups.name'])
+          .where('groups.org_id', '=', ctx.orgId)
+          .orderBy('groups.name')
+          .execute()
+      : []
     return {
       apps: apps.filter(a => a.status !== 'host_controlled' || a.enabled).map(a => ({
         appId: a.id,

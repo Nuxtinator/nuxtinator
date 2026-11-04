@@ -16,6 +16,7 @@
 import { sql } from 'kysely'
 import type { DbClient } from './settings'
 import { clearHostSetting, clearSetting, getHostSetting, getSetting, setHostSetting, setSetting } from './settings-store'
+import { getRegisteredApp } from './app-registry'
 
 export type GroupMode = 'audiences' | 'teams'
 
@@ -187,8 +188,10 @@ export async function setGroupArchived(tx: DbClient, id: string, archived: boole
     .execute()
 }
 
-// Refused (409, with what uses it) while content is limited to the group.
-// App access lists don't block it: that access just goes with the group.
+// Refused (409) while content is limited to the group, or while an org app's
+// access list names it: an access list left empty opens the app to everyone.
+// A personal app's list doesn't block it, since dropping the group there only
+// narrows who can open the app.
 export async function deleteGroup(tx: DbClient, id: string): Promise<void> {
   const usage = await getGroupUsage(tx, [id])
   if (usage.length > 0) {
@@ -196,6 +199,16 @@ export async function deleteGroup(tx: DbClient, id: string): Promise<void> {
       statusCode: 409,
       statusMessage: 'This group is still in use. Move that content off the group, or archive the group instead.',
       data: { usage }
+    })
+  }
+  const gated = (await tx.selectFrom('app_groups').select('app_id').where('group_id', '=', id).execute())
+    .map(r => getRegisteredApp(r.app_id))
+    .filter(app => app && app.scope !== 'user')
+    .map(app => app!.title)
+  if (gated.length > 0) {
+    throw createError({
+      statusCode: 409,
+      statusMessage: `This group opens ${gated.join(', ')}. Take it off those apps' access first, or archive the group instead.`
     })
   }
   await tx.deleteFrom('groups').where('id', '=', id).execute()

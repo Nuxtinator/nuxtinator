@@ -96,6 +96,28 @@ const inboxCounts = computed<Record<string, number>>(() => {
   return counts
 })
 
+// One list per project. A project that answers 404 is out of reach (deleted,
+// or no longer on one of the caller's teams) and leaves the board; any other
+// failure comes back in `error` without stopping the other projects.
+async function fetchPerProject<T>(path: string): Promise<{ byProject: Map<string, T[]>, error: unknown }> {
+  const ids = projects.value.map(p => p.id)
+  const results = await Promise.allSettled(ids.map(id => $fetch<T[]>(path, { query: { project_id: id } })))
+  const byProject = new Map<string, T[]>()
+  const gone = new Set<string>()
+  let error: unknown = null
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') byProject.set(ids[i]!, r.value)
+    else if ((r.reason as { statusCode?: number })?.statusCode === 404) gone.add(ids[i]!)
+    else error ??= r.reason
+  })
+  if (gone.size > 0) {
+    projects.value = projects.value.filter(p => !gone.has(p.id))
+    swimlanes.value = swimlanes.value.filter(l => !gone.has(l.project_id))
+    cards.value = cards.value.filter(c => !gone.has(c.project_id))
+  }
+  return { byProject, error }
+}
+
 async function loadAll() {
   loading.value = true
   error.value = ''
@@ -111,15 +133,13 @@ async function loadAll() {
     columns.value = columnsRes
     assignableUsers.value = assigneesRes.users
 
-    const laneResults = await Promise.all(
-      projects.value.map(p => $fetch<Swimlane[]>('/api/feedback/swimlanes', { query: { project_id: p.id } }))
-    )
-    swimlanes.value = laneResults.flat()
+    const lanes = await fetchPerProject<Swimlane>('/api/feedback/swimlanes')
+    if (lanes.error) throw lanes.error
+    swimlanes.value = [...lanes.byProject.values()].flat()
 
-    const cardResults = await Promise.all(
-      projects.value.map(p => $fetch<Card[]>('/api/feedback/cards', { query: { project_id: p.id } }))
-    )
-    cards.value = cardResults.flat()
+    const projectCards = await fetchPerProject<Card>('/api/feedback/cards')
+    if (projectCards.error) throw projectCards.error
+    cards.value = [...projectCards.byProject.values()].flat()
   } catch (err: any) {
     error.value = err?.data?.statusMessage || err?.message || 'Failed to load board'
   } finally {
@@ -133,14 +153,10 @@ const pollPaused = computed(
 
 async function refreshCards() {
   if (loading.value) return
-  try {
-    const cardResults = await Promise.all(
-      projects.value.map(p => $fetch<Card[]>('/api/feedback/cards', { query: { project_id: p.id } }))
-    )
-    cards.value = cardResults.flat()
-  } catch (err) {
-    console.warn('Auto-poll failed:', err)
-  }
+  const previous = cards.value
+  const res = await fetchPerProject<Card>('/api/feedback/cards')
+  cards.value = projects.value.flatMap(p => res.byProject.get(p.id) ?? previous.filter(c => c.project_id === p.id))
+  if (res.error) console.warn('Auto-poll failed:', res.error)
 }
 
 const { start: startPoll, stop: stopPoll } = useBoardPoll(refreshCards, pollPaused, 5000)
