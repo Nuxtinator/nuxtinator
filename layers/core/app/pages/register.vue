@@ -6,6 +6,7 @@ definePageMeta({
 const router = useRouter()
 const route = useRoute()
 const { register } = useAuth()
+const registrationOpen = await useRegistrationOpen()
 
 const state = reactive({
   display_name: '',
@@ -15,8 +16,10 @@ const state = reactive({
 })
 
 const loading = ref(false)
-const error = ref('')
+const error = ref(authErrorMessage(route.query.auth_error))
 const success = ref(false)
+
+const redirectTarget = computed(() => typeof route.query.redirect === 'string' ? route.query.redirect : undefined)
 
 const passwordMatch = computed(() => {
   if (!state.confirmPassword) return true
@@ -71,7 +74,7 @@ async function handleRegister() {
     if (result.success) {
       // First user is auto-logged-in by the server; skip the "check your email" UI.
       if (result.autoLoggedIn) {
-        await navigateTo('/dashboard', { replace: true })
+        await navigateTo(launcherPath(), { replace: true })
         return
       }
       success.value = true
@@ -123,6 +126,28 @@ const redirectToLogin = () => {
         />
       </div>
 
+      <div
+        v-else-if="!registrationOpen"
+        class="space-y-6"
+      >
+        <UAlert
+          color="neutral"
+          variant="soft"
+          icon="i-lucide-lock"
+          title="Registration is closed"
+          description="New accounts can only be created from an invitation."
+        />
+        <UButton
+          color="neutral"
+          variant="outline"
+          size="lg"
+          block
+          @click="redirectToLogin"
+        >
+          Back to Sign In
+        </UButton>
+      </div>
+
       <!-- Registration Form -->
       <form
         v-else
@@ -137,6 +162,12 @@ const redirectToLogin = () => {
           :title="error"
           :close-button="{ icon: 'i-lucide-x', color: 'gray', variant: 'ghost' }"
           @close="error = ''"
+        />
+
+        <AuthProviderButtons
+          intent="login"
+          :redirect="redirectTarget"
+          separator="or"
         />
 
         <!-- Display Name Input -->
@@ -255,14 +286,10 @@ const redirectToLogin = () => {
         </UButton>
 
         <!-- Divider -->
-        <div class="relative">
-          <div class="absolute inset-0 flex items-center">
-            <div class="w-full border-t border-(--ui-border)" />
-          </div>
-          <div class="relative flex justify-center text-sm">
-            <span class="px-2 bg-(--ui-bg) text-(--ui-text-muted)">Already have an account?</span>
-          </div>
-        </div>
+        <USeparator
+          label="Already have an account?"
+          :ui="{ container: 'font-normal text-muted' }"
+        />
 
         <!-- Login Link -->
         <UButton

@@ -36,7 +36,8 @@ export interface UsersTable {
   id: Generated<string>
   created: ColumnType<Date, string | undefined, string>
   updated: ColumnType<Date, string | undefined, string>
-  email: string
+  // Null for a user created without an address (see migration 016).
+  email: string | null
   display_name: string
   avatar: Generated<string>
   password: ColumnType<string | null, string | null | undefined, string | null>
@@ -67,6 +68,8 @@ export interface ActivityLogsTable extends NuxtinatorActivityLogsColumns {
   user_id: string | null
   user_agent: string | null
   metadata: Generated<Record<string, unknown>>
+  // The OAuth client the action came through (migration 021).
+  client_id: string | null
 }
 
 export interface CustomRolesTable extends NuxtinatorCustomRolesColumns {
@@ -78,11 +81,11 @@ export interface CustomRolesTable extends NuxtinatorCustomRolesColumns {
   permissions: Generated<string[]>
 }
 
-export type AppStatus = 'disabled' | 'available' | 'default'
+export type AppStatus = 'disabled' | 'available' | 'default' | 'host_controlled' | 'admins'
 
 export interface AppsTable {
   id: string
-  status: Generated<AppStatus>
+  status: AppStatus | null
   created_at: ColumnType<Date, string | undefined, string>
   updated_at: ColumnType<Date, string | undefined, string>
 }
@@ -110,6 +113,18 @@ export interface CoreSettingsTable {
   updated_at: ColumnType<Date, string | undefined, string>
 }
 
+// Deployment-global settings store. Same row shape and merge rule as
+// `core_settings`, but the tenancy layer never retrofits this table, so one
+// row is one value for the whole deployment in either mode. Read and written
+// only through `getHostSetting` / `setHostSetting` (settings-store.ts).
+export interface CoreHostSettingsTable {
+  id: Generated<string>
+  namespace: string
+  key: string
+  value: ColumnType<unknown, unknown, unknown>
+  updated_at: ColumnType<Date, string | undefined, string>
+}
+
 // Per-user additive permission grants — effective perms = role perms ∪ these
 // rows (see rbac + the tenant kernels). `permission` is a slug; the runtime
 // permissions registry decides whether a stored slug still grants anything.
@@ -123,6 +138,83 @@ export interface UserPermissionGrantsTable {
   id: Generated<string>
   user_id: string
   permission: string
+  granted_by: string | null
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
+export type SessionClient = 'web' | 'native'
+
+// One signed-in device. See migration 011_create_sessions.
+export interface SessionsTable {
+  id: Generated<string>
+  user_id: string
+  client: SessionClient
+  refresh_token_hash: string
+  previous_refresh_token_hash: string | null
+  rotated_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+  last_used_at: ColumnType<Date, Date | string | undefined, Date | string>
+  expires_at: ColumnType<Date, Date | string, Date | string>
+  authenticated_at: ColumnType<Date, Date | string | undefined, Date | string>
+  user_agent: string | null
+  ip: string | null
+}
+
+// A pending invitation; `email` is NULL for shareable link invites. See
+// migration 012_create_invites.
+export interface InvitesTable {
+  id: Generated<string>
+  token_hash: string
+  email: string | null
+  display_name: string | null
+  invited_by: string | null
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+  expires_at: ColumnType<Date, Date | string, Date | string>
+  accepted_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
+  accepted_by: string | null
+  // 'admin' or 'share'; see migration 020_invites_kind.
+  kind: Generated<InviteKind>
+}
+
+export type InviteKind = 'admin' | 'share'
+
+// A host admin's grant of a personal app to one user. See migration
+// 015_create_user_apps.
+export interface UserAppsTable {
+  id: Generated<string>
+  user_id: string
+  app_id: string
+  granted_by: string | null
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
+// A personal app an invite grants once accepted.
+export interface InviteAppsTable {
+  invite_id: string
+  app_id: string
+}
+
+// A named set of users: a host group (`org_id` NULL) or one org's. See
+// migration 018_create_groups.
+export interface GroupsTable {
+  id: Generated<string>
+  org_id: string | null
+  name: string
+  archived_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
+export interface GroupMembersTable {
+  group_id: string
+  user_id: string
+  added_by: string | null
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
+// A group that can open an app, beside `user_apps`' per-user grants.
+export interface AppGroupsTable {
+  app_id: string
+  group_id: string
   granted_by: string | null
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
@@ -144,7 +236,7 @@ export interface NotificationsTable {
   emailed_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
 }
 
-// The eight always-on core tables. Optional-layer tables live in the global
+// The always-on core tables. Optional-layer tables live in the global
 // `NuxtinatorDatabaseTables` registry and are joined in by `Database` below.
 export interface CoreDatabase {
   users: UsersTable
@@ -154,7 +246,15 @@ export interface CoreDatabase {
   apps: AppsTable
   notifications: NotificationsTable
   core_settings: CoreSettingsTable
+  core_host_settings: CoreHostSettingsTable
   user_permission_grants: UserPermissionGrantsTable
+  sessions: SessionsTable
+  invites: InvitesTable
+  user_apps: UserAppsTable
+  invite_apps: InviteAppsTable
+  groups: GroupsTable
+  group_members: GroupMembersTable
+  app_groups: AppGroupsTable
 }
 
 // The full schema Kysely sees: core tables plus whatever optional layers

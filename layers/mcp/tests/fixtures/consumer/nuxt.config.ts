@@ -1,5 +1,5 @@
-// Fixture consumer for the MCP-layer integration tests. Extends the OAuth
-// layer + the MCP layer just like a real consumer would.
+// Fixture consumer for the MCP-layer integration tests. Extends the core,
+// OAuth and MCP layers just like a real consumer would.
 //
 // Layer paths are resolved to absolute paths at config-load time so Nuxt's
 // route/plugin scanner doesn't get confused by relative-path resolution
@@ -7,13 +7,14 @@
 import { fileURLToPath } from 'node:url'
 import { defineNuxtConfig } from 'nuxt/config'
 
+const coreLayer = fileURLToPath(new URL('../../../../core', import.meta.url))
 const oauthLayer = fileURLToPath(new URL('../../../../oauth', import.meta.url))
 const mcpLayer = fileURLToPath(new URL('../../..', import.meta.url))
 
 export default defineNuxtConfig({
-  extends: [oauthLayer, mcpLayer],
+  extends: [coreLayer, oauthLayer, mcpLayer],
 
-  modules: [],
+  modules: ['@nuxt/ui'],
 
   ssr: false,
 

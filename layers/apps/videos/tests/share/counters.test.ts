@@ -1,8 +1,9 @@
-// POST /api/videos/share/:token/play  — bump play_count for public videos
-// POST /api/videos/share/:token/view  — bump view_count for public videos,
+// POST /api/videos/share/:token/play  — bump play_count for public + org videos
+// POST /api/videos/share/:token/view  — bump view_count for public + org videos,
 //                                        skipping owner self-views
 //
-// Both endpoints go through the SECURITY DEFINER `bump_video_counter` SQL
+// Both endpoints gate access like share/[token].get.ts (public / owner / org
+// member) and go through the SECURITY DEFINER `bump_video_counter` SQL
 // function so the no-GUC path can write past the RLS write policy.
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
@@ -44,15 +45,45 @@ describe('POST /api/videos/share/:token/play', () => {
     expect(c.play_count).toBe(1)
   })
 
-  it('private video: play endpoint is a no-op (SQL function filters on visibility)', async () => {
+  it('org video: member play bumps play_count', async () => {
     const { org, user } = await createVideosOrgWith(sql, ['admin'])
+    const other = await addVideosMember(sql, org.id, ['member'])
+    const video = await createTestVideo(sql, {
+      org_id: org.id, user_id: user.id, visibility: 'org', play_count: 4
+    })
+
+    const res = await $fetch<{ success: boolean }>(
+      `/api/videos/share/${video.share_token}/play`,
+      { method: 'POST', headers: other.auth.headers }
+    )
+    expect(res.success).toBe(true)
+
+    const c = await getCounters(sql, video.id)
+    expect(c.play_count).toBe(5)
+  })
+
+  it('org video: anonymous play gets 404 (existence not revealed)', async () => {
+    const { org, user } = await createVideosOrgWith(sql, ['admin'])
+    const video = await createTestVideo(sql, {
+      org_id: org.id, user_id: user.id, visibility: 'org', play_count: 0
+    })
+
+    const err = await $fetch(`/api/videos/share/${video.share_token}/play`, { method: 'POST' }).catch(e => e)
+    expect(err.statusCode).toBe(404)
+
+    const c = await getCounters(sql, video.id)
+    expect(c.play_count).toBe(0)
+  })
+
+  it('private video: owner play succeeds without counting', async () => {
+    const { org, user, auth } = await createVideosOrgWith(sql, ['admin'])
     const video = await createTestVideo(sql, {
       org_id: org.id, user_id: user.id, visibility: 'private', play_count: 0
     })
 
-    // No 4xx — the function silently filters non-public tokens.
     const res = await $fetch<{ success: boolean }>(
-      `/api/videos/share/${video.share_token}/play`, { method: 'POST' }
+      `/api/videos/share/${video.share_token}/play`,
+      { method: 'POST', ...withOrgHeader(auth, org.slug) }
     )
     expect(res.success).toBe(true)
 
@@ -60,14 +91,22 @@ describe('POST /api/videos/share/:token/play', () => {
     expect(c.play_count).toBe(0)
   })
 
-  it('unknown token: success without write (function clauses on token + visibility)', async () => {
-    // The handler doesn't 404 on unknown tokens — the SQL function's UPDATE
-    // just matches nothing. This pins current behavior so a future tightening
-    // (e.g. erroring on unknown tokens) is an intentional change.
-    const res = await $fetch<{ success: boolean }>(
-      '/api/videos/share/no-such-token/play', { method: 'POST' }
-    )
-    expect(res.success).toBe(true)
+  it('private video: anonymous play gets 404 (existence not revealed)', async () => {
+    const { org, user } = await createVideosOrgWith(sql, ['admin'])
+    const video = await createTestVideo(sql, {
+      org_id: org.id, user_id: user.id, visibility: 'private', play_count: 0
+    })
+
+    const err = await $fetch(`/api/videos/share/${video.share_token}/play`, { method: 'POST' }).catch(e => e)
+    expect(err.statusCode).toBe(404)
+
+    const c = await getCounters(sql, video.id)
+    expect(c.play_count).toBe(0)
+  })
+
+  it('unknown token: 404', async () => {
+    const err = await $fetch('/api/videos/share/no-such-token/play', { method: 'POST' }).catch(e => e)
+    expect(err.statusCode).toBe(404)
   })
 })
 
@@ -139,7 +178,40 @@ describe('POST /api/videos/share/:token/view', () => {
     expect(c.view_count).toBe(3)
   })
 
-  it('private video: anonymous (no GUC) view returns 404 — RLS hides the row', async () => {
+  it('org video: member view bumps view_count; counted=true', async () => {
+    const { org, user } = await createVideosOrgWith(sql, ['admin'])
+    const other = await addVideosMember(sql, org.id, ['member'])
+    const video = await createTestVideo(sql, {
+      org_id: org.id, user_id: user.id, visibility: 'org', view_count: 2
+    })
+
+    const res = await $fetch<{ counted: boolean }>(
+      `/api/videos/share/${video.share_token}/view`,
+      { method: 'POST', headers: other.auth.headers }
+    )
+    expect(res.counted).toBe(true)
+
+    const c = await getCounters(sql, video.id)
+    expect(c.view_count).toBe(3)
+  })
+
+  it('org video: owner self-view does NOT count', async () => {
+    const { org, user, auth } = await createVideosOrgWith(sql, ['admin'])
+    const video = await createTestVideo(sql, {
+      org_id: org.id, user_id: user.id, visibility: 'org', view_count: 2
+    })
+
+    const res = await $fetch<{ counted: boolean }>(
+      `/api/videos/share/${video.share_token}/view`,
+      { method: 'POST', ...withOrgHeader(auth, org.slug) }
+    )
+    expect(res.counted).toBe(false)
+
+    const c = await getCounters(sql, video.id)
+    expect(c.view_count).toBe(2)
+  })
+
+  it('private video: anonymous view returns 404 (existence not revealed)', async () => {
     const { org, user } = await createVideosOrgWith(sql, ['admin'])
     const video = await createTestVideo(sql, {
       org_id: org.id, user_id: user.id, visibility: 'private'
@@ -154,7 +226,7 @@ describe('POST /api/videos/share/:token/view', () => {
     const video = await createTestVideo(sql, {
       org_id: a.org.id, user_id: a.user.id, visibility: 'private'
     })
-    // b.user with b.org as active → RLS hides a.org rows → 404.
+    // b.user is neither the owner nor a member of a.org → 403.
     const err = await $fetch(`/api/videos/share/${video.share_token}/view`, {
       method: 'POST', ...withOrgHeader(b.auth, b.org.slug)
     }).catch(e => e)

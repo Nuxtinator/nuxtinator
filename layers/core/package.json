@@ -1,19 +1,22 @@
 {
   "name": "@nuxtinator/core",
-  "version": "1.0.1",
+  "version": "3.3.0",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./nuxt.config.ts",
     "./kit": "./kit/alias.ts",
+    "./share-tables": "./kit/share-tables.ts",
     "./test-helpers": "./tests/helpers/index.ts"
   },
   "dependencies": {
-    "@bradenmacdonald/s3-lite-client": "^0.9.6",
+    "@bradenmacdonald/s3-lite-client": "^1.0.0",
+    "@nuxtjs/i18n": "^10.6.0",
     "bcrypt": "^6.0.0",
-    "croner": "^9.0.0",
+    "croner": "^10.0.1",
     "jsonwebtoken": "^9.0.2",
-    "semver": "^7.6.0"
+    "semver": "^7.6.0",
+    "zod": "^4.1.8"
   },
   "peerDependencies": {
     "@iconify-json/lucide": "^1.0.0",

@@ -5,6 +5,7 @@
 // row is never mutated in place, because consent and suppression state hang
 // off it.
 
+import { createHash, randomBytes } from 'node:crypto'
 import type { Selectable, Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
@@ -82,6 +83,56 @@ export async function markChannelVerified(tx: Tx, channelId: string): Promise<vo
     .where('id', '=', channelId)
     .where('verified', '=', false)
     .execute()
+}
+
+function hashVerificationToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+// Issue a verification token for a channel: the sha-256 hash and expiry are
+// stored on the row (an earlier outstanding token is overwritten) and the raw
+// token is returned for the caller to mail. Redeeming it is the only path
+// that turns the token into `verified`.
+export async function issueChannelVerificationToken(
+  tx: Tx,
+  channelId: string,
+  opts: { ttlHours?: number } = {}
+): Promise<string> {
+  const token = randomBytes(24).toString('hex')
+  const expires = new Date(Date.now() + (opts.ttlHours ?? 72) * 3_600_000)
+  await tx
+    .updateTable('crm_channels')
+    .set({
+      verification_token_hash: hashVerificationToken(token),
+      verification_expires_at: expires,
+      updated_at: new Date()
+    })
+    .where('id', '=', channelId)
+    .execute()
+  return token
+}
+
+// Redeem a raw verification token. A matching hash is cleared on sight
+// (single use, expired or not); only an unexpired one marks the channel
+// verified. Returns the channel when ownership was proven, else null. Runs
+// inside the caller's scope transaction — in multi mode the row is only
+// visible from its org's scope.
+export async function consumeChannelVerificationToken(tx: Tx, token: string): Promise<CrmChannelRow | null> {
+  const row = await tx
+    .selectFrom('crm_channels')
+    .selectAll()
+    .where('verification_token_hash', '=', hashVerificationToken(token))
+    .executeTakeFirst()
+  if (!row) return null
+  await tx
+    .updateTable('crm_channels')
+    .set({ verification_token_hash: null, verification_expires_at: null, updated_at: new Date() })
+    .where('id', '=', row.id)
+    .execute()
+  const expires = row.verification_expires_at ? new Date(row.verification_expires_at).getTime() : 0
+  if (expires < Date.now()) return null
+  await markChannelVerified(tx, row.id)
+  return { ...row, verified: true }
 }
 
 export interface LinkChannelOpts {

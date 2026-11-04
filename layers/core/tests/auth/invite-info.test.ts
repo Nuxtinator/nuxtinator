@@ -1,10 +1,9 @@
-import { describe, it, expect, afterEach, afterAll } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import { randomUUID } from 'node:crypto'
 import {
   getHostAdminDb,
   cleanupCoreTestData,
-  createTestUser,
   createPendingInvite
 } from '../helpers'
 
@@ -14,6 +13,7 @@ describe('GET /api/auth/invite-info', () => {
   afterEach(async () => {
     await cleanupCoreTestData(sql)
   })
+
   it('returns 400 when token is missing', async () => {
     const err = await $fetch('/api/auth/invite-info').catch(e => e)
     expect(err.statusCode).toBe(400)
@@ -24,21 +24,11 @@ describe('GET /api/auth/invite-info', () => {
     expect(err.statusCode).toBe(404)
   })
 
-  it('returns 404 when token belongs to a verified user (not a pending invite)', async () => {
-    const user = await createTestUser(sql, { verified: true })
-    const tokenRows = await sql<{ token_key: string }[]>`SELECT token_key FROM users WHERE id = ${user.id}`
-    const err = await $fetch(`/api/auth/invite-info?token=${tokenRows[0]!.token_key}`).catch(e => e)
-    expect(err.statusCode).toBe(404)
-  })
-
-  it('still resolves the invite when the user was marked verified while pending (password=null)', async () => {
-    // Regression: an admin clicking "Mark verified" on a still-pending invitee
-    // used to strand the invite. The gate keys off password, not the verified
-    // flag, so the link must still resolve.
+  it('returns 404 once the invite has been accepted', async () => {
     const invite = await createPendingInvite(sql)
-    await sql`UPDATE users SET verified = true WHERE id = ${invite.userId}`
-    const res = await $fetch(`/api/auth/invite-info?token=${invite.token}`)
-    expect(res.email).toBe(invite.email)
+    await sql`UPDATE invites SET accepted_at = now() WHERE id = ${invite.inviteId}`
+    const err = await $fetch(`/api/auth/invite-info?token=${invite.token}`).catch(e => e)
+    expect(err.statusCode).toBe(404)
   })
 
   it('returns 410 when token is expired', async () => {
@@ -47,13 +37,19 @@ describe('GET /api/auth/invite-info', () => {
     expect(err.statusCode).toBe(410)
   })
 
-  it('returns email + display_name + (empty) orgs for a valid pending invite', async () => {
+  it('returns kind, email, display_name and (empty) orgs for an email invite', async () => {
     const invite = await createPendingInvite(sql, { display_name: 'Pending Person' })
     const res = await $fetch(`/api/auth/invite-info?token=${invite.token}`)
+    expect(res.kind).toBe('email')
     expect(res.email).toBe(invite.email)
     expect(res.display_name).toBe('Pending Person')
-    expect(Array.isArray(res.orgs)).toBe(true)
-    // No memberships seeded → empty array
-    expect(res.orgs.length).toBe(0)
+    expect(res.orgs).toEqual([])
+  })
+
+  it('reports a link invite with no email', async () => {
+    const invite = await createPendingInvite(sql, { email: null, display_name: 'test-core-link' })
+    const res = await $fetch(`/api/auth/invite-info?token=${invite.token}`)
+    expect(res.kind).toBe('link')
+    expect(res.email).toBeNull()
   })
 })

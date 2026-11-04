@@ -346,11 +346,18 @@ const deleteLabel = computed(() => {
 
           <UFormField
             v-if="isOptionKind"
-            label="Options"
           >
+            <template #label>
+              Options
+              <InfoTip
+                v-if="field?.column === 'status'"
+                text="Mark the statuses that mean a record is closed (archived). Closing a record then asks for a reason when the type has a reason field."
+              />
+            </template>
             <CrmSettingsFieldOptionEditor
               v-model="optionsDraft"
               :disabled="saving"
+              :closable="field?.column === 'status'"
             />
           </UFormField>
 

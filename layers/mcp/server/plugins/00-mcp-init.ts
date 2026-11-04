@@ -49,6 +49,14 @@ export default defineNitroPlugin((nitroApp) => {
   // runtime hits the cached value.
   resolveRateLimitConfig()
 
+  // Every layer's plugins have registered by the first request, so a disabled
+  // entry still unmatched then names no loaded app or tool.
+  nitroApp.hooks.hookOnce('request', () => {
+    const { apps, tools } = getRegistry().unmatchedDisabled()
+    if (apps.length > 0) console.warn(`[mcp-layer] mcpDisabledApps lists apps with no MCP tools or resources: ${apps.join(', ')}`)
+    if (tools.length > 0) console.warn(`[mcp-layer] mcpDisabledTools lists unknown tools: ${tools.join(', ')}`)
+  })
+
   // Cache-driver warning: production + memory driver = per-process buckets,
   // not deployment-wide. Operators see the line and decide whether to act.
   if (process.env.NODE_ENV === 'production') {

@@ -36,7 +36,7 @@ describe('GET /api/list-of-100/insights', () => {
 
   it('aggregates rhythm events by day for the 30d window, scoped to the caller', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
-    const c = await createTestContact(sql, { user_id: user.id, org_id: org.id })
+    const c = await createTestContact(sql, { user_id: user.id })
 
     // Two events today, one ~5d ago, one ~40d ago (outside the 30d window).
     const today = new Date()
@@ -72,7 +72,7 @@ describe('GET /api/list-of-100/insights', () => {
   it('does not include events from other users (same org)', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
     const other = await addListOf100Member(sql, org.id, ['member'])
-    const theirs = await createTestContact(sql, { user_id: other.user.id, org_id: org.id })
+    const theirs = await createTestContact(sql, { user_id: other.user.id })
     await createTestRhythmEvent(sql, { user_id: other.user.id, record_id: theirs.id, event_type: 'MARK_CONTACTED' })
 
     const res = await $fetch<{ series: { contacted: number, prayed: number }[] }>(
@@ -85,7 +85,7 @@ describe('GET /api/list-of-100/insights', () => {
 
   it('returns the all-time window without padding (only days with events)', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
-    const c = await createTestContact(sql, { user_id: user.id, org_id: org.id })
+    const c = await createTestContact(sql, { user_id: user.id })
 
     const longAgo = new Date('2024-06-01T10:00:00Z')
     const veryLongAgo = new Date('2023-11-15T10:00:00Z')
@@ -121,9 +121,9 @@ describe('GET /api/list-of-100/progress', () => {
     const recent = new Date(); recent.setUTCDate(recent.getUTCDate() - 5)
     const old = new Date(); old.setUTCDate(old.getUTCDate() - 60)
 
-    await createTestContact(sql, { user_id: user.id, org_id: org.id, last_contacted_at: recent })
-    await createTestContact(sql, { user_id: user.id, org_id: org.id, last_contacted_at: recent, last_prayed_at: recent })
-    await createTestContact(sql, { user_id: user.id, org_id: org.id, last_contacted_at: old })
+    await createTestContact(sql, { user_id: user.id, last_contacted_at: recent })
+    await createTestContact(sql, { user_id: user.id, last_contacted_at: recent, last_prayed_at: recent })
+    await createTestContact(sql, { user_id: user.id, last_contacted_at: old })
 
     const res = await $fetch<{ total: number, contactedLast30d: number, prayedLast30d: number }>(
       '/api/list-of-100/progress',
@@ -146,8 +146,8 @@ describe('GET /api/list-of-100/progress', () => {
   it('does not count other users\' contacts in the same org', async () => {
     const { org, auth } = await createListOf100OrgWith(sql, ['admin'])
     const other = await addListOf100Member(sql, org.id, ['member'])
-    await createTestContact(sql, { user_id: other.user.id, org_id: org.id })
-    await createTestContact(sql, { user_id: other.user.id, org_id: org.id })
+    await createTestContact(sql, { user_id: other.user.id })
+    await createTestContact(sql, { user_id: other.user.id })
 
     const res = await $fetch<{ total: number }>('/api/list-of-100/progress', {
       ...withOrgHeader(auth, org.slug)

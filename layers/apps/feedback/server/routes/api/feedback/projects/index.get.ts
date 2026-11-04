@@ -1,13 +1,13 @@
 import { sql } from 'kysely'
-import { defineTenantHandler } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 
-export default defineTenantHandler(async (tx, _ctx) => {
-  const rows = await tx
-    .selectFrom('projects')
-    .selectAll()
-    .orderBy(sql`coalesce((post_meta->>'sort_order')::int, 9999)`)
-    .orderBy('created_at')
-    .execute()
-
-  return rows
+export default defineEventHandler(async (event) => {
+  return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.read', async (tx) => {
+    return await tx
+      .selectFrom('projects')
+      .selectAll()
+      .orderBy(sql`coalesce((post_meta->>'sort_order')::int, 9999)`)
+      .orderBy('created_at')
+      .execute()
+  })
 })

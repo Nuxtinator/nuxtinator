@@ -3,7 +3,7 @@
 // tenant tables (the GUC isn't set outside of `defineTenantHandler`'s txn).
 import type postgres from 'postgres'
 import { randomUUID } from 'node:crypto'
-import { createTestUser, getAuthHeaders, type AuthHeaders, type TestUser } from 'layer-core/test-helpers'
+import { createTestUser, getAuthHeaders, type AuthHeaders, type TestUser } from '@nuxtinator/core/test-helpers'
 
 export interface TestOrg {
   id: string
@@ -21,6 +21,11 @@ export async function createTestOrg(
   await sql`
     INSERT INTO orgs (id, slug, name)
     VALUES (${id}, ${slug}, ${name})
+  `
+  // Catalog apps default to off for orgs; tests exercise every app.
+  await sql`
+    INSERT INTO org_apps (org_id, app_id, enabled, source)
+    SELECT ${id}, a.id, true, 'auto' FROM apps a
   `
   return { id, slug, name }
 }
@@ -75,6 +80,7 @@ export function withOrgHeader(auth: AuthHeaders, slug: string): { headers: { coo
 // Cleanup: delete tenancy-prefixed orgs (cascades wipe memberships, org_apps,
 // org_role_overrides) and tenancy-prefixed users.
 export async function cleanupTenancyTestData(sql: ReturnType<typeof postgres>): Promise<void> {
+  await sql`DELETE FROM invites WHERE email LIKE 'test-tenancy-%@example.com' OR display_name LIKE 'test-tenancy-%'`
   await sql`DELETE FROM orgs WHERE slug LIKE 'test-tenancy-%'`
   await sql`DELETE FROM users WHERE email LIKE 'test-tenancy-%@example.com'`
 }

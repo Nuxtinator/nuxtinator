@@ -1,22 +1,26 @@
 // MCP tool definitions for the feedback layer.
 //
-// Read tools use scope `feedback.read`; write tools use `feedback.write`. All
-// tools run inside `runInOrgTransaction(event, ...)` from `#tenant/server`,
-// which sets the `app.current_org` GUC in multi mode (driven by the
-// `X-Active-Org` header on the MCP HTTP request) and is a plain transaction in
-// single mode.
+// Read tools use scope `feedback.read`; write tools use `feedback.write`.
+// Every tool takes an optional `org` slug and runs inside
+// `withOrgPermission(event, { appId, org }, scope, ...)` from `#tenant/server`,
+// the same handler the web routes use: it signs the bearer in, requires the
+// tool's scope on the token and in the user's permissions for the org, and
+// in multi mode resolves the org (the `org` input, else the `X-Active-Org`
+// header on the MCP HTTP request, else the user's only org), enforces
+// membership, and sets the `app.current_org` GUC.
 //
 // Board vocabulary (columns are global to the deployment, ordered by
 // position): FEEDBACK INBOX holds untriaged intake — new findings, ideas, and
-// feature requests land there. TODO is the approved queue (a human drags a
-// card there to green-light it). DOING is in progress, DONE is finished, and
-// ARCHIVE holds rejected / deferred / accepted-as-is items.
+// feature requests land there. DISCUSS holds cards that have been read but
+// need more conversation or a decision first. TODO is the approved queue (a
+// human drags a card there to green-light it). DOING is in progress, DONE is
+// finished, and ARCHIVE holds rejected / deferred / accepted-as-is items.
 
 import { z } from 'zod'
 import { sql, type Kysely, type Transaction } from 'kysely'
 import { defineMcpTool, mcpError, mcpLog } from '#mcp-layer'
 import type { Database as CoreDatabase } from '#core/server/database/schema'
-import { runInOrgTransaction } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 
 // The mcp-audit layer types its executor as `Kysely<CoreDatabase>` (core-only
 // schema), while feedback-layer transactions carry the augmented Database
@@ -24,6 +28,11 @@ import { runInOrgTransaction } from '#tenant/server'
 function asAuditExecutor(tx: unknown): Kysely<CoreDatabase> {
   return tx as Kysely<CoreDatabase>
 }
+
+// Org slug selecting which org the tool runs in. Optional so clients pinned
+// to one org via a fixed `X-Active-Org` header keep working unchanged.
+const orgInput = z.string().min(1).max(64).optional()
+  .describe('Org slug to operate in. Defaults to the X-Active-Org header sent by the client.')
 
 function textResult(text: string, structured?: Record<string, unknown>) {
   return {
@@ -59,11 +68,13 @@ const POST_TYPES = ['task', 'feature', 'bug', 'artifact', 'feedback'] as const
 
 export const listProjectsTool = defineMcpTool({
   name: 'feedback_list_projects',
+  title: 'List Boards',
   description: 'List kanban projects (boards) in the active org, plus the global column set with its workflow order. Call this first to get the project_id and column names other feedback tools need.',
+  appId: 'feedback',
   scope: 'feedback.read',
-  input: z.object({}).strict(),
-  handler: async (_input, ctx) => {
-    return await runInOrgTransaction(ctx.event, async (tx) => {
+  input: z.object({ org: orgInput }).strict(),
+  handler: async (input, ctx) => {
+    return await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.read', async (tx) => {
       const projects = await tx
         .selectFrom('projects')
         .select(['id', 'name', 'description', 'created_at'])
@@ -89,15 +100,18 @@ export const listProjectsTool = defineMcpTool({
 
 export const listCardsTool = defineMcpTool({
   name: 'feedback_list_cards',
-  description: 'List cards in the active org, optionally filtered to one project and/or one column (by name, e.g. "TODO"). Cards in TODO are approved and waiting to be worked; cards in ARCHIVE were rejected, deferred, or accepted as-is.',
+  title: 'List Cards',
+  description: 'List cards in the active org, optionally filtered to one project and/or one column (by name, e.g. "TODO"). Cards in DISCUSS need more conversation or a decision before work starts; cards in TODO are approved and waiting to be worked; cards in ARCHIVE were rejected, deferred, or accepted as-is.',
+  appId: 'feedback',
   scope: 'feedback.read',
   input: z.object({
+    org: orgInput,
     project_id: z.string().uuid().optional(),
     column: z.string().min(1).optional(),
     limit: z.number().int().min(1).max(200).optional()
   }).strict(),
   handler: async (input, ctx) => {
-    return await runInOrgTransaction(ctx.event, async (tx) => {
+    return await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.read', async (tx) => {
       let qb = tx
         .selectFrom('cards as k')
         .leftJoin('columns as c', 'c.id', 'k.column_id')
@@ -136,22 +150,79 @@ export const listCardsTool = defineMcpTool({
 
 // ─── Write tools ────────────────────────────────────────────────────────────
 
-export const createCardTool = defineMcpTool({
-  name: 'feedback_create_card',
-  description: 'Create a card on a project board in the active org. New findings/ideas belong in the default FEEDBACK INBOX column for human triage — only target another column when explicitly asked. Start the description with a "## What happens" section in plain behavior-first language a teammate can read without opening code (when someone does X, Y goes wrong — instead of Z; no function names or jargon there), then "## Why it matters", then "## Technical detail" with file:line evidence. Put the proposed fix as concrete steps in post_meta.plan (not in the description); use post_meta for machine data too (repo, branch, file, line, category, dedupe_key).',
+export const createProjectTool = defineMcpTool({
+  name: 'feedback_create_project',
+  title: 'Create Board',
+  description: 'Create a kanban project (board) in the active org, along with its default swimlane. Columns are global to the deployment, so the new board immediately uses the existing FEEDBACK INBOX / DISCUSS / TODO / DOING / DONE / ARCHIVE workflow. Board names are not unique — call feedback_list_projects first and reuse the existing board rather than creating a near-duplicate. Returns the project_id that feedback_create_card and feedback_list_cards need.',
+  appId: 'feedback',
   scope: 'feedback.write',
   input: z.object({
+    org: orgInput,
+    name: z.string().trim().min(1).max(200),
+    description: z.string().max(2000).optional(),
+    post_meta: z.record(z.string(), z.unknown()).optional()
+  }).strict(),
+  handler: async (input, ctx) => {
+    try {
+      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx) => {
+        const project = await tx
+          .insertInto('projects')
+          .values({
+            name: input.name,
+            description: input.description ?? null,
+            post_meta: (input.post_meta ?? {}) as Record<string, any>
+          })
+          .returning(['id', 'name', 'description'])
+          .executeTakeFirstOrThrow()
+
+        // Cards always belong to a swimlane; every board needs one from birth.
+        const swimlane = await tx
+          .insertInto('swimlanes')
+          .values({
+            project_id: project.id,
+            name: 'default',
+            is_default: true,
+            position: 0
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+
+        await mcpLog('CREATE', 'projects', project.id, ctx, {
+          name: project.name
+        }, asAuditExecutor(tx))
+        return {
+          id: project.id,
+          name: project.name,
+          description: project.description,
+          swimlane_id: swimlane.id
+        }
+      })
+      return textResult(`Created project "${result.name}" (${result.id})`, result)
+    } catch (err) {
+      return mcpError(err)
+    }
+  }
+})
+
+export const createCardTool = defineMcpTool({
+  name: 'feedback_create_card',
+  title: 'Create Card',
+  description: 'Create a card on a project board in the active org. New findings/ideas belong in the default FEEDBACK INBOX column for human triage — only target another column when explicitly asked. Start the description with a "## What happens" section in plain behavior-first language a teammate can read without opening code (when someone does X, Y goes wrong — instead of Z; no function names or jargon there), then "## Why it matters", then "## Technical detail" with file:line evidence. Put the proposed fix as concrete steps in post_meta.plan (not in the description); use post_meta for machine data too (repo, branch, file, line, category, dedupe_key).',
+  appId: 'feedback',
+  scope: 'feedback.write',
+  input: z.object({
+    org: orgInput,
     project_id: z.string().uuid(),
     title: z.string().min(1).max(500),
     description: z.string().max(20000).optional(),
     post_type: z.enum(POST_TYPES).optional(),
     priority: z.enum(PRIORITIES).optional(),
     column: z.string().min(1).optional(),
-    post_meta: z.record(z.unknown()).optional()
+    post_meta: z.record(z.string(), z.unknown()).optional()
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx) => {
         const project = await tx
           .selectFrom('projects')
           .select('id')
@@ -203,15 +274,18 @@ export const createCardTool = defineMcpTool({
 
 export const moveCardTool = defineMcpTool({
   name: 'feedback_move_card',
-  description: 'Move a card to another column by name. Typical agent flow: pick a card from TODO, move it to DOING while working on it, then to DONE when finished. Leave triage moves (into TODO or ARCHIVE) to humans unless instructed.',
+  title: 'Move Card',
+  description: 'Move a card to another column by name. Typical agent flow: pick a card from TODO, move it to DOING while working on it, then to DONE when finished. Leave triage moves (into DISCUSS, TODO or ARCHIVE) to humans unless instructed.',
+  appId: 'feedback',
   scope: 'feedback.write',
   input: z.object({
+    org: orgInput,
     card_id: z.string().uuid(),
     column: z.string().min(1)
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx) => {
         const column = await resolveColumn(tx, input.column)
         const updated = await tx
           .updateTable('cards')
@@ -244,22 +318,25 @@ export const moveCardTool = defineMcpTool({
 
 export const updateCardTool = defineMcpTool({
   name: 'feedback_update_card',
+  title: 'Update Card',
   description: 'Update a card\'s title, description, priority, or post_meta. Use append_description to add a work log (e.g. the commit hash that resolved it) without overwriting the original text. post_meta_merge shallow-merges keys into the existing post_meta.',
+  appId: 'feedback',
   scope: 'feedback.write',
   input: z.object({
+    org: orgInput,
     card_id: z.string().uuid(),
     title: z.string().min(1).max(500).optional(),
     description: z.string().max(20000).optional(),
     append_description: z.string().min(1).max(20000).optional(),
     priority: z.enum(PRIORITIES).optional(),
-    post_meta_merge: z.record(z.unknown()).optional()
+    post_meta_merge: z.record(z.string(), z.unknown()).optional()
   }).strict().refine(
     v => !(v.description && v.append_description),
     { message: 'Provide either description or append_description, not both.' }
   ),
   handler: async (input, ctx) => {
     try {
-      const result = await runInOrgTransaction(ctx.event, async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx) => {
         const card = await tx
           .selectFrom('cards')
           .select(['id', 'description', 'post_meta'])
@@ -305,6 +382,7 @@ export const updateCardTool = defineMcpTool({
 export const feedbackMcpTools = [
   listProjectsTool,
   listCardsTool,
+  createProjectTool,
   createCardTool,
   moveCardTool,
   updateCardTool

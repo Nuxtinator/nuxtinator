@@ -16,8 +16,8 @@ import {
   getHostAdminDb,
   generateTestToken,
   type TestUser
-} from 'layer-core/test-helpers'
-import { addTestMembership } from 'layer-tenancy/test-helpers'
+} from '@nuxtinator/core/test-helpers'
+import { addTestMembership } from '@nuxtinator/tenancy/test-helpers'
 import {
   cleanupMessagesTestData,
   createMessagesUser,

@@ -19,6 +19,7 @@ const { data } = await useAsyncData(
 )
 const form = reactive({ name: data.value?.name ?? '', color: data.value?.color ?? '#7c3aed' })
 const saving = ref(false)
+const deleteOpen = ref(false)
 const deleting = ref(false)
 const sidebarOpen = ref(false)
 
@@ -43,10 +44,10 @@ async function save() {
 }
 
 async function deletePortfolio() {
-  if (!confirm(`Delete "${form.name}"? This cannot be undone.`)) return
   deleting.value = true
   try {
     await $fetch(`/api/context/portfolios/${slug.value}`, { method: 'DELETE' })
+    deleteOpen.value = false
     await refreshNuxtData('context-sidebar-portfolios')
     router.push('/context')
   } finally {
@@ -98,21 +99,34 @@ async function deletePortfolio() {
 
           <section class="space-y-4">
             <h2 class="text-lg font-semibold">
-              Custom sections
+              Sections
             </h2>
-            <ContextCustomSectionsManager :slug="slug" />
+            <p class="text-sm text-(--ui-text-muted)">
+              Drag a section, or use the arrows, to change the order it appears in. Removing a
+              section keeps its content; it comes back if you add the section again.
+            </p>
+            <ContextSectionsManager :slug="slug" />
           </section>
 
           <section class="space-y-4 border-t border-(--ui-border) pt-8">
             <h2 class="text-lg font-semibold text-(--ui-error)">
               Danger zone
             </h2>
-            <UButton color="error" variant="outline" :loading="deleting" @click="deletePortfolio">
+            <UButton color="error" variant="outline" @click="deleteOpen = true">
               Delete portfolio
             </UButton>
           </section>
         </div>
       </div>
     </section>
+
+    <ContextConfirmModal
+      v-model:open="deleteOpen"
+      :title="`Delete ${form.name || 'this portfolio'}?`"
+      description="This deletes every section, version, and comment in the portfolio. It cannot be undone."
+      confirm-label="Delete"
+      :loading="deleting"
+      @confirm="deletePortfolio"
+    />
   </div>
 </template>

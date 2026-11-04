@@ -5,6 +5,13 @@ export default defineNuxtConfig({
     }
   },
 
+  // The widget sign-in approval page must not be framed by the embedding site.
+  routeRules: {
+    '/feedback/connect': {
+      headers: { 'X-Frame-Options': 'DENY', 'Content-Security-Policy': 'frame-ancestors \'none\'' }
+    }
+  },
+
   // This layer owns its own config — the host no longer declares this.
   runtimeConfig: {
     // Lifetime of the access token minted for the embeddable widget

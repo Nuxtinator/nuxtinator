@@ -16,6 +16,8 @@ export interface CrmTypeSummary {
   orphan: boolean
   /** Field key promoted to the status column, or null when the type has none. */
   statusField: string | null
+  /** Field key picked to hold why a closed record was closed, or null. */
+  closedReasonField: string | null
   /** The caller's type-evaluator answers — the server is the only truthful source. */
   canRead: boolean
   canCreate: boolean
@@ -26,6 +28,8 @@ export interface CrmTypeFields {
   sections: CrmTypeSections
   /** Field key promoted to the status column, or null when the type has none. */
   statusField: string | null
+  /** Reason field asked for when closing; null unless the type can be closed with a reason. */
+  closedReasonField: string | null
   fields: CrmFieldSetting[]
 }
 

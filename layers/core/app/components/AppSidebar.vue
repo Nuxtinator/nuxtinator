@@ -16,7 +16,7 @@ const isActive = (path: string) => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-(--ui-bg-elevated)">
+  <div class="flex flex-col h-full bg-(--chrome-bg)">
     <div class="px-5 py-4 border-b border-(--ui-border) flex items-center gap-2">
       <AppIcon
         :name="app.icon"

@@ -47,7 +47,9 @@ runtimeConfig: {
     allToolsPerToken: { limit: 200, windowMs: 60_000 },
     destructivePerUser: null                      // explicit null disables a bucket
   },
-  mcpAdditionalOrigins: ['https://admin.example.com']
+  mcpAdditionalOrigins: ['https://admin.example.com'],
+  mcpDisabledApps: ['crm'],                       // keep these apps' tools and resources off the MCP server
+  mcpDisabledTools: ['some_tool']                 // keep single tools off, by name
 }
 ```
 
@@ -63,6 +65,7 @@ import { db } from '~~/server/utils/database'
 
 export const listPagesTool = defineMcpTool({
   name: 'list_pages',
+  title: 'List Pages',
   description: 'List CMS pages.',
   scope: 'pages.view',
   input: z.object({
@@ -155,17 +158,43 @@ await db.transaction().execute(async (tx) => {
 
 `mcpLog` always passes `ctx.auth.userId` (string), never `ctx.event` — MCP requests carry a bearer token, not the admin auth-token cookie that `getAuthUser(event)` reads.
 
-## Authorization model — three gates
+## Authorization model — four gates
 
 A `tools/call` invocation must pass:
 
 1. **Bearer valid** — token + audience + family + client-enabled (transport boundary, via `requireValidBearer`).
 2. **Token scope includes `tool.scope`** — `auth.scopes.includes(tool.scope)`. Failure → `isError` with `structuredContent: { error: 'insufficient_scope', surface: 'token', actionable: 're_authorize' }`.
-3. **User holds `tool.scope` as RBAC permission** — `userPermissions.has(tool.scope)`. Failure → `isError` with `structuredContent: { error: 'insufficient_permission', surface: 'rbac', actionable: 'contact_admin' }`.
+3. **User holds `tool.scope` as RBAC permission in the org the call targets** — resolved per call by the `#tenant/server` kernel's `getUserPermissionsForRequest(event, userId, { org })`, where `org` is the tool's `org` input, else the request's `X-Active-Org` header. Membership roles and the user's grants in that org count, plus personal-app permissions: the set `withOrgPermission` grants on the web. Host-level roles and `is_admin` don't widen it. Failure → `isError` with `structuredContent: { error: 'insufficient_permission', surface: 'rbac', actionable: 'contact_admin' }`.
+4. **The tool's app is on for the org the call targets** — only for tools that declare `appId`. The kernel's `getEnabledAppsForRequest(event, userId, { org })` resolves the org the way the handler does (including the user's sole membership when nothing selects one) and returns that org's enabled apps. Failure → `isError` with `structuredContent: { error: 'app_disabled', app, surface: 'org', actionable: 'contact_admin' }`, before the handler runs. Single mode has no per-org app switch, so the gate always passes; the same goes for a call that selects no org, which the handler then rejects with 400.
 
 Gates 2 and 3 reference the same string but check different surfaces. A user demoted in RBAC mid-session loses access immediately even with a valid token; reauthorization won't help — only an admin granting the permission will.
 
-`tools/list` filters by both gates 2 and 3, so the model only sees tools it can actually call.
+`tools/list` filters by gate 2 and by the union of the user's permissions across every org they belong to (`getUserPermissionsAcrossOrgs`), so the model only sees tools it can call somewhere; the per-org check is gate 3 at call time. When the request selects an org (`X-Active-Org`, or the user's only membership), tools whose `appId` is off in that org are hidden too; with no org selected they stay listed and gate 4 decides per call. `resources/list` and `resources/read` apply the same `appId` check against the request's org.
+
+Set `appId` on every tool that reads or writes an org-scoped app's data. Leave it off tools that work across orgs, such as the tenancy layer's `list_orgs`, and off tools of personal (`scope: 'user'`) apps, which are never on per org.
+
+A tool may omit `scope` when it is read-only and safe for any valid bearer, such as `list_orgs` listing the bearer's own memberships. Gates 2 and 3 are skipped for it, it is listed for every token, it registers no OAuth scope, and it counts against the read rate-limit buckets.
+
+## Turning tools off
+
+A host keeps an app layer's MCP surface off without changing the layer:
+
+- `mcpDisabledApps` skips every tool and resource whose `appId` is listed.
+- `mcpDisabledTools` skips single tools by name, including tools without an `appId` such as `list_orgs`. Resources have no name, so only `mcpDisabledApps` reaches them.
+
+A skipped tool is never registered: it isn't in `tools/list`, calling it returns an unknown-tool error, `list_orgs` leaves its app out of each org's `apps`, and its scope isn't registered with the OAuth layer, so it drops out of `scopes_supported`, dynamic client registration and the consent screen (unless another enabled tool or `oauthAdvertisedScopes` still uses it). Dynamically registered clients that already hold the scope lose it at their next token refresh. Admin-registered clients keep the scopes an admin gave them, and a token carrying an app's permission can still call that app's `/api` routes.
+
+Each skipped tool is logged at boot. On the first request the layer warns about any listed app or tool that matched nothing, so a misspelt id doesn't go unnoticed. Both settings can come from the environment as JSON, e.g. `NUXT_MCP_DISABLED_APPS='["crm"]'`.
+
+## Tool annotations
+
+A tool that sets `readOnly: true` or `destructive: true|false` is listed with the MCP `annotations` `{ readOnlyHint, destructiveHint }`, so clients can decide whether to ask before calling it. A tool that sets neither is listed without annotations, which the spec reads as possibly destructive. `readOnly: true` also keeps the tool out of the writes-per-token rate-limit bucket.
+
+## Org selection in multi-tenant mode
+
+When the tenancy layer is loaded, every tool that touches org-scoped data accepts an optional `org` input: the slug of the org to operate in (the tenancy layer's `list_orgs` returns the bearer's memberships, each with the MCP apps switched on there; the tenancy layer registers it only when the MCP layer is loaded). Without it the tool falls back to the request's `X-Active-Org` header, so a client pinned to one org through a fixed header keeps working, and then to the user's only org.
+
+A tool runs inside `withOrgPermission(ctx.event, { appId, org: input.org }, scope, (tx, tenant) => …)` from `#tenant/server`, the handler the web routes use. The `/mcp` request carries the bearer token, so the kernel signs it in the same way it does for an `/api` route: the token must carry `scope`, the user must hold it in the org, and `tenant` is the same context a web handler gets (roles, permissions narrowed to the token's scopes, `clientId`). It rejects an org the bearer's user is not a member of (404, indistinguishable from a non-existent org), a suspended org (423), an org with the app switched off (410), and a call that names no org when the user has several (400). The single-mode kernel ignores `org`.
 
 ## Rate limits
 
@@ -174,7 +203,7 @@ Three default buckets, all overridable via `runtimeConfig.mcpRateLimits`:
 | Bucket | Key | Default | Window |
 |---|---|---|---|
 | All tools | `auth.tokenId` | 120 | 60s |
-| Write tools (scope ∉ `mcpReadScopes`) | `auth.tokenId` | 20 | 60s |
+| Write tools (not `readOnly`, scope ∉ `mcpReadScopes`) | `auth.tokenId` | 20 | 60s |
 | Destructive tools (`destructive: true`) | `userId` | 20 | 1h |
 
 Per-tool overrides are **additive** — they layer on top of the defaults:

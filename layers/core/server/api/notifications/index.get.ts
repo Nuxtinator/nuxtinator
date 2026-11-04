@@ -1,8 +1,10 @@
 // GET /api/notifications?cursor=&limit=
 // The caller's global notification feed, newest-first, cursor-paginated.
-// Active-org scoped automatically: in multi mode RLS filters to the org the
-// request carries; in single mode it's user-scoped only.
+// In multi mode RLS filters to the org the request carries, plus the caller's
+// personal-app notifications, which show in every org; in single mode it's
+// user-scoped only.
 
+import { sql } from 'kysely'
 import { withOrgContext } from '#tenant/server'
 import { getRegisteredApp } from '#core/server/utils/app-registry'
 
@@ -11,6 +13,8 @@ const MAX_LIMIT = 100
 
 export default defineEventHandler(async (event) => {
   return await withOrgContext(event, async (tx, ctx) => {
+    // Personal-app notifications have no org; their RLS policy shows them to the recipient.
+    await sql`select set_config('app.current_user', ${ctx.userId}, true)`.execute(tx)
     const q = getQuery(event)
     const cursor = typeof q.cursor === 'string' ? q.cursor : null
     const limit = Math.min(MAX_LIMIT, Math.max(1, Number(q.limit) || DEFAULT_LIMIT))

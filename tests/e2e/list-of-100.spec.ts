@@ -25,8 +25,8 @@ import { fileURLToPath } from 'node:url'
 import {
   getHostAdminDb,
   cleanupCoreTestData
-} from 'layer-core/test-helpers'
-import { cleanupTenancyTestData } from 'layer-tenancy/test-helpers'
+} from '@nuxtinator/core/test-helpers'
+import { cleanupTenancyTestData } from '@nuxtinator/tenancy/test-helpers'
 import {
   cleanupListOf100TestData,
   createTestContact

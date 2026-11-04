@@ -11,7 +11,7 @@
 // Gated by inbox.send; 503 when AI is not configured.
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
-import { isAiConfigured, getFeatureModel } from '#ai/server'
+import { isAiConfigured, resolveFeatureModel } from '#ai/server'
 import { INBOX_AI_DRAFT_FEATURE } from '../../../../../utils/inbox-ai-draft'
 import type { InboxAiDraftMetadata } from '../../../../../database/schema'
 
@@ -35,7 +35,7 @@ const Body = z.object({
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')!
   return await withOrgPermission(event, { appId: 'inbox' }, 'inbox.send', async (tx, ctx) => {
-    if (!isAiConfigured()) {
+    if (!(await isAiConfigured(tx))) {
       throw createError({ statusCode: 503, statusMessage: 'AI drafting is not configured' })
     }
     const conversation = await inboxGetConversation(tx, id)
@@ -73,7 +73,7 @@ export default defineEventHandler(async (event) => {
       language: save.language ?? 'en',
       sources: save.sources ?? [],
       uncertainty: save.uncertainty ?? [],
-      model: await getFeatureModel(tx, INBOX_AI_DRAFT_FEATURE)
+      model: await resolveFeatureModel(tx, INBOX_AI_DRAFT_FEATURE)
     }
 
     // Regenerate into the same AI draft slot when the id is an AI draft on this

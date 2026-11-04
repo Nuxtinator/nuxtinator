@@ -4,6 +4,7 @@ import type { H3Event } from 'h3'
 import type { Kysely, Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import { getAuthUser } from './auth'
+import { currentOauthClientId } from './bearer-auth'
 
 type Executor = Kysely<Database> | Transaction<Database>
 
@@ -14,6 +15,8 @@ interface LogEventOptions {
   userId?: string
   userAgent?: string
   metadata?: Record<string, any>
+  // Defaults to the OAuth client the current request runs on behalf of.
+  clientId?: string | null
 }
 
 // Audit log writer.
@@ -44,7 +47,8 @@ export async function logEvent(
         record_id: options.recordId ?? null,
         user_id: options.userId ?? null,
         user_agent: options.userAgent ?? null,
-        metadata: options.metadata ?? {}
+        metadata: options.metadata ?? {},
+        client_id: options.clientId ?? currentOauthClientId()
       })
       .execute()
   } catch (error) {
@@ -61,9 +65,10 @@ function getUserInfoFromEvent(event: H3Event | null): { userId?: string, userAge
 
   const user = getAuthUser(event)
   const userAgent = getHeader(event, 'user-agent') || undefined
+  const bearer = event.context.bearerIdentity as { userId: string } | undefined
 
   return {
-    userId: user?.userId,
+    userId: bearer?.userId ?? user?.userId,
     userAgent
   }
 }

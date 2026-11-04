@@ -28,7 +28,7 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event) ?? {}
 
-  return await withOrgPermission(event, 'feedback.write', async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
     const updates: Record<string, any> = {}
     if (typeof body.name === 'string') updates.name = body.name
     if ('description' in body) updates.description = body.description

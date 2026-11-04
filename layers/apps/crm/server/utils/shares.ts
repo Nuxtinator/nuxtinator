@@ -22,7 +22,7 @@ export type { CrmShareLevel }
 export interface CrmShareEntry {
   userId: string
   name: string
-  email: string
+  email: string | null
   avatarUrl: string | null
   level: CrmShareLevel
   /** User who granted the share; null when that account was deleted. */

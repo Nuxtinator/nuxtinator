@@ -13,15 +13,17 @@ const INBOX_GROUNDING_SYNC_LOCK_KEY = '7203914082716530042'
 
 export default defineNitroPlugin(() => {
   if (process.env.NUXT_PREPARE_BUILD || process.env.NITRO_PRESET === 'prepare') return
-  // Disabled under tests (Doxa parity) — grounding refresh is exercised through
-  // the manual endpoint, which controls timing deterministically.
+  // Disabled under tests — grounding refresh is exercised through the manual
+  // endpoint, which controls timing deterministically.
   if (process.env.VITEST) return
 
   const config = useRuntimeConfig()
   const cronExpr = String(config.inboxGroundingSyncCron || '0 3 * * *')
 
+  // Grounding fetches can sit on slow sites, so the lock anchor gets a longer
+  // idle allowance than the send sweep's default.
   const run = () =>
-    void inboxWithAdvisoryLock(INBOX_GROUNDING_SYNC_LOCK_KEY, 'grounding sync', () => syncAllInboxGrounding())
+    inboxWithAdvisoryLock(INBOX_GROUNDING_SYNC_LOCK_KEY, 'grounding sync', () => syncAllInboxGrounding(), 30 * 60 * 1000)
       .catch(err => console.error('[inbox] grounding sync error:', err))
 
   new Cron(cronExpr, { protect: true, timezone: 'UTC' }, run)

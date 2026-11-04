@@ -9,9 +9,10 @@
 // Org routing (no session, no X-Active-Org):
 //   1. Reply-token mail — the token names exactly one conversation globally,
 //      so `withRecordOrgContext` resolves its org in O(1).
-//   2. Anything else — the recipient domain is matched against each org
-//      scope's inbound-domain setting; unroutable mail is acknowledged (200)
-//      and dropped, because a 503 would make Mailgun retry forever.
+//   2. Anything else — `inboxResolveOrgForRecipient`: the org slug on the
+//      shared slug-address domain, else the org whose inbound-domain setting
+//      is the recipient domain; unroutable mail is acknowledged (200) and
+//      dropped, because a 503 would make Mailgun retry forever.
 //
 // Durability choreography (at-most-once, never duplicated):
 //   tx A     resolve + claim: dedupe by Message-Id, thread, insert the
@@ -143,10 +144,10 @@ export default defineEventHandler(async (event) => {
     }
   }
   if (scope === undefined) {
-    scope = await inboxResolveOrgForRecipientDomain(parsedRecipient.domain)
+    scope = await inboxResolveOrgForRecipient(parsedRecipient)
   }
   if (scope === undefined) {
-    console.warn(`[inbox] unroutable inbound recipient "${recipient}" — no org claims domain "${parsedRecipient.domain}"`)
+    console.warn(`[inbox] unroutable inbound recipient "${recipient}" — no org claims it`)
     return { status: 'ignored', reason: 'unroutable' }
   }
 

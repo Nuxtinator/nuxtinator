@@ -1,4 +1,4 @@
-import { zodToJsonSchema } from 'zod-to-json-schema'
+import { z } from 'zod'
 import { isPermission } from '#core/app/utils/permissions'
 import { isRegisteredPermission } from '#core/server/utils/permissions-registry'
 import { registerScope } from '#oauth/scopes'
@@ -13,10 +13,25 @@ function isAcceptableScope(scope: string): boolean {
   return isPermission(scope) || isRegisteredPermission(scope)
 }
 
+export interface McpToolAnnotations {
+  readOnlyHint: boolean
+  destructiveHint: boolean
+}
+
 export interface RegisteredTool {
   def: McpToolDef
   inputJsonSchema: Record<string, unknown>
   outputJsonSchema?: Record<string, unknown>
+  annotations?: McpToolAnnotations
+}
+
+// Only tools that declare `readOnly` or `destructive` get annotations: the
+// spec defaults an unannotated tool to destructive, which is the safe reading
+// for tools that never said either way.
+function toolAnnotations(tool: McpToolDef): McpToolAnnotations | undefined {
+  if (tool.readOnly === undefined && tool.destructive === undefined) return undefined
+  const readOnly = tool.readOnly === true
+  return { readOnlyHint: readOnly, destructiveHint: !readOnly && tool.destructive === true }
 }
 
 export interface RegisteredResource {
@@ -31,7 +46,18 @@ export interface McpRegistry {
   // once stored — narrow I/O is preserved on the def for the dispatcher.
   register: <I, O>(tool: McpToolDef<I, O>) => void
   registerResource: (resource: McpResourceDef) => void
+  // Entries of `mcpDisabledApps` / `mcpDisabledTools` that no registration
+  // matched, so a misspelt id doesn't silently leave an app's tools on.
+  unmatchedDisabled: () => { apps: string[], tools: string[] }
   __resetForTests: () => void
+}
+
+function disabledConfig(): { apps: ReadonlySet<string>, tools: ReadonlySet<string> } {
+  const cfg = useRuntimeConfig()
+  return {
+    apps: new Set((cfg.mcpDisabledApps as string[] | undefined) ?? []),
+    tools: new Set((cfg.mcpDisabledTools as string[] | undefined) ?? [])
+  }
 }
 
 // Module-level singleton. The registry is a per-process value, so backing
@@ -50,10 +76,11 @@ export function getRegistry(): McpRegistry {
   return _singleton
 }
 
-function projectSchema(schema: unknown): Record<string, unknown> {
-  return zodToJsonSchema(schema as Parameters<typeof zodToJsonSchema>[0], {
-    target: 'jsonSchema7',
-    $refStrategy: 'none'
+function projectSchema(schema: z.ZodType, io: 'input' | 'output'): Record<string, unknown> {
+  return z.toJSONSchema(schema, {
+    target: 'draft-7',
+    io,
+    unrepresentable: 'any'
   }) as Record<string, unknown>
 }
 
@@ -61,16 +88,33 @@ export function createRegistry(): McpRegistry {
   const tools: RegisteredTool[] = []
   const resources: RegisteredResource[] = []
   const toolsByName = new Map<string, number>()
+  const matchedApps = new Set<string>()
+  const matchedTools = new Set<string>()
+
+  // Hosts keep an app's or a tool's MCP surface off with `mcpDisabledApps` /
+  // `mcpDisabledTools`; a skipped entry is never listed, callable or advertised as a scope.
+  function isDisabled(label: string, appId: string | undefined, name?: string): boolean {
+    const disabled = disabledConfig()
+    const byApp = appId !== undefined && disabled.apps.has(appId)
+    const byName = name !== undefined && disabled.tools.has(name)
+    if (!byApp && !byName) return false
+    if (byApp) matchedApps.add(appId)
+    if (byName) matchedTools.add(name)
+    console.info(`[mcp-layer] Skipping disabled ${label}${byApp ? ` (app "${appId}")` : ''}`)
+    return true
+  }
 
   function register<I, O>(tool: McpToolDef<I, O>): void {
-    if (!isAcceptableScope(tool.scope)) {
+    if (isDisabled(`tool "${tool.name}"`, tool.appId, tool.name)) return
+
+    if (tool.scope !== undefined && !isAcceptableScope(tool.scope)) {
       throw new Error(
         `MCP tool "${tool.name}" declares scope "${tool.scope}" which is not in the project's PERMISSIONS list. `
         + `Add it to app/utils/permissions.ts or fix the tool definition.`
       )
     }
 
-    const inputJsonSchema = projectSchema(tool.input)
+    const inputJsonSchema = projectSchema(tool.input, 'input')
     // The MCP spec requires a tool's inputSchema to be a JSON Schema object.
     // A top-level z.union() (bare anyOf) or similar wrapper erases the object
     // type, and strict clients (Claude Code) reject the server's ENTIRE tool
@@ -82,8 +126,14 @@ export function createRegistry(): McpRegistry {
         + `input and validate variants in the handler.`
       )
     }
-    const outputJsonSchema = tool.output ? projectSchema(tool.output) : undefined
-    const entry: RegisteredTool = { def: tool as McpToolDef, inputJsonSchema, outputJsonSchema }
+    const outputJsonSchema = tool.output ? projectSchema(tool.output, 'output') : undefined
+    const annotations = toolAnnotations(tool as McpToolDef)
+    const entry: RegisteredTool = {
+      def: tool as McpToolDef,
+      inputJsonSchema,
+      outputJsonSchema,
+      ...(annotations ? { annotations } : {})
+    }
 
     const existingIndex = toolsByName.get(tool.name)
     if (existingIndex !== undefined) {
@@ -93,7 +143,7 @@ export function createRegistry(): McpRegistry {
       // Dev: replace prior registration so HMR works without a server restart.
       console.info(`[mcp-layer] Replacing duplicate tool registration: ${tool.name}`)
       tools[existingIndex] = entry
-      registerScope(tool.scope)
+      if (tool.scope) registerScope(tool.scope)
       return
     }
 
@@ -102,10 +152,12 @@ export function createRegistry(): McpRegistry {
     // Feed the OAuth-layer scope registry so /.well-known/* discovery
     // and the DCR explicit-scope ceiling pick up this tool's scope
     // without the consumer having to enumerate it in nuxt.config.
-    registerScope(tool.scope)
+    if (tool.scope) registerScope(tool.scope)
   }
 
   function registerResource(resource: McpResourceDef): void {
+    if (isDisabled(`resource "${resource.uriPattern}"`, resource.appId)) return
+
     if (!isAcceptableScope(resource.scope)) {
       throw new Error(
         `MCP resource "${resource.uriPattern}" declares scope "${resource.scope}" which is not in the project's PERMISSIONS list.`
@@ -122,6 +174,16 @@ export function createRegistry(): McpRegistry {
     tools.length = 0
     resources.length = 0
     toolsByName.clear()
+    matchedApps.clear()
+    matchedTools.clear()
+  }
+
+  function unmatchedDisabled(): { apps: string[], tools: string[] } {
+    const disabled = disabledConfig()
+    return {
+      apps: [...disabled.apps].filter(id => !matchedApps.has(id)),
+      tools: [...disabled.tools].filter(name => !matchedTools.has(name))
+    }
   }
 
   return {
@@ -133,6 +195,7 @@ export function createRegistry(): McpRegistry {
     },
     register,
     registerResource,
+    unmatchedDisabled,
     __resetForTests
   }
 }

@@ -4,11 +4,13 @@ definePageMeta({
 })
 
 const route = useRoute()
+const toast = useToast()
 const token = computed(() => route.params.token as string)
 const { isLoggedIn } = useAuth()
 
 const loading = ref(true)
 const error = ref<string | null>(null)
+const needsLogin = ref(false)
 const videoUrl = ref<string | null>(null)
 const videoPlayer = ref<HTMLVideoElement | null>(null)
 const videoTitle = ref('')
@@ -65,7 +67,13 @@ onMounted(async () => {
     }
   } catch (err: any) {
     console.error('Error loading video:', err)
-    error.value = err.message || 'Failed to load video'
+    // 401 = an org-shared video and no session — offer sign-in instead of
+    // an error (the login page returns here via ?redirect=).
+    if (err?.statusCode === 401 || err?.status === 401) {
+      needsLogin.value = true
+    } else {
+      error.value = err.message || 'Failed to load video'
+    }
   } finally {
     loading.value = false
   }
@@ -117,7 +125,7 @@ const saveTitle = async () => {
     editTitle.value = ''
   } catch (err: any) {
     console.error('Error updating title:', err)
-    alert(err.data?.message || 'Failed to update title')
+    toast.add({ title: 'Failed to update title', description: err.data?.message, color: 'error' })
     cancelEdit()
   }
 }
@@ -140,6 +148,12 @@ useHead({ title: 'Watch Video' })
       <div v-if="loading" class="loading-view">
         <div class="spinner"></div>
         <p>Loading video...</p>
+      </div>
+
+      <div v-else-if="needsLogin" class="signin-card">
+        <h2>Sign in to watch</h2>
+        <p>This video is shared with an organization. Sign in to watch it.</p>
+        <UButton :to="`/login?redirect=${encodeURIComponent(route.fullPath)}`" size="lg" icon="i-lucide-log-in">Sign In</UButton>
       </div>
 
       <div v-else-if="error" class="error-card">
@@ -239,6 +253,19 @@ useHead({ title: 'Watch Video' })
 
 .error-card h2 { color: #dc2626; margin-bottom: 1rem; font-size: 1.5rem; }
 .error-card p { color: var(--ui-text-muted); margin-bottom: 1.5rem; }
+
+.signin-card {
+  background: var(--ui-bg-elevated);
+  border: 1px solid var(--ui-border);
+  border-radius: 0.5rem;
+  padding: 2rem;
+  text-align: center;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.signin-card h2 { margin-bottom: 1rem; font-size: 1.5rem; }
+.signin-card p { color: var(--ui-text-muted); margin-bottom: 1.5rem; }
 
 .player-view { text-align: center; }
 

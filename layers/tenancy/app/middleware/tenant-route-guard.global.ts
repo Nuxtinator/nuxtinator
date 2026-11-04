@@ -14,8 +14,9 @@ const SYSTEM_PREFIXES = [
   '/register',
   '/reset-password',
   '/accept-invite',
+  // Social-auth layer's "what should we call you?" sign-up step.
+  '/social-auth',
   '/orgs',
-  '/dashboard',
   '/kitchen',
   // Public share routes — anonymous visitors must be able to hit these
   // without getting bounced to /orgs by the active-slug rewrite. The
@@ -28,17 +29,24 @@ const SYSTEM_PREFIXES = [
 
 function isSystemPath(p: string): boolean {
   if (p === '/') return true
+  // `/dashboard` itself is org-scoped; pages below it are not doubled under `/@:orgSlug`.
+  if (/^\/dashboard\/./.test(p)) return true
   for (const prefix of SYSTEM_PREFIXES) {
     if (p === prefix || p.startsWith(prefix + '/')) return true
   }
   return false
 }
 
-export default defineNuxtRouteMiddleware((to, from) => {
+export default defineNuxtRouteMiddleware(async (to, from) => {
   const path = to.path
 
-  // Already in an org-prefixed route — nothing to do.
-  if (path.startsWith('/@')) return
+  // Already in an org-prefixed route — nothing to do, unless it names a
+  // personal app, which has no org-prefixed route: drop the prefix.
+  if (path.startsWith('/@')) {
+    const rest = path.replace(/^\/@[^/]+/, '') || '/'
+    if (isPersonalAppPath(rest)) return navigateTo({ path: rest, query: to.query, hash: to.hash })
+    return
+  }
   // A page can opt out of org-prefixing by setting `tenantExempt: true` in its
   // `definePageMeta` — the per-page equivalent of SYSTEM_PREFIXES, so a layer
   // exempts its own public route without editing this file.
@@ -52,6 +60,8 @@ export default defineNuxtRouteMiddleware((to, from) => {
   }
   // System route — pass.
   if (isSystemPath(path)) return
+  // Personal apps are the same in every org, so their pages stay at the bare path.
+  if (isPersonalAppPath(path)) return
 
   // The user is currently inside an org? Rewrite the destination to keep them there.
   const fromSlug = (from.params.orgSlug as string | undefined)
@@ -61,11 +71,16 @@ export default defineNuxtRouteMiddleware((to, from) => {
   }
 
   // No active org but the path looks like an app page — try the active-org cookie.
-  const cookie = useCookie<string | null>('active-org-slug')
+  const cookie = useCookie<string | null>(`${useRuntimeConfig().public.cookiePrefix || ''}active-org-slug`)
   if (cookie.value) {
     return navigateTo({ path: `/@${cookie.value}${path}`, query: to.query, hash: to.hash })
   }
 
-  // No org at all — send to picker.
+  // No org selected. A user with no memberships at all gets the bare launcher,
+  // which lists their personal apps; everyone else picks an org.
+  if (path === '/dashboard') {
+    const res = await $fetch<{ orgs: unknown[] }>('/api/orgs').catch(() => null)
+    if (res?.orgs.length === 0) return
+  }
   return navigateTo('/orgs')
 })

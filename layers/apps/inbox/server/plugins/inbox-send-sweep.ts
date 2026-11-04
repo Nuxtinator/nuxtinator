@@ -11,10 +11,12 @@ export default defineNitroPlugin(() => {
   const config = useRuntimeConfig()
   const seconds = Math.min(Math.max(parseInt(String(config.inboxSendSweepSeconds || '20'), 10) || 20, 2), 300)
 
-  new Cron(`*/${seconds} * * * * *`, { protect: true }, () => {
-    void inboxWithAdvisoryLock(INBOX_SEND_SWEEP_LOCK_KEY, 'send sweep', () => inboxRunSendSweep())
+  // Return the promise: `protect` only skips overlapping ticks if it can
+  // await the run.
+  new Cron(`*/${seconds} * * * * *`, { protect: true }, () =>
+    inboxWithAdvisoryLock(INBOX_SEND_SWEEP_LOCK_KEY, 'send sweep', () => inboxRunSendSweep())
       .catch(err => console.error('[inbox] send sweep error:', err))
-  })
+  )
 
   console.log(`[inbox] send sweep started — every ${seconds}s`)
 })

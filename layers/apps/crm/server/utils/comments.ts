@@ -14,6 +14,7 @@ import type { SqlBool, Transaction } from 'kysely'
 import { z } from 'zod'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
+import { resolveClientNames } from './client-names'
 
 type Tx = Transaction<Database>
 
@@ -70,6 +71,8 @@ export interface CrmComment {
   body: string
   createdAt: Date
   editedAt: Date | null
+  /** Name of the connected app the comment came through; null for the web. */
+  viaClient: string | null
 }
 
 export interface CrmCommentPage {
@@ -96,6 +99,7 @@ export async function listComments(
       'c.body as body',
       'c.created_at as created_at',
       'c.edited_at as edited_at',
+      'c.client_id as client_id',
       'u.display_name as user_name',
       'u.email as user_email'
     ])
@@ -111,13 +115,15 @@ export async function listComments(
     .limit(limit + 1)
     .execute()
   const page = rows.slice(0, limit)
+  const clients = await resolveClientNames(tx, page.map(r => r.client_id))
   const items = page.map(r => ({
     id: r.id,
     authorId: r.author_id,
     authorName: r.author_label ?? r.user_name ?? r.user_email ?? 'Unknown',
     body: r.body,
     createdAt: r.created_at,
-    editedAt: r.edited_at
+    editedAt: r.edited_at,
+    viaClient: r.client_id ? clients.get(r.client_id) ?? r.client_id : null
   }))
   const last = rows.length > limit ? page[page.length - 1]! : null
   return { items, nextCursor: last ? encodeTimelineCursor(last.created_at, last.id) : null }
@@ -178,6 +184,11 @@ async function resolveUserName(tx: Tx, userId: string | null): Promise<string> {
   return user?.display_name ?? user?.email ?? 'Unknown'
 }
 
+async function viaClientOf(tx: Tx, clientId: string | null): Promise<string | null> {
+  if (!clientId) return null
+  return (await resolveClientNames(tx, [clientId])).get(clientId) ?? clientId
+}
+
 async function loadComment(tx: Tx, commentId: string) {
   if (!uuidSchema.safeParse(commentId).success) {
     throw createError({ statusCode: 404, statusMessage: 'Comment not found.' })
@@ -215,7 +226,8 @@ export async function addComment(
       record_id: recordId,
       author_id: ctx.userId,
       author_label: opts.authorLabel ?? null,
-      body
+      body,
+      client_id: ctx.clientId ?? null
     })
     .returningAll()
     .executeTakeFirstOrThrow()
@@ -225,7 +237,8 @@ export async function addComment(
     authorName: row.author_label ?? await resolveUserName(tx, row.author_id),
     body: row.body,
     createdAt: row.created_at,
-    editedAt: row.edited_at
+    editedAt: row.edited_at,
+    viaClient: await viaClientOf(tx, row.client_id)
   }
 }
 
@@ -261,7 +274,8 @@ export async function updateComment(
     authorName: row.author_label ?? await resolveUserName(tx, row.author_id),
     body: row.body,
     createdAt: row.created_at,
-    editedAt: row.edited_at
+    editedAt: row.edited_at,
+    viaClient: await viaClientOf(tx, row.client_id)
   }
 }
 

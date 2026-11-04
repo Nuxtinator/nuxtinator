@@ -4,7 +4,7 @@ import { withOrgPermission } from '#tenant/server'
 import { db } from '#core/server/utils/database'
 import { logDelete } from '#core/server/utils/activity-logger'
 import { getPortfolioBySlugOr404 } from '../../../../../../../../utils/portfolio-helpers'
-import { loadSection } from '../../../../../../../../utils/section-helpers'
+import { loadSection, requireKnownSection } from '../../../../../../../../utils/section-helpers'
 
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, { appId: 'context' }, 'context.read', async (tx, ctx) => {
@@ -12,6 +12,7 @@ export default defineEventHandler(async (event) => {
     const key = getRouterParam(event, 'key') ?? ''
     const id = getRouterParam(event, 'id') ?? ''
     const p = await getPortfolioBySlugOr404(tx, slug)
+    await requireKnownSection(tx, p.id, key)
     const section = await loadSection(tx, p.id, key)
     if (!section) throw createError({ statusCode: 404, statusMessage: 'Section not found.' })
 

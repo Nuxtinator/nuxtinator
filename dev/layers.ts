@@ -24,6 +24,7 @@ export const LAYERS = [
   { id: 'core', pkg: '@nuxtinator/core' },
   { id: 'tenancy', pkg: '@nuxtinator/tenancy' },
   { id: 'email-mailgun', pkg: '@nuxtinator/email-mailgun' },
+  { id: 'social-auth', pkg: '@nuxtinator/social-auth' },
   { id: 'ai', pkg: '@nuxtinator/ai' },
   { id: 'oauth', pkg: '@nuxtinator/oauth' },
   { id: 'mcp', pkg: '@nuxtinator/mcp' },
@@ -35,6 +36,7 @@ export const LAYERS = [
   { id: 'context', pkg: '@nuxtinator/context' },
   { id: 'crm', pkg: '@nuxtinator/crm' },
   { id: 'inbox', pkg: '@nuxtinator/inbox' },
+  { id: 'helpinator', pkg: '@nuxtinator/helpinator' },
   { id: 'workflows', pkg: '@nuxtinator/workflows' },
   { id: 'dev', pkg: '@nuxtinator/dev' }
 ] as const

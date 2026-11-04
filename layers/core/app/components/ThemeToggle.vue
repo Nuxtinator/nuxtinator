@@ -1,4 +1,6 @@
 <script setup lang="ts">
+withDefaults(defineProps<{ size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' }>(), { size: 'lg' })
+
 const { theme, toggleTheme } = useTheme()
 </script>
 
@@ -6,20 +8,10 @@ const { theme, toggleTheme } = useTheme()
   <UButton
     variant="ghost"
     color="neutral"
-    size="lg"
+    :size="size"
+    :icon="theme === 'light' ? 'i-lucide-moon' : 'i-lucide-sun'"
     :aria-label="theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'"
     title="Toggle theme"
     @click="toggleTheme"
-  >
-    <UIcon
-      v-if="theme === 'light'"
-      name="i-lucide-moon"
-      class="size-5"
-    />
-    <UIcon
-      v-else
-      name="i-lucide-sun"
-      class="size-5"
-    />
-  </UButton>
+  />
 </template>

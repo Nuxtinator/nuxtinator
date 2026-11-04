@@ -37,6 +37,7 @@ export interface CrmUpdateTypePatch {
   icon?: string | null
   hidden?: boolean
   sectionOrder?: string[] | null
+  closedReasonField?: string | null
 }
 
 export interface CrmCreateFieldInput {

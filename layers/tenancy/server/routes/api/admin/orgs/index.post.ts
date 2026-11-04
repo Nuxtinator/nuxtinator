@@ -3,6 +3,7 @@ import { adminDb } from '#tenant/admin-db'
 import { requireHostAdmin } from '#tenant/server'
 import { logEvent } from '#core/server/utils/activity-logger'
 import { validateSlug } from '#core/app/utils/slug'
+import { getApps } from '#core/server/utils/app-settings'
 
 // Host-admin org creation. Creates the `orgs` row, the initial admin
 // `memberships` row, and seeds default-status apps as `org_apps` rows with
@@ -59,14 +60,10 @@ export default defineEventHandler(async (event) => {
         })
         .execute()
 
-      // Seed every non-disabled app so the per-org bootstrap hook
-      // (`app.enabled`) fires for each enabled app. Under current policy
-      // all non-disabled apps are on by default for every org.
-      const defaultApps = await trx
-        .selectFrom('apps')
-        .select('id')
-        .where('status', '!=', 'disabled')
-        .execute()
+      // Seed every 'default' app so the per-org bootstrap hook
+      // (`app.enabled`) fires for each app the new org starts with.
+      const defaultApps = (await getApps(trx))
+        .filter(a => a.installed && a.created_at !== null && a.status === 'default' && a.scope !== 'user')
       if (defaultApps.length > 0) {
         await trx
           .insertInto('org_apps')

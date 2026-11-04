@@ -59,6 +59,15 @@ export interface InboxAiDraftPreview {
   uncertainty: string[]
 }
 
+// Deliverability of the address a reply goes to — resolved server-side by the
+// same util the send sweep uses, so the composer shows exactly where mail
+// will go and why it might not get there.
+export interface InboxReplyStatus {
+  email: string | null
+  verified: boolean
+  suppression: { reason: string, detail: string | null, since: string } | null
+}
+
 export interface InboxThread {
   conversation: {
     id: string
@@ -74,6 +83,7 @@ export interface InboxThread {
   }
   channel: { value: string, verified: boolean, blocked: boolean } | null
   contacts: { id: string, name: string }[]
+  replyStatus: InboxReplyStatus
   capabilities: { canSend: boolean, canCreateContact: boolean }
   messages: InboxThreadMessage[]
   drafts: InboxThreadDraft[]

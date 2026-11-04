@@ -2,7 +2,7 @@
 // Query: include_resolved=true to show resolved comments (default: only open).
 import { withOrgPermission } from '#tenant/server'
 import { getPortfolioBySlugOr404 } from '../../../../../../../../utils/portfolio-helpers'
-import { loadSection } from '../../../../../../../../utils/section-helpers'
+import { loadSection, requireKnownSection } from '../../../../../../../../utils/section-helpers'
 import { isAnchorStale } from '../../../../../../../../utils/comments'
 
 export default defineEventHandler(async (event) => {
@@ -11,6 +11,7 @@ export default defineEventHandler(async (event) => {
     const key = getRouterParam(event, 'key') ?? ''
     const includeResolved = String(getQuery(event).include_resolved ?? '').toLowerCase() === 'true'
     const p = await getPortfolioBySlugOr404(tx, slug)
+    await requireKnownSection(tx, p.id, key)
     const section = await loadSection(tx, p.id, key)
     if (!section) return { comments: [] }
 

@@ -11,7 +11,10 @@ export default defineNitroPlugin((nitroApp) => {
   nitroApp.hooks.hook('org.deleted', async ({ orgId }) => {
     const rows = await db.transaction().execute(async (tx) => {
       await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
-      return await tx.selectFrom('videos').select(['s3_key', 'thumbnail_url']).execute()
+      return await tx.selectFrom('videos')
+        .select(['s3_key', 'thumbnail_url'])
+        .where('org_id', '=', orgId)
+        .execute()
     })
     if (rows.length === 0) return
     let deleted = 0

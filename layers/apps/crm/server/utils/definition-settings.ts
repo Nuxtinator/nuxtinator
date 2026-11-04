@@ -36,6 +36,8 @@ export interface CrmRecordTypeSetting {
   labelSingular: string
   icon?: string
   statusField?: string
+  /** Closed-reason field: config.closedReasonField ⊳ the manifest's. */
+  closedReasonField?: string
   sections: Record<string, { label: string, order?: number }>
   hidden: boolean
   config: Record<string, unknown>
@@ -61,6 +63,14 @@ function roleGrantsOf(config: Record<string, unknown> | undefined): CrmTypeRoleG
   return {}
 }
 
+// config.closedReasonField: a field key picked in the schema builder, or
+// null to drop the code-declared one. Absent means the manifest's.
+function closedReasonFieldOf(config: Record<string, unknown> | undefined, fallback: string | undefined): string | undefined {
+  if (!config || !('closedReasonField' in config)) return fallback
+  const raw = config.closedReasonField
+  return typeof raw === 'string' && raw.length > 0 ? raw : undefined
+}
+
 export const getRecordTypes = defineSettings<CrmRecordTypeManifest, RecordTypeRow, CrmRecordTypeSetting>({
   loadDefaults: () => getRegisteredRecordTypes(),
   loadOverrides: async (tx) => {
@@ -76,6 +86,7 @@ export const getRecordTypes = defineSettings<CrmRecordTypeManifest, RecordTypeRo
         labelSingular: row?.label_singular_override ?? manifest.labelSingular,
         icon: row?.icon_override ?? manifest.icon,
         statusField: manifest.statusField,
+        closedReasonField: closedReasonFieldOf(row?.config, manifest.closedReasonField),
         sections: manifest.sections ?? {},
         hidden: row?.hidden ?? false,
         config: row?.config ?? {},

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { KanbanCardModel } from './types'
-import { isCardOverdue, priorityDotColor, cardPhase, phaseLabel, cardHeadline, cardLabels, labelDef, labelPillClass, DOING_COLUMN } from '../../composables/useCardUtils'
+import { isCardOverdue, priorityDotColor, cardPhase, phaseLabel, cardHeadline, cardLabels, labelDef, labelPillClass, feedbackType, BOARD_USERS_KEY, DOING_COLUMN } from '../../composables/useCardUtils'
 
 const props = withDefaults(
   defineProps<{
@@ -30,6 +30,7 @@ const priorityQual = computed<string | null>(() => {
 
 const headline = computed(() => cardHeadline(props.card))
 const labels = computed(() => cardLabels(props.card))
+const type = computed(() => feedbackType(props.card))
 const priorityDotClass = computed(() => priorityDotColor(priorityQual.value))
 const overdue = computed(() => isCardOverdue(props.card, props.columnName))
 const showOverdueIcon = computed(() => overdue.value && !props.card.is_done)
@@ -77,6 +78,17 @@ const assigneeName = computed(() => {
   return a ? String(a).trim() : ''
 })
 
+// Avatars for the submitter (matched by user id) and assignee (matched by the
+// stored display name); '' when the user is unknown here or has no avatar.
+const boardUsers = inject(BOARD_USERS_KEY, ref([]))
+const submitterAvatar = computed(() => {
+  const id = props.card.post_meta?.submitter_user_id
+  return (id && boardUsers.value.find(u => u.id === id)?.avatar) || ''
+})
+const assigneeAvatar = computed(() =>
+  (assigneeName.value && boardUsers.value.find(u => u.display_name === assigneeName.value)?.avatar) || ''
+)
+
 function handleClick() {
   emit('click', props.card)
 }
@@ -109,7 +121,7 @@ function handleDragEnd(event: DragEvent) {
   <div
     class="relative rounded-md border bg-(--ui-bg-elevated) shadow-sm cursor-grab select-none
            transition-shadow duration-100
-           w-full min-h-[84px] p-2
+           w-full shrink-0 min-h-[84px] p-2
            hover:shadow-md hover:border-(--ui-primary)"
     :class="overdue ? 'border-red-500' : 'border-(--ui-border)'"
     draggable="true"
@@ -134,33 +146,17 @@ function handleDragEnd(event: DragEvent) {
       {{ headline }}
     </h4>
 
-    <div v-if="labels.length" class="mt-1 flex flex-wrap gap-1">
+    <div class="mt-1.5 flex items-center gap-2 text-[11px] text-(--ui-text-muted) min-w-0">
       <span
-        v-for="l in labels"
-        :key="l"
-        class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium"
-        :class="labelPillClass(l)"
-      >
-        {{ labelDef(l)?.label ?? l }}
-      </span>
-    </div>
-
-    <div class="mt-1.5 flex items-center gap-2 text-[11px] text-(--ui-text-muted)">
-      <span
-        v-if="showPhase"
-        class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide bg-(--ui-bg-accented) text-(--ui-text) shrink-0"
-        :title="`Phase: ${phaseText}`"
-      >
-        {{ phaseText }}
-      </span>
-
-      <span
-        v-if="assigneeName"
+        v-if="submitterName"
         class="inline-flex items-center gap-1 min-w-0 shrink"
-        :title="`Assigned to ${assigneeName}`"
+        :title="`Submitted by ${submitterName}`"
       >
-        <UIcon name="i-lucide-user-check" class="w-3 h-3 shrink-0" />
-        <span class="truncate">{{ assigneeName }}</span>
+        <UAvatar v-if="submitterAvatar" :src="submitterAvatar" :alt="submitterName" size="2xs" />
+        <template v-else>
+          <UIcon name="i-lucide-user" class="w-3 h-3 shrink-0" />
+          <span class="truncate">{{ submitterName }}</span>
+        </template>
       </span>
 
       <span
@@ -201,12 +197,44 @@ function handleDragEnd(event: DragEvent) {
     </div>
 
     <div
-      v-if="submitterName"
-      class="mt-1 flex items-center gap-1 text-[11px] text-(--ui-text-muted) min-w-0"
-      :title="`Submitted by ${submitterName}`"
+      v-if="showPhase || type || labels.length || assigneeName"
+      class="mt-1.5 flex items-center flex-wrap gap-1 min-w-0"
     >
-      <UIcon name="i-lucide-user" class="w-3 h-3 shrink-0" />
-      <span class="truncate">{{ submitterName }}</span>
+      <span
+        v-if="showPhase"
+        class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide bg-(--ui-bg-accented) text-(--ui-text) shrink-0"
+        :title="`Phase: ${phaseText}`"
+      >
+        {{ phaseText }}
+      </span>
+      <span
+        v-if="type"
+        class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium"
+        :class="type.pillClass"
+      >
+        <UIcon :name="type.icon" class="w-3 h-3" />
+        {{ type.label }}
+      </span>
+      <span
+        v-for="l in labels"
+        :key="l"
+        class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium"
+        :class="labelPillClass(l)"
+      >
+        {{ labelDef(l)?.label ?? l }}
+      </span>
+
+      <span
+        v-if="assigneeName"
+        class="ml-auto inline-flex items-center gap-1 min-w-0 shrink text-[11px] text-(--ui-text-muted)"
+        :title="`Assigned to ${assigneeName}`"
+      >
+        <UAvatar v-if="assigneeAvatar" :src="assigneeAvatar" :alt="assigneeName" size="2xs" />
+        <template v-else>
+          <UIcon name="i-lucide-user-check" class="w-3 h-3 shrink-0" />
+          <span class="truncate">{{ assigneeName }}</span>
+        </template>
+      </span>
     </div>
   </div>
 </template>

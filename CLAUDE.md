@@ -42,7 +42,7 @@ go-saas/                          ← repo root (bun workspace)
     │   └── package.json             deps: nodemailer, nodemailer-mailgun-transport
     ├── oauth/                    ← OPTIONAL OAuth 2.1 server (peer-deps only)
     ├── mcp/                      ← OPTIONAL MCP transport
-    │   └── package.json             deps: @modelcontextprotocol/sdk, zod, zod-to-json-schema
+    │   └── package.json             deps: @modelcontextprotocol/sdk, zod
     ├── dev/                      ← OPTIONAL UI sandbox layer (@nuxtinator/dev — distinct
     │                                from the top-level dev/ host folder above). /kitchen pages.
     └── apps/                     ← per-app feature layers
@@ -57,11 +57,11 @@ go-saas/                          ← repo root (bun workspace)
 Both are Nuxt host shells; they differ in **how they resolve layers**:
 
 - **`dev/`** is a workspace member of this monorepo. Layer selection lives in [dev/layers.ts](dev/layers.ts) — a `LAYERS` array of `{ id, pkg }` entries — and `dev/nuxt.config.ts` derives `extends:` from it. `dev/package.json` separately lists each layer as `"@nuxtinator/<id>": "workspace:*"` so bun symlinks each name into `dev/node_modules/@nuxtinator/<id>/` (the two files must agree — bun needs the explicit dep entry to symlink). Use this for editing layers + host together. Run `bun dev` from `dev/`.
-- **`prod/`** is a **standalone starter template** — NOT a workspace member of this monorepo. It uses the consumer recipe: `workspaces: ["_layers/*"]`, a `sync-layers` script that fetches each chosen layer from a giget URL into `_layers/<id>/`, `bunfig.toml linker = "hoisted"` for name-based resolution. When someone starts a new project on nuxtinator, they copy `prod/` (via `bunx giget github:corsacca/nuxtinator/prod#master . --force` — the `#master` ref is required because giget defaults to `main` but this repo's default branch is `master`), trim it to their selected layers, and run `bun run setup`. `prod/` is what the README's Assembly Instructions point to.
+- **`prod/`** is a **standalone starter template** — NOT a workspace member of this monorepo. It uses the consumer recipe: `workspaces: ["_layers/*"]`, a `sync-layers` script that fetches each chosen layer from a giget URL into `_layers/<id>/`, `bunfig.toml linker = "hoisted"` for name-based resolution. When someone starts a new project on nuxtinator, they copy `prod/` (via `bunx giget github:Nuxtinator/nuxtinator/prod#master . --force` — the `#master` ref is required because giget defaults to `main` but this repo's default branch is `master`), trim it to their selected layers, and run `bun run setup`. `prod/` is what the README's Assembly Instructions point to.
 
 Two `dev` names exist (the top-level `dev/` host folder and the `layers/dev/` `@nuxtinator/dev` sandbox layer) and they're distinct things. Context (path vs. package name) disambiguates.
 
-Every layer has its own `package.json` declaring exactly what it imports. The `name` is `@nuxtinator/<id>` and the package exposes its config via `exports: { ".": "./nuxt.config.ts" }`. Cross-layer deps are declared as `"*"` in `optionalDependencies` (e.g. `"@nuxtinator/core": "*"`) — not `workspace:*`, which resolves only inside this monorepo and breaks a consumer's standalone install. Layer-private deps (no other layer needs them, no shared runtime state) go in `dependencies`. Framework/DB singletons that must resolve to a single instance (`nuxt`, `@nuxt/kit`, `@nuxt/ui`, `kysely`, `kysely-postgres-js`, `postgres`, `h3`, `vue`, `tailwindcss`) go in `peerDependencies` so they resolve to host's installed copy. Don't add a `main` field to layer package.json files — Nuxt generates `/// <reference types="@nuxtinator/<id>" />` and TS would resolve through `main`, breaking the typecheck. `exports` is fine.
+Every layer has its own `package.json` declaring exactly what it imports. The `name` is `@nuxtinator/<id>` and the package exposes its config via `exports: { ".": "./nuxt.config.ts" }`. Cross-layer deps are declared as `"*"` in `optionalDependencies` (e.g. `"@nuxtinator/core": "*"`) — not `workspace:*`, which resolves only inside this monorepo and breaks a consumer's standalone install. A layer that needs another layer loaded, or a minimum version of it, declares that in `"nuxtinator": { "requires": { "@nuxtinator/core": ">=2.2.0" } }` — read by `layers:update`, core's build check and `bun run release` (see [documentation/layers.md](documentation/layers.md#requiring-other-layers)). Layer-private deps (no other layer needs them, no shared runtime state) go in `dependencies`. Framework/DB singletons that must resolve to a single instance (`nuxt`, `@nuxt/kit`, `@nuxt/ui`, `kysely`, `kysely-postgres-js`, `postgres`, `h3`, `vue`, `tailwindcss`) go in `peerDependencies` so they resolve to host's installed copy. Don't add a `main` field to layer package.json files — Nuxt generates `/// <reference types="@nuxtinator/<id>" />` and TS would resolve through `main`, breaking the typecheck. `exports` is fine.
 
 Run dev/build from `dev/`:
 
@@ -157,6 +157,26 @@ import { sendTemplateEmail } from '#email'
 
 Each email backend layer (`email-mailgun`, future `email-smtp`/`email-ses`) provides its own implementation and registers `#email` to point at it. Core ships a throwing fallback at [layers/core/email-fallback/email.ts](layers/core/email-fallback/email.ts) that surfaces a clear error if no email layer is loaded.
 
+### Translations (i18n)
+
+Core loads `@nuxtjs/i18n` once ([layers/core/nuxt.config.ts](layers/core/nuxt.config.ts)): `no_prefix` strategy (URLs never change, so tenancy's `/@:orgSlug` aliases aren't multiplied), default locale `en`, browser detection with the choice remembered in the `i18n_locale` cookie. Missing keys fall back to English without console warnings ([layers/core/i18n/i18n.config.ts](layers/core/i18n/i18n.config.ts)), so a layer may translate only part of its strings. Nuxt UI's own strings and `<html lang/dir>` follow the active locale ([layers/core/app/app.vue](layers/core/app/app.vue)).
+
+Translation is opt-in per layer. A layer that wants it:
+
+1. Declares its locales in its own `nuxt.config.ts` (no `modules:` entry needed):
+   ```ts
+   i18n: {
+     locales: [
+       { code: 'en', file: 'en.json' },
+       { code: 'fr', language: 'fr', name: 'Français', file: 'fr.json' }
+     ]
+   }
+   ```
+2. Ships the files at `<layer>/i18n/locales/<file>`, with every key under the layer id (`{ "people-groups": { "fields": { "bible_status": "…" } } }`).
+3. Uses `$t('<layerId>.…')` / `useI18n()` in its components, and places `<LocaleSwitcher />` (core) wherever it wants the picker. The switcher hides itself when only one locale exists.
+
+The module merges locales and messages across all layers by locale code; the host's files win over a layer's. The picker lists the union of every layer's locales. Worked example: [layers/dev/i18n/](layers/dev/i18n/) + `/kitchen-i18n`. Core's own UI, the server-registered labels (apps/nav/admin-section titles), and emails are not translated.
+
 ### Layer wiring (dev/nuxt.config.ts)
 
 [dev/nuxt.config.ts](dev/nuxt.config.ts) does three layer-related things worth knowing about:
@@ -165,9 +185,9 @@ Each email backend layer (`email-mailgun`, future `email-smtp`/`email-ses`) prov
 2. **`extends:`** lists every layer in load order. `core` first (lowest priority — gets overridden by other layers and host); `tenancy` next (multi-mode kernel overrides core's single-mode); then email backend, oauth, mcp, app layers, dev.
 3. **The host has no modules of its own** — `migrations`, `tenant-kernel`, and `email-kernel` modules all live in `layers/core/nuxt.config.ts`.
 
-### The six runtime registries (core owns)
+### The seven runtime registries (core owns)
 
-Every app layer feeds the host through six in-process registries in [layers/core/server/utils/](layers/core/server/utils/) at boot via a Nitro plugin:
+Every app layer feeds the host through seven in-process registries in [layers/core/server/utils/](layers/core/server/utils/) at boot via a Nitro plugin:
 
 | Registry | File | Function |
 |---|---|---|
@@ -176,9 +196,10 @@ Every app layer feeds the host through six in-process registries in [layers/core
 | App static roles | [roles-registry.ts](layers/core/server/utils/roles-registry.ts) | `registerStaticRole(...)` |
 | Launcher tiles | [app-registry.ts](layers/core/server/utils/app-registry.ts) | `registerApp(...)` |
 | In-app nav items | [nav-registry.ts](layers/core/server/utils/nav-registry.ts) | `registerNavItem(...)` |
+| Rail entries | [rail-registry.ts](layers/core/server/utils/rail-registry.ts) | `registerRailItem(...)` |
 | Admin shell sections | [admin-section-registry.ts](layers/core/server/utils/admin-section-registry.ts) | `registerAdminSection(...)` |
 
-The host bridges these to the client via auth-gated, permission-filtered endpoints (`/api/_apps`, `/api/_nav`, `/api/_admin-sections`) consumed by composables (`useApps`, `useAppNav`, `useAdminSections`). Core's own admin sections are registered the same way — see [layers/core/server/plugins/register-host-admin.ts](layers/core/server/plugins/register-host-admin.ts).
+The host bridges these to the client via auth-gated, permission-filtered endpoints (`/api/_apps`, `/api/_nav`, `/api/_admin-sections`) consumed by composables (`useApps`, `useAppNav`, `useAdminSections`). Core's own admin sections are registered the same way — see [layers/core/server/plugins/register-host-admin.ts](layers/core/server/plugins/register-host-admin.ts). Rail items ride along in the app feeds (`rail` on each app entry). A host changes how an installed app is presented with `configureApp(id, { title, icon, order, defaultStatus })`, and sets the rail's behaviour under `rail` in its `app.config.ts` (see [documentation/layers.md](documentation/layers.md#the-app-rail)).
 
 ### Permissions: compile-time + runtime
 
@@ -189,7 +210,7 @@ Two parallel permission stores you must keep in sync:
 
 Core itself ships **no** permissions — operator-admin authority is the `users.is_admin` boolean (no permission slug), checked via `requireOperatorAdmin(event)` from [layers/core/tenant-kernel/server.ts](layers/core/tenant-kernel/server.ts). The tenancy layer adds `org.*` permissions when loaded.
 
-Code that checks permissions calls `isRegisteredPermission()` / `getAllPermissions()` — it never reads the static `PERMISSIONS` array directly, so layer contributions are always included. The `admin` role name is special-cased in [rbac.ts](layers/core/server/utils/rbac.ts) `getRolePermissions` to union every registered permission.
+Code that checks permissions calls `isRegisteredPermission()` / `getAllPermissions()` — it never reads the static `PERMISSIONS` array directly, so layer contributions are always included. The `admin` role name is special-cased in [rbac.ts](layers/core/server/utils/rbac.ts) `getRolePermissions` to union every registered permission, minus any a host withholds with `withholdFromAdmin` ([permissions-registry.ts](layers/core/server/utils/permissions-registry.ts)).
 
 Use granular permissions (e.g. `mail.read`, `mail.write`) not coarse ones (`mail.manage`) — the same vocabulary is shared with OAuth scopes.
 
@@ -219,6 +240,27 @@ Live examples:
 
 When adding a new settings surface (e.g. custom roles, per-org branding, host-level feature flags): write a `<thing>-settings.ts` file with one `defineSettings` call, export the reader, and have endpoints call it. Don't put the DB read in the endpoint; don't do the merge inline.
 
+### Personal apps (user-scoped layers)
+
+An app layer whose data belongs to each user instead of an org registers with `registerApp({ scope: 'user', permissions: [...] })` and maps its id to its path under `runtimeConfig.public.personalApps` in its own `nuxt.config.ts`. Same behaviour in single and multi mode ([layers/core/server/utils/personal-apps.ts](layers/core/server/utils/personal-apps.ts)):
+
+- **Access is per user, not per org.** `apps.status` `'default'` = every signed-in user; `'available'`/`'host_controlled'` = only users with a `user_apps` grant (host admin sets it on `/admin/users` or in an invite, via `invite_apps`) or in a host group listed in `app_groups` (`/admin/apps` → Users); `'admins'` = host admins only. While the app is on, the user holds every permission in `permissions`; roles grant nothing. Personal apps never appear in org feeds, `org_apps` or org settings.
+- **Groups** ([groups.ts](layers/core/server/utils/groups.ts), `/admin/groups`) are named sets of users: host groups (`org_id` NULL) or an org's. The group mode (host setting `core:group_mode`, default `audiences`) decides whether members see each other (`teams`) or groups only gate apps (`audiences`). The group tables have no RLS; handlers decide who sees membership. A layer that limits content to a group registers a lister with `registerGroupUsage`, which blocks deleting the group or switching to audiences while it's in use.
+- **Handlers** use `withUserPermission(event, { appId }, perm, fn)` / `withUserContext` / `defineUserHandler` from `#core/server/utils/personal-apps`; these also accept an OAuth bearer token (see [OAuth tokens on app routes](#oauth-tokens-on-app-routes)). Routes outside them call `runInUserTransaction(userId, { appId }, fn)` after `requireBearerScope`. They 410 when the app isn't on for the caller and set the `app.current_user` GUC — never `app.current_org`.
+- **Tables** have no `org_id` and no `_T` migration. RLS keys on `user_id = nullif(current_setting('app.current_user', true), '')::uuid`; sharing policies may widen that but must still reference `app.current_user` (the RLS invariant test enforces it).
+- **Pages** live at their bare path in every org: tenancy doesn't double them under `/@:orgSlug` and redirects `/@<slug>/<personal path>` to the bare one. The launcher lists them under "Personal"; their nav comes from `/api/_personal-nav`.
+- **Sharing** a personal item with people uses a share table per resource, made by `createShareTable` from `@nuxtinator/core/share-tables` in the app's migration and registered with `registerShareTable`; routes come from `defineShareHandler` and the UI from `<ShareDialog>` ([shares.ts](layers/core/server/utils/shares.ts)). Direct shares go only to known people; anyone else gets a share invite (`invites.kind = 'share'`) by email or single-use link, turned into a share inside the accept transaction.
+- `invite.accepted` fires after any invite is accepted, and with `inviteId: null` when an invite to an existing account attaches it directly, for layers that act on it.
+
+### OAuth tokens on app routes
+
+`defineTenantHandler` / `withOrgContext` / `withOrgPermission` (both kernels) and the personal-app handlers accept an OAuth access token in `Authorization: Bearer` as well as the session, so one route serves the web and OAuth clients (native apps, MCP clients). Core holds the hook in [bearer-auth.ts](layers/core/server/utils/bearer-auth.ts); the oauth layer registers the token check, and without it a token isn't a sign-in. A native-login session token in the same header stays a session.
+
+- The route must name a permission (`withOrgPermission` / `withUserPermission`) and the token must carry it as a scope; routes that name none refuse tokens with 403.
+- `ctx.perms` is the user's permissions narrowed to the token's scopes, so checks inside a handler respect what the user granted. `ctx.clientId` is the client (null for a session), and the activity log stores it as `client_id`.
+- Multi mode takes the org from `X-Active-Org` (or an `/api/o/<slug>/` path), else the user's only org, with the same 404 / 423 / 410 checks; the tenancy middleware skips token requests and the active-org cookie isn't set. Personal apps ignore the org.
+- `requireOperatorAdmin` never accepts a token.
+
 ### App-layer page paths — write single-tenant shape
 
 App layer pages live at `app/pages/<appId>/...` and routes mount at `server/routes/api/<appId>/...`. App authors do **not** prefix paths with `/@:orgSlug/...`.
@@ -234,15 +276,18 @@ When [layers/tenancy/](layers/tenancy/) is in `extends:`:
 - Schema augmentation adds `orgs`, `memberships`, `org_apps`, `org_role_overrides` tables and adds `org_id` columns to `custom_roles` + `activity_logs`.
 - Migrations: `tenancy_001_*` through `tenancy_020_*` plus per-app `*_T<NNN>_*.ts` files that retrofit each layer's tenant tables. Core's migrations Nitro plugin discovers `_T<NNN>_` files via `runtimeConfig.tenancyMigrationPaths` (set by the layer's `tenant-migrations` module). In single-tenant deploys those files exist on disk but never run.
 - Per-app tenancy migrations call `enableTenantScoping(db, '<table>')` (a helper inlined in each migration to avoid alias-resolution at migration-load time) — adds `org_id NOT NULL DEFAULT current_org_id() REFERENCES orgs(id) ON DELETE CASCADE` plus the missing-safe RLS policy. The `current_org_id()` Postgres function reads the GUC.
-- DB role split: `host_admin` (BYPASSRLS, exposed as `adminDb` from `#tenant/admin-db`, used by migrations + `/api/admin/orgs/...` endpoints) and `app_user` (RLS-enforced, the default `db` from [layers/core/server/utils/database.ts](layers/core/server/utils/database.ts)). Single deploys use only `DATABASE_URL`; multi deploys add `APP_DATABASE_URL`.
+- DB role split: `host_admin` (BYPASSRLS, exposed as `adminDb` from `#tenant/admin-db`, used by migrations + `/api/admin/orgs/...` endpoints) and `app_user` (RLS-enforced, the default `db` from [layers/core/server/utils/database.ts](layers/core/server/utils/database.ts)). Every deploy sets both `DATABASE_URL` and `APP_DATABASE_URL`; in single mode the owner role needn't be BYPASSRLS. See [documentation/database-roles.md](documentation/database-roles.md).
 - Nitro middleware reads `X-Active-Org` header (or path parameter for `/api/o/<slug>/...` and `/admin/orgs/:id/...` routes) and writes `event.context.{orgId,orgSlug,orgName,orgRoles}`. Does NOT set the GUC — `defineTenantHandler` does that inside its transaction.
 - Operator admin (`users.is_admin`) lives in core in both modes. The thing tenancy adds on top is BYPASSRLS for cross-org reach.
+- **Isolation invariant:** every row visible inside a tenant transaction belongs to the active org, so `ctx.perms` (the user's permissions in that org) is always checked against that org's rows. RLS policies are therefore exactly `org_id = current org` — never `OR visibility = 'public'` or similar; reach another org's row through `withRecordOrgContext`, which sets the GUC to the row's own org. The one exception is rows with no org, keyed on `app.current_user` (`org_id IS NULL AND user_id = me`): personal-app notifications. [policy-invariant.test.ts](layers/core/tests/rls/policy-invariant.test.ts) enforces this for every layer's migrations (restrictive policies are always allowed, since they only narrow), and core's [rls-guard.ts](layers/core/server/utils/rls-guard.ts) refuses requests in either mode when `db`'s role bypasses RLS.
 
 ### Migrations
 
 [layers/core/modules/migrations.ts](layers/core/modules/migrations.ts) (a Nuxt module) walks `nuxt.options._layers` at config time and collects every layer's `migrations/` folder. The Nitro plugin [layers/core/server/plugins/migrations.ts](layers/core/server/plugins/migrations.ts) reads those paths plus the host's own `migrations/` directory and runs Kysely's `Migrator` over the union on boot. Tenancy migrations (filename pattern `*_T<NNN>_*.ts`) are only included when the tenancy layer is loaded; they're suffixed `zzz_` internally to force them to sort after every other layer's regular migrations.
 
 Migration filenames must be globally unique across host + all layers. Convention: `<appId>_NNN_<description>.ts` for regular migrations; `<appId>_T<NNN>_<description>.ts` for per-app tenancy retrofits.
+
+**Committed migrations are immutable. Never squash, edit, rename, renumber or delete a migration file once it has been committed** — not even on an unreleased feature branch, and not to "tidy up before release". Every schema change, fix-up or reversal goes in a **new** migration. Kysely tracks migrations by name only, so any database that already ran the old file (another developer's checkout, a branch deploy, a host pinned to a local layer path) never re-runs it and silently misses whatever the rewrite added — e.g. helpinator `ec05e74` folded `008`–`011` into `001`–`007`, leaving existing DBs without `run_heartbeat_at`. Patch-on-patch migration history is fine; a drifted database is not. The only exception is a migration that has never left your machine (uncommitted) — and if in doubt, ask.
 
 Database is Postgres via Kysely + `kysely-postgres-js`. Schema composed: core tables in [layers/core/server/database/schema.ts](layers/core/server/database/schema.ts); layers extend the `Database` interface via module augmentation in their own `server/database/schema.d.ts`.
 
@@ -268,7 +313,9 @@ Database is Postgres via Kysely + `kysely-postgres-js`. Schema composed: core ta
 
 ## User instruction reminders
 
+- Before any UI work, read [layers/core/DESIGN.md](layers/core/DESIGN.md) and follow it. When a UI decision is made or reversed, update DESIGN.md (the rule) and [documentation/ui-decisions.md](documentation/ui-decisions.md) (the reasoning and what was rejected).
 - App-layer pages live at `app/pages/<appId>/...`. Don't write them with org-slug prefixes — the tenancy layer adds those automatically when loaded.
 - Layer code that touches the database imports `db` from `#core/server/utils/database`. Only the tenancy layer imports `adminDb` (via `#tenant/admin-db`); doing so from outside that layer is a tenancy contract violation.
 - Server route handlers that need user identity / permissions use `defineTenantHandler` from `#tenant/server`. In single mode it's just `requireAuth` + a transaction; in multi mode it adds the org context.
 - Run dev/build/test commands from `dev/`, not from the repo root.
+- Never squash, edit, rename or delete a committed migration — add a new one (see [Migrations](#migrations)).

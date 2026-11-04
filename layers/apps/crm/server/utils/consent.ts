@@ -22,6 +22,8 @@ type Tx = Transaction<Database>
 // and carry their evidence in `source`/`captureMeta` instead.
 export interface CrmConsentActor {
   userId: string | null
+  /** The OAuth client the change came through; recorded in the event's meta. */
+  clientId?: string | null
 }
 
 type ConsentRow = Selectable<Database['crm_channel_consents']>
@@ -167,7 +169,10 @@ async function setConsent(
       actor_user_id: ctx.userId,
       ip: input.ip ?? null,
       user_agent: input.userAgent ?? null,
-      meta: sql<Record<string, unknown>>`${JSON.stringify(input.captureMeta ?? {})}::text::jsonb`
+      meta: sql<Record<string, unknown>>`${JSON.stringify({
+        ...(input.captureMeta ?? {}),
+        ...(ctx.clientId ? { client_id: ctx.clientId } : {})
+      })}::text::jsonb`
     })
     .execute()
 

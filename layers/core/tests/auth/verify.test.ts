@@ -1,6 +1,6 @@
 // Standalone tests for GET /api/auth/verify. The register flow exercises the
 // happy path; this file covers the redirect-based responses for the various
-// error conditions (already-verified, invalid token, expired, pending invite).
+// error conditions (already-verified, invalid token, expired).
 import { describe, it, expect, afterEach, afterAll } from 'vitest'
 import { fetch } from '@nuxt/test-utils/e2e'
 import { randomUUID } from 'node:crypto'
@@ -53,21 +53,6 @@ describe('GET /api/auth/verify', () => {
     // User stays unverified
     const after = await sql<{ verified: boolean }[]>`SELECT verified FROM users WHERE id = ${user.id}`
     expect(after[0]!.verified).toBe(false)
-  })
-
-  it('redirects with verified=invalid when user has no password (pending invite)', async () => {
-    // Pending-invite users have password=null and must use /accept-invite.
-    const id = randomUUID()
-    const tokenKey = randomUUID()
-    const future = new Date(Date.now() + 60_000).toISOString()
-    await sql`
-      INSERT INTO users (id, email, password, display_name, verified, is_admin, token_key, token_expires_at)
-      VALUES (${id}, ${`test-core-pending-${randomUUID().slice(0, 8)}@example.com`},
-              NULL, 'Pending', false, false, ${tokenKey}, ${future})
-    `
-
-    const res = await verifyRaw(tokenKey)
-    expect(res.headers.get('location')).toMatch(/verified=invalid/)
   })
 
   it('flips verified=true and clears token_expires_at on successful verify', async () => {

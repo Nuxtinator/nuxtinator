@@ -1,5 +1,6 @@
 import type { H3Event } from 'h3'
 import { logEvent } from '#core/server/utils/activity-logger'
+import { getClientIp } from '#core/server/utils/client-ip'
 
 export const OAUTH_EVENTS = {
   CLIENT_REGISTERED: 'oauth.client_registered',
@@ -8,7 +9,9 @@ export const OAUTH_EVENTS = {
   CONSENT_GRANTED: 'oauth.consent_granted',
   CONSENT_DENIED: 'oauth.consent_denied',
   CONSENT_REVOKED: 'oauth.consent_revoked',
+  CONSENT_UPDATED: 'oauth.consent_updated',
   SCOPE_REDUCED: 'oauth.scope_reduced',
+  AUTHORIZE_ORG_UNRESOLVED: 'oauth.authorize_org_unresolved',
   AUTHORIZATION_CODE_ISSUED: 'oauth.authorization_code_issued',
   AUTHORIZATION_CODE_REUSED: 'oauth.authorization_code_reused',
   TOKEN_ISSUED: 'oauth.token_issued',
@@ -36,7 +39,7 @@ interface OauthLogOptions {
 // computes its own and passes it explicitly).
 export function logOauthEvent(options: OauthLogOptions): void {
   const userAgent = options.event3 ? (getHeader(options.event3, 'user-agent') || undefined) : undefined
-  const ip = options.event3 ? (getRequestIP(options.event3, { xForwardedFor: true }) || undefined) : undefined
+  const ip = options.event3 ? getClientIp(options.event3) : undefined
   const metadata = ip
     ? { ip, ...(options.metadata ?? {}) }
     : (options.metadata ?? {})

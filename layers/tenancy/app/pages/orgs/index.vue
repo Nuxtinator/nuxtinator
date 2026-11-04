@@ -65,10 +65,10 @@ const statusLabel = (org: { suspended: boolean }) => org.suspended ? 'Suspended'
       <li
         v-for="org in orgs"
         :key="org.id"
-        class="flex items-center gap-2 rounded-md border border-(--ui-border) p-2 pr-3 hover:bg-(--ui-bg-elevated) transition-colors"
+        class="flex items-center gap-2 rounded-md border border-(--ui-border) dark:border-(--ui-border-accented) p-2 pr-3 bg-(--ui-bg-elevated)/50 hover:bg-(--ui-bg-elevated) transition-colors"
       >
         <NuxtLink
-          :to="`/@${org.slug}/`"
+          :to="launcherPath(org.slug)"
           class="flex-1 min-w-0 flex items-center justify-between gap-3 p-2 rounded-md"
         >
           <div class="min-w-0">

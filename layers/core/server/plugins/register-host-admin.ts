@@ -26,6 +26,14 @@ export default defineNitroPlugin(() => {
 
   registerAdminSection({
     appId: 'host',
+    title: 'Groups',
+    path: '/admin/groups',
+    icon: 'i-lucide-users-round',
+    order: 15
+  })
+
+  registerAdminSection({
+    appId: 'host',
     title: 'Apps',
     path: '/admin/apps',
     icon: 'i-lucide-grid-2x2',
@@ -46,5 +54,13 @@ export default defineNitroPlugin(() => {
     path: '/admin/audit',
     icon: 'i-lucide-history',
     order: 30
+  })
+
+  registerAdminSection({
+    appId: 'host',
+    title: 'Settings',
+    path: '/admin/settings',
+    icon: 'i-lucide-settings',
+    order: 40
   })
 })

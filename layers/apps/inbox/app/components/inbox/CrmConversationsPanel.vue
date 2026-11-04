@@ -58,8 +58,7 @@ async function sendReply(id: string) {
   replySending.value = true
   try {
     const url: string = `/api/inbox/conversations/${id}/messages`
-    // <_, string> pins the request type off the deep typed-route union (TS2589).
-    await $fetch<unknown, string>(url, {
+    await $fetch(url, {
       method: 'POST',
       body: {
         body: toMarkup(text),

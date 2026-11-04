@@ -10,7 +10,7 @@
 // the e2e run from uploading to the live bucket.
 import { test, expect } from '@playwright/test'
 import { loginIntoNewOrg } from './helpers/login'
-import { getHostAdminDb } from 'layer-core/test-helpers'
+import { getHostAdminDb } from '@nuxtinator/core/test-helpers'
 
 const baseURL = process.env.TEST_BASE_URL || 'http://localhost:2090'
 

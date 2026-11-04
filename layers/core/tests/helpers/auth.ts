@@ -58,20 +58,41 @@ export async function createTestUser(
   return { id, email, display_name, password, verified, is_admin }
 }
 
-export function generateTestToken(user: TestUser): string {
+// A session access token. The `sid` need not exist in `sessions` — access
+// tokens are verified statelessly — but endpoints that act on the session
+// (logout, step-up) need a real row; use `createTestSession` for those.
+export function generateTestToken(user: TestUser, sessionId: string = randomUUID()): string {
   return jwt.sign(
-    { userId: user.id, email: user.email, display_name: user.display_name },
+    { userId: user.id, email: user.email, display_name: user.display_name, sid: sessionId },
     jwtSecret(),
     { expiresIn: '7d' }
   )
 }
 
+// Inserts a `sessions` row for the user and returns cookie headers bound to
+// it. `authenticatedAgoMs` backdates the last sign-in, e.g. past the step-up
+// window.
+export async function createTestSession(
+  sql: ReturnType<typeof postgres>,
+  user: TestUser,
+  opts: { authenticatedAgoMs?: number } = {}
+): Promise<{ sessionId: string, auth: AuthHeaders }> {
+  const sessionId = randomUUID()
+  const authenticatedAt = new Date(Date.now() - (opts.authenticatedAgoMs ?? 0)).toISOString()
+  const expiresAt = new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString()
+  await sql`
+    INSERT INTO sessions (id, user_id, client, refresh_token_hash, expires_at, authenticated_at)
+    VALUES (${sessionId}, ${user.id}, 'web', ${randomUUID()}, ${expiresAt}, ${authenticatedAt})
+  `
+  return { sessionId, auth: { headers: { cookie: `auth-token=${generateTestToken(user, sessionId)}` } } }
+}
+
 // A scope-tagged bearer token, matching `signScopedToken` in core auth. Used
 // by cross-origin flows (e.g. the feedback widget's `Authorization: Bearer`),
 // which verify the token carries the expected `scope` claim.
-export function generateScopedTestToken(user: TestUser, scope: string): string {
+export function generateScopedTestToken(user: TestUser, scope: string, claims: Record<string, unknown> = {}): string {
   return jwt.sign(
-    { userId: user.id, email: user.email, display_name: user.display_name, scope },
+    { userId: user.id, email: user.email, display_name: user.display_name, ...claims, scope },
     jwtSecret(),
     { expiresIn: '7d' }
   )

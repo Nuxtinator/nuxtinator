@@ -6,7 +6,12 @@
 //
 //   1. Registry default       — layer's `registerApp({ defaultStatus })`
 //   2. Host-admin override    — `apps.status` (set via /admin/apps)
-//   3. Org-admin override     — `org_apps.enabled` (set via /@<org>/settings/apps)
+//                               'default' = on for orgs without a row,
+//                               'available' = off until the org enables it,
+//                               'host_controlled' = off until a host admin
+//                               enables it; org admins can't change it
+//   3. Per-org override       — `org_apps.enabled` (set via /@<org>/settings/apps,
+//                               or by a host admin via /admin/apps)
 //
 // `getApps` resolves (1) and (2). `getOrgApps` adds (3). The downstream
 // helpers (`getOrgEnabledApps`, `isAppEnabledForOrg`) filter off its
@@ -23,7 +28,8 @@ export interface OrgAppEntry extends AppCatalogEntry {
   // null when no explicit row exists and the answer derives from the
   // catalog status alone.
   source: OrgAppSource | null
-  // Host has disabled the app catalog-wide — org admin can't override.
+  // Org admin can't change it: the host has disabled the app catalog-wide
+  // or made it host-controlled.
   lockedByHost: boolean
   // Catalog-level status surfaced for UI tooltips ("Default: available").
   globalStatus: AppStatus
@@ -38,10 +44,11 @@ interface OrgAppRow {
 export const getOrgApps = defineSettings<AppCatalogEntry, OrgAppRow, OrgAppEntry>({
   // Defaults = the catalog merge, filtered to installed apps only. An
   // uninstalled orphan row can't be org-enabled, so it's not even worth
-  // surfacing to org-level callers.
+  // surfacing to org-level callers. Personal apps are turned on per user,
+  // never per org (see core's personal-apps.ts), so they're left out too.
   loadDefaults: async (tx) => {
     const catalog = await getApps(tx)
-    return catalog.filter(a => a.installed)
+    return catalog.filter(a => a.installed && a.scope !== 'user')
   },
   loadOverrides: async (tx, ctx) => {
     if (!ctx.orgId) throw new Error('getOrgApps requires ctx.orgId')
@@ -55,11 +62,8 @@ export const getOrgApps = defineSettings<AppCatalogEntry, OrgAppRow, OrgAppEntry
   keyOf: app => app.id,
   merge: (app, orgRow) => {
     const a = app!
-    const lockedByHost = a.status === 'disabled'
-    let enabled: boolean
-    if (lockedByHost) enabled = false
-    else if (orgRow) enabled = orgRow.enabled
-    else enabled = true
+    const lockedByHost = a.status === 'disabled' || a.status === 'host_controlled'
+    const enabled = resolveOrgAppEnabled(a.status, orgRow)
     return {
       ...a,
       globalStatus: a.status,
@@ -69,6 +73,15 @@ export const getOrgApps = defineSettings<AppCatalogEntry, OrgAppRow, OrgAppEntry
     }
   }
 })
+
+// Whether an org has an app on, given the catalog status and the org's row
+// (if any). A host-disabled app is off regardless of the row. 'admins' belongs
+// to personal apps and reads as disabled for an org app.
+export function resolveOrgAppEnabled(status: AppStatus, orgRow: { enabled: boolean } | undefined): boolean {
+  if (status === 'disabled' || status === 'admins') return false
+  if (orgRow) return orgRow.enabled
+  return status === 'default'
+}
 
 // Set of installed-and-enabled app IDs for an org. Used by the launcher
 // (`/api/.../_apps`), the `app.enabled` gate inside `defineTenantHandler`,

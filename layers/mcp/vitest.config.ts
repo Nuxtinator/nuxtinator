@@ -20,7 +20,10 @@ export default defineConfig({
       // so we mirror those aliases here pointing at the test stubs.
       '#oauth/bearer': `${stubsDir}/server/utils/oauth-bearer.ts`,
       '#oauth/config': `${stubsDir}/server/utils/oauth-config.ts`,
-      '#oauth/scopes': `${stubsDir}/server/utils/scopes-registry.ts`
+      '#oauth/scopes': `${stubsDir}/server/utils/scopes-registry.ts`,
+      // Same for the core layer's `#core/*` alias.
+      '#core/app/utils/permissions': `${stubsDir}/app/utils/permissions.ts`,
+      '#core/server/utils/permissions-registry': `${stubsDir}/server/utils/permissions-registry.ts`
     }
   },
   test: {
@@ -32,9 +35,6 @@ export default defineConfig({
     // Integration tests boot the fixture consumer and run sequentially —
     // they share the test Postgres and the booted Nuxt server.
     fileParallelism: false,
-    poolOptions: {
-      threads: { singleThread: false }
-    },
     // Long timeout for boot-the-Nuxt-fixture init.
     testTimeout: 30_000,
     hookTimeout: 60_000

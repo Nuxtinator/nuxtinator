@@ -30,4 +30,34 @@ describe('rls (multi-tenant test mode)', () => {
     `
     expect(rows.some(r => r.policyname === 'tenant_isolation')).toBe(true)
   })
+
+  it('context_assistant_conversations is tenant-scoped directly', async () => {
+    const cols = await sql<{ column_name: string }[]>`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'context_assistant_conversations'
+    `
+    expect(cols.map(r => r.column_name)).toContain('org_id')
+    const policies = await sql<{ policyname: string }[]>`
+      SELECT policyname FROM pg_policies WHERE tablename = 'context_assistant_conversations'
+    `
+    expect(policies.some(r => r.policyname === 'tenant_isolation')).toBe(true)
+  })
+})
+
+describe('rls — section chunks', () => {
+  const sql = getHostAdminDb()
+
+  it('context_section_chunks is tenant-scoped with the vector column present', async () => {
+    const cols = await sql<{ column_name: string, udt_name: string }[]>`
+      SELECT column_name, udt_name FROM information_schema.columns
+      WHERE table_name = 'context_section_chunks'
+    `
+    const names = cols.map(r => r.column_name)
+    expect(names).toContain('org_id')
+    expect(cols.find(r => r.column_name === 'embedding')?.udt_name).toBe('vector')
+    const policies = await sql<{ policyname: string }[]>`
+      SELECT policyname FROM pg_policies WHERE tablename = 'context_section_chunks'
+    `
+    expect(policies.some(r => r.policyname === 'tenant_isolation')).toBe(true)
+  })
 })

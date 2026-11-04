@@ -1,15 +1,19 @@
+import { REFRESH_COOKIE, clearSessionCookies, revokeSession, sessionIdOf } from '../../utils/sessions'
+import { cookieName } from '../../utils/cookie-names'
+
+// Ends this device's session. The session is found from the access token, or
+// from the refresh token (cookie, or `refreshToken` in the body for native
+// clients) when the access token has already expired.
 export default defineEventHandler(async (event) => {
-  // Get user info before clearing cookie
   const user = getAuthUser(event)
   const userAgent = getHeader(event, 'user-agent') || undefined
 
-  // Clear the auth cookie
-  setCookie(event, 'auth-token', '', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 0 // Expire immediately
-  })
+  const body = await readBody(event).catch(() => null) as { refreshToken?: unknown } | null
+  const refreshToken = typeof body?.refreshToken === 'string' ? body.refreshToken : getCookie(event, cookieName(REFRESH_COOKIE))
+  const sessionId = user?.sid ?? (refreshToken ? sessionIdOf(refreshToken) : null)
+
+  if (sessionId) await revokeSession(sessionId)
+  clearSessionCookies(event)
 
   // Log logout if user was authenticated
   if (user?.userId) {

@@ -19,6 +19,7 @@ export interface PermissionMeta {
 
 const _layerPerms = new Set<string>()
 const _layerMeta = new Map<string, PermissionMeta>()
+const _withheldFromAdmin = new Set<string>()
 
 export function registerPermissions(
   perms: ReadonlyArray<string>,
@@ -41,6 +42,19 @@ export function isRegisteredPermission(perm: string): boolean {
   return _layerPerms.has(perm)
 }
 
+// Permissions the `admin` role does not receive automatically. A host calls
+// this to keep a layer's permission from org/site admins; users then hold it
+// only through another role or a per-user grant.
+export function withholdFromAdmin(perms: ReadonlyArray<string>): void {
+  for (const p of perms) {
+    if (typeof p === 'string' && p.length > 0) _withheldFromAdmin.add(p)
+  }
+}
+
+export function isWithheldFromAdmin(perm: string): boolean {
+  return _withheldFromAdmin.has(perm)
+}
+
 export function getPermissionMeta(perm: string): PermissionMeta | undefined {
   return PERMISSION_META[perm] ?? _layerMeta.get(perm)
 }
@@ -51,4 +65,5 @@ export function __resetPermissionsRegistryForTests(): void {
   }
   _layerPerms.clear()
   _layerMeta.clear()
+  _withheldFromAdmin.clear()
 }

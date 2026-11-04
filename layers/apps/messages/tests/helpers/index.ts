@@ -17,9 +17,9 @@ import {
   createTestOrg,
   addTestMembership,
   type TestOrg
-} from 'layer-tenancy/test-helpers'
+} from '@nuxtinator/tenancy/test-helpers'
 
-export * from 'layer-tenancy/test-helpers'
+export * from '@nuxtinator/tenancy/test-helpers'
 
 // Users / orgs are tagged with `test-messages-` so per-layer cleanup stays
 // scoped. Anything tagged `test-tenancy-` or `test-core-` is owned by other

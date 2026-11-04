@@ -3,7 +3,8 @@ import { requireAuth } from '#core/server/utils/auth'
 import { runInOrgTransaction } from '#tenant/server'
 import { getOauthConfig } from '../../utils/oauth-config'
 import { sha256Hex, constantTimeEqual } from '../../utils/oauth-crypto'
-import { buildRedirect } from '../../utils/oauth-validation'
+import { buildRedirect, hasAnyPermissionScope, parseScopeString } from '../../utils/oauth-validation'
+import { choicesFromRow, mergeConsentChoices } from '../../utils/oauth-consent-choices'
 import { issueCode } from '../../utils/oauth-issue-code'
 import { logOauthEvent, OAUTH_EVENTS } from '../../utils/oauth-audit'
 
@@ -19,6 +20,8 @@ export default defineEventHandler(async (event) => {
   const requestId = body?.request_id ? String(body.request_id) : ''
   const action = body?.action ? String(body.action) : ''
   const submittedCsrf = body?.csrf_token ? String(body.csrf_token) : ''
+  // The scopes left ticked on the consent screen.
+  const ticked = new Set([body?.scope ?? []].flat().map(String))
 
   if (!requestId || !action) {
     abort(400, 'Missing required fields')
@@ -29,7 +32,9 @@ export default defineEventHandler(async (event) => {
 
   // Reads + writes against oauth_pending_requests and oauth_consents are
   // RLS-scoped in multi-tenant mode. Single mode: plain transaction, no GUC.
-  const pending = await runInOrgTransaction(event, async (tx) => {
+  // `userId` resolves the org the same way `authorize.get.ts` did, so this
+  // step reads the pending row it wrote.
+  const { row: pending, chosen } = await runInOrgTransaction(event, { userId: user.userId }, async (tx) => {
     const row = await tx
       .selectFrom('oauth_pending_requests')
       .selectAll()
@@ -58,36 +63,53 @@ export default defineEventHandler(async (event) => {
 
     if (!consumed) abort(410, 'Already consumed')
 
-    if (action === 'approve') {
-      // Upsert consent — must run in the same txn so the GUC scopes the row
-      // to the active org via the column DEFAULT.
-      await tx
-        .insertInto('oauth_consents')
-        .values({
-          client_id: row.client_id,
-          user_id: row.user_id,
-          resource: row.resource,
-          scope: row.scope,
-          revoked: false
-        })
-        .onConflict(oc => oc
-          .columns(['client_id', 'user_id', 'resource'])
-          .doUpdateSet({
-            scope: row.scope,
-            revoked: false,
-            updated: new Date()
-          })
-        )
-        .execute()
-    }
+    // Approving with no permission left ticked is a deny.
+    const requested = parseScopeString(row.scope)
+    const chosen = action === 'approve' ? requested.filter(s => ticked.has(s)) : []
+    if (!hasAnyPermissionScope(chosen)) return { row, chosen: null }
 
-    return row
+    // Upsert consent — must run in the same txn so the GUC scopes the row
+    // to the active org via the column DEFAULT. Unticked scopes are kept as
+    // declined so the screen doesn't ask about them again.
+    const prev = await tx
+      .selectFrom('oauth_consents')
+      .select(['scope', 'declined_scope'])
+      .where('client_id', '=', row.client_id)
+      .where('user_id', '=', row.user_id)
+      .where('resource', '=', row.resource)
+      .where('revoked', '=', false)
+      .executeTakeFirst()
+    const choices = mergeConsentChoices(choicesFromRow(prev), requested, chosen)
+    const saved = {
+      scope: choices.granted.join(' '),
+      declined_scope: choices.declined.join(' ')
+    }
+    await tx
+      .insertInto('oauth_consents')
+      .values({
+        client_id: row.client_id,
+        user_id: row.user_id,
+        resource: row.resource,
+        ...saved,
+        revoked: false
+      })
+      .onConflict(oc => oc
+        .columns(['client_id', 'user_id', 'resource'])
+        .doUpdateSet({
+          ...saved,
+          revoked: false,
+          updated: new Date()
+        })
+      )
+      .execute()
+
+    return { row, chosen }
   })
 
   // Clear consent cookie
   deleteCookie(event, `oauth_consent_token_${requestId}`, { path: '/oauth/' })
 
-  if (action === 'deny') {
+  if (!chosen) {
     logOauthEvent({
       event: OAUTH_EVENTS.CONSENT_DENIED,
       userId: user.userId,
@@ -107,6 +129,7 @@ export default defineEventHandler(async (event) => {
     return
   }
 
+  const grantedScope = chosen.join(' ')
   logOauthEvent({
     event: OAUTH_EVENTS.CONSENT_GRANTED,
     userId: user.userId,
@@ -114,7 +137,8 @@ export default defineEventHandler(async (event) => {
     metadata: {
       client_id: pending.client_id,
       resource: pending.resource,
-      scope: pending.scope
+      scope: grantedScope,
+      requested: pending.scope
     }
   })
 
@@ -138,7 +162,7 @@ export default defineEventHandler(async (event) => {
     clientId: pending.client_id,
     clientName: clientMeta?.client_name ?? pending.client_id,
     dynamic: Boolean(clientMeta?.dynamic),
-    scope: pending.scope,
+    scope: grantedScope,
     resource: pending.resource,
     event
   })
@@ -147,7 +171,7 @@ export default defineEventHandler(async (event) => {
     clientId: pending.client_id,
     userId: pending.user_id,
     redirectUri: pending.redirect_uri,
-    scope: pending.scope,
+    scope: grantedScope,
     resource: pending.resource,
     codeChallenge: pending.code_challenge,
     event

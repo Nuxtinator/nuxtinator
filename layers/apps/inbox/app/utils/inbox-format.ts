@@ -42,12 +42,21 @@ export const INBOX_STATUS_META: Record<string, { label: string, color: 'primary'
   spam: { label: 'Spam', color: 'error' }
 }
 
+// The deliverability suppression vocabulary as badge labels (why an address
+// is not receiving mail).
+export const INBOX_SUPPRESSION_REASON_META: Record<string, { label: string, color: 'error' | 'warning' | 'neutral' }> = {
+  hard_bounce: { label: 'Hard bounce', color: 'error' },
+  complaint: { label: 'Complaint', color: 'error' },
+  manual: { label: 'Manual block', color: 'warning' }
+}
+
 // How a conversation entered the inbox. Rendered as a small muted badge on
 // list rows so staff can tell an emailed thread from a form submission or a
 // staff-composed one at a glance.
 export const INBOX_SOURCE_META: Record<string, { label: string, icon: string }> = {
   inbound_email: { label: 'Email', icon: 'i-lucide-mail' },
   contact_form: { label: 'Form', icon: 'i-lucide-clipboard-list' },
+  helpinator: { label: 'Chat', icon: 'i-lucide-message-circle' },
   staff: { label: 'Staff', icon: 'i-lucide-pen-line' }
 }
 

@@ -4,6 +4,7 @@ import ProjectsBoard from '../../components/kanban/ProjectsBoard.vue'
 import ProjectsSidebar from '../../components/kanban/ProjectsSidebar.vue'
 import CardEditSidePanel from '../../components/kanban/CardEditSidePanel.vue'
 import KanbanContextMenu from '../../components/kanban/KanbanContextMenu.vue'
+import { BOARD_USERS_KEY, type BoardUser } from '../../composables/useCardUtils'
 import type {
   KanbanCardModel as Card,
   KanbanColumnModel as Column,
@@ -12,6 +13,7 @@ import type {
 } from '../../components/kanban/types'
 
 const toast = useToast()
+const confirmAction = useConfirm()
 
 definePageMeta({
   middleware: 'auth'
@@ -63,7 +65,8 @@ const projects = ref<Project[]>([])
 const columns = ref<Column[]>([])
 const swimlanes = ref<Swimlane[]>([])
 const cards = ref<Card[]>([])
-const assignableUsers = ref<{ id: string, display_name: string | null }[]>([])
+const assignableUsers = ref<BoardUser[]>([])
+provide(BOARD_USERS_KEY, assignableUsers)
 const loading = ref(true)
 const error = ref('')
 
@@ -99,7 +102,7 @@ async function loadAll() {
     const [projectsRes, columnsRes, assigneesRes] = await Promise.all([
       $fetch<Project[]>('/api/feedback/projects'),
       $fetch<Column[]>('/api/feedback/columns'),
-      $fetch<{ users: { id: string, display_name: string | null }[] }>('/api/feedback/assignees')
+      $fetch<{ users: BoardUser[] }>('/api/feedback/assignees')
         .catch(() => ({ users: [] }))
     ])
 
@@ -142,7 +145,10 @@ async function refreshCards() {
 const { start: startPoll, stop: stopPoll } = useBoardPoll(refreshCards, pollPaused, 5000)
 
 onMounted(() => {
-  loadAll().then(() => startPoll())
+  loadAll().then(() => {
+    openCardFromQuery()
+    startPoll()
+  })
 })
 
 onUnmounted(() => {
@@ -171,6 +177,14 @@ const projectForm = ref({
 const userItems = computed(() =>
   assignableUsers.value.map(u => ({ id: u.id, label: u.display_name || 'Unnamed user' }))
 )
+
+// Picker items for a recipient list: the candidates plus any selected id that
+// no longer matches one, so a removed user still shows and can be unselected.
+function recipientItems(selected: string[]) {
+  const known = new Set(userItems.value.map(u => u.id))
+  const stale = selected.filter(id => !known.has(id)).map(id => ({ id, label: 'Removed user' }))
+  return [...userItems.value, ...stale]
+}
 const projectBusy = ref(false)
 
 // The allowed-origins textarea accepts one origin per line (commas/spaces also
@@ -236,7 +250,11 @@ async function submitProject() {
   }
 }
 async function deleteProject(p: Project) {
-  if (!import.meta.client || !confirm(`Delete project "${p.name}" and all its cards + swimlanes?`)) return
+  if (!import.meta.client || !await confirmAction({
+    title: `Delete project "${p.name}"?`,
+    description: 'Its cards and swimlanes are deleted too.',
+    confirmLabel: 'Delete'
+  })) return
   try {
     await $fetch(`/api/feedback/projects/${p.id}`, { method: 'DELETE' })
     projects.value = projects.value.filter(x => x.id !== p.id)
@@ -374,10 +392,27 @@ async function submitCard() {
 }
 
 // ---------- Card panel (edit/move) ----------
+const { refresh: refreshNotifications } = useNotifications()
+
 function openCard(card: Card) {
   activeCard.value = card
   cardPanelOpen.value = true
+  $fetch(`/api/feedback/cards/${card.id}/read`, { method: 'POST' })
+    .then(() => refreshNotifications())
+    .catch(() => {})
 }
+
+// Notification links point at `?card=<id>`; open that card once the board has it.
+function openCardFromQuery() {
+  const id = route.query.card
+  if (typeof id !== 'string') return
+  const card = cards.value.find(c => c.id === id)
+  if (card) openCard(card)
+  router.replace({ query: { ...route.query, card: undefined } })
+}
+watch(() => route.query.card, () => {
+  if (!loading.value) openCardFromQuery()
+})
 async function onCardDrop(payload: {
   card: Card
   toColumnId: string
@@ -412,25 +447,47 @@ async function onCardDrop(payload: {
       const i = cards.value.findIndex(c => c.id === updated.id)
       if (i >= 0) cards.value.splice(i, 1, updated)
     }
+    refreshNotifications().catch(() => {})
   } catch (e: any) {
     cards.value.splice(idx, 1, prev)
     toast.add({ title: 'Move failed', description: e?.data?.statusMessage, color: 'error' })
     await loadAll()
   }
 }
+// Saves the panel's edits, then moves the card when its status or project
+// changed, so the move endpoint records the column history.
+async function persistCard(card: Card, patch: Partial<Card>): Promise<Card> {
+  const { column_id: columnId, project_id: projectId, ...fields } = patch
+  let saved = await $fetch<Card>(`/api/feedback/cards/${card.id}`, {
+    method: 'PATCH',
+    body: fields
+  })
+  const targetColumn = columnId || saved.column_id
+  const targetProject = projectId || saved.project_id
+  if (targetColumn && (targetColumn !== saved.column_id || targetProject !== saved.project_id)) {
+    saved = await $fetch<Card>(`/api/feedback/cards/${card.id}/move`, {
+      method: 'PATCH',
+      body: { column_id: targetColumn, swimlane_id: saved.swimlane_id, project_id: targetProject }
+    })
+  }
+  return saved
+}
+
 async function onSaveCard(patch: Partial<Card>) {
   if (!activeCard.value) return
   try {
-    const updated = await $fetch<Card>(`/api/feedback/cards/${activeCard.value.id}`, {
-      method: 'PATCH',
-      body: patch
-    })
+    const updated = await persistCard(activeCard.value, patch)
     const i = cards.value.findIndex(c => c.id === updated.id)
     if (i >= 0) cards.value.splice(i, 1, updated)
     cardPanelOpen.value = false
   } catch (e: any) {
     toast.add({ title: 'Save failed', description: e?.data?.statusMessage, color: 'error' })
   }
+}
+// The panel keeps its open card and draft; only the board's copy is refreshed.
+function onCardReplied(updated: Card) {
+  const i = cards.value.findIndex(c => c.id === updated.id)
+  if (i >= 0) cards.value.splice(i, 1, updated)
 }
 async function onDeleteCard(cardId: string) {
   try {
@@ -466,27 +523,9 @@ async function archiveCard(card: Card) {
     })
     const i = cards.value.findIndex(c => c.id === updated.id)
     if (i >= 0) cards.value.splice(i, 1, updated)
+    refreshNotifications().catch(() => {})
   } catch (e: any) {
     cards.value.splice(idx, 1, prev)
-    toast.add({ title: 'Archive failed', description: e?.data?.statusMessage, color: 'error' })
-  }
-}
-
-// Archiving from the edit panel persists the card's edits (labels, etc.) first,
-// then moves it into the ARCHIVE column so the move endpoint logs the history.
-async function onArchiveCard(patch: Partial<Card>) {
-  const card = activeCard.value
-  if (!card) return
-  try {
-    const saved = await $fetch<Card>(`/api/feedback/cards/${card.id}`, {
-      method: 'PATCH',
-      body: patch
-    })
-    const i = cards.value.findIndex(c => c.id === saved.id)
-    if (i >= 0) cards.value.splice(i, 1, saved)
-    cardPanelOpen.value = false
-    await archiveCard(saved)
-  } catch (e: any) {
     toast.add({ title: 'Archive failed', description: e?.data?.statusMessage, color: 'error' })
   }
 }
@@ -779,7 +818,7 @@ async function onReorderProjects(payload: { orderedIds: string[] }) {
       :users="assignableUsers"
       @save="onSaveCard"
       @delete="onDeleteCard"
-      @archive="onArchiveCard"
+      @replied="onCardReplied"
     />
 
     <UModal v-model:open="projectModalOpen" :title="projectForm.mode === 'create' ? 'New project' : 'Project settings'">
@@ -834,7 +873,7 @@ async function onReorderProjects(payload: { orderedIds: string[] }) {
           >
             <USelectMenu
               v-model="projectForm.notifyUserIds"
-              :items="userItems"
+              :items="recipientItems(projectForm.notifyUserIds)"
               value-key="id"
               label-key="label"
               multiple
@@ -875,7 +914,7 @@ async function onReorderProjects(payload: { orderedIds: string[] }) {
           >
             <USelectMenu
               v-model="defaultNotifyUserIds"
-              :items="userItems"
+              :items="recipientItems(defaultNotifyUserIds)"
               value-key="id"
               label-key="label"
               multiple

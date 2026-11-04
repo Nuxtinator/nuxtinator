@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch, fetch } from '@nuxt/test-utils/e2e'
 import {
@@ -235,11 +236,31 @@ describe('files layer', () => {
     // Opaque origin: the page must never be able to ride a visitor's cookie.
     expect(res.headers.get('content-security-policy')).toContain('sandbox')
     expect(res.headers.get('content-security-policy')).not.toContain('allow-same-origin')
+    expect(res.headers.get('content-security-policy')).toContain('allow-downloads')
+    expect(res.headers.get('content-security-policy')).toContain('allow-popups-to-escape-sandbox')
     expect(await res.text()).toBe(html)
 
     await $fetch(`/api/files/items/${id}/share`, { method: 'DELETE', ...withOrgHeader(auth, org.slug) })
     const after = await fetch(`/files/site/${issued.share_token}`)
     expect(after.status).toBe(404)
+  })
+
+  it('sends a signed-in visitor to the framed site page; ?bare=1 serves the HTML', async () => {
+    const { org, user, auth } = await createFilesOrgWith(sql)
+    const html = '<!doctype html><html><body><h1>Framed</h1></body></html>'
+    const { id } = await createTestSite(sql, { org_id: org.id, created_by: user.id, html })
+    const issued = await $fetch<{ share_token: string }>(
+      `/api/files/items/${id}/share`, { method: 'POST', ...withOrgHeader(auth, org.slug) }
+    )
+
+    const redirected = await fetch(`/files/site/${issued.share_token}`, { ...auth, redirect: 'manual' })
+    expect(redirected.status).toBe(302)
+    expect(redirected.headers.get('location')).toBe(`/files/public/${issued.share_token}`)
+
+    const bare = await fetch(`/files/site/${issued.share_token}?bare=1`, { ...auth, redirect: 'manual' })
+    expect(bare.status).toBe(200)
+    expect(bare.headers.get('content-security-policy')).toContain('sandbox')
+    expect(await bare.text()).toBe(html)
   })
 
   it('site raw route 404s for a doc share token', async () => {
@@ -266,6 +287,75 @@ describe('files layer', () => {
     expect(pub.kind).toBe('site')
     expect(pub.title).toBe('Landing')
     expect(pub.body_md).toBeUndefined()
+  })
+
+  describe('raw file route', () => {
+    async function sharedFile(filename = 'clip.mp4', mime = 'video/mp4') {
+      const ctx = await createFilesOrgWith(sql)
+      const { id } = await createTestFile(sql, { org_id: ctx.org.id, created_by: ctx.user.id, filename, mime })
+      const issued = await $fetch<{ share_token: string }>(
+        `/api/files/items/${id}/share`, { method: 'POST', ...withOrgHeader(ctx.auth, ctx.org.slug) }
+      )
+      return { ...ctx, id, token: issued.share_token }
+    }
+
+    function rawStatus(path: string): Promise<number> {
+      return fetch(path, { redirect: 'manual' }).then(r => r.status)
+    }
+
+    it('redirects a shared file to a signed inline bucket URL, uncached', async () => {
+      const { token } = await sharedFile()
+      const res = await fetch(`/files/raw/${token}`, { redirect: 'manual' })
+      expect(res.status).toBe(302)
+      expect(res.headers.get('cache-control')).toBe('no-store')
+      const location = new URL(res.headers.get('location')!)
+      expect(location.host).toBe(new URL(process.env.S3_ENDPOINT!).host)
+      expect(location.searchParams.get('response-content-disposition')).toBe('inline; filename="clip.mp4"')
+      expect(location.searchParams.get('response-content-type')).toBe('video/mp4')
+    })
+
+    it('?download=1 signs an attachment disposition with a UTF-8 name', async () => {
+      const { token } = await sharedFile('résumé.pdf', 'application/pdf')
+      const res = await fetch(`/files/raw/${token}?download=1`, { redirect: 'manual' })
+      const location = new URL(res.headers.get('location')!)
+      expect(location.searchParams.get('response-content-disposition'))
+        .toBe('attachment; filename="r_sum_.pdf"; filename*=UTF-8\'\'r%C3%A9sum%C3%A9.pdf')
+    })
+
+    it('answers HEAD', async () => {
+      const { token } = await sharedFile()
+      const res = await fetch(`/files/raw/${token}`, { method: 'HEAD', redirect: 'manual' })
+      expect(res.status).toBe(302)
+    })
+
+    it('404s for unknown, malformed, revoked, reissued, and deleted tokens', async () => {
+      expect(await rawStatus(`/files/raw/${randomUUID()}`)).toBe(404)
+      expect(await rawStatus('/files/raw/not-a-uuid')).toBe(404)
+
+      const revoked = await sharedFile()
+      await $fetch(`/api/files/items/${revoked.id}/share`, { method: 'DELETE', ...withOrgHeader(revoked.auth, revoked.org.slug) })
+      expect(await rawStatus(`/files/raw/${revoked.token}`)).toBe(404)
+
+      const reissued = await sharedFile()
+      await $fetch(`/api/files/items/${reissued.id}/share`, { method: 'POST', ...withOrgHeader(reissued.auth, reissued.org.slug) })
+      expect(await rawStatus(`/files/raw/${reissued.token}`)).toBe(404)
+
+      const deleted = await sharedFile()
+      await $fetch(`/api/files/items/${deleted.id}`, { method: 'DELETE', ...withOrgHeader(deleted.auth, deleted.org.slug) })
+      expect(await rawStatus(`/files/raw/${deleted.token}`)).toBe(404)
+    })
+
+    it('404s for doc and site tokens', async () => {
+      const { org, user, auth } = await createFilesOrgWith(sql)
+      const doc = await createTestDoc(sql, { org_id: org.id, created_by: user.id })
+      const site = await createTestSite(sql, { org_id: org.id, created_by: user.id })
+      for (const { id } of [doc, site]) {
+        const issued = await $fetch<{ share_token: string }>(
+          `/api/files/items/${id}/share`, { method: 'POST', ...withOrgHeader(auth, org.slug) }
+        )
+        expect(await rawStatus(`/files/raw/${issued.share_token}`)).toBe(404)
+      }
+    })
   })
 
   it('nulls created_by when the creator is deleted (item survives)', async () => {

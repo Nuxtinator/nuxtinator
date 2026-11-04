@@ -1,11 +1,11 @@
 // GET /api/messages/items/:id/comments
 // Returns: { comments: [...] } — flat list, client flattens by parent_comment_id.
 
-import { withOrgContext } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 import { requireConversationAccess } from '../../../../../utils/conversation-access'
 
 export default defineEventHandler(async (event) => {
-  return await withOrgContext(event, { appId: 'messages' }, async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'messages' }, 'messages.read', async (tx, ctx) => {
     const itemId = getRouterParam(event, 'id')!
 
     const item = await tx

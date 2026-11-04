@@ -12,15 +12,15 @@
  *   </div>
  *
  * Move it to the bottom-left:
- *   <div class="feedback-widget-slot" style="right: auto; left: 20px;">
+ *   <div class="feedback-widget-slot" style="right: auto; left: 0;">
  *     <feedback-web-component profile-config='...' />
  *   </div>
  */
 
 .feedback-widget-slot {
   position: fixed;
-  right: 20px;
-  bottom: 20px;
+  right: 0;
+  bottom: 0;
   z-index: 2147483000;
 }
 

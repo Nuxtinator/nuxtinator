@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AiAdminConfig, AiAdminModel } from '#ai'
+import type { AiAdminConfig, AiEnabledModel, AiHostProvider, AiModelInfo, AiModelKind, AiProvider, AiEmbeddingModelInfo, AiReindexStatus, AiStaleScope } from '#ai'
 
 definePageMeta({
   layout: 'admin',
@@ -9,22 +9,80 @@ definePageMeta({
 const toast = useToast()
 
 const { data, pending, refresh } = await useFetch<AiAdminConfig>('/api/ai/admin/config', {
-  default: () => ({ configured: false, models: [], features: [] })
+  default: (): AiAdminConfig => ({
+    providers: [], modelListAvailable: false, catalog: [], enabled: [], defaultModel: '', features: [],
+    embeddingAvailable: false, embeddingModelListAvailable: false, embeddingModel: '', staleScopes: []
+  })
+})
+const { data: embeddingList } = await useFetch<{ models: AiEmbeddingModelInfo[] }>('/api/ai/embedding-models', {
+  default: () => ({ models: [] })
 })
 
-const configured = computed(() => data.value?.configured ?? false)
-const models = computed(() => data.value?.models ?? [])
+const enabled = computed(() => data.value?.enabled ?? [])
 const features = computed(() => data.value?.features ?? [])
-const enabledModels = computed(() => models.value.filter(m => m.enabled))
+const enabledIds = computed(() => enabled.value.map(m => m.id))
+const providers = computed(() => data.value?.providers ?? [])
 
-// Model options for the per-feature selectors — only enabled models are
-// selectable (the server refuses a disabled model anyway).
-const featureModelItems = computed(() =>
-  enabledModels.value.map(m => ({ value: m.id, label: m.label }))
-)
+function hasKey(p: AiHostProvider): boolean {
+  return p.keySource === 'env' || p.storedKey.status === 'ok'
+}
+
+// Default and feature pickers offer only models a host key can pay for.
+const keyedProviders = computed(() => new Set(providers.value.filter(hasKey).map(p => p.provider)))
+function enabledOfKind(kind: AiModelKind) {
+  return enabled.value.filter((m: AiEnabledModel) => m.kind === kind && keyedProviders.value.has(m.provider))
+}
+
+function enabledOf(provider: AiProvider) {
+  return enabled.value.filter((m: AiEnabledModel) => m.provider === provider)
+}
+
+// A provider's models still addable: everything it lists that isn't enabled yet.
+function addableOf(provider: AiProvider) {
+  return (data.value?.catalog ?? []).filter((m: AiModelInfo) => m.provider === provider && !enabledIds.value.includes(m.id))
+}
+
+const activeProvider = ref<AiProvider>('openrouter')
+const providerTabs = computed(() => providers.value.map(p => ({
+  label: p.label,
+  value: p.provider,
+  icon: hasKey(p) ? 'i-lucide-key-round' : undefined
+})))
 
 const saving = ref(false)
-const newCustomId = ref('')
+const pendingAdd = ref('')
+
+function errorMessage(err: unknown): string | undefined {
+  return (err as { data?: { statusMessage?: string } } | null)?.data?.statusMessage
+}
+
+async function saveHostKey(provider: AiProvider, key: string): Promise<boolean> {
+  saving.value = true
+  try {
+    await $fetch('/api/ai/admin/key', { method: 'PUT', body: { provider, key } })
+    await refresh()
+    toast.add({ title: 'API key saved', color: 'success' })
+    return true
+  } catch (err: unknown) {
+    toast.add({ title: 'Key not saved', description: errorMessage(err), color: 'error' })
+    return false
+  } finally {
+    saving.value = false
+  }
+}
+
+async function removeHostKey(provider: AiProvider) {
+  saving.value = true
+  try {
+    await $fetch('/api/ai/admin/key', { method: 'DELETE', query: { provider } })
+    await refresh()
+    toast.add({ title: 'API key removed', color: 'success' })
+  } catch (err: unknown) {
+    toast.add({ title: 'Key not removed', description: errorMessage(err), color: 'error' })
+  } finally {
+    saving.value = false
+  }
+}
 
 async function put(body: Record<string, unknown>): Promise<boolean> {
   saving.value = true
@@ -44,50 +102,109 @@ async function put(body: Record<string, unknown>): Promise<boolean> {
   }
 }
 
-async function toggleModel(model: AiAdminModel, enabled: boolean) {
-  const next = enabled
-    ? [...enabledModels.value.map(m => m.id), model.id]
-    : enabledModels.value.map(m => m.id).filter(id => id !== model.id)
-  if (await put({ enabled_models: next })) {
-    toast.add({ title: enabled ? `Enabled ${model.label}` : `Disabled ${model.label}`, color: 'success' })
+async function addModel(id: string) {
+  pendingAdd.value = ''
+  if (!id || enabledIds.value.includes(id)) return
+  if (await put({ enabled_models: [...enabledIds.value, id] })) {
+    toast.add({ title: `Enabled ${id}`, color: 'success' })
   }
 }
 
-async function addCustomModel() {
-  const id = newCustomId.value.trim()
-  if (!id) return
-  const custom = models.value.filter(m => m.custom).map(m => m.id)
-  if (custom.includes(id) || models.value.some(m => m.id === id)) {
-    toast.add({ title: 'That model is already listed', color: 'warning' })
-    return
+async function removeModel(model: { id: string, name: string }) {
+  const next = enabledIds.value.filter(id => id !== model.id)
+  // Drop the default and any feature choice that pointed at it.
+  const featureMap: Record<string, string> = {}
+  for (const f of features.value) {
+    if (f.model && f.model !== model.id) featureMap[f.key] = f.model
   }
-  // Add it as a custom id and enable it in one write.
-  const ok = await put({
-    custom_models: [...custom, id],
-    enabled_models: [...enabledModels.value.map(m => m.id), id]
-  })
-  if (ok) {
-    newCustomId.value = ''
-    toast.add({ title: `Added ${id}`, color: 'success' })
+  const body: Record<string, unknown> = { enabled_models: next, feature_models: featureMap }
+  if (data.value?.defaultModel === model.id) body.default_model = ''
+  if (await put(body)) {
+    toast.add({ title: `Disabled ${model.name}`, color: 'success' })
   }
 }
 
-async function removeCustomModel(model: AiAdminModel) {
-  const custom = models.value.filter(m => m.custom && m.id !== model.id).map(m => m.id)
-  const enabled = enabledModels.value.map(m => m.id).filter(id => id !== model.id)
-  if (await put({ custom_models: custom, enabled_models: enabled })) {
-    toast.add({ title: `Removed ${model.id}`, color: 'success' })
+async function setDefaultModel(id: string) {
+  if (await put({ default_model: id })) {
+    toast.add({ title: id ? 'Default model updated' : 'Default model cleared', color: 'success' })
   }
 }
 
-async function setFeatureModel(featureKey: string, modelId: string) {
+async function setFeatureModel(featureKey: string, id: string) {
   const map: Record<string, string> = {}
-  for (const f of features.value) map[f.key] = f.model
-  map[featureKey] = modelId
+  for (const f of features.value) {
+    if (f.model) map[f.key] = f.model
+  }
+  if (id) map[featureKey] = id
+  else delete map[featureKey]
   if (await put({ feature_models: map })) {
     toast.add({ title: 'Feature model updated', color: 'success' })
   }
 }
+
+function nameOf(id: string): string {
+  return enabled.value.find(m => m.id === id)?.name ?? id
+}
+
+// ---- Embedding model ----------------------------------------------------
+
+// The picker reuses AiModelSelect, which renders AiModelInfo rows; embedding
+// models carry a subset of those fields.
+const embeddingItems = computed<AiModelInfo[]>(() => (embeddingList.value?.models ?? []).map((m: AiEmbeddingModelInfo): AiModelInfo => ({
+  id: m.id,
+  name: m.name,
+  promptPrice: m.promptPrice,
+  completionPrice: null,
+  contextLength: m.contextLength,
+  supportsTemperature: false,
+  supportsCaching: false,
+  provider: 'openrouter',
+  kind: 'chat',
+  supportsImages: false,
+  requestPrice: null,
+  reasoning: null
+})))
+const staleScopes = computed<AiStaleScope[]>(() => data.value?.staleScopes ?? [])
+const confirmEmbedding = ref<string | null>(null)
+
+async function setEmbeddingModel(id: string) {
+  confirmEmbedding.value = null
+  if (await put({ embedding_model: id })) {
+    toast.add({ title: id ? 'Embedding model updated' : 'Embedding model cleared', color: 'success' })
+  }
+}
+function onPickEmbedding(id: string) {
+  if (id === (data.value?.embeddingModel ?? '')) return
+  // Only warn when an index exists somewhere that this change would orphan.
+  if (data.value?.embeddingModel || staleScopes.value.length) confirmEmbedding.value = id
+  else setEmbeddingModel(id)
+}
+
+const reindex = ref<AiReindexStatus | null>(null)
+const reindexing = computed(() => reindex.value?.running === true)
+let reindexTimer: ReturnType<typeof setTimeout> | null = null
+async function pollReindex() {
+  try {
+    reindex.value = await $fetch<AiReindexStatus>('/api/ai/admin/reindex-status')
+  } catch {
+    return
+  }
+  if (reindex.value?.running) reindexTimer = setTimeout(pollReindex, 2000)
+  else await refresh()
+}
+async function startReindex(all = false) {
+  try {
+    const res = await $fetch<{ started: boolean, reason: string | null, status: AiReindexStatus }>('/api/ai/admin/reindex', { method: 'POST', body: { all } })
+    reindex.value = res.status
+    if (!res.started && res.reason === 'already-running') toast.add({ title: 'A rebuild is already running', color: 'warning' })
+    await pollReindex()
+  } catch (err: unknown) {
+    toast.add({ title: 'Could not start the rebuild', description: (err as { data?: { statusMessage?: string } } | null)?.data?.statusMessage, color: 'error' })
+  }
+}
+onBeforeUnmount(() => {
+  if (reindexTimer) clearTimeout(reindexTimer)
+})
 </script>
 
 <template>
@@ -97,98 +214,128 @@ async function setFeatureModel(featureKey: string, modelId: string) {
         AI
       </h1>
       <p class="text-sm text-(--ui-text-muted)">
-        Choose which models are available and which model powers each AI feature.
-        Models are called through OpenRouter with the deployment's
-        <code>OPENROUTER_API_KEY</code>.
+        Models the host's keys can run, the default, and the model for each
+        feature. Organizations inherit these and can override them.
       </p>
     </header>
 
     <UAlert
-      v-if="!configured"
+      v-if="providers.length && !keyedProviders.size"
       color="warning"
       variant="subtle"
       icon="i-lucide-triangle-alert"
-      title="AI is not configured"
-      description="Set OPENROUTER_API_KEY in the environment to enable live generation. Model selection is saved regardless, but requests will return a 503 until a key is present."
+      title="No host API key"
+      description="Add a key below so organizations without their own have a fallback."
     />
 
     <section class="space-y-3">
       <div>
         <h2 class="text-lg font-semibold">
-          Models
+          Providers
         </h2>
         <p class="text-sm text-(--ui-text-muted)">
-          Enable the models this deployment may use. Add a custom OpenRouter model
-          id to adopt a new model without a code change.
+          Add a provider's key, then enable the models it may run.
         </p>
       </div>
 
-      <ul class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md">
-        <li
-          v-for="model in models"
-          :key="model.id"
-          class="flex items-center justify-between gap-3 p-4"
-        >
-          <div class="min-w-0">
-            <div class="font-medium flex items-center gap-2 flex-wrap">
-              {{ model.label }}
-              <UBadge
-                v-if="model.custom"
-                color="neutral"
-                variant="subtle"
-                size="sm"
-              >
-                Custom
-              </UBadge>
-              <UBadge
-                v-if="model.supportsCaching"
-                color="info"
-                variant="subtle"
-                size="sm"
-                icon="i-lucide-database"
-              >
-                Prompt caching
-              </UBadge>
-            </div>
-            <div class="text-xs text-(--ui-text-muted) font-mono">
-              {{ model.id }}
-            </div>
-          </div>
-          <div class="flex items-center gap-3 shrink-0">
-            <UButton
-              v-if="model.custom"
-              icon="i-lucide-trash-2"
-              color="error"
-              variant="ghost"
-              size="sm"
+      <UTabs
+        v-model="activeProvider"
+        :items="providerTabs"
+        variant="link"
+        class="w-full"
+        :ui="{ list: 'overflow-x-auto' }"
+      >
+        <template #content="{ item }">
+          <div
+            v-for="p in providers.filter(x => x.provider === item.value)"
+            :key="p.provider"
+            class="space-y-3 pt-2"
+          >
+            <AiProviderKey
+              :provider="p.provider"
+              :label="p.label"
+              :status="p.storedKey.status"
+              :last4="p.storedKey.last4"
+              :env-var="p.keySource === 'env' ? p.envVar : ''"
               :disabled="saving"
-              @click="removeCustomModel(model)"
+              :empty-hint="`Add one, or set ${p.envVar}.`"
+              :save="(key: string) => saveHostKey(p.provider, key)"
+              @remove="removeHostKey(p.provider)"
             />
-            <USwitch
-              :model-value="model.enabled"
-              :disabled="saving"
-              size="lg"
-              @update:model-value="(v: boolean) => toggleModel(model, v)"
-            />
-          </div>
-        </li>
-      </ul>
 
-      <div class="flex items-center gap-2">
-        <UInput
-          v-model="newCustomId"
-          placeholder="provider/model-id (e.g. anthropic/claude-opus-4.1)"
-          class="flex-1 font-mono"
-          :disabled="saving"
-          @keydown.enter="addCustomModel"
+            <template v-if="hasKey(p) || enabledOf(p.provider).length">
+              <p
+                v-if="!hasKey(p)"
+                class="text-sm text-(--ui-text-muted)"
+              >
+                These models won't run until a key is added.
+              </p>
+              <UAlert
+                v-else-if="!p.catalogAvailable"
+                color="warning"
+                variant="subtle"
+                icon="i-lucide-cloud-off"
+                title="Model list unavailable"
+                description="Existing choices still work. You can add models once the list loads."
+              />
+
+              <AiModelList
+                v-if="enabledOf(p.provider).length"
+                :models="enabledOf(p.provider)"
+                removable
+                :disabled="saving"
+                @remove="removeModel"
+              />
+              <p
+                v-else-if="!pending"
+                class="text-sm text-(--ui-text-muted)"
+              >
+                No {{ p.label }} models enabled.
+              </p>
+
+              <div
+                v-if="hasKey(p)"
+                class="max-w-md"
+              >
+                <AiModelSelect
+                  :model-value="pendingAdd"
+                  :items="addableOf(p.provider)"
+                  placeholder="Add a model…"
+                  :disabled="saving || !addableOf(p.provider).length"
+                  @update:model-value="addModel"
+                />
+              </div>
+            </template>
+          </div>
+        </template>
+      </UTabs>
+
+      <p
+        v-if="!enabled.length && !pending"
+        class="text-sm text-(--ui-text-muted)"
+      >
+        AI stays off until a model is enabled and set as default.
+      </p>
+    </section>
+
+    <section class="space-y-3">
+      <div>
+        <h2 class="text-lg font-semibold">
+          Default model
+        </h2>
+        <p class="text-sm text-(--ui-text-muted)">
+          Used by chat features without their own model.
+        </p>
+      </div>
+      <div class="max-w-md">
+        <AiModelSelect
+          :model-value="data?.defaultModel ?? ''"
+          :items="enabledOfKind('chat')"
+          clearable
+          clear-label="None"
+          :disabled="saving || !enabledOfKind('chat').length"
+          @update:model-value="setDefaultModel"
         />
-        <UButton
-          icon="i-lucide-plus"
-          :disabled="saving || !newCustomId.trim()"
-          @click="addCustomModel"
-        >
-          Add model
-        </UButton>
       </div>
     </section>
 
@@ -201,7 +348,7 @@ async function setFeatureModel(featureKey: string, modelId: string) {
           Feature models
         </h2>
         <p class="text-sm text-(--ui-text-muted)">
-          Pick which enabled model powers each AI feature.
+          Override the model for a specific feature.
         </p>
       </div>
 
@@ -209,7 +356,7 @@ async function setFeatureModel(featureKey: string, modelId: string) {
         <li
           v-for="feature in features"
           :key="feature.key"
-          class="flex items-center justify-between gap-3 p-4"
+          class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4"
         >
           <div class="min-w-0">
             <div class="font-medium">
@@ -221,19 +368,25 @@ async function setFeatureModel(featureKey: string, modelId: string) {
             >
               {{ feature.description }}
             </div>
+            <div class="text-xs text-(--ui-text-muted) mt-1">
+              <template v-if="feature.effectiveModel">
+                Runs on {{ nameOf(feature.effectiveModel) }}
+              </template>
+              <template v-else>
+                No model resolves — enable a model and choose a default.
+              </template>
+            </div>
           </div>
-          <USelectMenu
-            :model-value="feature.model"
-            :items="featureModelItems"
-            value-key="value"
-            label-key="label"
-            :search="false"
-            :disabled="saving || !enabledModels.length"
-            variant="outline"
-            size="sm"
-            class="w-64 shrink-0"
-            @update:model-value="(v: string) => setFeatureModel(feature.key, v)"
-          />
+          <div class="w-full sm:w-72 shrink-0">
+            <AiModelSelect
+              :model-value="feature.model"
+              :items="enabledOfKind(feature.kind)"
+              clearable
+              :clear-label="feature.kind === 'chat' ? 'Use default' : 'None'"
+              :disabled="saving || !enabledOfKind(feature.kind).length"
+              @update:model-value="(v: string) => setFeatureModel(feature.key, v)"
+            />
+          </div>
         </li>
       </ul>
     </section>
@@ -242,8 +395,132 @@ async function setFeatureModel(featureKey: string, modelId: string) {
       v-else-if="!pending"
       class="text-sm text-(--ui-text-muted)"
     >
-      No AI features are registered yet. Feature layers (like the inbox) register
-      the models they need here once loaded.
+      No AI features are registered yet.
     </div>
+
+    <section
+      v-if="data?.embeddingAvailable"
+      class="space-y-3"
+    >
+      <div>
+        <h2 class="text-lg font-semibold">
+          Embedding model
+        </h2>
+        <p class="text-sm text-(--ui-text-muted)">
+          Builds the search indexes. Organizations can pick their own.
+        </p>
+      </div>
+
+      <UAlert
+        v-if="!data?.embeddingModelListAvailable"
+        color="warning"
+        variant="subtle"
+        icon="i-lucide-cloud-off"
+        title="Embedding model list unavailable"
+        description="The current choice still works."
+      />
+
+      <div class="max-w-md">
+        <AiModelSelect
+          :model-value="data?.embeddingModel ?? ''"
+          :items="embeddingItems"
+          clearable
+          clear-label="None"
+          :disabled="saving || reindexing || !embeddingItems.length"
+          @update:model-value="onPickEmbedding"
+        />
+      </div>
+
+      <UAlert
+        v-if="staleScopes.length && !reindexing"
+        color="error"
+        variant="subtle"
+        icon="i-lucide-database-zap"
+        :title="`${staleScopes.length} ${staleScopes.length === 1 ? 'index set was' : 'index sets were'} built with another model`"
+      >
+        <template #description>
+          <p class="mb-2">
+            Search won't work for these until they're rebuilt.
+          </p>
+          <UButton
+            size="sm"
+            color="error"
+            icon="i-lucide-refresh-cw"
+            :disabled="saving"
+            @click="startReindex(false)"
+          >
+            Re-embed the affected indexes
+          </UButton>
+        </template>
+      </UAlert>
+
+      <div
+        v-if="reindex"
+        class="text-sm border border-(--ui-border) rounded-md p-3 space-y-1"
+      >
+        <div class="font-medium flex items-center gap-2">
+          <UIcon
+            :name="reindexing ? 'i-lucide-loader-circle' : 'i-lucide-check'"
+            class="size-4"
+            :class="{ 'animate-spin': reindexing }"
+          />
+          {{ reindexing ? 'Rebuilding…' : 'Rebuild finished' }}
+        </div>
+        <ul class="text-xs text-(--ui-text-muted)">
+          <li
+            v-for="scope in reindex.scopes"
+            :key="scope.orgId ?? 'single'"
+          >
+            {{ scope.orgId ?? 'this deployment' }} — {{ scope.state }}<template v-if="scope.current">
+              ({{ scope.current }})</template>: {{ scope.items }} of {{ scope.total }} items, {{ scope.chunks }} chunks
+            <span
+              v-if="scope.error"
+              class="text-(--ui-error)"
+            >({{ scope.error }})</span>
+          </li>
+        </ul>
+      </div>
+
+      <UButton
+        v-if="data?.embeddingModel && !reindexing"
+        size="xs"
+        variant="ghost"
+        color="neutral"
+        icon="i-lucide-refresh-cw"
+        @click="startReindex(true)"
+      >
+        Re-embed everything
+      </UButton>
+    </section>
+
+    <UModal
+      :open="confirmEmbedding !== null"
+      title="Change the embedding model?"
+      @update:open="(v: boolean) => { if (!v) confirmEmbedding = null }"
+    >
+      <template #body>
+        <p class="text-sm">
+          Existing search indexes stop working until they're re-embedded.
+          You can start the rebuild right after saving.
+        </p>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2 w-full">
+          <UButton
+            variant="ghost"
+            color="neutral"
+            @click="confirmEmbedding = null"
+          >
+            Cancel
+          </UButton>
+          <UButton
+            color="warning"
+            @click="setEmbeddingModel(confirmEmbedding ?? '')"
+          >
+            Change model
+          </UButton>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>

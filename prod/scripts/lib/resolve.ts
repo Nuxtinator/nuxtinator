@@ -20,12 +20,20 @@ export type LayerSpec = {
   version?: string // 'latest' | semver range | exact semver | raw ref. Default 'latest'.
 }
 
-export const DEFAULT_REPO = 'corsacca/nuxtinator'
+export const DEFAULT_REPO = 'Nuxtinator/nuxtinator'
 
 export const repoOf = (l: LayerSpec) => l.repo ?? DEFAULT_REPO
 export const subdirOf = (l: LayerSpec) => l.subdir ?? `layers/${l.id}`
 export const tagPrefixOf = (l: LayerSpec) => l.tagPrefix ?? `@nuxtinator/${l.id}@`
 export const versionOf = (l: LayerSpec) => l.version ?? 'latest'
+
+// The giget source of a layer, ref-less: `github:<repo>/<subdir>`, or plain
+// `github:<repo>` for a layer that is its own repo (subdir '.') — giget
+// extracts nothing for a literal `/.` path segment.
+export const sourceOf = (l: LayerSpec) => {
+  const subdir = subdirOf(l)
+  return subdir === '.' ? `github:${repoOf(l)}` : `github:${repoOf(l)}/${subdir}`
+}
 
 // List a repo's tag names. `git ls-remote` needs no API token and isn't rate
 // limited; a token (for a private source) is injected into the clone URL.
@@ -55,39 +63,57 @@ function layerVersions(spec: LayerSpec, tags: string[]): Map<string, string> {
   return map
 }
 
-// Resolve a layer's `version` policy to a concrete git ref giget can fetch.
-export function resolveRef(spec: LayerSpec, tags: string[]): string {
+// Resolve a layer's `version` policy to the concrete git refs giget can fetch:
+// every ref the policy allows, newest first. The first is what the policy
+// resolves to; the rest are the fallbacks lock.ts steps down through when a
+// newer version's `nuxtinator.requires` can't be met.
+export function candidateRefs(spec: LayerSpec, tags: string[]): string[] {
   const v = versionOf(spec)
   const versions = layerVersions(spec, tags)
+  const newestFirst = (vs: string[]) => semver.rsort([...vs]).map(x => versions.get(x)!)
 
   // 'latest' / omitted -> newest released tag, or `master` when none exist yet
   // (this is what preserves today's track-master behaviour before any tags).
   if (v === 'latest' || v === '') {
-    const newest = semver.rsort([...versions.keys()])[0]
-    return newest ? versions.get(newest)! : 'master'
+    return versions.size ? newestFirst([...versions.keys()]) : ['master']
   }
 
   // exact pin -> that tag (must exist)
   if (semver.valid(v)) {
     const tag = versions.get(v)
     if (!tag) throw new Error(`${spec.id}: no tag ${tagPrefixOf(spec)}${v}`)
-    return tag
+    return [tag]
   }
 
-  // range -> highest tag satisfying it
+  // range -> tags satisfying it, highest first
   if (semver.validRange(v)) {
-    const best = semver.maxSatisfying([...versions.keys()], v)
-    if (!best) {
+    const inRange = [...versions.keys()].filter(x => semver.satisfies(x, v))
+    if (!inRange.length) {
       throw new Error(
         `${spec.id}: no ${tagPrefixOf(spec)}* tag satisfies "${v}" `
         + `(available: ${[...versions.keys()].join(', ') || 'none'})`
       )
     }
-    return versions.get(best)!
+    return newestFirst(inRange)
   }
 
   // raw branch / SHA -> passthrough
-  return v
+  return [v]
+}
+
+// A layer's package.json at a ref: its version and the other layers it declares
+// it needs (`nuxtinator.requires`, package name -> semver range). Read from
+// raw.githubusercontent.com, with the token for a private source.
+export type LayerPackage = { version: string, requires: Record<string, string> }
+
+export async function fetchLayerPackage(spec: LayerSpec, ref: string, token?: string): Promise<LayerPackage> {
+  const subdir = subdirOf(spec)
+  const file = subdir === '.' ? 'package.json' : `${subdir}/package.json`
+  const url = `https://raw.githubusercontent.com/${repoOf(spec)}/${encodeURIComponent(ref)}/${file}`
+  const res = await fetch(url, token ? { headers: { Authorization: `token ${token}` } } : undefined)
+  if (!res.ok) throw new Error(`${spec.id}: couldn't read ${file} at ${ref} (HTTP ${res.status})`)
+  const pkg = await res.json() as { version?: string, nuxtinator?: { requires?: Record<string, string> } }
+  return { version: pkg.version ?? '', requires: pkg.nuxtinator?.requires ?? {} }
 }
 
 // The newest released version that sits OUTSIDE a layer's range (i.e. a held

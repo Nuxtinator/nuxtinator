@@ -1,10 +1,9 @@
 # Inbox layer — maintainer notes
 
 Working doc for sessions building out `@nuxtinator/inbox`. [README.md](README.md) is the
-consumer-facing overview (Mailgun/DNS setup lives there). The layer is a port of the
-Doxa campaigns-server shared inbox (`~/code/doxa/campaigns-sever`), rebuilt on the CRM
-layer's channel kernel; the plan and the port's decision record live in the repo's
-session logs and the plan file referenced by them.
+consumer-facing overview (Mailgun/DNS setup lives there). The layer is built on the CRM
+layer's channel kernel; the build backlog lives in [PLAN.md](PLAN.md) and the decision
+record in the repo's session logs.
 
 ## What this layer is
 
@@ -20,10 +19,9 @@ they ever become a contact. First app-layer→app-layer dependency in the monore
 NULL, ON DELETE **NO ACTION** (not RESTRICT: an org deletion cascades into
 crm_channels and inbox_conversations along independent FK paths, and RESTRICT's
 immediate per-row check trips on whichever cascades second; NO ACTION defers to
-statement end). Deliberate deltas vs Doxa: **threading is channel-strict** (the same
-person writing from a second address forks a new conversation — Doxa accepted any
-address of the subscriber), and **contact deletion no longer deletes threads**
-(registry semantics; Doxa cascaded via subscriber_id). `counterparty_name` is
+statement end). **Threading is channel-strict** (the same person writing from a second
+address forks a new conversation), and **contact deletion does not delete threads**
+(registry semantics). `counterparty_name` is
 denormalized onto the conversation so the hot list query never joins crm tables;
 linked-contact chips resolve per detail view, gated on
 `resolveTypePermission(tx, ctx, 'contacts', 'read')`.
@@ -34,7 +32,7 @@ linked-contact chips resolve per detail view, gated on
 `INBOX_SEND_SWEEP_SECONDS`) claims each due row with an atomic queued→sent UPDATE
 (`inboxClaimForSend`) **before** the provider call. Confirmed provider failure →
 release with exponential backoff (or `failed` at 3 attempts); crash mid-send leaves it
-`sent` without a provider id — **at-most-once**, same bias as Doxa. `markSent` copies
+`sent` without a provider id — **at-most-once**. `markSent` copies
 the provider Message-Id into `email_message_id` so contact replies thread back.
 
 **CRM plumbing activated here.** DKIM/DMARC-authenticated inbound ⇒
@@ -138,15 +136,13 @@ locally with a signed multipart POST — the fixture builder in
 path). Tests: `bun run test -- --project inbox`. The app seeds into the catalog as
 `available` — enable it per org (host admin UI or an `org_apps` row).
 
-**Small deliberate deltas vs Doxa (kept).** Replies stamp a normalized `Re: `
-subject prefix (Doxa reused the raw subject; standard client threading
-etiquette wins). The messages endpoint refuses replies on `spam` conversations
-server-side (Doxa only hid the composer; a guard beats a convention). The AI
-grounding static pack builds from the tone guide + per-org reference URLs + KB
-only — Doxa's filesystem feature-docs input was dropped (the layer ships no
-equivalent docs tree; per-org reference URLs cover the need).
+**Small deliberate choices.** Replies stamp a normalized `Re: ` subject prefix
+(standard client threading etiquette). The messages endpoint refuses replies on
+`spam` conversations server-side (a guard beats a convention). The AI grounding
+static pack builds from the tone guide + per-org reference URLs + KB only (the
+layer ships no docs tree; per-org reference URLs cover the need).
 
-## Built since the initial port (see PLAN.md phases)
+## Built after the initial version (see PLAN.md phases)
 
 - **Shared drafts + outbound attachments + inline-image CID pipeline** (Phase 2).
   Deliberate deltas vs the PLAN's composer spec: files **upload eagerly** on pick
@@ -202,11 +198,29 @@ equivalent docs tree; per-org reference URLs cover the need).
   all gated on `GET /api/ai/status`. 9 tests (`tests/api/ai-draft.test.ts`). Live generation
   needs `OPENROUTER_API_KEY` (tests use the layer's VITEST stub).
 
+- **Follow-up additions:** nightly
+  auto-close of quiet pending threads (`inbox-autoclose.ts` + a `...43` advisory-lock
+  cron; per-org `auto_close_days`, 0 = off; held rows and never-sent rows exempt; each
+  close logged as a system `inbox_status_changed`; `POST /api/_test/inbox-autoclose`
+  drives it under VITEST) · one reply-target resolver (`inbox-reply-target.ts`) shared
+  by the send sweep and the detail payload's `replyStatus` (verified + active
+  suppression), with Unverified / Not-receiving badges in the header and on a composer
+  To line, and Send disabled while a suppression stands · `POST /conversations/bulk`
+  (status / assignee / add-tags over ≤100 ids, spam excluded both ways, per-row activity
+  log) behind hover-revealed row checkboxes and a sticky bulk bar · the auto-ack carries
+  an address-confirmation link for unverified contact-form senders (token on the once
+  dormant `crm_channels.verification_token_*` columns via the CRM kernel's
+  `issueChannelVerificationToken` / `consumeChannelVerificationToken`; redeemed at the
+  session-less `GET /api/inbox/verify/:token`, which scans org scopes like the API-key
+  routing) · a confirmed close returns the pane to the folder · wide HTML mail scrolls
+  inside its bubble · the AI layer retries transient (502) round trips with backoff and
+  treats a 200 carrying an error body, and a `refusal` finish, as failures.
+
 ## Deferred (planned, not built)
 
 - **Smaller deferred items rolled out of earlier phases:** per-user notification
-  preferences (a core-level prefs change, Phase 7) · double-opt-in consent verification
-  (reissue-and-overwrite on the dormant `crm_channels.verification_token_*` columns,
-  Phase 9) · `bounce_count` history column + contact-record "Not receiving" badge
+  preferences (a core-level prefs change, Phase 7) · double-opt-in *consent* verification
+  (the address-confirmation link proves ownership only; marketing consent still stands
+  on the checkbox alone, Phase 9) · `bounce_count` history column + contact-record "Not receiving" badge
   (Phase 8, both need CRM-side changes) · staff reply-by-email signed addresses · i18n +
   localized courtesy mail (Phase 11, deferred to core-first i18n).

@@ -27,8 +27,10 @@ logs
 # Extended layers (downloaded by c12/giget)
 .layers
 docs
-context
-!layers/apps/context
+# Anchored to the repo root: an unanchored pattern also matches the layer
+# directories named `context/` (components, pages, api routes), which hides
+# their files from git and from Tailwind's source scan.
+/context
 
 # Test artifacts
 test-results/

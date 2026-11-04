@@ -1,7 +1,8 @@
 // GET /api/videos/share/:token
 // Mostly public. Anyone (authed or not) can fetch a `visibility='public'`
-// video. Authenticated owners can additionally fetch their own private/org
-// videos via the same URL.
+// video. Authenticated members of the video's org can fetch `visibility='org'`
+// videos, and owners can fetch their own videos at any visibility. Anonymous
+// requests get 401 for org videos (sign-in prompt) and 404 for private ones.
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import {
@@ -73,6 +74,46 @@ describe('GET /api/videos/share/:token', () => {
     expect(err.statusCode).toBe(403)
   })
 
+  it('authed org member (non-owner) can fetch an org-visibility video', async () => {
+    const { org, user: owner } = await createVideosOrgWith(sql, ['admin'])
+    const other = await addVideosMember(sql, org.id, ['member'])
+    const video = await createTestVideo(sql, {
+      org_id: org.id, user_id: owner.id, visibility: 'org'
+    })
+
+    // Auth cookie only, no X-Active-Org — /watch/:token is org-exempt, so
+    // this is exactly what the browser sends.
+    const res = await $fetch<ShareResp>(`/api/videos/share/${video.share_token}`, {
+      method: 'GET', headers: other.auth.headers
+    })
+    expect(res.videoId).toBe(video.id)
+    expect(res.isOwner).toBe(false)
+    expect(res.videoUrl).toMatch(/^https?:\/\//)
+  })
+
+  it('403 for an authed member of a different org fetching an org-visibility video', async () => {
+    const a = await createVideosOrgWith(sql, ['admin'])
+    const b = await createVideosOrgWith(sql, ['admin'])
+    const video = await createTestVideo(sql, {
+      org_id: a.org.id, user_id: a.user.id, visibility: 'org'
+    })
+
+    const err = await $fetch(`/api/videos/share/${video.share_token}`, {
+      method: 'GET', headers: b.auth.headers
+    }).catch(e => e)
+    expect(err.statusCode).toBe(403)
+  })
+
+  it('401 for an anonymous request for an org-visibility video (sign-in prompt)', async () => {
+    const { org, user } = await createVideosOrgWith(sql, ['admin'])
+    const video = await createTestVideo(sql, {
+      org_id: org.id, user_id: user.id, visibility: 'org'
+    })
+
+    const err = await $fetch(`/api/videos/share/${video.share_token}`, { method: 'GET' }).catch(e => e)
+    expect(err.statusCode).toBe(401)
+  })
+
   it('404 for an unknown share token (anonymous)', async () => {
     const err = await $fetch('/api/videos/share/nonexistent-token-zzz', { method: 'GET' }).catch(e => e)
     expect(err.statusCode).toBe(404)
@@ -88,13 +129,14 @@ describe('GET /api/videos/share/:token', () => {
     expect([400, 404]).toContain(err.statusCode)
   })
 
-  it('RLS read isolation: anonymous request for a private (non-public) token returns 404', async () => {
+  it('anonymous request for a private token returns 404 — existence not confirmed', async () => {
     const { org, user } = await createVideosOrgWith(sql, ['admin'])
     const video = await createTestVideo(sql, {
       org_id: org.id, user_id: user.id, visibility: 'private'
     })
-    // Anon path uses base `db` (no GUC set) — RLS read policy hides
-    // non-public rows entirely, so the lookup returns nothing → 404.
+    // The handler resolves the row internally but answers with the same 404
+    // as an unknown token, so a private link is indistinguishable from a
+    // nonexistent one.
     const err = await $fetch(`/api/videos/share/${video.share_token}`, { method: 'GET' }).catch(e => e)
     expect(err.statusCode).toBe(404)
   })

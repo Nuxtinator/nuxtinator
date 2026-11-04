@@ -2,7 +2,8 @@
 // The full detail-pane payload: conversation, thread messages (attachment
 // metadata attached per message, served via the auth proxy), the channel's
 // linked contact chips (only for callers with CRM contacts read — the inbox
-// must not leak contact names past CRM permissions), and capability flags.
+// must not leak contact names past CRM permissions), capability flags, and
+// the deliverability of the address a reply will go to.
 
 import { withOrgPermission } from '#tenant/server'
 import { resolveTypePermission } from '#crm/server'
@@ -21,11 +22,12 @@ export default defineEventHandler(async (event) => {
       .where('id', '=', conversation.channel_id)
       .executeTakeFirst()
 
-    const [messages, drafts, attachments, blocked] = await Promise.all([
+    const [messages, drafts, attachments, blocked, replyStatus] = await Promise.all([
       inboxListMessages(tx, conversation.id),
       inboxListDrafts(tx, conversation.id),
       inboxListAttachmentsForConversation(tx, conversation.id),
-      inboxIsChannelBlocked(tx, conversation.channel_id)
+      inboxIsChannelBlocked(tx, conversation.channel_id),
+      inboxGetReplyStatus(tx, conversation)
     ])
 
     const attachmentsByMessage = new Map<string, { id: string, filename: string | null, contentType: string | null, sizeBytes: number | null }[]>()
@@ -72,6 +74,9 @@ export default defineEventHandler(async (event) => {
         ? { value: channel.value, verified: channel.verified, blocked }
         : null,
       contacts,
+      // Where a reply goes and whether it can be delivered there — resolved by
+      // the same util the send sweep uses.
+      replyStatus,
       capabilities: {
         canSend: ctx.perms.has('inbox.send'),
         canCreateContact

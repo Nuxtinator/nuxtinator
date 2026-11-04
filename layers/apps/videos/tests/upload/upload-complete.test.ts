@@ -103,6 +103,26 @@ describe('POST /api/videos/upload-complete', () => {
     expect(err.statusCode).toBe(400)
   })
 
+  it('rejects object keys that were not derived from videoId', async () => {
+    const { org, auth } = await createVideosOrgWith(sql, ['admin'])
+    const videoId = randomUUID()
+    const victimId = randomUUID()
+    const cases = [
+      { videoId, videoKey: `${victimId}.webm` },
+      { videoId, videoKey: `${videoId}.webm`, thumbnailKey: `${victimId}-thumb.jpg` },
+      { videoId, videoKey: `${videoId}.webm/../${victimId}.webm` },
+      { videoId: 'not-a-uuid', videoKey: 'not-a-uuid.webm' }
+    ]
+    for (const body of cases) {
+      const err = await $fetch('/api/videos/upload-complete', {
+        method: 'POST', body, ...withOrgHeader(auth, org.slug)
+      }).catch(e => e)
+      expect(err.statusCode).toBe(400)
+    }
+    const rows = await sql`SELECT id FROM videos WHERE id = ${videoId}`
+    expect(rows.length).toBe(0)
+  })
+
   it('coerces invalid visibility back to private', async () => {
     const { org, auth } = await createVideosOrgWith(sql, ['admin'])
     const videoId = randomUUID()

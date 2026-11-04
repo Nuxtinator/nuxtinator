@@ -1,6 +1,11 @@
 <script setup lang="ts">
-const { apps, pending } = await useApps()
+const { apps, orgApps, personalApps, pending } = await useApps()
 const open = ref(false)
+// Org apps first, then personal apps under their own label.
+const sections = computed(() => [
+  { key: 'org', label: '', apps: orgApps.value },
+  { key: 'user', label: 'Personal', apps: personalApps.value }
+].filter(s => s.apps.length > 0))
 </script>
 
 <template>
@@ -36,23 +41,32 @@ const open = ref(false)
           No apps installed.
         </div>
 
-        <div
-          v-else
-          class="grid grid-cols-3 gap-2"
-        >
-          <NuxtLink
-            v-for="app in apps"
-            :key="app.id"
-            :to="app.path"
-            class="flex flex-col items-center justify-center gap-1.5 rounded-md p-3 hover:bg-(--ui-bg-accented) transition-colors text-center"
-            @click="open = false"
+        <div v-else>
+          <template
+            v-for="section in sections"
+            :key="section.key"
           >
-            <AppIcon
-              :name="app.icon"
-              class="size-6 text-sm text-(--ui-text)"
+            <USeparator
+              v-if="section.label"
+              :label="section.label"
+              class="my-2"
             />
-            <span class="text-xs text-(--ui-text) line-clamp-2">{{ app.title }}</span>
-          </NuxtLink>
+            <div class="grid grid-cols-3 gap-2">
+              <NuxtLink
+                v-for="app in section.apps"
+                :key="app.id"
+                :to="app.path"
+                class="flex flex-col items-center justify-center gap-1.5 rounded-md p-3 hover:bg-(--ui-bg-accented) transition-colors text-center"
+                @click="open = false"
+              >
+                <AppIcon
+                  :name="app.icon"
+                  class="size-6 text-sm text-(--ui-text)"
+                />
+                <span class="text-xs text-(--ui-text) line-clamp-2">{{ app.title }}</span>
+              </NuxtLink>
+            </div>
+          </template>
         </div>
       </div>
     </template>

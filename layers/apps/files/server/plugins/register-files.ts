@@ -18,6 +18,7 @@ export default defineNitroPlugin(() => {
     path: '/files',
     icon: 'i-lucide-folder',
     requiredPermission: 'files.access',
+    defaultStatus: 'available',
     order: 25
   })
 

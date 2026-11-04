@@ -61,6 +61,7 @@ export default defineConfig({
     projects: [
       layerProject('core', '../layers/core/tests'),
       layerProject('tenancy', '../layers/tenancy/tests'),
+      layerProject('social-auth', '../layers/social-auth/tests'),
       layerProject('messages', '../layers/apps/messages/tests'),
       layerProject('videos', '../layers/apps/videos/tests'),
       layerProject('feedback', '../layers/apps/feedback/tests'),
@@ -69,6 +70,7 @@ export default defineConfig({
       layerProject('context', '../layers/apps/context/tests'),
       layerProject('crm', '../layers/apps/crm/tests'),
       layerProject('inbox', '../layers/apps/inbox/tests'),
+      layerProject('helpinator', '../layers/apps/helpinator/tests'),
       layerProject('workflows', '../layers/apps/workflows/tests'),
       layerProject('ai', '../layers/ai/tests')
     ]

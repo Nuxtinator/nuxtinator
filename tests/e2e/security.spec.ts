@@ -9,11 +9,11 @@ import {
   getHostAdminDb,
   closeTestDatabases,
   cleanupCoreTestData
-} from 'layer-core/test-helpers'
+} from '@nuxtinator/core/test-helpers'
 import {
   cleanupTenancyTestData,
   createTestOrg
-} from 'layer-tenancy/test-helpers'
+} from '@nuxtinator/tenancy/test-helpers'
 import { loginIntoNewOrg, loginAsNewUser } from './helpers/login'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))

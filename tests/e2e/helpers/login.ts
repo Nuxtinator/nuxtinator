@@ -8,13 +8,13 @@ import {
   createTestUser,
   generateTestToken,
   type TestUser
-} from 'layer-core/test-helpers'
+} from '@nuxtinator/core/test-helpers'
 import {
   createTestOrg,
   addTestMembership,
   createTenancyUser,
   type TestOrg
-} from 'layer-tenancy/test-helpers'
+} from '@nuxtinator/tenancy/test-helpers'
 
 function setAuthCookie(page: Page, token: string): Promise<void> {
   // The `url` form is more reliable than domain+path for httpOnly cookies on

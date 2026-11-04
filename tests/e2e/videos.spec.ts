@@ -20,8 +20,8 @@ import { randomUUID } from 'node:crypto'
 import { config as loadDotenv } from 'dotenv'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { getHostAdminDb } from 'layer-core/test-helpers'
-import { addTestMembership } from 'layer-tenancy/test-helpers'
+import { getHostAdminDb } from '@nuxtinator/core/test-helpers'
+import { addTestMembership } from '@nuxtinator/tenancy/test-helpers'
 import {
   cleanupVideosTestData,
   createVideosUser,
@@ -189,7 +189,7 @@ test('non-owner gets the private-video error UI when opening someone else\'s pri
   // — switch to `other`'s session via a fresh context).
   const otherCtx = await page.context().browser()!.newContext()
   const otherPage = await otherCtx.newPage()
-  const { generateTestToken } = await import('layer-core/test-helpers')
+  const { generateTestToken } = await import('@nuxtinator/core/test-helpers')
   await otherCtx.addCookies([{
     name: 'auth-token',
     value: generateTestToken(other),

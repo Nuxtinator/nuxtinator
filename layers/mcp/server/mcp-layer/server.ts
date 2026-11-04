@@ -6,8 +6,9 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema
 } from '@modelcontextprotocol/sdk/types.js'
-import { getUserPermissions } from '#core/server/utils/rbac'
+import { getEnabledAppsForRequest, getUserPermissionsAcrossOrgs, getUserPermissionsForRequest } from '#tenant/server'
 import type { Permission } from '#core/app/utils/permissions'
+import { runAsOauthClient } from '#core/server/utils/bearer-auth'
 // Cross-layer type import to the OAuth layer; see mcp-origin.ts for why we
 // use the `#oauth/*` aliases declared in the OAuth layer's nuxt.config.ts
 // instead of `~~/...` or `#imports`.
@@ -30,22 +31,40 @@ function authzError(payload: McpAuthorizationError, text: string): {
   structuredContent: McpAuthorizationError
   isError: true
 } {
-  return {
+  return withStructuredText({
     content: [{ type: 'text', text }],
     structuredContent: payload,
     isError: true
+  })
+}
+
+// Appends `structuredContent` serialized as a trailing text block, as the MCP
+// spec recommends, so clients that only read `content` still receive the data.
+function withStructuredText<T extends { content: Array<{ type: 'text'; text: string }>; structuredContent?: unknown }>(result: T): T {
+  if (result.structuredContent === undefined) return result
+  return {
+    ...result,
+    content: [...result.content, { type: 'text', text: JSON.stringify(result.structuredContent) }]
   }
+}
+
+// `enabledApps` is null when the request targets no org (or the deploy has no
+// per-org app switch); every app counts as on and the call-time gate decides.
+function isAppOn(appId: string | undefined, enabledApps: ReadonlySet<string> | null): boolean {
+  return !appId || !enabledApps || enabledApps.has(appId)
 }
 
 function listVisibleTools(
   scopeSet: ReadonlySet<string>,
   userPerms: ReadonlySet<Permission>,
+  enabledApps: ReadonlySet<string> | null,
   tools: ReadonlyArray<RegisteredTool>
 ): RegisteredTool[] {
   const out: RegisteredTool[] = []
   for (const entry of tools) {
-    if (!scopeSet.has(entry.def.scope)) continue
-    if (!userPerms.has(entry.def.scope as Permission)) continue
+    const scope = entry.def.scope
+    if (scope !== undefined && !(scopeSet.has(scope) && userPerms.has(scope))) continue
+    if (!isAppOn(entry.def.appId, enabledApps)) continue
     out.push(entry)
   }
   return out
@@ -62,7 +81,9 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
   const serverName = (cfg.mcpServerName as string) || 'mcp-server'
   const serverVersion = (cfg.mcpServerVersion as string) || '1.0.0'
 
-  const userPermissions = await getUserPermissions(auth.userId)
+  // The union across every org the user belongs to — the visibility set for
+  // tools/list and resources/list. Each call re-resolves for its own org.
+  const userPermissions = await getUserPermissionsAcrossOrgs(auth.userId)
   const dispatchCtx = { auth, event, userPermissions }
 
   const server = new Server(
@@ -81,16 +102,23 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
   // ── tools/list ─────────────────────────────────────────────────────────
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const scopeSet = new Set<string>(auth.scopes)
-    const visible = listVisibleTools(scopeSet, userPermissions, registry.tools)
+    // Hides tools whose app is off in the org the request selects (header,
+    // or the user's only org). With no org selected every tool is listed.
+    const enabledApps = await getEnabledAppsForRequest(event, auth.userId)
+    const visible = listVisibleTools(scopeSet, userPermissions, enabledApps, registry.tools)
     return {
       tools: visible.map((entry) => {
         const tool: Record<string, unknown> = {
           name: entry.def.name,
+          ...(entry.def.title ? { title: entry.def.title } : {}),
           description: entry.def.description,
           inputSchema: entry.inputJsonSchema
         }
         if (entry.outputJsonSchema) {
           tool.outputSchema = entry.outputJsonSchema
+        }
+        if (entry.annotations) {
+          tool.annotations = entry.annotations
         }
         return tool
       })
@@ -114,13 +142,14 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
       }
     }
     const tool = entry.def
+    const scope = tool.scope
 
     // Gate 2: scope on token
-    if (!auth.scopes.includes(tool.scope)) {
+    if (scope !== undefined && !auth.scopes.includes(scope)) {
       return authzError(
         {
           error: 'insufficient_scope',
-          required: tool.scope,
+          required: scope,
           surface: 'token',
           actionable: 're_authorize'
         },
@@ -128,39 +157,65 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
       )
     }
 
-    // Gate 3: RBAC permission
-    if (!userPermissions.has(tool.scope as Permission)) {
-      return authzError(
-        {
-          error: 'insufficient_permission',
-          required: tool.scope,
-          surface: 'rbac',
-          actionable: 'contact_admin'
-        },
-        `Insufficient permission. This tool requires '${tool.scope}'; your account does not currently have it.`
-      )
-    }
-
-    const toolCtx: McpToolContext = { ...dispatchCtx, tool }
-
-    // Rate-limit buckets (default + per-tool).
-    const limited = await checkBuckets(tool, toolCtx)
-    if (limited) {
-      const windowDesc = limited.windowMs >= 60_000
-        ? `${Math.round(limited.windowMs / 60_000)}m`
-        : `${Math.round(limited.windowMs / 1000)}s`
-      return {
-        content: [{
-          type: 'text',
-          text: `Rate limit exceeded: ${limited.bucket} (${limited.count}/${limited.limit} in ${windowDesc}). Retry after ${limited.retryAfterSeconds}s.`
-        }],
-        isError: true
-      }
-    }
-
+    // Gate 3 runs inside the try so the kernel's org-resolution errors (404
+    // unknown org or non-member, 423 suspended) are formatted by `mcpError`
+    // the same way a handler's own would be.
     try {
-      const parsedInput = await validateInput(req.params.arguments ?? {}, tool.input)
-      const result = await tool.handler(parsedInput, toolCtx)
+      // Gate 3: RBAC permission, resolved for the org this call targets (the
+      // tool's `org` input, else the request's X-Active-Org header) rather
+      // than the across-orgs union tools/list is filtered by.
+      const args = req.params.arguments ?? {}
+      const org = typeof args.org === 'string' ? args.org : undefined
+      // A scope-less tool targets no org and gets the across-orgs set.
+      const callPermissions = scope === undefined
+        ? userPermissions
+        : await getUserPermissionsForRequest(event, auth.userId, { org })
+      if (scope !== undefined && !callPermissions.has(scope)) {
+        return authzError(
+          {
+            error: 'insufficient_permission',
+            required: scope,
+            surface: 'rbac',
+            actionable: 'contact_admin'
+          },
+          `Insufficient permission. This tool requires '${scope}'; your account does not currently have it.`
+        )
+      }
+
+      // Gate 4: the tool's app is switched on for the org this call targets,
+      // resolved the way the handler's `runInOrgTransaction` resolves it.
+      if (tool.appId && !isAppOn(tool.appId, await getEnabledAppsForRequest(event, auth.userId, { org }))) {
+        return authzError(
+          {
+            error: 'app_disabled',
+            app: tool.appId,
+            surface: 'org',
+            actionable: 'contact_admin'
+          },
+          `App "${tool.appId}" is not enabled for this organization.`
+        )
+      }
+
+      const toolCtx: McpToolContext = { ...dispatchCtx, userPermissions: callPermissions, tool }
+
+      // Rate-limit buckets (default + per-tool).
+      const limited = await checkBuckets(tool, toolCtx)
+      if (limited) {
+        const windowDesc = limited.windowMs >= 60_000
+          ? `${Math.round(limited.windowMs / 60_000)}m`
+          : `${Math.round(limited.windowMs / 1000)}s`
+        return {
+          content: [{
+            type: 'text',
+            text: `Rate limit exceeded: ${limited.bucket} (${limited.count}/${limited.limit} in ${windowDesc}). Retry after ${limited.retryAfterSeconds}s.`
+          }],
+          isError: true
+        }
+      }
+
+      const parsedInput = await validateInput(args, tool.input)
+      // Run as the client so activity-log rows record it in `client_id`.
+      const result = await runAsOauthClient(auth.clientId, () => tool.handler(parsedInput, toolCtx))
 
       // Server-side output validation when the tool declared an output schema.
       if (tool.output && result.structuredContent !== undefined) {
@@ -177,7 +232,7 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
         }
       }
 
-      return result
+      return withStructuredText(result)
     }
     catch (err) {
       return mcpError(err)
@@ -190,11 +245,13 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
       const scopeSet = new Set<string>(auth.scopes)
       const out: Array<{ uri: string; name?: string; description?: string; mimeType?: string }> = []
       const seen = new Set<string>()
+      const enabledApps = await getEnabledAppsForRequest(event, auth.userId)
 
       for (const entry of registry.resources) {
         const def = entry.def
         if (!scopeSet.has(def.scope)) continue
         if (!userPermissions.has(def.scope as Permission)) continue
+        if (!isAppOn(def.appId, enabledApps)) continue
 
         try {
           const items = await def.list({ ...dispatchCtx, resource: def })
@@ -225,10 +282,16 @@ export async function buildMcpServer(opts: BuildOpts): Promise<Server> {
         if (!scopeSet.has(def.scope)) {
           throw new Error(`Insufficient scope. Resource requires '${def.scope}'.`)
         }
-        if (!userPermissions.has(def.scope as Permission)) {
+        // Resources carry no org input; the request's header or cookie
+        // selects the org the permission is checked against.
+        const readPermissions = await getUserPermissionsForRequest(event, auth.userId)
+        if (!readPermissions.has(def.scope as Permission)) {
           throw new Error(`Insufficient permission. Resource requires '${def.scope}'.`)
         }
-        return await def.read(uri, { ...dispatchCtx, resource: def })
+        if (def.appId && !isAppOn(def.appId, await getEnabledAppsForRequest(event, auth.userId))) {
+          throw new Error(`App "${def.appId}" is not enabled for this organization.`)
+        }
+        return await def.read(uri, { ...dispatchCtx, userPermissions: readPermissions, resource: def })
       }
 
       throw new Error(`Resource not found: ${uri}`)

@@ -16,7 +16,7 @@ function errMsg(e: unknown): string {
 }
 
 const {
-  get, update, remove, replaceFile, listVersions, restoreVersion, issueLink, revokeLink, shareUrl, siteUrl
+  get, update, remove, replaceFile, listVersions, restoreVersion, issueLink, revokeLink, shareUrl, siteUrl, rawUrl
 } = useFiles()
 
 const item = ref<FilesItemDetail | null>(null)
@@ -203,9 +203,9 @@ async function onRevoke() {
   }
 }
 
-async function copyLink() {
+async function copyLink(url?: string) {
   if (!item.value?.share_token) return
-  const url = shareUrl(item.value, item.value.share_token)
+  url ??= shareUrl(item.value, item.value.share_token)
   const copied = await copyToClipboard(url)
   toast.add(copied
     ? { title: 'Link copied', color: 'success' }
@@ -371,9 +371,17 @@ onMounted(async () => {
           >
             Open site
           </UButton>
-          <UButton size="sm" variant="soft" icon="i-lucide-link" @click="copyLink">
+          <UButton size="sm" variant="soft" icon="i-lucide-link" @click="copyLink()">
             Copy link
           </UButton>
+          <template v-if="item.kind === 'file'">
+            <UButton size="sm" variant="soft" icon="i-lucide-code" @click="copyLink(rawUrl(item.share_token))">
+              Copy embed link
+            </UButton>
+            <UButton size="sm" variant="soft" icon="i-lucide-download" @click="copyLink(rawUrl(item.share_token, true))">
+              Copy download link
+            </UButton>
+          </template>
           <UButton
             size="sm"
             variant="ghost"

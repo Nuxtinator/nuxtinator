@@ -31,7 +31,7 @@ export default defineEventHandler(async (event) => {
         updated_at: sql<Date>`now()`
       })
       .where('id', '=', existing.id)
-      .returning(['id', 'slug', 'name', 'color', 'icon_url', 'created_at', 'updated_at'])
+      .returning(['id', 'slug', 'name', 'color', 'icon_url', 'template', 'created_at', 'updated_at'])
       .executeTakeFirstOrThrow()
 
     logUpdate('context_portfolios', updated.id, ctx.userId, { patch })

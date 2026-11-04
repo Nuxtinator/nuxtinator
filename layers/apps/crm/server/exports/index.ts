@@ -36,7 +36,10 @@ export type {
 export { normalizeChannelValue, channelFingerprint } from '../utils/normalize'
 export type { NormalizedChannelValue } from '../utils/normalize'
 
-export { claimChannel, findChannel, linkChannel, unlinkChannel, setPrimary, markChannelVerified } from '../utils/channels'
+export {
+  claimChannel, findChannel, linkChannel, unlinkChannel, setPrimary, markChannelVerified,
+  issueChannelVerificationToken, consumeChannelVerificationToken
+} from '../utils/channels'
 export type { CrmChannelRow, CrmChannelLinkRow, LinkChannelOpts } from '../utils/channels'
 
 export { hydrateRecords, getRecord, applyFieldPatch, deleteRecord } from '../utils/record-storage'
@@ -67,6 +70,9 @@ export type { CrmUserGrantEntry } from '../utils/user-grants'
 
 export { listRecords, requireRecordType, assertRecordVisible } from '../utils/list-records'
 export type { CrmListOpts, CrmRecordListItem, CrmListResult } from '../utils/list-records'
+
+export { closingRulesOf, isClosedStatus } from '../utils/closing'
+export type { CrmClosingRules } from '../utils/closing'
 
 export { recordCrmActivity } from '../utils/crm-activity'
 export type { CrmActivityAction, CrmActivityOpts } from '../utils/crm-activity'

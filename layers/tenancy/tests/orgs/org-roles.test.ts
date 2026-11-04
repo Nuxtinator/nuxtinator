@@ -125,6 +125,33 @@ describe('Role overrides: PUT/GET /api/o/[orgSlug]/role-overrides', () => {
     ]))
   })
 
+  it('overrides change what the role grants in that org only', async () => {
+    const a = await createOrgWithAdmin(sql)
+    const b = await createOrgWithAdmin(sql)
+    const user = await createTenancyUser(sql)
+    await addTestMembership(sql, { user_id: user.id, org_id: a.org.id, roles: ['member'] })
+    await addTestMembership(sql, { user_id: user.id, org_id: b.org.id, roles: ['member'] })
+    const inA = withOrgHeader(getAuthHeaders(user), a.org.slug)
+    const inB = withOrgHeader(getAuthHeaders(user), b.org.slug)
+
+    // Members read the member list by default, but not roles.
+    await $fetch(`/api/o/${a.org.slug}/members`, inA)
+    expect((await $fetch(`/api/o/${a.org.slug}/roles`, inA).catch(e => e)).statusCode).toBe(403)
+
+    await $fetch(`/api/o/${a.org.slug}/role-overrides`, {
+      method: 'PUT',
+      body: { role: 'member', grants: ['org.roles.read'], revokes: ['org.members.read'] },
+      ...withOrgHeader(a.auth, a.org.slug)
+    })
+
+    expect((await $fetch(`/api/o/${a.org.slug}/members`, inA).catch(e => e)).statusCode).toBe(403)
+    await $fetch(`/api/o/${a.org.slug}/roles`, inA)
+
+    // Org B's member role is untouched.
+    await $fetch(`/api/o/${b.org.slug}/members`, inB)
+    expect((await $fetch(`/api/o/${b.org.slug}/roles`, inB).catch(e => e)).statusCode).toBe(403)
+  })
+
   it('PUT replaces previous overrides for the same role (bulk-replace semantics)', async () => {
     const { org, auth } = await createOrgWithAdmin(sql)
 

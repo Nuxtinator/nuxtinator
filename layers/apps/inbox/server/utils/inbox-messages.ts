@@ -24,6 +24,13 @@ export const INBOX_MESSAGE_STATUSES = ['draft', 'queued', 'sent', 'delivered', '
 
 export const INBOX_SEND_MAX_ATTEMPTS = 3
 
+// A send blocked on missing configuration is held, not retried: it keeps its
+// 'queued' status and its attempt budget, and the sweep re-examines it this
+// often. Short enough that fixing the setting releases held mail promptly,
+// long enough that a misconfigured org isn't re-scanned every sweep.
+export const INBOX_SEND_HOLD_RECHECK_MINUTES = 1
+export const INBOX_HOLD_NO_CONTACT_ADDRESS = 'Inbox contact address not configured'
+
 export interface InboxCreateMessageData {
   conversationId: string
   direction: 'inbound' | 'outbound'
@@ -197,16 +204,35 @@ export function inboxAiContextMessages<T extends Pick<InboxMessageRow, 'status'>
 }
 
 // Atomically claim a queued message for sending (queued → sent), returning
-// the row only to the winner.
+// the row only to the winner. Clears any configuration hold: reaching the
+// claim means the blocking setting is present again.
 export async function inboxClaimForSend(tx: Tx, id: string): Promise<InboxMessageRow | null> {
   const row = await tx
     .updateTable('inbox_messages')
-    .set({ status: 'sent', attempts: sql`attempts + 1`, updated_at: new Date() })
+    .set({ status: 'sent', attempts: sql`attempts + 1`, hold_reason: null, updated_at: new Date() })
     .where('id', '=', id)
     .where('status', '=', 'queued')
     .returningAll()
     .executeTakeFirst()
   return row ?? null
+}
+
+// Hold a queued send that cannot proceed until an operator changes a setting.
+// Unlike inboxReleaseForRetry this spends no retry budget: status stays
+// 'queued' and attempts is untouched, so the message waits indefinitely and
+// goes out on the first sweep after the configuration lands. Called before the
+// claim, so a held message never momentarily reads as 'sent'.
+export async function inboxHoldForConfig(tx: Tx, id: string, reason: string): Promise<void> {
+  await tx
+    .updateTable('inbox_messages')
+    .set({
+      hold_reason: reason,
+      next_attempt_at: sql<Date>`now() + (${INBOX_SEND_HOLD_RECHECK_MINUTES} * interval '1 minute')`,
+      updated_at: new Date()
+    })
+    .where('id', '=', id)
+    .where('status', '=', 'queued')
+    .execute()
 }
 
 // Mark an outbound message sent and store the provider's message-id — also as

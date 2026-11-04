@@ -5,15 +5,31 @@ import { getRegisteredScopes } from './scopes-registry'
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
 
+// Schemes a browser executes rather than hands to an application. The
+// authorize endpoint answers with a 302 to the redirect URI carrying the
+// code, so none of these can ever be a redirect target.
+const EXECUTABLE_SCHEMES = new Set(['javascript:', 'data:', 'vbscript:', 'file:', 'blob:', 'about:'])
+
 export interface ParsedRedirectUri {
   valid: boolean
   serialized?: string
   error?: string
 }
 
-// Parses a redirect URI and enforces registration-time rules:
-// absolute URL, https in production (http for loopback in dev), no fragment, no userinfo,
-// no wildcards. Returns the serialized form (new URL(input).toString()) for exact-string match.
+// Parses a redirect URI and enforces registration-time rules: absolute URL,
+// no fragment, no userinfo, no wildcards. Three scheme classes are accepted,
+// following RFC 8252 for native apps:
+//   - `https` to any host.
+//   - `http` only to a loopback host (§7.3) — a native app listening on an
+//     ephemeral local port; the port may differ per session, see
+//     matchesRegisteredRedirect.
+//   - any other scheme as a private-use scheme (§7.1) that the OS routes to
+//     the app that registered it — `cursor://anysphere.cursor-mcp/oauth/callback`,
+//     `com.example.app:/oauth2redirect`. Such a scheme is not globally
+//     unique, so a squatting app could receive the callback; the mandatory
+//     S256 PKCE on the token exchange makes the intercepted code useless.
+// Browser-executable schemes are refused outright. Returns the serialized
+// form (new URL(input).toString()) for exact-string match.
 export function parseRedirectUri(input: string): ParsedRedirectUri {
   if (typeof input !== 'string' || input.length === 0) {
     return { valid: false, error: 'redirect_uri is required' }
@@ -33,8 +49,8 @@ export function parseRedirectUri(input: string): ParsedRedirectUri {
   } catch {
     return { valid: false, error: 'redirect_uri must be an absolute URL' }
   }
-  if (!url.protocol || !url.host) {
-    return { valid: false, error: 'redirect_uri must include a scheme and host' }
+  if (!url.protocol) {
+    return { valid: false, error: 'redirect_uri must include a scheme' }
   }
   if (url.hash) {
     return { valid: false, error: 'redirect_uri must not contain a fragment' }
@@ -42,17 +58,20 @@ export function parseRedirectUri(input: string): ParsedRedirectUri {
   if (url.username || url.password) {
     return { valid: false, error: 'redirect_uri must not contain userinfo' }
   }
+  if (EXECUTABLE_SCHEMES.has(url.protocol)) {
+    return { valid: false, error: `redirect_uri must not use the ${url.protocol} scheme` }
+  }
+  const isHttp = url.protocol === 'http:'
   const isHttps = url.protocol === 'https:'
-  // RFC 8252 §7.3 — loopback http redirect URIs are permitted in any
-  // environment for native installed apps. The historical dev-only
-  // gate was conflating "no http to public hosts" (correct) with
-  // "no http loopback in prod" (out of spec, blocks every native
-  // MCP client).
-  const isLoopback
-    = url.protocol === 'http:'
-      && LOOPBACK_HOSTS.has(url.hostname.toLowerCase())
-  if (!isHttps && !isLoopback) {
-    return { valid: false, error: 'redirect_uri must use https (http allowed only for loopback)' }
+  if (isHttp || isHttps) {
+    if (!url.host) {
+      return { valid: false, error: 'redirect_uri must include a host' }
+    }
+    if (isHttp && !LOOPBACK_HOSTS.has(url.hostname.toLowerCase())) {
+      return { valid: false, error: 'redirect_uri must use https (http allowed only for loopback)' }
+    }
+  } else if (!url.host && !url.pathname) {
+    return { valid: false, error: 'redirect_uri must include a host or path after the scheme' }
   }
   return { valid: true, serialized: url.toString() }
 }

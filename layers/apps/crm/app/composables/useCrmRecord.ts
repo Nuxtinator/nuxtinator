@@ -27,6 +27,10 @@ export interface CrmRecordDetail {
   createdAt: string
   updatedAt: string
   createdBy: string
+  /** The linked user account; its name and email addresses are read-only here. */
+  userId: string | null
+  /** Channel types whose addresses come from the linked account (empty when unlinked). */
+  accountOwnedChannelTypes: string[]
   capabilities: CrmRecordCapabilities
 }
 

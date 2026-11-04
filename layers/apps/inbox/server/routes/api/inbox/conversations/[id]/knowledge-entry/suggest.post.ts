@@ -8,7 +8,7 @@ import { isAiConfigured } from '#ai/server'
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')!
   return await withOrgPermission(event, { appId: 'inbox' }, 'inbox.send', async (tx) => {
-    if (!isAiConfigured()) {
+    if (!(await isAiConfigured(tx))) {
       throw createError({ statusCode: 503, statusMessage: 'AI is not configured' })
     }
     const conversation = await inboxGetConversation(tx, id)

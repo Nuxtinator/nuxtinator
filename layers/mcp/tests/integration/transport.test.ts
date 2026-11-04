@@ -32,6 +32,7 @@ describe('/mcp transport (integration)', async () => {
     runner: 'vitest',
     env: {
       TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? '',
+      DATABASE_URL: process.env.TEST_DATABASE_URL ?? '',
       NUXT_PUBLIC_SITE_URL: process.env.NUXT_PUBLIC_SITE_URL ?? 'http://localhost:3099',
       OAUTH_CONSENT_COOKIE_SECRET: 'test-secret-32-bytes-of-random-stuff-for-integration-suite-padding'
     }
@@ -85,12 +86,22 @@ describe('/mcp transport (integration)', async () => {
     expect(res.status).toBe(413)
   })
 
-  it('post-initialize POST without MCP-Protocol-Version returns 400', async () => {
+  it('post-initialize POST without MCP-Protocol-Version is accepted', async () => {
     const fx = await fixtureToken({ scopes: ['pages.view'], permissions: ['pages.view'] })
     const res = await callMcp({
       token: fx.token,
       rawBody: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
       headers: {} // explicitly omit mcp-protocol-version
+    })
+    expect(res.status).toBe(200)
+  })
+
+  it('POST with an unsupported MCP-Protocol-Version returns 400', async () => {
+    const fx = await fixtureToken({ scopes: ['pages.view'], permissions: ['pages.view'] })
+    const res = await callMcp({
+      token: fx.token,
+      rawBody: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+      headers: { 'mcp-protocol-version': '1999-01-01' }
     })
     expect(res.status).toBe(400)
   })
@@ -114,10 +125,12 @@ describe('/mcp transport (integration)', async () => {
     })
     const res = await callMcp({ method: 'tools/list', token: fx.token })
     expect(res.status).toBe(200)
-    const result = (res.body as { result?: { tools?: Array<{ name: string }> } }).result
+    const result = (res.body as { result?: { tools?: Array<{ name: string, title?: string }> } }).result
     const names = (result?.tools ?? []).map(t => t.name).sort()
     // Only the pages.view tools are visible — write/destructive scopes hidden.
     expect(names).toEqual(['expensive_thing', 'failing_tool', 'list_pages', 'output_check'])
+    expect(result?.tools?.find(t => t.name === 'list_pages')?.title).toBe('List Pages')
+    expect(result?.tools?.find(t => t.name === 'output_check')).not.toHaveProperty('title')
   })
 
   it('tools/list hides a tool whose scope the user has but the token does not', async () => {
@@ -212,6 +225,37 @@ describe('/mcp transport (integration)', async () => {
     const body = res.body as { result?: { isError?: boolean; structuredContent?: { ok: boolean; value: number } } }
     expect(body.result?.isError).toBeFalsy()
     expect(body.result?.structuredContent).toEqual({ ok: true, value: 1 })
+  })
+
+  it('structuredContent is also returned serialized as a trailing text block', async () => {
+    const fx = await fixtureToken({ scopes: ['pages.view'], permissions: ['pages.view'] })
+    const res = await callMcp({
+      method: 'tools/call',
+      params: { name: 'output_check', arguments: { malformed: false } },
+      token: fx.token
+    })
+    const body = res.body as { result?: { content?: Array<{ type: string; text: string }>; structuredContent?: unknown } }
+    const content = body.result?.content ?? []
+    expect(content).toHaveLength(2)
+    expect(content[0]?.text).toBe('ok')
+    expect(content[1]?.type).toBe('text')
+    expect(JSON.parse(content[1]!.text)).toEqual(body.result?.structuredContent)
+  })
+
+  it('authorization errors also return their payload serialized as a text block', async () => {
+    const { userId } = await createTestUser({ permissions: ['pages.view', 'pages.write'] })
+    const { clientId } = await createTestClient()
+    const { token } = await issueTestToken({ userId, clientId, scopes: ['pages.view'] })
+    const res = await callMcp({
+      method: 'tools/call',
+      params: { name: 'create_page', arguments: { slug: 'x' } },
+      token
+    })
+    const body = res.body as { result?: { content?: Array<{ text: string }>; structuredContent?: unknown } }
+    const content = body.result?.content ?? []
+    expect(content).toHaveLength(2)
+    expect(content[0]?.text).toMatch(/insufficient scope/i)
+    expect(JSON.parse(content[1]!.text)).toEqual(body.result?.structuredContent)
   })
 
   // ── Error mapping ──────────────────────────────────────────────────────

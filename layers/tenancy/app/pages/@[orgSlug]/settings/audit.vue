@@ -30,7 +30,7 @@ const fetchPage = async (reset = false) => {
   try {
     const r = await $fetch<{ logs: LogRow[], nextCursor: string | null }>(
       `/api/o/${orgSlug.value}/audit`,
-      { params: reset ? {} : (cursor.value ? { before: cursor.value } : {}) }
+      { query: reset ? {} : (cursor.value ? { before: cursor.value } : {}) }
     )
     if (reset) logs.value = r.logs
     else logs.value = [...logs.value, ...r.logs]

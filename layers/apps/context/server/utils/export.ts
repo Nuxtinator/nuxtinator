@@ -49,7 +49,7 @@ export async function buildPortfolioExport(
   tx: Transaction<Database>,
   p: PortfolioRow
 ): Promise<{ files: SectionExportFile[], readme: string, safeFilename: string }> {
-  const defs = await getPortfolioSections(tx, p.id)
+  const defs = await getPortfolioSections(tx, p)
   const rows = await tx
     .selectFrom('context_sections')
     .select(['section_key', 'content'])

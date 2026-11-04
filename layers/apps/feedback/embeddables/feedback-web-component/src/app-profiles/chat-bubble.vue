@@ -64,6 +64,7 @@ const SUB_TYPE_LABEL = { bug: 'Bug', idea: 'Idea' }
 const STATUS_LABEL = {
   new: 'New',
   triage_needed: 'Triage',
+  discussing: 'In discussion',
   in_progress: 'In progress',
   rejected: 'Rejected',
   accepted: 'Accepted'
@@ -269,6 +270,7 @@ async function doSubmit() {
     submitOk.value = true
     saveName(form.submitter_name.trim())
     resetForm()
+    autoScreenshot()
     setTimeout(() => { submitOk.value = false }, 2500)
   } catch (e) {
     submitError.value = e.message || 'Submit failed.'
@@ -684,10 +686,10 @@ watch(open, (v) => {
       aria-label="Open feedback"
       @click="open = !open"
     >
-      <svg v-if="!open" xmlns="http://www.w3.org/2000/svg" height="32" viewBox="0 -960 960 960" width="32" fill="#1f1f1f" style="display:block;margin:auto;">
+      <svg v-if="!open" xmlns="http://www.w3.org/2000/svg" height="16" viewBox="0 -960 960 960" width="16" fill="#1f1f1f" style="display:block;margin:auto;">
         <path d="M480-200q66 0 113-47t47-113v-160q0-66-47-113t-113-47q-66 0-113 47t-47 113v160q0 66 47 113t113 47Zm-80-120h160v-80H400v80Zm0-160h160v-80H400v80Zm80 40Zm0 320q-65 0-120.5-32T272-240H160v-80h84q-3-20-3.5-40t-.5-40h-80v-80h80q0-20 .5-40t3.5-40h-84v-80h112q14-23 31.5-43t40.5-35l-64-66 56-56 86 86q28-9 57-9t57 9l88-86 56 56-66 66q23 15 41.5 34.5T688-640h112v80h-84q3 20 3.5 40t.5 40h80v80h-80q0 20-.5 40t-3.5 40h84v80H688q-32 56-87.5 88T480-120Z"/>
       </svg>
-      <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none">
         <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
       </svg>
     </button>
@@ -715,9 +717,9 @@ watch(open, (v) => {
 }
 
 .fw-bubble {
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  border-radius: 0;
   border: none;
   background: #2563eb;
   color: #fff;
@@ -733,8 +735,9 @@ watch(open, (v) => {
 
 .fw-panel {
   width: 360px;
-  max-width: calc(100vw - 40px);
+  max-width: calc(100vw - 24px);
   max-height: 70vh;
+  margin-right: 12px;
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
@@ -816,9 +819,9 @@ watch(open, (v) => {
 }
 .fw-user-menu-item:hover { background: #f3f4f6; }
 .fw-bubble {
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  border-radius: 0;
   border: none;
   background: #fff;
   color: #2563eb;
@@ -1062,6 +1065,7 @@ watch(open, (v) => {
 .fw-badge { padding: 2px 7px; border-radius: 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
 .fw-badge-new { background: #dbeafe; color: #1d4ed8; }
 .fw-badge-triage_needed { background: #fef3c7; color: #92400e; }
+.fw-badge-discussing { background: #e0f2fe; color: #075985; }
 .fw-badge-in_progress { background: #ede9fe; color: #5b21b6; }
 .fw-badge-rejected { background: #fee2e2; color: #991b1b; }
 .fw-badge-accepted { background: #dcfce7; color: #166534; }

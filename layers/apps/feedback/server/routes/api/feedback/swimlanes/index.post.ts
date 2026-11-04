@@ -11,7 +11,7 @@ export default defineEventHandler(async (event) => {
   if (!projectId) throw createError({ statusCode: 400, statusMessage: 'project_id is required' })
   if (!name) throw createError({ statusCode: 400, statusMessage: 'name is required' })
 
-  return await withOrgPermission(event, 'feedback.write', async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
     const row = await tx
       .insertInto('swimlanes')
       .values({

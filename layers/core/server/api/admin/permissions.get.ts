@@ -1,5 +1,6 @@
 import { requireOperatorAdmin } from '#tenant/server'
 import { getAllPermissions, getPermissionMeta } from '../../utils/permissions-registry'
+import { getPersonalAppPermissionSlugs } from '../../utils/app-registry'
 
 // Drives the custom-role permission picker. Returns the full set of
 // currently-registered permissions (host static + every installed app
@@ -10,7 +11,9 @@ import { getAllPermissions, getPermissionMeta } from '../../utils/permissions-re
 export default defineEventHandler(async (event) => {
   await requireOperatorAdmin(event)
 
-  const perms = getAllPermissions()
+  // Personal-app permissions come from the app being on for a user, never a role.
+  const personal = getPersonalAppPermissionSlugs()
+  const perms = getAllPermissions().filter(p => !personal.has(p))
   const items = perms.map((perm) => {
     const meta = getPermissionMeta(perm)
     return {

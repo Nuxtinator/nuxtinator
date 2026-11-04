@@ -1,14 +1,13 @@
 {
   "name": "@nuxtinator/email-mailgun",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./nuxt.config.ts"
   },
   "dependencies": {
-    "nodemailer": "^7.0.6",
-    "nodemailer-mailgun-transport": "^2.1.5"
+    "nodemailer": "^10.1.0"
   },
   "optionalDependencies": {
     "@nuxtinator/core": "*"
@@ -17,9 +16,5 @@
     "@nuxt/kit": "^4.0.0",
     "h3": "^1.0.0",
     "nuxt": "^4.0.0"
-  },
-  "devDependencies": {
-    "@types/nodemailer": "^7.0.1",
-    "@types/nodemailer-mailgun-transport": "^1.4.6"
   }
 }

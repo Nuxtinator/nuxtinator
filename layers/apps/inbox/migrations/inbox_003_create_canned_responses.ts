@@ -2,9 +2,8 @@ import { type Kysely, sql } from 'kysely'
 
 // Canned responses — shared, org-wide reply snippets an agent can insert into
 // the composer. Single-body (HTML): the monorepo has no i18n system yet, so
-// there is no translations table (Doxa's per-locale variants are dropped until
-// core grows i18n). `created_by` is SET NULL, not CASCADE — a snippet is a
-// shared team asset that must outlive the teammate who authored it.
+// there is no translations table. `created_by` is SET NULL, not CASCADE — a
+// snippet is a shared team asset that must outlive the teammate who authored it.
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable('inbox_canned_responses')

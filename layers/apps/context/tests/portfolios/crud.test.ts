@@ -11,6 +11,7 @@ import {
   createTestPortfolio,
   withOrgHeader
 } from '../helpers'
+import { CONTEXT_SECTIONS } from '../../server/utils/section-catalog'
 
 describe('POST /api/context/portfolios', () => {
   const sql = getHostAdminDb()
@@ -44,6 +45,61 @@ describe('POST /api/context/portfolios', () => {
       ...withOrgHeader(auth, org.slug)
     })
     expect(res.slug).toBe(`${fixed}-2`)
+  })
+
+  it('starts with every built-in section when builtin_sections is omitted', async () => {
+    const { org, auth } = await createContextOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    const res = await $fetch<{ id: string, slug: string }>('/api/context/portfolios', { method: 'POST', body: { name: 'All' }, ...opts })
+
+    const listed = await $fetch<{ sections: Array<{ key: string, is_custom: boolean }> }>(`/api/context/portfolios/${res.slug}/sections`, { ...opts })
+    expect(listed.sections.map(s => s.key)).toEqual(CONTEXT_SECTIONS.map(s => s.key))
+    expect(listed.sections.every(s => !s.is_custom)).toBe(true)
+  })
+
+  it('starts empty when builtin_sections is []', async () => {
+    const { org, auth } = await createContextOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    const res = await $fetch<{ id: string, slug: string }>('/api/context/portfolios', {
+      method: 'POST', body: { name: 'None', builtin_sections: [] }, ...opts
+    })
+
+    const listed = await $fetch<{ sections: unknown[] }>(`/api/context/portfolios/${res.slug}/sections`, { ...opts })
+    expect(listed.sections).toEqual([])
+    const rows = await sql<{ key: string }[]>`SELECT key FROM context_section_definitions WHERE portfolio_id = ${res.id}`
+    expect(rows).toHaveLength(0)
+  })
+
+  it('starts with only the chosen built-ins, deduplicated, stamped with the creator', async () => {
+    const { org, auth, user } = await createContextOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    const res = await $fetch<{ id: string, slug: string }>('/api/context/portfolios', {
+      method: 'POST', body: { name: 'Some', builtin_sections: ['team', 'identity', 'team'] }, ...opts
+    })
+
+    const listed = await $fetch<{ sections: Array<{ key: string }> }>(`/api/context/portfolios/${res.slug}/sections`, { ...opts })
+    expect(listed.sections.map(s => s.key)).toEqual(['identity', 'team'])
+    const rows = await sql<{ key: string, title: string | null, created_by: string }[]>`
+      SELECT key, title, created_by FROM context_section_definitions WHERE portfolio_id = ${res.id} ORDER BY key
+    `
+    expect(rows).toEqual([
+      { key: 'identity', title: null, created_by: user.id },
+      { key: 'team', title: null, created_by: user.id }
+    ])
+  })
+
+  it('rejects an unknown built-in key with 400 and creates nothing', async () => {
+    const { org, auth } = await createContextOrgWith(sql, ['admin'])
+    const err = await $fetch('/api/context/portfolios', {
+      method: 'POST',
+      body: { name: 'Bad keys', builtin_sections: ['identity', 'roadmap'] },
+      ...withOrgHeader(auth, org.slug)
+    }).catch(e => e)
+    expect(err.statusCode).toBe(400)
+    expect(String(err.statusMessage)).toContain('roadmap')
+
+    const rows = await sql<{ id: string }[]>`SELECT id FROM context_portfolios WHERE org_id = ${org.id}`
+    expect(rows).toHaveLength(0)
   })
 
   it('member without context.portfolio.create gets 403', async () => {

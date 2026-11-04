@@ -5,7 +5,7 @@ import { defineAlias } from '../kit/alias'
 // `@nuxtinator/ai` layer's alias module) has already set it. Same pattern as
 // modules/email-kernel.ts — the layer that provides the real implementation
 // sets the alias unconditionally and wins; this fallback fills the gap so
-// consumers can import `#ai/server` and gate on `isAiConfigured()` regardless.
+// consumers can import `#ai/server` and gate on `isAiConfigured(tx)` regardless.
 export default defineNuxtModule({
   meta: { name: 'ai-kernel' },
   setup(_, nuxt) {

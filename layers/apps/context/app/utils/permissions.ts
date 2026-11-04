@@ -7,7 +7,9 @@ export const CONTEXT_PERMISSIONS = [
   'context.portfolio.delete',
   'context.section.custom',
   'context.assistant.chat',
-  'context.assistant.apply'
+  'context.assistant.apply',
+  'context.settings',
+  'context.suggestion.review'
 ] as const
 
 export type ContextPermission = typeof CONTEXT_PERMISSIONS[number]
@@ -38,8 +40,8 @@ export const CONTEXT_PERMISSION_META: Record<string, { title: string, descriptio
     description: 'Delete portfolios and their content.'
   },
   'context.section.custom': {
-    title: 'Manage custom sections',
-    description: 'Add, edit, and remove custom section definitions on a portfolio.'
+    title: 'Manage sections',
+    description: 'Add, edit, and remove sections on a portfolio.'
   },
   'context.assistant.chat': {
     title: 'Chat with assistant',
@@ -48,6 +50,14 @@ export const CONTEXT_PERMISSION_META: Record<string, { title: string, descriptio
   'context.assistant.apply': {
     title: 'Apply assistant updates',
     description: 'Apply assistant-proposed section updates.'
+  },
+  'context.settings': {
+    title: 'Manage Context settings',
+    description: 'Open the Context settings page and set the portfolio order.'
+  },
+  'context.suggestion.review': {
+    title: 'Review suggestions',
+    description: 'Approve or reject section updates suggested through MCP.'
   }
 }
 
@@ -56,7 +66,8 @@ export const CONTEXT_DEFAULT_GRANTS = {
     'context.access',
     'context.read',
     'context.write',
-    'context.assistant.chat'
+    'context.assistant.chat',
+    'context.assistant.apply'
   ],
   admin: [...CONTEXT_PERMISSIONS]
 } as const
@@ -72,5 +83,7 @@ declare module '#permissions' {
     'context.section.custom': true
     'context.assistant.chat': true
     'context.assistant.apply': true
+    'context.settings': true
+    'context.suggestion.review': true
   }
 }

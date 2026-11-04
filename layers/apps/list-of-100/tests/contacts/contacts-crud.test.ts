@@ -43,8 +43,8 @@ describe('POST /api/list-of-100/contacts', () => {
     expect(res.contact.id).toBeDefined()
     expect(res.contact.user_id).toBe(user.id)
 
-    const rows = await sql<{ name: string, relationship: string, faith_status: string, notes: string | null, user_id: string, org_id: string }[]>`
-      SELECT name, relationship, faith_status, notes, user_id, org_id
+    const rows = await sql<{ name: string, relationship: string, faith_status: string, notes: string | null, user_id: string }[]>`
+      SELECT name, relationship, faith_status, notes, user_id
       FROM list_of_100_contacts WHERE id = ${res.contact.id}
     `
     expect(rows.length).toBe(1)
@@ -53,7 +53,6 @@ describe('POST /api/list-of-100/contacts', () => {
     expect(rows[0]!.faith_status).toBe('unknown')
     expect(rows[0]!.notes).toBe('met at conference')
     expect(rows[0]!.user_id).toBe(user.id)
-    expect(rows[0]!.org_id).toBe(org.id)
   })
 
   it('trims the name and defaults notes to null when omitted', async () => {
@@ -148,8 +147,8 @@ describe('GET /api/list-of-100/contacts', () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
     const other = await addListOf100Member(sql, org.id, ['member'])
 
-    const mine = await createTestContact(sql, { user_id: user.id, org_id: org.id, name: 'Mine' })
-    await createTestContact(sql, { user_id: other.user.id, org_id: org.id, name: 'Theirs' })
+    const mine = await createTestContact(sql, { user_id: user.id, name: 'Mine' })
+    await createTestContact(sql, { user_id: other.user.id, name: 'Theirs' })
 
     const res = await $fetch<{ contacts: { id: string, name: string }[], progress: { total: number } }>(
       '/api/list-of-100/contacts',
@@ -164,10 +163,10 @@ describe('GET /api/list-of-100/contacts', () => {
     const old = new Date(); old.setUTCDate(old.getUTCDate() - 60)
     const recent = new Date(); recent.setUTCDate(recent.getUTCDate() - 5)
 
-    await createTestContact(sql, { user_id: user.id, org_id: org.id, name: 'NoActivity' })
-    await createTestContact(sql, { user_id: user.id, org_id: org.id, name: 'RecentContact', last_contacted_at: recent })
-    await createTestContact(sql, { user_id: user.id, org_id: org.id, name: 'OldContact', last_contacted_at: old })
-    await createTestContact(sql, { user_id: user.id, org_id: org.id, name: 'RecentPray', last_prayed_at: recent })
+    await createTestContact(sql, { user_id: user.id, name: 'NoActivity' })
+    await createTestContact(sql, { user_id: user.id, name: 'RecentContact', last_contacted_at: recent })
+    await createTestContact(sql, { user_id: user.id, name: 'OldContact', last_contacted_at: old })
+    await createTestContact(sql, { user_id: user.id, name: 'RecentPray', last_prayed_at: recent })
 
     const res = await $fetch<{ progress: { total: number, contactedLast30d: number, prayedLast30d: number } }>(
       '/api/list-of-100/contacts',
@@ -180,9 +179,9 @@ describe('GET /api/list-of-100/contacts', () => {
 
   it('orders contacts by sort_order then name', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
-    await createTestContact(sql, { user_id: user.id, org_id: org.id, name: 'Charlie', sort_order: 5 })
-    await createTestContact(sql, { user_id: user.id, org_id: org.id, name: 'Alpha', sort_order: 10 })
-    await createTestContact(sql, { user_id: user.id, org_id: org.id, name: 'Beta', sort_order: 10 })
+    await createTestContact(sql, { user_id: user.id, name: 'Charlie', sort_order: 5 })
+    await createTestContact(sql, { user_id: user.id, name: 'Alpha', sort_order: 10 })
+    await createTestContact(sql, { user_id: user.id, name: 'Beta', sort_order: 10 })
 
     const res = await $fetch<{ contacts: { name: string }[] }>('/api/list-of-100/contacts', {
       ...withOrgHeader(auth, org.slug)
@@ -206,7 +205,7 @@ describe('PATCH /api/list-of-100/contacts/:id', () => {
   it('updates partial fields, refreshes updated_at, leaves others untouched', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
     const c = await createTestContact(sql, {
-      user_id: user.id, org_id: org.id, name: 'Original', relationship: 'friend', faith_status: 'unknown', notes: 'first'
+      user_id: user.id, name: 'Original', relationship: 'friend', faith_status: 'unknown', notes: 'first'
     })
 
     const before = await sql<{ updated_at: Date }[]>`
@@ -237,7 +236,7 @@ describe('PATCH /api/list-of-100/contacts/:id', () => {
 
   it('allows nulling notes via explicit null', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
-    const c = await createTestContact(sql, { user_id: user.id, org_id: org.id, notes: 'something' })
+    const c = await createTestContact(sql, { user_id: user.id, notes: 'something' })
 
     const res = await $fetch<{ contact: { notes: string | null } }>(
       `/api/list-of-100/contacts/${c.id}`,
@@ -248,7 +247,7 @@ describe('PATCH /api/list-of-100/contacts/:id', () => {
 
   it('rejects empty patch body with 400', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
-    const c = await createTestContact(sql, { user_id: user.id, org_id: org.id })
+    const c = await createTestContact(sql, { user_id: user.id })
     const err = await $fetch(`/api/list-of-100/contacts/${c.id}`, {
       method: 'PATCH', body: {}, ...withOrgHeader(auth, org.slug)
     }).catch(e => e)
@@ -257,7 +256,7 @@ describe('PATCH /api/list-of-100/contacts/:id', () => {
 
   it('rejects invalid enum with 400', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
-    const c = await createTestContact(sql, { user_id: user.id, org_id: org.id })
+    const c = await createTestContact(sql, { user_id: user.id })
     const err = await $fetch(`/api/list-of-100/contacts/${c.id}`, {
       method: 'PATCH', body: { faith_status: 'wat' }, ...withOrgHeader(auth, org.slug)
     }).catch(e => e)
@@ -267,7 +266,7 @@ describe('PATCH /api/list-of-100/contacts/:id', () => {
   it('returns 404 when targeting a contact owned by another user (owner-only)', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
     const other = await addListOf100Member(sql, org.id, ['admin'])
-    const theirs = await createTestContact(sql, { user_id: other.user.id, org_id: org.id, name: 'Theirs' })
+    const theirs = await createTestContact(sql, { user_id: other.user.id, name: 'Theirs' })
 
     // Caller is an org admin but doesn't own this contact — should still 404.
     const err = await $fetch(`/api/list-of-100/contacts/${theirs.id}`, {
@@ -295,7 +294,7 @@ describe('DELETE /api/list-of-100/contacts/:id', () => {
 
   it('hard-deletes the caller\'s own row; row is gone in DB', async () => {
     const { org, user, auth } = await createListOf100OrgWith(sql, ['admin'])
-    const c = await createTestContact(sql, { user_id: user.id, org_id: org.id })
+    const c = await createTestContact(sql, { user_id: user.id })
 
     const res = await $fetch<{ ok: boolean }>(`/api/list-of-100/contacts/${c.id}`, {
       method: 'DELETE', ...withOrgHeader(auth, org.slug)
@@ -309,7 +308,7 @@ describe('DELETE /api/list-of-100/contacts/:id', () => {
   it('returns 404 when targeting a contact owned by another user; row survives', async () => {
     const { org, auth } = await createListOf100OrgWith(sql, ['admin'])
     const other = await addListOf100Member(sql, org.id, ['member'])
-    const theirs = await createTestContact(sql, { user_id: other.user.id, org_id: org.id })
+    const theirs = await createTestContact(sql, { user_id: other.user.id })
 
     const err = await $fetch(`/api/list-of-100/contacts/${theirs.id}`, {
       method: 'DELETE', ...withOrgHeader(auth, org.slug)

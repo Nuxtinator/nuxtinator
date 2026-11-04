@@ -122,21 +122,20 @@ export interface CallMcpResponse {
 export interface TestFixture extends CreateTestUserResult, CreateTestClientResult, IssueTestTokenResult {}
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Role lookup (mirrors the fixture's role-definitions catalog)
+// Role lookup (mirrors the roles the fixture's Nitro plugin registers)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ROLE_PERMS: Record<string, string[]> = {
   reader: ['pages.view'],
   writer: ['pages.view', 'pages.write'],
-  publisher: ['pages.view', 'pages.write', 'pages.publish'],
-  admin: ['admin.access', 'pages.view', 'pages.write', 'pages.publish', 'users.view', 'users.manage']
+  publisher: ['pages.view', 'pages.write', 'pages.publish']
 }
 
 function pickRoleForPermissions(permissions: readonly string[]): string {
   const set = new Set(permissions)
   if (set.size === 0) return ''
   // Smallest exact match wins.
-  for (const role of ['reader', 'writer', 'publisher', 'admin']) {
+  for (const role of ['reader', 'writer', 'publisher']) {
     const grants = new Set(ROLE_PERMS[role])
     if (grants.size !== set.size) continue
     let exact = true
@@ -144,7 +143,7 @@ function pickRoleForPermissions(permissions: readonly string[]): string {
     if (exact) return role
   }
   // Otherwise smallest superset.
-  for (const role of ['reader', 'writer', 'publisher', 'admin']) {
+  for (const role of ['reader', 'writer', 'publisher']) {
     const grants = new Set(ROLE_PERMS[role])
     let covers = true
     for (const p of set) if (!grants.has(p)) { covers = false; break }
@@ -174,8 +173,7 @@ export async function createTestUser(opts: CreateTestUserOpts = {}): Promise<Cre
     .values({
       id,
       email,
-      password_hash: null,
-      display_name: null,
+      display_name: `harness ${id.slice(0, 8)}`,
       verified: opts.verified ?? true,
       roles
     })

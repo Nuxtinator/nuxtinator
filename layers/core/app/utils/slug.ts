@@ -3,12 +3,27 @@
 // `/orgs/new`) and the server (`POST /api/admin/orgs`, `PATCH /api/o/:slug`,
 // etc.) so both layers tell the user the same thing.
 //
-// No reserved-name list — the `@` URL prefix on org pages means no slug can
-// collide with any top-level system path. The DB also enforces shape via the
-// `orgs_slug_shape` CHECK constraint; this validator exists for friendlier
-// errors than a raw constraint violation.
+// The `@` URL prefix on org pages means no slug can collide with a top-level
+// system path. Reserved slugs are mail role addresses: a slug can become the
+// org's mailbox on a shared inbound domain (inbox slug addresses). The DB also
+// enforces shape via the `orgs_slug_shape` CHECK constraint; this validator
+// exists for friendlier errors than a raw constraint violation.
 
 export const SLUG_RE = /^[a-z][a-z0-9-]{1,39}$/
+
+export const RESERVED_SLUGS = [
+  'abuse',
+  'bounce',
+  'contact',
+  'hostmaster',
+  'mailer-daemon',
+  'no-reply',
+  'noreply',
+  'notifications',
+  'postmaster',
+  'security',
+  'webmaster'
+]
 
 export function validateSlug(slug: string): string | null {
   if (slug.length === 0) {
@@ -38,6 +53,9 @@ export function validateSlug(slug: string): string | null {
   // Belt-and-suspenders: regex still has to pass.
   if (!SLUG_RE.test(slug)) {
     return 'Slug must be 2–40 lowercase letters, digits, or hyphens, starting with a letter.'
+  }
+  if (RESERVED_SLUGS.includes(slug)) {
+    return `"${slug}" is reserved. Choose another slug.`
   }
   return null
 }

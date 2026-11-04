@@ -1,6 +1,6 @@
 {
   "name": "@nuxtinator/crm",
-  "version": "0.1.0",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -9,11 +9,17 @@
   "optionalDependencies": {
     "@nuxtinator/core": "*"
   },
+  "nuxtinator": {
+    "requires": {
+      "@nuxtinator/core": ">=3.1.0"
+    }
+  },
   "peerDependencies": {
+    "@nuxt/kit": "^4.0.0",
     "h3": "^1.0.0",
     "kysely": "^0.28.0",
     "nuxt": "^4.0.0",
     "vue": "^3.0.0",
-    "zod": "^3.23.0"
+    "zod": "^4.1.8"
   }
 }

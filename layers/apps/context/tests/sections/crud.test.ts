@@ -31,10 +31,18 @@ describe('PUT /api/context/portfolios/:slug/sections/:key', () => {
     `
     expect(rows[0]!.content).toBe('We are Acme.')
 
-    const vrows = await sql<{ id: string }[]>`
-      SELECT id FROM context_section_versions WHERE section_id = ${res.id}
+    const vrows = await sql<{ id: string, source: string | null }[]>`
+      SELECT id, source FROM context_section_versions WHERE section_id = ${res.id}
     `
     expect(vrows.length).toBe(1)
+    expect(vrows[0]!.source).toBe('user')
+
+    const listed = await $fetch<{ versions: Array<{ id: string, source: string | null }> }>(
+      `/api/context/portfolios/${p.slug}/sections/identity/versions`,
+      { ...withOrgHeader(auth, org.slug) }
+    )
+    expect(listed.versions).toHaveLength(1)
+    expect(listed.versions[0]).toMatchObject({ id: res.version_id, source: 'user' })
   })
 
   it('subsequent saves append versions; restore returns a prior version as the new head', async () => {
@@ -57,10 +65,11 @@ describe('PUT /api/context/portfolios/:slug/sections/:key', () => {
     expect(restored.content).toBe('v1')
     expect(restored.version_id).not.toBe(first.version_id)
 
-    const vrows = await sql<{ id: string }[]>`
-      SELECT id FROM context_section_versions WHERE section_id = ${first.id}
+    const vrows = await sql<{ id: string, source: string | null }[]>`
+      SELECT id, source FROM context_section_versions WHERE section_id = ${first.id}
     `
     expect(vrows.length).toBe(3)
+    expect(vrows.find(v => v.id === restored.version_id)!.source).toBe('user')
   })
 
   it('rejects > 100KB body with 413', async () => {

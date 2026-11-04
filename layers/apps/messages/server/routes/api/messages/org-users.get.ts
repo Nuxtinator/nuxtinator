@@ -1,11 +1,11 @@
 // GET /api/messages/org-users?q=
 // Lists org members for mention autocomplete. Response includes id, display_name, avatar.
-// Caller must be authenticated and tenant-resolved (defineTenantHandler enforces both).
+// Requires messages.read.
 
-import { withOrgContext } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 
 export default defineEventHandler(async (event) => {
-  return await withOrgContext(event, { appId: 'messages' }, async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'messages' }, 'messages.read', async (tx, ctx) => {
     const q = getQuery(event)
     const filter = typeof q.q === 'string' ? q.q.trim().toLowerCase() : ''
 

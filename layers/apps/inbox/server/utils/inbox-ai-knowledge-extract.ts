@@ -5,7 +5,7 @@
 import { createError } from 'h3'
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
-import { generate, getFeatureModel } from '#ai/server'
+import { generate } from '#ai/server'
 import { inboxGetConversation } from './inbox-conversations'
 import { inboxListMessages, inboxAiContextMessages } from './inbox-messages'
 import { inboxMessageText } from './inbox-ai-draft'
@@ -58,10 +58,9 @@ export async function extractInboxKnowledgeEntry(tx: Tx, conversationId: string)
     .map(m => `${m.direction === 'inbound' ? 'CONTACT' : 'TEAM'}: ${inboxMessageText(m)}`)
     .join('\n\n')
 
-  const model = await getFeatureModel(tx, INBOX_AI_KNOWLEDGE_FEATURE)
-
   const { input } = await generate<Partial<InboxKnowledgeExtractResult>>({
-    model,
+    tx,
+    feature: INBOX_AI_KNOWLEDGE_FEATURE,
     // Plain-string system (no caching — extraction runs rarely and per-thread).
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: `SUBJECT: ${conversation.subject || '(none)'}\n\nTHREAD:\n${thread}` }],

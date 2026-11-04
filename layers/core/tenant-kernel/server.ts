@@ -9,6 +9,9 @@
 //     their direct grants (`user_permission_grants`), then calls the handler.
 //     There is no `app.current_org` GUC, no app-enable check, no per-org
 //     overlay.
+//   - An OAuth bearer token signs in in place of the session (see
+//     `bearer-auth.ts`): the route must name a permission the token carries,
+//     and `ctx.perms` is narrowed to the token's scopes.
 //   - `encodeFlowOrg` / `decodeFlowOrg` are no-ops — OAuth `state` carries
 //     whatever the caller put in it.
 //   - `requireOperatorAdmin` checks `users.is_admin`. Same in both modes; the
@@ -16,11 +19,15 @@
 //     reach.
 
 import type { H3Event, EventHandler, EventHandlerRequest } from 'h3'
-import type { Transaction } from 'kysely'
+import type { Transaction, Kysely } from 'kysely'
 import { db } from '#core/server/utils/database'
+// Tracks each request transaction so `afterCommit` work runs once it commits.
+import { runTransaction } from '#core/server/utils/after-commit'
 import { requireAuth } from '#core/server/utils/auth'
+import { getBearerIdentity, narrowToScopes, requireBearerPermission, runAsOauthClient } from '#core/server/utils/bearer-auth'
 import { getRolePermissions } from '#core/server/utils/rbac'
 import { getUserGrantedPermissions } from '#core/server/utils/permission-grants'
+import { getPersonalAppPermissions } from '#core/server/utils/personal-apps'
 import type { Database } from '#core/server/database/schema'
 import type { Permission } from '#core/app/utils/permissions'
 
@@ -33,12 +40,18 @@ export interface TenantContext {
   // plus `admin` when `is_admin` is set.
   role: string | null
   roles: string[]
-  // Effective permissions: union(role perms) ∪ direct user grants.
+  // Effective permissions: union(role perms) ∪ direct user grants, narrowed
+  // to the token's scopes for an OAuth request.
   perms: Set<Permission>
+  // The OAuth client making the request; null for a session request.
+  clientId: string | null
 }
 
 export interface DefineTenantHandlerOpts {
   appId?: string
+  // Org slug an OAuth request selects (multi mode). Single mode has one
+  // tenant and ignores it.
+  org?: string
 }
 
 export type TenantHandler<T> = (
@@ -46,37 +59,53 @@ export type TenantHandler<T> = (
   ctx: TenantContext
 ) => Promise<T> | T
 
+// The single-mode permission set: `users.roles[]` (plus `admin` when
+// `is_admin`) resolved through `getRolePermissions`, unioned with the user's
+// direct grants. The grants table is global in single mode, so the user_id
+// filter is the whole scope.
+async function resolveSinglePerms(
+  client: Kysely<Database> | Transaction<Database>,
+  userId: string
+): Promise<{ roles: string[], perms: Set<Permission> }> {
+  const userRow = await client
+    .selectFrom('users')
+    .select(['is_admin', 'roles'])
+    .where('id', '=', userId)
+    .executeTakeFirst()
+
+  const roles = [...(userRow?.roles ?? [])]
+  if (userRow?.is_admin && !roles.includes('admin')) roles.push('admin')
+
+  const perms = await getRolePermissions(client, roles, null)
+  for (const perm of await getUserGrantedPermissions(client, userId)) {
+    perms.add(perm)
+  }
+  return { roles, perms }
+}
+
+// `perm` is the permission the route is gated on, which an OAuth request
+// must carry as a scope.
 async function runWithSingleContext<T>(
   event: H3Event,
+  perm: Permission | undefined,
   fn: TenantHandler<T>
 ): Promise<T> {
-  const authUser = requireAuth(event)
-  return await db.transaction().execute(async (tx) => {
-    const userRow = await tx
-      .selectFrom('users')
-      .select(['is_admin', 'roles'])
-      .where('id', '=', authUser.userId)
-      .executeTakeFirst()
-
-    const roles = [...(userRow?.roles ?? [])]
-    if (userRow?.is_admin && !roles.includes('admin')) roles.push('admin')
-
-    const perms = await getRolePermissions(tx, roles, null)
-    // Additive per-user grants ride on top of role-derived perms. The table
-    // is global in single mode, so the user_id filter is the whole scope.
-    for (const perm of await getUserGrantedPermissions(tx, authUser.userId)) {
-      perms.add(perm)
-    }
-
+  const bearer = await getBearerIdentity(event)
+  if (bearer) requireBearerPermission(event, bearer, perm)
+  const userId = bearer?.userId ?? requireAuth(event).userId
+  const clientId = bearer?.clientId ?? null
+  return await runAsOauthClient(clientId, () => runTransaction(db, async (tx) => {
+    const { roles, perms } = await resolveSinglePerms(tx, userId)
     return await fn(tx, {
-      userId: authUser.userId,
+      userId,
       orgId: null,
       orgSlug: null,
       role: null,
       roles,
-      perms
+      perms: bearer ? narrowToScopes(perms, bearer.scopes) : perms,
+      clientId
     })
-  })
+  }))
 }
 
 export function defineTenantHandler<T>(fn: TenantHandler<T>): EventHandler<EventHandlerRequest, Promise<T>>
@@ -86,7 +115,7 @@ export function defineTenantHandler<T>(
   maybeFn?: TenantHandler<T>
 ): EventHandler<EventHandlerRequest, Promise<T>> {
   const fn = (typeof optsOrFn === 'function' ? optsOrFn : maybeFn) as TenantHandler<T>
-  return defineEventHandler<EventHandlerRequest, Promise<T>>(event => runWithSingleContext(event, fn))
+  return defineEventHandler<EventHandlerRequest, Promise<T>>(event => runWithSingleContext(event, undefined, fn))
 }
 
 // Function-call style — for handlers already wrapped in `defineEventHandler`.
@@ -107,7 +136,7 @@ export function withOrgContext<T>(
   maybeFn?: TenantHandler<T>
 ): Promise<T> {
   const fn = (typeof optsOrFn === 'function' ? optsOrFn : maybeFn) as TenantHandler<T>
-  return runWithSingleContext(event, fn)
+  return runWithSingleContext(event, undefined, fn)
 }
 
 // Same as `withOrgContext` plus a permission gate on `ctx.perms`.
@@ -131,12 +160,80 @@ export function withOrgPermission<T>(
   const hasOpts = typeof a === 'object'
   const perm = (hasOpts ? b : a) as Permission
   const fn = (hasOpts ? c : b) as TenantHandler<T>
-  return runWithSingleContext(event, async (tx, ctx) => {
+  return runWithSingleContext(event, perm, async (tx, ctx) => {
     if (!ctx.perms.has(perm)) {
       throw createError({ statusCode: 403, statusMessage: `Permission required: ${perm}` })
     }
     return await fn(tx, ctx)
   })
+}
+
+// Every permission the user holds anywhere in the deployment, resolved
+// outside a request. The OAuth layer uses it as the upper bound for consent
+// and token issuance; the MCP layer uses it for tools/list visibility. Single
+// mode has one tenant, so this is the set `defineTenantHandler` computes plus
+// the permissions of the user's personal apps.
+export async function getUserPermissionsAcrossOrgs(userId: string): Promise<Set<Permission>> {
+  const { perms } = await resolveSinglePerms(db, userId)
+  for (const perm of await getPersonalAppPermissions(db, userId)) perms.add(perm)
+  return perms
+}
+
+// The user's effective permissions for the org a request targets. Single
+// mode has no orgs, so `opts.org` is accepted for API compatibility with the
+// multi-mode kernel and ignored.
+export async function getUserPermissionsForRequest(
+  _event: H3Event,
+  userId: string,
+  _opts: { org?: string } = {}
+): Promise<Set<Permission>> {
+  return await getUserPermissionsAcrossOrgs(userId)
+}
+
+// App ids switched on for the org a request targets, or null when there is
+// no org to check. Single deploys have no per-org app switch, so always null.
+export async function getEnabledAppsForRequest(
+  _event: H3Event,
+  _userId: string,
+  _opts: { org?: string } = {}
+): Promise<Set<string> | null> {
+  return null
+}
+
+export interface UserOrg {
+  id: string
+  slug: string
+  name: string
+  perms: Set<Permission>
+}
+
+export interface UserOrgsFilter {
+  permission?: Permission
+  appId?: string
+  orgIds?: string[]
+}
+
+// The user's orgs. Single mode has none.
+export async function listUserOrgs(_userId: string, _filter: UserOrgsFilter = {}): Promise<UserOrg[]> {
+  return []
+}
+
+export interface OrgScopesFilter {
+  activeOnly?: boolean
+  appId?: string
+}
+
+// The org scopes a session-less job visits: one, with no org, in single mode.
+export async function listOrgScopes(_filter: OrgScopesFilter = {}): Promise<(string | null)[]> {
+  return [null]
+}
+
+// Runs `fn` in a transaction. The multi-mode kernel also sets the org GUC.
+export async function withOrgScope<T>(
+  _orgId: string | null,
+  fn: (tx: Transaction<Database>) => Promise<T>
+): Promise<T> {
+  return await runTransaction(db, fn)
 }
 
 // Operator-admin gate. Same in single and multi modes — the bit on the user
@@ -166,19 +263,33 @@ export function decodeFlowOrg<S>(state: S): { state: S, orgSlug: string | null }
   return { state, orgSlug: null }
 }
 
+export type OrgTransactionFn<T> = (tx: Transaction<Database>) => Promise<T>
+
+// Caller-supplied org selection. Single mode has one tenant, so both fields
+// are accepted for API compatibility with the multi-mode kernel and ignored.
+export interface OrgTransactionOpts {
+  org?: string
+  userId?: string
+}
+
 // Open a transaction and run `fn(tx)` inside it. In single mode, just opens
 // the transaction. In multi mode (overridden by the tenancy layer) this also
-// reads the `active-org-slug` cookie, validates the user's membership, and
+// resolves the org (`opts.org`, else the request's header or cookie),
+// enforces the acting user's membership when `opts.userId` is given, and
 // runs `SET LOCAL app.current_org` before yielding.
 //
 // Used by code paths that aren't routed through `defineTenantHandler` but
-// still need to write to RLS-protected tables (notably the OAuth flow's
-// non-`/api/` endpoints, which can't go through the tenancy middleware).
+// still need to write to RLS-protected tables (the OAuth flow's non-`/api/`
+// endpoints, which can't go through the tenancy middleware).
+export async function runInOrgTransaction<T>(event: H3Event, fn: OrgTransactionFn<T>): Promise<T>
+export async function runInOrgTransaction<T>(event: H3Event, opts: OrgTransactionOpts, fn: OrgTransactionFn<T>): Promise<T>
 export async function runInOrgTransaction<T>(
   _event: H3Event,
-  fn: (tx: Transaction<Database>) => Promise<T>
+  optsOrFn: OrgTransactionOpts | OrgTransactionFn<T>,
+  maybeFn?: OrgTransactionFn<T>
 ): Promise<T> {
-  return await db.transaction().execute(fn)
+  const fn = (typeof optsOrFn === 'function' ? optsOrFn : maybeFn) as OrgTransactionFn<T>
+  return await runTransaction(db, fn)
 }
 
 // Open a transaction scoped to the org that owns the given project. In single
@@ -194,7 +305,7 @@ export async function withProjectOrgContext<T>(
   _projectId: string,
   fn: (tx: Transaction<Database>) => Promise<T>
 ): Promise<T> {
-  return await db.transaction().execute(fn)
+  return await runTransaction(db, fn)
 }
 
 // Resolve the org that owns an arbitrary record and run `fn` in its context.
@@ -207,10 +318,34 @@ export async function withProjectOrgContext<T>(
 // without an authenticated tenant request.
 export async function withRecordOrgContext<T>(
   _event: H3Event,
-  _opts: { table: string, id: string, idColumn?: string, notFoundMessage?: string, validateUuid?: boolean },
+  // `appId` is ignored here: single deploys have no per-org app switch.
+  _opts: { table: string, id: string, idColumn?: string, notFoundMessage?: string, validateUuid?: boolean, appId?: string },
   fn: (tx: Transaction<Database>) => Promise<T>
 ): Promise<T> {
-  return await db.transaction().execute(fn)
+  return await runTransaction(db, fn)
+}
+
+// Membership check against the org bound to the current transaction (the GUC
+// set by `withOrgContext` / `withRecordOrgContext`). Single mode has no orgs —
+// every authenticated user belongs to the deployment — so this is always true.
+// The tenancy layer overrides it with a real memberships lookup.
+export async function isActiveOrgMember(
+  _tx: Transaction<Database>,
+  _userId: string
+): Promise<boolean> {
+  return true
+}
+
+// Whether `appId` is on for the org bound to the current transaction. Single
+// deploys have no per-org app switch, so it always is. The tenancy layer
+// overrides it with the org's app settings. For public routes that reach a
+// second app (helpinator handing off into inbox) on top of the `appId` that
+// `withRecordOrgContext` already checks.
+export async function isAppEnabledForCurrentOrg(
+  _tx: Transaction<Database>,
+  _appId: string
+): Promise<boolean> {
+  return true
 }
 
 // Migration helper. In single mode this is a no-op — single deploys don't

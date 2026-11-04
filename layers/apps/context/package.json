@@ -1,6 +1,6 @@
 {
   "name": "@nuxtinator/context",
-  "version": "1.0.0",
+  "version": "1.13.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -8,26 +8,33 @@
     "./test-helpers": "./tests/helpers/index.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.1",
     "archiver": "^7.0.1",
-    "dompurify": "^3.2.0",
-    "marked": "^14.1.0"
+    "diff": "^9.0.0",
+    "dompurify": "^3.4.13",
+    "marked": "^18.1.1"
   },
   "optionalDependencies": {
+    "@nuxtinator/ai": "*",
     "@nuxtinator/core": "*",
-    "@nuxtinator/tenancy": "*",
-    "@nuxtinator/mcp": "*"
+    "@nuxtinator/mcp": "*",
+    "@nuxtinator/tenancy": "*"
+  },
+  "nuxtinator": {
+    "requires": {
+      "@nuxtinator/core": ">=3.3.0"
+    }
   },
   "devDependencies": {
     "@types/archiver": "^6.0.3",
     "jszip": "^3.10.1"
   },
   "peerDependencies": {
+    "@nuxt/kit": "^4.0.0",
     "h3": "^1.0.0",
     "kysely": "^0.28.0",
     "nuxt": "^4.0.0",
     "postgres": "^3.4.0",
     "vue": "^3.0.0",
-    "zod": "^3.23.0"
+    "zod": "^4.1.8"
   }
 }

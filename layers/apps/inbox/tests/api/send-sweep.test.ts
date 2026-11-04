@@ -3,8 +3,9 @@
 //   1. a queued reply to a suppressed channel goes 'failed', never sent
 //   2. staff reply bodies are sanitized at write (script/handler stripped)
 //   3. the atomic claim guard: repeated sweep ticks deliver exactly once
-//   4. a confirmed failure releases with backoff, then 'failed' once
-//      INBOX_SEND_MAX_ATTEMPTS is exhausted
+//   4. missing configuration holds rather than fails: a queued reply with no
+//      contact address keeps its status and its attempt budget indefinitely,
+//      and goes out on its own once the address is set
 //   5. a held sender's address never becomes the recipient (or thread anchor,
 //      or quoted content) of a staff reply
 // The sweep runs every 2s here (INBOX_SEND_SWEEP_SECONDS pinned in
@@ -55,6 +56,7 @@ async function mailCountTo(email: string): Promise<number> {
 interface MessageRow {
   status: string
   attempts: number
+  hold_reason: string | null
   failed_reason: string | null
   next_attempt_at: Date | null
   body_html: string | null
@@ -63,7 +65,7 @@ interface MessageRow {
 
 async function getMessageRow(id: string): Promise<MessageRow> {
   const [row] = await sql`
-    SELECT status, attempts, failed_reason, next_attempt_at, body_html, body_text
+    SELECT status, attempts, hold_reason, failed_reason, next_attempt_at, body_html, body_text
     FROM inbox_messages WHERE id = ${id}
   `
   if (!row) throw new Error(`message ${id} not found`)
@@ -96,9 +98,21 @@ async function queueReply(conversationId: string, opts: object, body = '<p>On it
   return res.id
 }
 
+// The composer route refuses replies it knows can't be delivered, so a reply
+// that becomes undeliverable after queueing is inserted straight into the
+// queue: the sweep must still catch it.
+async function insertQueuedReply(orgId: string, conversationId: string): Promise<string> {
+  const [row] = await sql<{ id: string }[]>`
+    INSERT INTO inbox_messages (org_id, conversation_id, direction, status, body_html, body_text)
+    VALUES (${orgId}, ${conversationId}, 'outbound', 'queued', '<p>On it.</p>', 'On it.')
+    RETURNING id
+  `
+  return row!.id
+}
+
 describe('send sweep hardening', () => {
   it('fails a queued reply to a suppressed channel without sending', async () => {
-    const { org, opts, domain } = await createInboxOrgWith(sql)
+    const { org, domain } = await createInboxOrgWith(sql)
     await setInboxOrgSetting(sql, org.id, 'auto_ack_enabled', false)
     const sender = uniqueSender('suppressed')
     const res = await postInbound({ recipient: `hello@${domain}`, from: `S <${sender}>` })
@@ -113,7 +127,7 @@ describe('send sweep hardening', () => {
     })
     expect(supp.suppressed).toBe(true)
 
-    const msgId = await queueReply(res.body.conversation_id as string, opts)
+    const msgId = await insertQueuedReply(org.id, res.body.conversation_id as string)
     const row = await waitForMessage(msgId, r => r.status === 'failed')
     expect(row.failed_reason).toBe('Recipient suppressed')
     // The row failed before any claim/send was attempted — nothing went out.
@@ -157,39 +171,50 @@ describe('send sweep hardening', () => {
     expect(row.attempts).toBe(1)
   })
 
-  it('releases with backoff on failure and lands failed once attempts are exhausted', async () => {
-    const { org, opts, domain } = await createInboxOrgWith(sql)
+  it('holds a queued reply while no contact address is set, then sends it once one is', async () => {
+    const { org, domain } = await createInboxOrgWith(sql)
     await setInboxOrgSetting(sql, org.id, 'auto_ack_enabled', false)
-    const sender = uniqueSender('retry')
+    const sender = uniqueSender('hold')
     const res = await postInbound({ recipient: `hello@${domain}`, from: `R <${sender}>` })
 
-    // Remove the From identity — the sweep claims, then hits a confirmed
-    // failure and releases for retry.
+    // Remove the From identity — nothing can send until an operator restores
+    // it, which is a configuration state rather than a delivery failure.
     await sql`
       DELETE FROM core_settings
       WHERE org_id = ${org.id} AND namespace = 'inbox' AND key = 'contact_address'
     `
-    const msgId = await queueReply(res.body.conversation_id as string, opts)
+    const msgId = await insertQueuedReply(org.id, res.body.conversation_id as string)
 
-    // First tick: claim bumped attempts to 1, release put it back to 'queued'
-    // with the failure recorded and the next attempt pushed out (2^1 minutes).
-    const released = await waitForMessage(msgId, r => r.status === 'queued' && r.failed_reason !== null)
-    expect(released.failed_reason).toBe('Inbox contact address not configured')
-    expect(released.attempts).toBe(1)
-    expect(released.next_attempt_at).not.toBeNull()
-    expect(new Date(released.next_attempt_at!).getTime()).toBeGreaterThan(Date.now() + 60_000)
-
-    // Fast-forward to the last allowed attempt: the next claim bumps attempts
-    // to INBOX_SEND_MAX_ATTEMPTS (3) and the release marks it failed for good.
-    await sql`
-      UPDATE inbox_messages
-      SET attempts = 2, next_attempt_at = now() - interval '1 second'
-      WHERE id = ${msgId}
-    `
-    const dead = await waitForMessage(msgId, r => r.status === 'failed')
-    expect(dead.attempts).toBe(3)
-    expect(dead.failed_reason).toBe('Inbox contact address not configured')
+    // The sweep holds it: still queued, no attempt spent, reason recorded,
+    // and nothing delivered.
+    const held = await waitForMessage(msgId, r => r.hold_reason !== null)
+    expect(held.status).toBe('queued')
+    expect(held.attempts).toBe(0)
+    expect(held.failed_reason).toBeNull()
+    expect(held.hold_reason).toBe('Inbox contact address not configured')
     expect(await mailCountTo(sender)).toBe(0)
+
+    // Repeated sweeps must not age it toward 'failed' — the whole point is
+    // that a missing setting never exhausts the retry budget. Pull the
+    // recheck time back so several more ticks actually examine the row.
+    for (let i = 0; i < 3; i++) {
+      await sql`UPDATE inbox_messages SET next_attempt_at = now() - interval '1 second' WHERE id = ${msgId}`
+      await new Promise(r => setTimeout(r, 2_500))
+      const still = await getMessageRow(msgId)
+      expect(still.status).toBe('queued')
+      expect(still.attempts).toBe(0)
+    }
+
+    // Configuring the address releases it with no manual intervention. (The
+    // hold pushes next_attempt_at a minute out; the test pulls it back rather
+    // than waiting for the production recheck interval.)
+    await setInboxOrgSetting(sql, org.id, 'contact_address', `contact@${domain}`)
+    await sql`UPDATE inbox_messages SET next_attempt_at = now() - interval '1 second' WHERE id = ${msgId}`
+
+    const sent = await waitForMessage(msgId, r => r.status === 'sent')
+    expect(sent.hold_reason).toBeNull()
+    expect(sent.attempts).toBe(1)
+    await waitForMailTo(sender)
   })
 
   it('never sends a staff reply to a held sender, anchors it to them, or quotes their content', async () => {

@@ -44,6 +44,8 @@ bun run layers:update   # advance layers.lock.json to the newest in-range versio
 
 A scheduled GitHub Action ([.github/workflows/layer-updates.yml](.github/workflows/layer-updates.yml)) runs `layers:update` weekly and opens a PR with the lockfile change — merge it to deploy the update. It works with no secrets on public sources; add a `LAYER_UPDATE_TOKEN` (fine-grained PAT) so the PR runs CI and can auto-merge, and a `LAYER_SOURCE_TOKEN` (read-only) for a private layer source. Major updates outside a layer's range are reported, not auto-applied — widen the range in `layers.ts` to adopt one.
 
+Resolution also honours each layer's `nuxtinator.requires` (minimum versions of other layers, in its `package.json`): a layer whose newest release needs more than the others resolve to is held at an older release and listed under "Held back by layer requirements". When no compatible set exists, `layers:update` writes nothing and exits non-zero, so the weekly Action fails instead of opening a PR. The build checks the same requirements and stops on an unmet one between fetched layers.
+
 ## Cross-layer imports (aliases)
 
 Import shared functionality by alias, not relative path into `_layers/`:
@@ -149,7 +151,11 @@ To share a layer across projects, put it in its own git repo and add an entry to
 
 Framework/DB singletons (`nuxt`, `vue`, `@nuxt/kit`, `@nuxt/ui`, `kysely`, `kysely-postgres-js`, `postgres`, `h3`, `tailwindcss`) go in `peerDependencies` so they resolve to this host's copy. Layer-private deps go in `dependencies`. Cross-layer deps (e.g. `@nuxtinator/core`) go in `optionalDependencies` as `"*"`. Don't add a `main` field.
 
-For the full file-by-file template — DB schema augmentation, per-app tenancy retrofit migrations (`*_T<NNN>_*.ts`), admin sections, static roles, and the prefix conventions — see the upstream guide: **https://github.com/corsacca/nuxtinator/blob/master/documentation/layers.md** (section "Creating a new app layer").
+For the full file-by-file template — DB schema augmentation, per-app tenancy retrofit migrations (`*_T<NNN>_*.ts`), admin sections, static roles, and the prefix conventions — see the upstream guide: **https://github.com/Nuxtinator/nuxtinator/blob/master/documentation/layers.md** (section "Creating a new app layer").
+
+## UI rules
+
+Before any UI work — in the host or in your own app layer — read `_layers/core/DESIGN.md` and follow it. It lists the core components to use (help icons, sidebars, settings rows, confirm dialogs) and the styling rules every nuxtinator page shares. It updates with core, so re-read it after a core update.
 
 ## Good to know
 

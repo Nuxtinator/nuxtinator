@@ -15,6 +15,7 @@ export default defineNitroPlugin(() => {
     path: '/crm',
     icon: 'i-lucide-contact',
     requiredPermission: 'crm.access',
+    defaultStatus: 'available',
     order: 30
   })
   registerNavItem({

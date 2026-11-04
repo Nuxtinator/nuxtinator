@@ -1,6 +1,6 @@
 import { downloadTemplate } from 'giget'
 import { LAYERS } from '../layers'
-import { repoOf, subdirOf } from './lib/resolve'
+import { sourceOf } from './lib/resolve'
 import { readLock, resolveAll, writeLock } from './lib/lock'
 
 // Fetch each selected layer into _layers/<id>/.
@@ -15,13 +15,18 @@ import { readLock, resolveAll, writeLock } from './lib/lock'
 let lock = readLock()
 if (!lock) {
   console.log('No layers.lock.json — resolving once from layers.ts…')
-  lock = resolveAll(LAYERS, process.env.LAYER_SOURCE_TOKEN).lock
+  const resolved = await resolveAll(LAYERS, process.env.LAYER_SOURCE_TOKEN)
+  if (resolved.conflicts.length) {
+    console.error(`Layer requirements can't be met:\n${resolved.conflicts.map(c => `  ${c}`).join('\n')}`)
+    process.exit(1)
+  }
+  lock = resolved.lock
   writeLock(lock)
 }
 
 for (const l of LAYERS) {
   const ref = lock[l.id]?.ref ?? 'master'
-  const url = `github:${repoOf(l)}/${subdirOf(l)}#${ref}`
+  const url = `${sourceOf(l)}#${ref}`
   console.log(`Fetching ${l.id} @ ${ref}`)
   await downloadTemplate(url, { dir: `_layers/${l.id}`, forceClean: true })
 }

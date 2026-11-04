@@ -1,10 +1,10 @@
 // DELETE /api/messages/items/:id/star
 // Unstars the item for the caller. Idempotent.
 
-import { withOrgContext } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 
 export default defineEventHandler(async (event) => {
-  return await withOrgContext(event, { appId: 'messages' }, async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'messages' }, 'messages.read', async (tx, ctx) => {
     const itemId = getRouterParam(event, 'id')!
     await tx
       .deleteFrom('messages_item_stars')

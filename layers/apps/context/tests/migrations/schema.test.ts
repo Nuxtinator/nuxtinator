@@ -1,4 +1,4 @@
-// Migrations create the six context tables with the expected columns.
+// Migrations create the context tables with the expected columns.
 // Runs against the booted Nuxt server's DB (which ran every migration via
 // the core layer's Nitro migrations plugin).
 import { describe, it, expect } from 'vitest'
@@ -8,9 +8,11 @@ const TABLES = [
   'context_portfolios',
   'context_sections',
   'context_section_versions',
-  'context_custom_section_definitions',
+  'context_section_definitions',
   'context_section_comments',
-  'context_section_comment_replies'
+  'context_section_comment_replies',
+  'context_assistant_conversations',
+  'context_assistant_messages'
 ] as const
 
 describe('schema migrations', () => {
@@ -31,6 +33,27 @@ describe('schema migrations', () => {
     expect(names).toContain('name')
     expect(names).toContain('color')
     expect(names).toContain('icon_url')
+  })
+
+  it('context_section_definitions stores built-in rows without a title', async () => {
+    const rows = await sql<{ column_name: string, is_nullable: string }[]>`
+      SELECT column_name, is_nullable FROM information_schema.columns
+      WHERE table_name = 'context_section_definitions'
+    `
+    const byName = new Map(rows.map(r => [r.column_name, r.is_nullable]))
+    expect(byName.get('key')).toBe('NO')
+    expect(byName.get('title')).toBe('YES')
+    expect(byName.get('created_by')).toBe('YES')
+    expect(byName.get('is_custom')).toBe('NO')
+  })
+
+  it('context_section_versions has a source column', async () => {
+    const rows = await sql<{ column_name: string }[]>`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'context_section_versions'
+    `
+    const names = rows.map(r => r.column_name)
+    expect(names).toContain('source')
   })
 
   it('context_section_comments has anchor columns', async () => {

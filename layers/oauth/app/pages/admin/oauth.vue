@@ -6,7 +6,7 @@
 //
 // Page is auto-discovered from the OAuth layer. Consumer must define
 // the `admin` layout and `auth` + `admin` middleware (typical Nuxt
-// admin setup; doxa-marketing-rebuild has both).
+// admin setup).
 //
 // English-only, matches existing admin pages.
 

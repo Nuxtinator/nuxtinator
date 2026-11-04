@@ -35,7 +35,7 @@ function selectTag(slug: string) {
 </script>
 
 <template>
-  <SidebarPanel title="Inbox" class="w-52 shrink-0 hidden lg:flex">
+  <SidebarPanel title="Inbox">
     <nav class="p-2 space-y-0.5">
       <button
         v-for="folder in folders"

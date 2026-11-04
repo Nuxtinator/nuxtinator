@@ -98,6 +98,8 @@ export interface OauthConsentsTable {
   user_id: string
   resource: string
   scope: string
+  // Scopes the user turned down (migration oauth_002).
+  declined_scope: Generated<string>
   revoked: Generated<boolean>
 }
 

@@ -1,19 +1,17 @@
 import type { H3Event } from 'h3'
-import { getRequestIP, getHeader, setResponseHeader } from 'h3'
-import { checkRateLimit, logRateLimitExceeded } from '#core/server/utils/rate-limit'
-import { logEvent } from '#core/server/utils/activity-logger'
+import { getHeader, setResponseHeader } from 'h3'
+import { consumeRateLimit, logRateLimitExceeded } from '#core/server/utils/rate-limit'
+import { getClientIp } from '#core/server/utils/client-ip'
 
-// Client IP for rate-limit keying. Trustworthy only behind a proxy you control
-// — X-Forwarded-For is otherwise caller-spoofable.
+// Client IP for rate-limit keying, resolved through the trusted-proxy list.
 export function widgetClientIp(event: H3Event): string {
-  return getRequestIP(event, { xForwardedFor: true }) || 'unknown'
+  return getClientIp(event)
 }
 
 // Enforce a sliding-window limit on `action` for one identifier (e.g. an IP or
-// a project id). `checkRateLimit` only COUNTS prior `action` events in the
-// window — it never records — so on each allowed request we log one; without
-// that the window never fills and the limit never trips. Throws 429 (with
-// Retry-After) when the limit is exceeded.
+// a project id). Counts and records in one locked step, so parallel requests
+// can't all read the same count and pass. Throws 429 (with Retry-After) when
+// the limit is exceeded.
 export async function enforceWidgetRateLimit(
   event: H3Event,
   action: string,
@@ -22,12 +20,10 @@ export async function enforceWidgetRateLimit(
   max: number,
   windowMs: number
 ): Promise<void> {
-  const rate = await checkRateLimit(action, field, value, windowMs, max)
+  const rate = await consumeRateLimit(action, field, value, windowMs, max)
   if (!rate.allowed) {
     logRateLimitExceeded(value, event.path, getHeader(event, 'user-agent') || undefined)
     if (rate.retryAfterSeconds) setResponseHeader(event, 'Retry-After', rate.retryAfterSeconds)
     throw createError({ statusCode: 429, statusMessage: 'Too many requests' })
   }
-  // Record this attempt so it counts toward the window for later requests.
-  logEvent({ eventType: action, metadata: { [field]: value } })
 }

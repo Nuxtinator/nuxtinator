@@ -40,7 +40,7 @@ export default defineEventHandler(async (event) => {
       .updateTable('context_portfolios')
       .set({ icon_url: result.url, updated_at: sql<Date>`now()` })
       .where('id', '=', p.id)
-      .returning(['id', 'slug', 'name', 'color', 'icon_url', 'created_at', 'updated_at'])
+      .returning(['id', 'slug', 'name', 'color', 'icon_url', 'template', 'created_at', 'updated_at'])
       .executeTakeFirstOrThrow()
 
     logUpdate('context_portfolios', p.id, ctx.userId, { icon_url: result.url })

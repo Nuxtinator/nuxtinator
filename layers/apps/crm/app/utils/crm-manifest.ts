@@ -34,6 +34,13 @@ export interface CrmFieldOption {
   description?: string
   /** Soft-removed options stay for historical values but are not offered. */
   deleted?: boolean
+  /** Status options only: this status means the record is closed (archived). */
+  closed?: boolean
+  /**
+   * Closed-reason options only, code-declared: closing with this reason
+   * revokes every consent on the record's addresses ("asked to be removed").
+   */
+  revokesConsent?: boolean
 }
 
 export interface CrmFieldDef {
@@ -73,6 +80,8 @@ export interface CrmRecordTypeManifest {
   icon?: string
   /** Field key of the key_select promoted to the status column. */
   statusField?: string
+  /** Field key of the key_select holding why a closed record was closed. */
+  closedReasonField?: string
   /** Code-owned sections; CrmFieldDef.section references these keys. */
   sections?: Record<string, { label: string, order?: number }>
   fields: Record<string, CrmFieldDef>

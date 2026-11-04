@@ -17,6 +17,7 @@ interface Video {
   updatedAt: string
 }
 
+const toast = useToast()
 const scope = ref<'mine' | 'team'>('mine')
 const videos = ref<Video[]>([])
 const loading = ref(true)
@@ -103,7 +104,7 @@ const setVisibility = async (video: Video, visibility: Video['visibility']) => {
     video.visibility = visibility
   } catch (err: any) {
     console.error('Error updating visibility:', err)
-    alert(err.data?.message || 'Failed to update visibility')
+    toast.add({ title: 'Failed to update visibility', description: err.data?.message, color: 'error' })
   }
 }
 
@@ -152,7 +153,7 @@ const saveTitle = async (videoId: string) => {
     editingTitle.value = ''
   } catch (err: any) {
     console.error('Error updating title:', err)
-    alert(err.data?.message || 'Failed to update title')
+    toast.add({ title: 'Failed to update title', description: err.data?.message, color: 'error' })
     cancelEdit()
   }
 }

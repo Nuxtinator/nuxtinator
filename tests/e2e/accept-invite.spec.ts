@@ -11,12 +11,12 @@ import {
   closeTestDatabases,
   cleanupCoreTestData,
   createPendingInvite
-} from 'layer-core/test-helpers'
+} from '@nuxtinator/core/test-helpers'
 import {
   createTestOrg,
   addTestMembership,
   cleanupTenancyTestData
-} from 'layer-tenancy/test-helpers'
+} from '@nuxtinator/tenancy/test-helpers'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 loadDotenv({ path: resolve(__dirname, '../../dev/.env') })
@@ -49,9 +49,9 @@ test('new-user invite: visit accept-invite link → set password → land in the
     page.getByRole('button', { name: /activate account/i }).click()
   ])
 
-  // Single-org user → server returns redirect: `/@<slug>/`. The page now
+  // Single-org user → server returns redirect: `/@<slug>/dashboard`. The page now
   // honors it and navigates there directly.
-  await expect(page).toHaveURL(new RegExp(`/@${org.slug}/?$`), { timeout: 10_000 })
+  await expect(page).toHaveURL(new RegExp(`/@${org.slug}/dashboard$`), { timeout: 10_000 })
   await expect(page.locator('h1').first()).toContainText(org.name, { timeout: 5000 })
 
   const cookies = await page.context().cookies(baseURL!)

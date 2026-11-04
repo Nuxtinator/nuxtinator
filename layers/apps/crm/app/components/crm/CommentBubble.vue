@@ -71,6 +71,10 @@ const menuItems = computed(() => [[
         <span class="text-sm font-medium truncate">{{ comment.authorName }}</span>
         <span class="text-xs text-(--ui-text-muted) whitespace-nowrap">{{ crmRelativeTime(comment.createdAt) }}</span>
         <span
+          v-if="comment.viaClient"
+          class="text-xs text-(--ui-text-muted) whitespace-nowrap"
+        >via {{ comment.viaClient }}</span>
+        <span
           v-if="comment.editedAt"
           class="text-xs text-(--ui-text-muted)"
         >(edited)</span>

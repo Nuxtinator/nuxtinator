@@ -17,6 +17,11 @@ export { getInboxSettings } from '../utils/inbox-settings'
 export type { InboxSettings } from '../utils/inbox-settings'
 export { inboxSanitizeEmailHtml } from '../utils/inbox-sanitize'
 
+// Public intake (contact form, help-chat handoff): record in the caller's tx,
+// then run the post-commit side effects.
+export { inboxRecordIntake, inboxAfterIntake, inboxPlainTextToHtml } from '../utils/inbox-intake'
+export type { InboxIntakeInput, InboxIntakeResult, InboxAfterIntakeOptions } from '../utils/inbox-intake'
+
 // Staff notification + courtesy mail.
 export { inboxNotifyNewMessage } from '../utils/inbox-notify'
 export { inboxSendCourtesy } from '../utils/inbox-courtesy'

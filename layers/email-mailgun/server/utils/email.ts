@@ -1,6 +1,5 @@
 import nodemailer from 'nodemailer'
 import type { Transporter } from 'nodemailer'
-import mailgunTransport from 'nodemailer-mailgun-transport'
 import { renderEmailTemplate, type EmailTemplateData } from '#core/server/utils/email-templates'
 
 const isDevelopment = (process.env.NODE_ENV || 'development') === 'development'
@@ -30,40 +29,63 @@ function getEmailConfig() {
   }
 }
 
-function getTransporter(): Transporter {
+// Development preview only: SMTP to MailHog on localhost:1025. Production
+// never goes through nodemailer — see sendViaMailgun.
+function getDevTransporter(): Transporter {
   if (transporter) return transporter
 
-  const config = getEmailConfig()
+  console.log('[Email] Using MailHog (development mode)')
+  transporter = nodemailer.createTransport({
+    host: 'localhost',
+    port: 1025,
+    secure: false,
+    tls: { rejectUnauthorized: false }
+  })
+  return transporter
+}
 
-  if (isDevelopment) {
-    console.log('[Email] Using MailHog (development mode)')
-    transporter = nodemailer.createTransport({
-      host: 'localhost',
-      port: 1025,
-      secure: false,
-      tls: { rejectUnauthorized: false }
-    })
-    return transporter
-  }
+interface MailgunMessage {
+  from: string
+  to: string | string[]
+  subject: string
+  html: string
+  text: string
+}
+
+// Posts straight to Mailgun's messages API. Talking HTTP directly keeps the
+// layer free of a mail-provider SDK and its transitive dependencies; the
+// inbox layer sends the same way (layers/apps/inbox/server/utils/inbox-transport.ts).
+async function sendViaMailgun(message: MailgunMessage): Promise<string | undefined> {
+  const config = getEmailConfig()
 
   if (!config.mailgunApiKey || !config.mailgunDomain) {
     throw new Error('Mailgun configuration incomplete. Set MAILGUN_API_KEY and MAILGUN_DOMAIN.')
   }
 
-  console.log('[Email] Using Mailgun HTTP API')
-  const mailgunOptions: any = {
-    auth: {
-      api_key: config.mailgunApiKey,
-      domain: config.mailgunDomain
-    }
+  const host = config.mailgunHost || 'api.mailgun.net'
+
+  const form = new FormData()
+  form.append('from', message.from)
+  const recipients = Array.isArray(message.to) ? message.to : [message.to]
+  for (const recipient of recipients) form.append('to', recipient)
+  form.append('subject', message.subject)
+  form.append('html', message.html)
+  form.append('text', message.text)
+
+  const auth = Buffer.from(`api:${config.mailgunApiKey}`).toString('base64')
+  const res = await fetch(`https://${host}/v3/${config.mailgunDomain}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Basic ${auth}` },
+    body: form
+  })
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`Mailgun responded ${res.status}: ${body}`)
   }
 
-  if (config.mailgunHost) {
-    mailgunOptions.host = config.mailgunHost
-  }
-
-  transporter = nodemailer.createTransport(mailgunTransport(mailgunOptions))
-  return transporter
+  const json = (await res.json().catch(() => ({}))) as { id?: string }
+  return json.id
 }
 
 export interface EmailOptions {
@@ -95,16 +117,28 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
       fromEmail = fromName ? `${fromName} <${fromAddress}>` : fromAddress
     }
 
-    const mailOptions = {
-      from: fromEmail,
-      to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
-      subject: options.subject,
-      html: options.html,
-      text: options.text || options.html.replace(/<[^>]*>/g, '')
+    const text = options.text || options.html.replace(/<[^>]*>/g, '')
+
+    if (isDevelopment) {
+      const info = await getDevTransporter().sendMail({
+        from: fromEmail,
+        to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
+        subject: options.subject,
+        html: options.html,
+        text
+      })
+      console.log('[Email] Sent successfully:', info.messageId)
+      return true
     }
 
-    const info = await getTransporter().sendMail(mailOptions)
-    console.log('[Email] Sent successfully:', info.messageId)
+    const messageId = await sendViaMailgun({
+      from: fromEmail,
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+      text
+    })
+    console.log('[Email] Sent successfully:', messageId)
     return true
   } catch (error) {
     if (!process.env.VITEST) {

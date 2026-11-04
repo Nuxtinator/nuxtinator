@@ -8,7 +8,8 @@
 // over records); `applyFieldPatch` routes writes the other way:
 //
 //   merged defs → field-filter hook chain → per-kind validation →
-//   storage-routed writes → updated_at bump → activity rows per changed field
+//   closing rules (./closing) → storage-routed writes → updated_at bump →
+//   activity rows per changed field → consent revocation on close
 //
 // Every function takes the caller's tenant transaction — org context (the RLS
 // GUC in multi mode) exists only inside it, so nothing here opens connections.
@@ -24,6 +25,7 @@ import { getRecordType, getRecordTypeFields, type CrmFieldSetting } from './defi
 import { normalizeChannelValue } from './normalize'
 import { claimChannel, findChannel, linkChannel, unlinkChannel } from './channels'
 import { recordCrmActivity } from './crm-activity'
+import { closingRulesOf, enforceClosingRules, revokeConsentOnClose } from './closing'
 
 type Tx = Transaction<Database>
 
@@ -37,6 +39,8 @@ export interface CrmHydratedRecord {
   createdBy: string
   createdAt: Date
   updatedAt: Date
+  /** The linked user account, whose name and email addresses the record shows. */
+  userId: string | null
   /** Logical field values keyed by field key (shapes per InferRecordShape). */
   fields: Record<string, unknown>
 }
@@ -113,6 +117,7 @@ export async function hydrateRecords(
       createdBy: row.created_by,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      userId: row.user_id ?? null,
       fields
     })
   }
@@ -825,8 +830,11 @@ export async function applyFieldPatch(
 
   let id: string
   let oldRecord: CrmHydratedRecord | null = null
+  const closingRules = closingRulesOf(type, defs)
+  let closing = { revokeConsent: false }
 
   if (isCreate) {
+    closing = enforceClosingRules(closingRules, scalarOps, null)
     const nameDef = defs.find(d => d.column === 'name')
     const statusDef = defs.find(d => d.column === 'status')
     const name = nameDef ? scalarOps.get(nameDef.key) : undefined
@@ -856,6 +864,7 @@ export async function applyFieldPatch(
     oldRecord = await getRecord(tx, ctx, typeKey, id)
 
     if (scalarOps.size === 0 && listOps.size === 0) return oldRecord
+    closing = enforceClosingRules(closingRules, scalarOps, oldRecord.fields)
 
     // Promoted columns, the jsonb merge, and the updated_at bump (no DB
     // trigger exists — the kernel owns it) in a single statement.
@@ -919,6 +928,12 @@ export async function applyFieldPatch(
         await recordCrmActivity(tx, ctx, id, 'field_changed', { fieldKey: key, old: before, new: after })
       }
     }
+  }
+
+  if (closing.revokeConsent && closingRules.reasonKey) {
+    const reason = record.fields[closingRules.reasonKey] as string
+    const label = defsByKey.get(closingRules.reasonKey)?.options?.[reason]?.label ?? reason
+    await revokeConsentOnClose(tx, ctx, id, label)
   }
 
   return record

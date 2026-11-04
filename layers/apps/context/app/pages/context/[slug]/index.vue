@@ -19,7 +19,7 @@ interface SectionMeta {
   description: string
   order: number
   is_custom: boolean
-  custom_id: string | null
+  id: string
   word_count: number
   has_content: boolean
   last_edited_at: string | null
@@ -36,6 +36,29 @@ const { data: sectionsData, refresh } = await useAsyncData(
 )
 const sections = computed(() => sectionsData.value?.sections ?? [])
 const completedCount = computed(() => sections.value.filter(s => s.has_content && s.word_count >= 50).length)
+
+// Fetched through `$fetch` rather than linked, because a plain navigation
+// doesn't carry the X-Active-Org header the export endpoint needs.
+const toast = useToast()
+const exporting = ref(false)
+async function exportPortfolio() {
+  exporting.value = true
+  try {
+    const res = await $fetch.raw<Blob>(`/api/context/portfolios/${slug.value}/export`, { responseType: 'blob' })
+    const disposition = res.headers.get('content-disposition') ?? ''
+    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `${slug.value}.zip`
+    const url = URL.createObjectURL(res._data!)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    toast.add({ title: (e as { statusMessage?: string }).statusMessage ?? 'Export failed.', color: 'error' })
+  } finally {
+    exporting.value = false
+  }
+}
 </script>
 
 <template>
@@ -61,7 +84,7 @@ const completedCount = computed(() => sections.value.filter(s => s.has_content &
             {{ completedCount }} of {{ sections.length }} sections complete
           </p>
         </div>
-        <UButton variant="outline" icon="i-lucide-download" size="sm" :to="`/api/context/portfolios/${slug}/export`" external>
+        <UButton variant="outline" icon="i-lucide-download" size="sm" :loading="exporting" @click="exportPortfolio">
           Export
         </UButton>
         <UButton variant="outline" icon="i-lucide-settings" size="sm" :to="`/context/${slug}/settings`">
@@ -102,7 +125,7 @@ const completedCount = computed(() => sections.value.filter(s => s.has_content &
               </div>
             </div>
           </NuxtLink>
-          <ContextCustomSectionsManager :slug="slug" class="pt-4" @changed="refresh" />
+          <ContextSectionsManager :slug="slug" :list="false" class="pt-4" @changed="refresh" />
         </div>
       </div>
     </section>

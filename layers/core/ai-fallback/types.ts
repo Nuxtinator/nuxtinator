@@ -41,22 +41,73 @@ export interface AiTool {
   parameters: Record<string, unknown>
 }
 
-export interface AiCompleteOptions {
-  model: string
+// Resolves one tool call the model made during `complete`. The returned string
+// is fed back to the model as the tool result.
+export type AiToolHandler = (name: string, input: Record<string, unknown>) => Promise<string> | string
+
+export interface AiToolCallRecord {
+  name: string
+  input: Record<string, unknown>
+}
+
+// An org's key and model, resolved inside a transaction by `resolveAiRun` /
+// `resolveAiEmbedRun`. Passing one instead of `tx` lets a caller commit before
+// the slow provider call, so no DB connection is held while the model works.
+// It is only obtainable through a tx, so the host key still can't be spent by
+// omission.
+export interface AiCompletionRun {
+  readonly kind: 'completion'
+  readonly apiKey: string
+  readonly model: string
+}
+
+export interface AiEmbeddingRun {
+  readonly kind: 'embedding'
+  readonly apiKey: string
+  readonly model: string
+}
+
+// Exactly one of the two: the caller's transaction, or a run resolved through
+// one. With `tx`, generation runs on behalf of whichever org the transaction
+// is scoped to: the org's own API key and model choices are read through it,
+// falling back to the host's key and choices when the org has none.
+// Required so no call path can spend the host key by omission.
+export type AiScoped<R> = { tx: AiDbClient, run?: never } | { run: R, tx?: never }
+
+export type AiCompleteOptions = AiScoped<AiCompletionRun> & {
+  // The registered feature key (see `registerAiFeature`), which resolves to
+  // the model an admin picked for it. Ignored when `run` is given (the run was
+  // resolved for a feature already).
+  feature: string
   system?: AiContent
   messages: AiMessage[]
   maxTokens?: number
   temperature?: number
+  // Tools the model may call. Each call is resolved through `onToolCall` and
+  // its result appended to the conversation before the model is asked again.
+  // After `maxToolRounds` rounds (default 4) one final call runs without tools
+  // so the model must answer in text.
+  tools?: AiTool[]
+  onToolCall?: AiToolHandler
+  maxToolRounds?: number
+  // Streaming. With `onTextDelta` the provider call streams and reply text
+  // arrives in fragments as the model writes it. Text from a round that ends
+  // in tool calls is not part of the reply; `onTextDiscard` fires so a consumer
+  // can drop what it already showed.
+  onTextDelta?: (delta: string) => void
+  onTextDiscard?: () => void
 }
 
 export interface AiCompleteResult {
   text: string
   model: string
   finishReason: string
+  // Tool calls resolved while producing this answer, in order.
+  toolCalls: AiToolCallRecord[]
 }
 
-export interface AiGenerateOptions {
-  model: string
+export type AiGenerateOptions = AiScoped<AiCompletionRun> & {
+  feature: string
   system?: AiContent
   messages: AiMessage[]
   // The one tool the model is forced to call; its parsed arguments are returned
@@ -72,36 +123,110 @@ export interface AiGenerateResult<T = Record<string, unknown>> {
   finishReason: string
 }
 
-// One entry in the code-owned model catalog.
-export interface AiModelCatalogEntry {
+// One model as OpenRouter lists it, reduced to what the pickers and the client
+// need. The list is fetched live (and cached) — nothing model-specific lives in
+// code.
+export interface AiModelInfo {
   // OpenRouter model slug, e.g. 'anthropic/claude-sonnet-4.5'.
   id: string
-  label: string
-  // Whether the model accepts sampling params (temperature). Some newer models
-  // reject them with a hard error; guard per model rather than always sending.
+  name: string
+  // USD per million tokens; null when OpenRouter reports no price.
+  promptPrice: number | null
+  completionPrice: number | null
+  contextLength: number | null
+  // Whether the model accepts sampling params (temperature). Some models
+  // reject them with a hard error; the client sends them only when reported.
   supportsTemperature: boolean
-  // Whether the model honours Anthropic prompt caching via `cache_control`.
+  // Whether the model honours prompt caching via `cache_control` (OpenRouter
+  // reports cache pricing only for models that do).
   supportsCaching: boolean
-  // Whether this entry is enabled before any admin override.
-  defaultEnabled: boolean
-}
-
-// A model as surfaced to admin / per-feature selectors: catalog metadata plus
-// whether it came from the code catalog or was added by an admin as a custom id.
-export interface AiModelInfo {
-  id: string
-  label: string
-  supportsTemperature: boolean
-  supportsCaching: boolean
-  custom: boolean
 }
 
 // A capability a consumer layer wants an admin-selectable model for (e.g. inbox
 // draft replies). Registered at boot via `registerAiFeature`; the admin UI lists
 // each and lets an operator pick which enabled model powers it.
+//
+// `kind: 'embedding'` declares that the layer builds a vector index. Such a
+// feature gets no per-feature chat model picker; instead its presence makes the
+// embedding-model section appear on the AI settings pages.
 export interface AiFeature {
   // Stable key, namespaced by the owning layer, e.g. 'inbox.draft'.
   key: string
   label: string
   description?: string
+  kind?: 'chat' | 'embedding'
+}
+
+// How a layer names what, inside a feature, its AI calls ran for (a widget, a
+// portfolio), registered with `registerAiUsageSubjects`. A call's subject is
+// `<prefix>:<id>` (see `aiUsageSubject`).
+export interface AiUsageSubjectDef {
+  prefix: string
+  // What one subject is, e.g. 'Bot'; names an id the resolver doesn't know.
+  label: string
+  // Names for the ids it knows, read through the summary's transaction: the
+  // active org's in the org view, no org's (so RLS hides tenant rows) in the
+  // host view.
+  resolve: (tx: AiDbClient, ids: string[]) => Promise<Map<string, string>>
+}
+
+// --- Embeddings ---
+
+// Every vector column is AI_EMBED_DIMENSIONS wide (vectors.ts); `embed()`
+// always requests that many dimensions so any embedding model an admin picks
+// fits the same column.
+
+// Same contract as AiCompleteOptions: `tx` (the org whose key and embedding
+// model choice apply) or a run resolved through one. With `tx`, `feature` is
+// the registered embedding feature the calls are billed to.
+export type AiEmbedOptions = (
+  { tx: AiDbClient, feature: string, run?: never } | { run: AiEmbeddingRun, tx?: never, feature?: never }
+) & {
+  input: string[]
+}
+
+export interface AiEmbedResult {
+  // One vector per input, in order, each AI_EMBED_DIMENSIONS wide.
+  vectors: number[][]
+  model: string
+}
+
+// One embedding model as OpenRouter lists it.
+export interface AiEmbeddingModelInfo {
+  id: string
+  name: string
+  // USD per million input tokens; null when unreported.
+  promptPrice: number | null
+  contextLength: number | null
+}
+
+// A layer that owns a vector index registers one of these so the AI settings
+// pages can rebuild every index after the embedding model changes.
+// The registrar iterates org scopes. `currentModels` runs inside one scoped
+// transaction; `run` gets a runner for short scoped transactions instead, so
+// it can embed between them without holding a connection for the whole scope.
+export type AiTxScope = <T>(fn: (tx: AiDbClient) => Promise<T>) => Promise<T>
+
+export interface AiReindexer {
+  // Stable key, e.g. 'context.sections'.
+  key: string
+  label: string
+  // False when the index's tables don't exist on this deployment (e.g. its
+  // migrations were held back for a missing pgvector). Omitted = always.
+  available?: () => Promise<boolean>
+  // Distinct embedding model ids currently stored in this index for the scope.
+  currentModels: (tx: AiDbClient) => Promise<string[]>
+  // Items with content but no chunks at all (never indexed, e.g. written
+  // before embeddings were set up). They count as stale too.
+  unindexedCount?: (tx: AiDbClient) => Promise<number>
+  // Re-embed everything in the scope with the model that resolves now.
+  // `progress` (optional to call) lets the settings pages show live counts:
+  // `total(n)` once the item count is known, `item(chunks)` after each
+  // section / page. The returned total is authoritative.
+  run: (scope: AiTxScope, progress?: AiReindexProgress) => Promise<{ chunks: number }>
+}
+
+export interface AiReindexProgress {
+  total: (items: number) => void
+  item: (chunks: number) => void
 }

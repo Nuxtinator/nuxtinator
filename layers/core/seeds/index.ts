@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { readdirSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { Kysely } from 'kysely'
+import { sql, type Kysely } from 'kysely'
 import type { SeedContext } from './types'
 import type { Database } from '../server/database/schema'
 
@@ -35,7 +35,7 @@ async function seedUsers(db: Kysely<Database>, log: SeedContext['log']): Promise
     const existing = await db
       .selectFrom('users')
       .select(['id', 'is_admin'])
-      .where('email', '=', u.email)
+      .where(sql`lower(email)`, '=', u.email)
       .executeTakeFirst()
 
     if (existing) {

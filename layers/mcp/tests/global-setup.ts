@@ -1,18 +1,24 @@
-// Vitest globalSetup hook. Runs migrations against $TEST_DATABASE_URL once
-// before the suite, then truncates the test tables once after, so each
-// test file starts against a clean schema. Per-test row tracking via the
-// harness handles isolation between tests.
+// Vitest globalSetup hook. Truncates the test tables once before the suite so
+// each run starts from empty rows. The schema itself is created by core's
+// migration runner when the fixture consumer boots, so on a fresh database the
+// tables don't exist yet and there is nothing to truncate.
 //
 // Skips when TEST_DATABASE_URL is unset — unit suite still runs.
-import { fileURLToPath } from 'node:url'
-import { promises as fs } from 'node:fs'
-import path from 'node:path'
-import { Kysely, Migrator, FileMigrationProvider, sql } from 'kysely'
+import { Kysely, sql } from 'kysely'
 import { PostgresJSDialect } from 'kysely-postgres-js'
 import postgres from 'postgres'
 
-const FIXTURE_MIGRATIONS = fileURLToPath(new URL('./fixtures/consumer/migrations', import.meta.url))
-const OAUTH_MIGRATIONS = fileURLToPath(new URL('../../oauth/migrations', import.meta.url))
+const TABLES = [
+  'oauth_refresh_tokens',
+  'oauth_access_tokens',
+  'oauth_authorization_codes',
+  'oauth_pending_requests',
+  'oauth_consents',
+  'oauth_token_families',
+  'oauth_clients',
+  'activity_logs',
+  'users'
+]
 
 export async function setup(): Promise<void> {
   const url = process.env.TEST_DATABASE_URL
@@ -26,47 +32,14 @@ export async function setup(): Promise<void> {
   const db = new Kysely<any>({ dialect: new PostgresJSDialect({ postgres: pg }) })
 
   try {
-    // Each source gets its own migration tracking table — Kysely's default
-    // table name is shared, so running fixture migrations and OAuth
-    // migrations against one table causes "missing migration" complaints
-    // when the second migrator can't find the first migrator's file names.
-    const sources: Array<{ dir: string; tableName: string }> = [
-      { dir: FIXTURE_MIGRATIONS, tableName: 'kysely_migration_fixture' },
-      { dir: OAUTH_MIGRATIONS, tableName: 'kysely_migration_oauth' }
-    ]
-
-    for (const { dir, tableName } of sources) {
-      const exists = await fs.access(dir).then(() => true).catch(() => false)
-      if (!exists) throw new Error(`migration dir missing: ${dir}`)
-
-      const migrator = new Migrator({
-        db,
-        provider: new FileMigrationProvider({ fs, path, migrationFolder: dir }),
-        migrationTableName: tableName,
-        migrationLockTableName: `${tableName}_lock`
-      })
-      const { error, results } = await migrator.migrateToLatest()
-      if (error) throw error
-      for (const r of results ?? []) {
-        if (r.status === 'Error') throw new Error(`migration ${r.migrationName} failed in ${dir}`)
-      }
+    const existing: string[] = []
+    for (const table of TABLES) {
+      const { rows } = await sql<{ t: string | null }>`SELECT to_regclass(${`public.${table}`})::text AS t`.execute(db)
+      if (rows[0]?.t) existing.push(table)
     }
-
-    // Wipe data (preserve schema) so the suite starts clean. Disable FK checks
-    // for the duration via TRUNCATE ... CASCADE.
-    await sql`
-      TRUNCATE
-        oauth_refresh_tokens,
-        oauth_access_tokens,
-        oauth_authorization_codes,
-        oauth_pending_requests,
-        oauth_consents,
-        oauth_token_families,
-        oauth_clients,
-        activity_logs,
-        users
-      RESTART IDENTITY CASCADE
-    `.execute(db)
+    if (existing.length > 0) {
+      await sql`TRUNCATE ${sql.join(existing.map(t => sql.table(t)))} RESTART IDENTITY CASCADE`.execute(db)
+    }
   }
   finally {
     await db.destroy()

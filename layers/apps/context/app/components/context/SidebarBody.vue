@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineEmits<{ navigated: [] }>()
+defineEmits<{ navigated: [], create: [] }>()
 
 interface PortfolioListItem {
   id: string
@@ -16,6 +16,7 @@ interface SectionMeta {
   is_custom: boolean
   word_count: number
   has_content: boolean
+  pending_suggestions: number
 }
 
 const route = useRoute()
@@ -37,7 +38,7 @@ function pathTo(p: string): string {
   return org ? `/@${org}${p}` : p
 }
 
-const { data: portfoliosData, refresh: refreshPortfolios } = await useAsyncData(
+const { data: portfoliosData } = await useAsyncData(
   'context-sidebar-portfolios',
   () => $fetch<{ portfolios: PortfolioListItem[] }>('/api/context/portfolios')
 )
@@ -51,32 +52,6 @@ const { data: sectionsData } = await useAsyncData(
   { watch: [activeSlug] }
 )
 const sections = computed(() => sectionsData.value?.sections ?? [])
-
-const showCreate = ref(false)
-const newName = ref('')
-const newColor = ref('#7c3aed')
-const creating = ref(false)
-const createError = ref<string | null>(null)
-
-async function createPortfolio() {
-  if (!newName.value.trim()) return
-  creating.value = true
-  createError.value = null
-  try {
-    const created = await $fetch<{ slug: string }>('/api/context/portfolios', {
-      method: 'POST',
-      body: { name: newName.value.trim(), color: newColor.value || null }
-    })
-    newName.value = ''
-    showCreate.value = false
-    await refreshPortfolios()
-    if (created.slug) await navigateTo(pathTo(`/context/${created.slug}`))
-  } catch (e) {
-    createError.value = (e as Error).message ?? 'Could not create portfolio.'
-  } finally {
-    creating.value = false
-  }
-}
 </script>
 
 <template>
@@ -91,32 +66,11 @@ async function createPortfolio() {
         color="neutral"
         size="xs"
         aria-label="New portfolio"
-        @click.stop="showCreate = !showCreate"
+        @click.stop="$emit('create')"
       />
     </div>
 
-    <form
-      v-if="showCreate"
-      class="space-y-2 px-1 pb-2"
-      @click.stop
-      @submit.prevent="createPortfolio"
-    >
-      <UInput v-model="newName" placeholder="Portfolio name" size="sm" autofocus />
-      <UInput v-model="newColor" type="color" size="sm" />
-      <p v-if="createError" class="text-(--ui-error) text-xs">
-        {{ createError }}
-      </p>
-      <div class="flex gap-2">
-        <UButton type="submit" color="primary" size="xs" :loading="creating">
-          Create
-        </UButton>
-        <UButton size="xs" variant="ghost" @click.stop="showCreate = false">
-          Cancel
-        </UButton>
-      </div>
-    </form>
-
-    <p v-if="portfolios.length === 0 && !showCreate" class="px-2 py-2 text-xs text-(--ui-text-muted)">
+    <p v-if="portfolios.length === 0" class="px-2 py-2 text-xs text-(--ui-text-muted)">
       No portfolios yet.
     </p>
 
@@ -147,7 +101,7 @@ async function createPortfolio() {
         </NuxtLink>
 
         <nav
-          v-if="activeSlug === p.slug && sections.length > 0"
+          v-if="activeSlug === p.slug"
           class="ml-5 border-l border-(--ui-border) pl-2 my-1 flex flex-col gap-px"
         >
           <NuxtLink
@@ -168,7 +122,13 @@ async function createPortfolio() {
             <span class="font-mono shrink-0 text-(--ui-text-muted)" style="font-size: 10px">
               {{ String(idx + 1).padStart(2, '0') }}
             </span>
-            <span class="truncate">{{ s.title }}</span>
+            <span class="truncate flex-1">{{ s.title }}</span>
+            <UIcon
+              v-if="s.pending_suggestions > 0"
+              name="i-lucide-git-pull-request-arrow"
+              class="size-3 shrink-0 text-(--ui-warning)"
+              :title="`${s.pending_suggestions} pending suggestion(s)`"
+            />
           </NuxtLink>
           <NuxtLink
             :to="pathTo(`/context/${p.slug}/settings`)"

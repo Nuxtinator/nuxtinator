@@ -143,5 +143,18 @@ export function useInboxConversations() {
     debounce = setTimeout(() => refresh(), 300)
   })
 
-  return { items, total, counts, tagCounts, pending, error, scope, status, q, tag, refresh }
+  // Bulk triage over checked rows (status / assignee / add tags); resolves to
+  // how many conversations actually changed.
+  async function applyBulk(
+    ids: string[],
+    action: { status?: string, assignedUserId?: string | null, addTags?: string[] }
+  ): Promise<number> {
+    const res = await $fetch<{ updated: number }>('/api/inbox/conversations/bulk', {
+      method: 'POST',
+      body: { ids, ...action }
+    })
+    return res.updated
+  }
+
+  return { items, total, counts, tagCounts, pending, error, scope, status, q, tag, refresh, applyBulk }
 }

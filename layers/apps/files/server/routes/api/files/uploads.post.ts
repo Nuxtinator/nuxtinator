@@ -5,9 +5,7 @@
 import { withOrgPermission } from '#tenant/server'
 import { uploadToS3, validateFileSize } from '#core/server/utils/storage'
 import { logCreate } from '#core/server/utils/activity-logger'
-import { normalizeTags } from '../../../utils/file-helpers'
-
-const MAX_SIZE_MB = 50
+import { normalizeTags, MAX_FILE_MB } from '../../../utils/file-helpers'
 
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, { appId: 'files' }, 'files.write', async (tx, ctx) => {
@@ -25,8 +23,8 @@ export default defineEventHandler(async (event) => {
     const originalFilename = filePart.filename ?? 'upload'
     const contentType = filePart.type ?? 'application/octet-stream'
 
-    if (!validateFileSize(data.byteLength, MAX_SIZE_MB)) {
-      throw createError({ statusCode: 413, statusMessage: `File too large (max ${MAX_SIZE_MB} MB).` })
+    if (!validateFileSize(data.byteLength, MAX_FILE_MB)) {
+      throw createError({ statusCode: 413, statusMessage: `File too large (max ${MAX_FILE_MB} MB).` })
     }
 
     const titlePart = parts.find(p => p.name === 'title')

@@ -12,6 +12,29 @@ export const MAX_DOC_BYTES = 100 * 1024
 // files_003 migration), so the tsvector size limit doesn't constrain them.
 export const MAX_SITE_BYTES = 2 * 1024 * 1024
 
+// Upload cap for kind='file' items, shared by the multipart route and the
+// MCP presigned-upload tools.
+export const MAX_FILE_MB = 50
+
+// Lifetime of the signed bucket URL /files/raw/:token redirects to. Bounds how
+// long an already-loaded link keeps working after the file is unshared.
+export const RAW_LINK_TTL_SECONDS = 3600
+
+// Content-Disposition value for serving a stored file under its original
+// name. Non-ASCII names get an RFC 5987 `filename*` alongside an ASCII
+// fallback.
+export function contentDisposition(type: 'inline' | 'attachment', filename: string): string {
+  // eslint-disable-next-line no-control-regex
+  const clean = filename.replace(/[\x00-\x1f\x7f]/g, '')
+  const ascii = clean.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_')
+  let value = `${type}; filename="${ascii}"`
+  if (ascii !== clean) {
+    const encoded = encodeURIComponent(clean).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+    value += `; filename*=UTF-8''${encoded}`
+  }
+  return value
+}
+
 // Kinds whose body_md is edited in-app and snapshotted into files_versions.
 export type EditableKind = 'doc' | 'site'
 

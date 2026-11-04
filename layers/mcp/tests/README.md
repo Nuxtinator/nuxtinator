@@ -3,11 +3,11 @@
 ```
 tests/
   setup.ts                    # Vitest per-test setup (Nitro globals + state reset)
-  global-setup.ts             # Vitest globalSetup — runs migrations once before suite
+  global-setup.ts             # Vitest globalSetup — truncates test tables once before suite
   harness.ts                  # Integration harness (createTestUser, callMcp, etc.)
-  stubs/                      # Test stubs for ~~/* aliases (unit suite only)
+  stubs/                      # Test stubs for #core/* and #oauth/* aliases (unit suite only)
     app/utils/permissions.ts
-    server/utils/{rbac, activity-logger, oauth-bearer, oauth-config, database}.ts
+    server/utils/{rbac, activity-logger, oauth-bearer, oauth-config, permissions-registry, scopes-registry}.ts
     server/database/schema.ts
     nitro-globals.ts          # useStorage / useRuntimeConfig / createError shims
   unit/                       # Unit tests — no Nuxt boot, no DB
@@ -20,24 +20,19 @@ tests/
   integration/                # Boots fixture consumer with @nuxt/test-utils/e2e
     transport.test.ts
   fixtures/
-    consumer/                 # Real Nuxt app extending oauth + mcp layers
+    consumer/                 # Real Nuxt app extending core + oauth + mcp layers
       nuxt.config.ts
-      app/utils/{permissions, role-definitions}.ts
-      server/utils/{database, rbac, auth, activity-logger, rate-limit}.ts
-      server/database/schema.ts
       server/mcp-tools/all.ts
-      server/plugins/10-mcp-test-tools.ts
-      migrations/001_users.ts
-      migrations/002_activity_logs.ts
+      server/plugins/10-mcp-test-tools.ts   # registers pages.* perms, roles, tools
 ```
 
 ## Running
 
 ```bash
-cd base-code/layers/mcp
+cd layers/mcp
 TEST_DATABASE_URL=postgres://<user>@localhost:5432/mcp_layer_test \
 NUXT_PUBLIC_SITE_URL=http://localhost:3099 \
-npm test
+bun run test
 ```
 
 The integration suite needs:
@@ -46,11 +41,11 @@ The integration suite needs:
 - `TEST_DATABASE_URL` pointed at it.
 - `NUXT_PUBLIC_SITE_URL` matching the harness's resource URI (default `http://localhost:3099`).
 
-The `global-setup.ts` hook applies fixture migrations (users, activity_logs)
-+ OAuth migrations once before the suite. Each migrations folder gets its
-own tracking table (`kysely_migration_fixture` / `kysely_migration_oauth`)
-so they don't collide. After migrations, the hook truncates all schema
-tables `RESTART IDENTITY CASCADE` so the run starts clean.
+The schema comes from core's migration runner, which applies core + OAuth
+migrations when the fixture consumer boots. The `global-setup.ts` hook
+truncates the test tables `RESTART IDENTITY CASCADE` before the suite so the
+run starts clean (on a fresh database the tables don't exist yet and it
+skips them).
 
 Per-test isolation runs through the harness's `cleanupFixtures()` —
 called from `afterEach` in the integration spec.
@@ -75,7 +70,7 @@ called from `afterEach` in the integration spec.
   pre-release tiebreak, the `1.20.0-alpha < 1.20.0` regression test for
   the SDK floor check.
 
-**Integration (17 tests in transport.test.ts)** — boots the fixture
+**Integration (20 tests in transport.test.ts)** — boots the fixture
 consumer + drives the live `/mcp` route over $TEST_DATABASE_URL:
 
 - `GET /mcp` returns 405 with `Allow: POST`.
@@ -83,7 +78,8 @@ consumer + drives the live `/mcp` route over $TEST_DATABASE_URL:
 - POST without bearer returns 401.
 - POST with hostile Origin returns 403.
 - POST with body > 2 MB returns 413.
-- post-initialize POST without `MCP-Protocol-Version` returns 400.
+- post-initialize POST without `MCP-Protocol-Version` is accepted.
+- POST with an unsupported `MCP-Protocol-Version` returns 400.
 - POST with malformed JSON returns 400.
 - `tools/list` filters to scope ∩ RBAC.
 - `tools/list` hides write tools when token has only read scope (even when
@@ -95,6 +91,8 @@ consumer + drives the live `/mcp` route over $TEST_DATABASE_URL:
 - Output-schema validation rejects malformed `structuredContent` and emits
   `mcp.handler_output_invalid` server-side.
 - Output-schema validation accepts a valid `structuredContent`.
+- `structuredContent` (success and authorization errors) is also returned
+  serialized as a trailing text block.
 - `tools/call` with handler throwing 404 maps to `isError "page not found"`.
 - A successful write tool emits an `mcp`-source `activity_logs` row with
   the standard metadata shape (source, client_id, tool, scope, user_id).

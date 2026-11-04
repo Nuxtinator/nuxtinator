@@ -1,11 +1,12 @@
 <script setup lang="ts">
-// Preview for an uploaded (kind='file') item: images render inline; everything
-// else shows an icon + metadata + download button. `url` is a signed S3 URL.
+// Preview for an uploaded (kind='file') item: images and videos render inline;
+// everything else shows an icon + metadata + download button. `url` is a signed S3 URL.
 import { formatBytes, iconForItem, type FilesItemDetail } from '../../composables/useFiles'
 
 const props = defineProps<{ item: FilesItemDetail }>()
 
 const isImage = computed(() => (props.item.mime ?? '').startsWith('image/'))
+const isVideo = computed(() => (props.item.mime ?? '').startsWith('video/'))
 const lightboxOpen = ref(false)
 </script>
 
@@ -23,6 +24,14 @@ const lightboxOpen = ref(false)
       v-model:open="lightboxOpen"
       :src="item.url"
       :alt="item.title"
+    />
+
+    <video
+      v-else-if="isVideo && item.url"
+      :src="item.url"
+      controls
+      preload="metadata"
+      class="max-w-full max-h-[85vh] rounded-lg border border-(--ui-border) bg-black"
     />
 
     <div

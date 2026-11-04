@@ -1,21 +1,20 @@
-# Inbox layer — implementation plan (gap scan vs Doxa campaigns-server)
+# Inbox layer — implementation plan
 
 Status doc for finishing `@nuxtinator/inbox`. Companion to [dev.md](dev.md) (decision log)
 and [README.md](README.md) (consumer setup). This file is the **build backlog**: every feature
-and edge case in the Doxa shared inbox (`~/code/doxa/campaigns-sever`) that the initial port
-did not carry, in recommended build order, with the load-bearing bug/edge-case logic each item
-must preserve.
+and edge case the initial version did not carry, in recommended build order, with the
+load-bearing bug/edge-case logic each item must preserve.
 
 ## How this was produced
 
-Full subsystem-by-subsystem diff of the Doxa inbox against this layer — 16 comparison passes
+Full subsystem-by-subsystem review of this layer — 16 passes
 (conversation API, compose/send, attachments+images, inbound pipeline, delivery/suppressions,
 tags, canned responses, knowledge/AI, identities, notifications/activity, spam, main UI, schema,
 CRM integration, tests/docs, plus a completeness sweep), each adversarially re-verified against
 the actual layer code. Source of truth for the details behind each line here:
 `scratchpad/inbox-gaps.json` (raw) and `inbox-gaps-digest.md` (readable) from the scan session.
 
-**Topline:** 64 behaviors already ported and solid; 23 deliberate deltas (do not "fix" back);
+**Topline:** 64 behaviors already solid; 23 deliberate design choices (do not "fix" back);
 ~135 gaps totalling ~2.9M tokens of implementation. The two the user flagged as most notable —
 **outbound image upload / inline-image pipeline** and **CRM-layer integration** — are Phases 2
 and 5 and can be pulled to the front.
@@ -25,8 +24,8 @@ and 5 and can be pulled to the front.
 These fork the work; decide them up front.
 
 1. **i18n — DECIDED: not now.** The go-saas monorepo has **no i18n system**; every inbox string
-   and both courtesy-mail templates are hardcoded English. Doxa localizes ~148 UI keys + a
-   translated auto-ack across 11 locales. **Decision: stay English-only across the inbox for now** —
+   and both courtesy-mail templates are hardcoded English. **Decision: stay English-only across the
+   inbox for now** —
    i18n will be built in **core first** as a monorepo-wide capability, and the inbox will adopt it
    then. Consequences baked into this plan: canned responses ship **single-body** (no translations
    table, Phase 4); courtesy mail stays English (no per-locale string table); Phase 11 is deferred
@@ -43,29 +42,28 @@ These fork the work; decide them up front.
    `UEditor` with `:image="false"` (Thread.vue:139), not a plain textarea. Inline images therefore
    need *enabling + upload wiring*, not a composer rewrite; canned/signature HTML will render
    correctly in it already. This shrinks several UI estimates.
-5. **Per-org, code-owned everything.** Every Doxa `app_config` singleton (tag palette, AI model)
-   and every hardcoded brand string ("Doxa Prayer", "<First> with Doxa") must become a
-   **core_settings** override (namespace `inbox`) with a code-owned default — per the repo's
-   persisted-state rule. Write JSON settings with `sql.json` (project gotcha). No `app_config` port.
+5. **Per-org, code-owned everything.** Every singleton config value (tag palette, AI model) and
+   every brand string must be a **core_settings** override (namespace `inbox`) with a code-owned
+   default — per the repo's persisted-state rule. Write JSON settings with `sql.json` (project gotcha).
 
 ---
 
 ## Already done and solid (don't rebuild)
 
-For orientation — these were verified faithful ports: conversation list filters/sort/pagination,
+For orientation — these are verified solid: conversation list filters/sort/pagination,
 rail/badge counts (six-FILTER single query), search (subject + counterparty, minus CRM-name — see
 5.x), the whole inbound durability choreography (dedupe → thread → claim-row → S3 → side-effects),
 signature-verify + replay handling, sender classification (contact/held), auto-ack + auto-responder
 gates, the queued-row-is-the-job send sweep with atomic claim + backoff, spam blocklist + close +
-reopen-as-closed, channel-strict threading, and the auth-proxy attachment download. Several are
-**improvements** over Doxa (reply_token no longer leaked in payloads; unblock un-strands sibling
-threads; From display-name quote-stripping). Deliberate deltas in [dev.md](dev.md) stand.
+reopen-as-closed, channel-strict threading, and the auth-proxy attachment download. Load-bearing
+details: reply_token is never exposed in payloads; unblock un-strands sibling threads; From
+display names are quote-stripped. The decisions in [dev.md](dev.md) stand.
 
 ---
 
-## Phase 0 — Correctness & parity fixes  (~47k)
+## Phase 0 — Correctness fixes  (~47k)
 
-Small, mostly independent, each closes a real defect or divergence. Do first.
+Small, mostly independent, each closes a real defect. Do first.
 
 - **Outbound reply stuck on "Sending…" until manual refresh (~10k). [reported, confirmed]**
   Root cause: `useInboxThread.reply()` POSTs a `queued` message then `refresh()`es immediately —
@@ -82,8 +80,8 @@ Small, mostly independent, each closes a real defect or divergence. Do first.
   actual await.
 - **Replying doesn't clear `needs_review` (~1k).** `messages.post.ts` never calls
   `inboxSetNeedsReview(id, false)` on send, so a held-then-answered thread stays in the "held"
-  count/filter and inflates the (status-independent) rail badge until manually cleared. Doxa clears
-  it on every send (`messages.post.ts:116`). **Preserve:** clear on *send only*, never on draft-save.
+  count/filter and inflates the (status-independent) rail badge until manually cleared.
+  **Preserve:** clear on *send only*, never on draft-save.
 - **`constrainImages` on outbound HTML (~3k).** Inject `max-width:100%;max-height:480px;height:auto;`
   onto every `<img>` in the final outbound body (email clients ignore `<style>`/external CSS, so the
   cap must be per-tag). Live bug today: the sanitizer allowlists `<img width/height/style>`, so
@@ -91,21 +89,20 @@ Small, mostly independent, each closes a real defect or divergence. Do first.
   cap *last* inside an existing `style` (wins over sender styles); handle both quote styles + self-closing tags.
 - **Attachment download filename sanitizer (~2k).** `attachments/[id].get.ts:27` strips `["\r\n]`
   but **not backslashes** and does **not** length-cap — a trailing `\` escapes the closing quote of
-  the `Content-Disposition` filename. Match Doxa: also strip `\`, slice to 200 chars.
-- **Auto-responder held-branch divergence (~2k).** Target closes held mail on the *broad*
+  the `Content-Disposition` filename. Fix: also strip `\`, slice to 200 chars.
+- **Auto-responder held-branch too broad (~2k).** Target closes held mail on the *broad*
   `isAutoResponderOrBounce` flag (inbound.post.ts:254/360), silently swallowing DSNs and
-  `Precedence: list/bulk` from strangers that Doxa surfaces for review. Align: close the held branch
+  `Precedence: list/bulk` from strangers that should surface for review. Fix: close the held branch
   on the *vacation subset* only (two-line change), so DSNs land held + needs_review + notify.
 - **Boolean query coercion (~1k).** List route uses `z.coerce.boolean()` for `held/unassigned/mine`,
   so `?held=false` coerces to **true** (any non-empty string is truthy). Harmless with the current
   UI (only ever sends `true`) but inverts the filter for raw API callers. Use an explicit
-  `'true'|'1'` check like Doxa.
-- **Ship an `inbox_agent` static role (~3k).** Doxa ships an "Inbox Agent" role bundling
+  `'true'|'1'` check.
+- **Ship an `inbox_agent` static role (~3k).** An "Inbox Agent" role bundling
   `inbox.access + inbox.send`; target registers only permissions + default grants, so an org must
   hand-assemble a custom role to staff the inbox. Add one `registerStaticRole({ key: 'inbox_agent',
   permissions: [...], source: 'inbox' })` in `register-inbox.ts` (core's roles-registry exists for
   this — would be the first app layer to use it; verify the admin role-assignment UI lists app-static roles).
-  **Don't** port Doxa's superadmin-locked-out quirk (target already behaves better).
 - **Spam verdict feedback + unmark `needs_review` (~5k, see Phase 1 for the log).** Add success
   toasts ("Marked as spam"/"Removed from spam" — target only toasts on failure) and clear
   `needs_review` on *any* unmark, not just when the requested status is `closed`
@@ -132,7 +129,7 @@ is already imported in the inbox layer (used only for `inbox_webhook_rejected` t
   `withOrgPermission('inbox.access')` (RLS scopes rows to the org), joins users for display_name,
   `ORDER BY timestamp DESC LIMIT 100`, normalizes bigint-string timestamps to int + string metadata
   to parsed JSON. **Preserve:** the table allowlist is the security boundary — never a generic
-  read-any-table endpoint (Doxa's core `/admin/audit` is operator-only; inbox.access staff need this).
+  read-any-table endpoint.
 
 ## Phase 2 — Composer pipeline: drafts + attachments + inline images  (~230k)  ⭐ user-flagged (images)
 
@@ -172,7 +169,7 @@ on send).
 - **Composer file UI.** Paperclip → hidden multi-file input → `pendingFiles`; on save/send,
   `ensureDraft()` then upload each file sequentially with `draft_id`. **Preserve:** re-pick replaces
   (no append/dedupe); `pendingFiles` cleared only after the whole loop, so a mid-loop failure leaves
-  the full list pending (retry re-uploads the prefix → duplicate rows — Doxa accepts this).
+  the full list pending (retry re-uploads the prefix → duplicate rows; accepted).
 
 ### 2c. Inline-image pipeline (~135k = upload 40k + serving 15k + CID embed 20k + editor UI 15k + magic-byte sniffer within upload)
 - **Upload endpoints** (both `inbox.send`, field `image`): `POST /conversations/:id/inline-images`
@@ -183,8 +180,8 @@ on send).
   sig / GIF87a|89a / RIFF..WEBP, min 12 bytes) — core storage has **no** magic-byte sniffer, only
   string content-type matching. **Preserve:** never trust the browser Content-Type (a `.png`-named
   HTML/SVG must 415); extension derived from the *sniffed* mime, filename discarded; distinct
-  400/413/415 codes surfaced in the editor toast. Target addition: **org-scope the key or verify org
-  membership in the proxy** (Doxa is single-tenant).
+  400/413/415 codes surfaced in the editor toast. **Org-scope the key or verify org membership in
+  the proxy.**
 - **Serving proxy** `GET /api/inbox/inline-image/[...key]` (`inbox.access` — weaker than upload so
   any viewer renders thread images): guard `isInlineImageKey` (must start `inline/`, no `..`), fetch
   private object, serve with the **stored sniffed Content-Type** + `Cache-Control: private,
@@ -209,11 +206,11 @@ on send).
 ### 2d. S3 lifecycle cleanup (~15k, partial)
 Target has **zero** `deleteFromS3` calls in the inbox layer — attachment objects and raw-MIME `.eml`
 files (full-message PII) orphan forever. Core already exports `deleteFromS3` (wiring, not a new
-util). Doxa's subscriber-cascade hook is *not* portable (channel-strict threading intentionally keeps
-threads on contact deletion), but add cleanup on **org deletion** and provide a GDPR-purge path.
+util). Channel-strict threading keeps threads on contact deletion, so there is no contact-cascade
+hook; add cleanup on **org deletion** and provide a GDPR-purge path.
 **Preserve:** best-effort per key (one failed delete logs + continues; a key-gather failure never
 blocks the delete); include raw `.eml` (biggest PII item). Note: inline/ composer images are never
-DB-tracked and orphan by design on both sides.
+DB-tracked and orphan by design.
 
 ## Phase 3 — Tags  (~112k)
 
@@ -225,7 +222,7 @@ Conversation tags with a per-org palette. On dev.md's Deferred list.
   `sql.json`.
 - **Palette service + API (~40k):** `slugifyTag` (kebab, the stable stored key so renames don't break
   assignments); 7-color closed set with `neutral` fallback applied on read *and* write; list/create/
-  delete endpoints gated `inbox.access` (Doxa deliberately gates palette management at *view* level).
+  delete endpoints gated `inbox.access` (palette management is deliberately gated at *view* level).
   **Preserve:** create is **create-or-return by derived slug** (idempotent, never overwrites color —
   inline create-on-assign can't duplicate); empty slug (name `!!!`) → 400; delete strips the slug from
   every conversation via the JSONB `-` operator *even for non-palette slugs* (cleans orphans);
@@ -251,13 +248,13 @@ Shared (org-wide) reply snippets. `inbox.send`'s description already promises "m
 responses", so permission wiring pre-exists.
 - **Schema + service (~12k):** **DECIDED — single-body, no translations table** (i18n is deferred to
   future core work, cross-cutting #1). One `canned_responses` table (`title`, `body_html`,
-  `created_by SET NULL`, timestamps) + `_T` org rescope. Drops Doxa's `canned_response_translations`
-  and the language select entirely. If/when core i18n lands, revisit.
+  `created_by SET NULL`, timestamps) + `_T` org rescope. No translations table and no language
+  select. If/when core i18n lands, revisit.
 - **CRUD API (~16k):** list (ORDER BY title, batch-fetch translations), create/update (partial:
   title-only bumps updated_at; `translations: undefined` leaves them, `[]` wipes),
   replaceTranslations (delete-then-reinsert). **Preserve:** list early-returns `[]` when no parents
   (avoids `IN ()` syntax error); PUT existence-check before body parse; `created_by` is `SET NULL`
-  (shared asset survives user deletion); the tenant tx makes the replace atomic (Doxa's isn't).
+  (shared asset survives user deletion); the tenant tx makes the replace atomic.
 - **Manager modal + composer picker (~22k):** two-pane manager (opened from the header,
   `inbox.send`-gated), single body field (no language select); a picker in the reply toolbar.
   **Preserve:** picker hidden when list empty and on fetch failure (degrades silently, no error
@@ -313,8 +310,8 @@ On dev.md's Deferred list.
   permission model**: alias changes (routable = attack surface) are admin-gated; a user may edit only
   their *own* signature (`inbox.send`). `GET /api/inbox/me` (`inbox.access`, one tier below send, so
   read-only agents see why no signature attaches). **Preserve:** validate alias `/^[a-z0-9][a-z0-9._-]*$/i`;
-  **reject reserved local-parts** (`contact`, `bounce`, `notifications` — Doxa has no such check,
-  a real gap); lowercase on write + case-insensitive match (MTA case-folding); unique-violation →
+  **reject reserved local-parts** (`contact`, `bounce`, `notifications`); lowercase on write +
+  case-insensitive match (MTA case-folding); unique-violation →
   friendly 400; log only actually-changed fields; `null` clears vs `undefined` leaves untouched.
 - **Outbound From selection + signature (~29k):** `from_identity: personal|contact` on both compose
   endpoints; personal → `<alias>@<inboxDomain>`, **hard fallback to contact when no alias**; append
@@ -322,19 +319,19 @@ On dev.md's Deferred list.
   compose time onto `from_email` (an admin removing the alias later doesn't change a queued send) but
   display name re-derived at send time from current display_name — don't collapse this split;
   case-insensitive `from_email == contactAddress` detection; **keep the target's quote-stripping** on
-  display names (Doxa's `"<First> with Doxa"` doesn't escape quotes — a From-header injection bug,
-  don't port it); signature baked into stored `body_html` (not `body_text`), sanitized at the outbound sink.
+  display names (an unescaped quote in a display name is a From-header injection bug); signature
+  baked into stored `body_html` (not `body_text`), sanitized at the outbound sink.
 - **Composer From selector + signature notice (~18k):** USelect over From options (shown only when
   >1); three-state signature notice (attach/none-personal/contact) with a preview toggle;
   `defaultFromIdentity` continuity heuristic (default `contact` unless a prior non-draft outbound
   differs from the contact address → `personal`). **Preserve:** the preview renders the agent's own
-  signature via `v-html` (self-XSS only — Doxa marks it with an eslint-disable); build the UI From
+  signature via `v-html` (self-XSS only); build the UI From
   label from the *same source the server sends* or the preview lies.
 - **Inbound alias routing → auto-assign (~9k):** tokenless mail whose local-part base ≠ contact base
   → look up the alias's user → a **new** conversation is assigned to them (flips notification from
   broadcast to assignee-immediate). **Preserve:** reply-token beats alias beats References; contact
   base + `bounce@` never resolve as aliases; alias affects new conversations only (not the reused
-  empty-shell branch — a Doxa quirk, decide deliberately); run the lookup **inside the org-scope tx**
+  empty-shell branch — decide deliberately); run the lookup **inside the org-scope tx**
   (same alias can exist in two orgs).
 
 ## Phase 7 — Notes, activity feed & notification enrichment  (~200k)
@@ -347,10 +344,9 @@ On dev.md's Deferred list.
   in-repo model to adapt. **Preserve:** the empty-tiptap-doc guard (incl. single-empty-paragraph);
   system notes (null user) never editable.
 - **@Mentions in notes (~25k):** extract mention user-ids from the *sanitized* doc (extracting from
-  the raw doc would notify via stripped nodes), filter self-mentions, notify. **Much cheaper than
-  Doxa** — `createNotification(email:'immediate', actorId)` gives bell + email + self-mention
-  suppression for free. Don't port Doxa's broken `/admin/conversations/<id>` mention-link
-  (wrong route).
+  the raw doc would notify via stripped nodes), filter self-mentions, notify.
+  `createNotification(email:'immediate', actorId)` gives bell + email + self-mention suppression
+  for free. Point the mention link at the inbox conversation route.
 - **Woven notes + activity feed UI (~30k):** a "Notes & Activity" tab merging comments
   (`record_type='conversation'`) + activity (`table='conversations'`) into one newest-first timeline.
   CRM's Timeline/ActivityEntry/CommentBubble/CommentComposer are the building blocks. **Preserve:**
@@ -362,7 +358,7 @@ On dev.md's Deferred list.
   sender address, and the "New reply:" vs "New message:" subject distinction. Core rows are snapshot
   title/body/link — rich HTML would need an inbox-owned mailer. **Preserve:** assignee missing/no-email
   → no-op (not retry-forever); note the target's at-most-once gap (notification write is in tx C —
-  a crash between S3 persist and tx C drops it silently, vs Doxa's retried job).
+  a crash between S3 persist and tx C drops it silently).
 - **Per-user notification preferences (~40k):** a **core-level** prefs blob (code-owned defaults,
   DB stores only explicit choices — the repo's persisted-state pattern) + profile endpoints/UI, so a
   user can opt into email for unassigned/held inbox mail (today the bell-only broadcast is
@@ -389,7 +385,7 @@ contact-form dependency — listed there.)
   diagnosing sees a stale first message); (2) the scope loop **breaks at the first scope that acted**,
   so a multi-org address is suppressed/unsubscribed in only the first scope scanned (one loop fix
   covers both suppression and unsubscribe fanout); (3) `suppress()` is first-write-wins so a complaint
-  following a bounce keeps `reason='bounce'` (Doxa overwrites to `complaint`).
+  following a bounce keeps `reason='bounce'` (should upgrade to `complaint`).
 - **Suppression visibility on the contact record + timeline (~20k, partial):** the data (reason/
   detail/source/created_at) already exists in the DB but `consent.get.ts` exposes only
   `suppressed: boolean`; expose the detail, add a "Not receiving" badge on record list/detail, and
@@ -409,8 +405,8 @@ contact-form dependency — listed there.)
 - **Double-opt-in consent (~50k):** `crm_channels` already has `verification_token_hash` +
   `verification_expires_at` columns (dormant — nothing reads/writes them). Add token generate/consume
   + verification email, sent only when consent was requested AND the address is unverified.
-  **Design constraint:** the target stores a token *hash*, so Doxa's "reuse the still-valid plaintext
-  token" dedupe can't be ported literally — rework as reissue-and-overwrite with a resend throttle.
+  **Design constraint:** the target stores a token *hash*, so a still-valid plaintext token can't be
+  reused for dedupe — use reissue-and-overwrite with a resend throttle.
   **Preserve:** verification is ownership proof, strictly separate from deliverability — the delivery
   webhook must never call `markChannelVerified`; `verified` is forward-only.
 - **`#inbox/server` barrel:** export the conversation-creation + channel-claim helpers so a future
@@ -436,7 +432,7 @@ chat-completions + tool-calling API; single `OPENROUTER_API_KEY`).
   enable/disable + the per-feature model choice (e.g. `inbox.draftModel`) — no migration to add a
   model. Per-feature model resolves from the enabled set at request time (no redeploy to change).
 - **Alias/exports/fallback wiring + tests (~15k).**
-- **Preserve (generalized from Doxa's Anthropic client):** some models reject sampling params
+- **Preserve:** some models reject sampling params
   (`temperature`) — OpenRouter surfaces the provider error, so guard per model rather than always
   sending; error triage (429/5xx → retryable 502; not-configured → 503; else 500); model read
   per-request. Prompt caching: OpenRouter passes Anthropic `cache_control` through on Anthropic
@@ -491,16 +487,16 @@ default en); the ack must keep its auto-reply headers even when localized (or tw
 
 ## Cross-cutting — tests & docs  (~100k, woven per phase)
 
-Doxa pins behaviors the target doesn't test. Add per phase, not as a lump: send-sweep hardening
+Behaviors the target doesn't test yet. Add per phase, not as a lump: send-sweep hardening
 battery (suppressed→failed, sanitization, claim guard, retry, held-sender-never-a-recipient, ~25k);
 durable-ack error paths (503 retryable on persistence failure, 400 malformed, ~10k); compose/start
 endpoint (~10k); auto-ack fires authenticated-only with RFC 3834 headers (~8k); staff-notification
 targeting (~6k); positive References/In-Reply-To threading + closed-reopens-on-token-reply (~7k);
 delivery `delivered`→state + never-verifies-channel (~4k); complaint→suppression idempotency (~4k).
-Docs: port `email-inbox-setup.md` (EU-region values, troubleshooting, e2e checklist); add
+Docs: write `email-inbox-setup.md` (EU-region values, troubleshooting, e2e checklist); add
 `INBOX_SEND_SWEEP_SECONDS` and the AI/grounding env vars to `.env.example`. An **inbox seed script**
-(~15k) matters more here than in Doxa — signed-webhook fixtures are otherwise the only way to get data
-in; seed `crm_channels` + conversations under an org scope, idempotent by a marker domain.
+(~15k) matters — signed-webhook fixtures are otherwise the only way to get data in; seed
+`crm_channels` + conversations under an org scope, idempotent by a marker domain.
 
 ---
 

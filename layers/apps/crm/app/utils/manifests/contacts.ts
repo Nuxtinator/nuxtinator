@@ -9,6 +9,7 @@ export const contactsManifest = defineRecordType({
   labelSingular: 'Contact',
   icon: 'i-lucide-contact',
   statusField: 'status',
+  closedReasonField: 'reason_closed',
   sections: {
     details: { label: 'Details', order: 1 },
     channels: { label: 'Contact info', order: 2 },
@@ -27,11 +28,25 @@ export const contactsManifest = defineRecordType({
         new: { label: 'New', color: 'info' },
         active: { label: 'Active', color: 'success' },
         paused: { label: 'Paused', color: 'warning' },
-        closed: { label: 'Closed', color: 'neutral' }
+        closed: { label: 'Closed', color: 'neutral', closed: true }
       }
     },
-    assigned_to: { kind: 'user_select', label: 'Assigned to', multiple: true, section: 'details', order: 3 },
-    nickname: { kind: 'text', label: 'Nickname', section: 'details', order: 4 },
+    reason_closed: {
+      kind: 'key_select',
+      label: 'Reason closed',
+      section: 'details',
+      order: 3,
+      options: {
+        duplicate: { label: 'Duplicate' },
+        not_interested: { label: 'Not interested' },
+        not_responding: { label: 'Not responding' },
+        moved: { label: 'Moved away' },
+        asked_to_be_removed: { label: 'Asked to be removed', revokesConsent: true },
+        other: { label: 'Other' }
+      }
+    },
+    assigned_to: { kind: 'user_select', label: 'Assigned to', multiple: true, section: 'details', order: 4 },
+    nickname: { kind: 'text', label: 'Nickname', section: 'details', order: 5 },
     contact_email: { kind: 'communication_channel', label: 'Email', channelType: 'email', section: 'channels', order: 1 },
     contact_phone: { kind: 'communication_channel', label: 'Phone', channelType: 'phone', section: 'channels', order: 2 },
     gender: {

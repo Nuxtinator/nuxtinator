@@ -31,6 +31,7 @@ export type DbClient = Kysely<Database> | Transaction<Database>
 
 export interface SettingsContext {
   orgId?: string
+  userId?: string
 }
 
 export interface DefineSettingsSpec<TDefault, TOverride, TResult> {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { useActiveOrg } from '#tenant'
+
 const { user } = useAuth()
-const { isHostAdmin } = usePermissions()
 const config = useRuntimeConfig()
 
 // OrgSwitcher ships with the tenancy layer and doesn't exist in single-tenant
@@ -10,12 +11,21 @@ const orgSwitcher = config.public.tenancy ? resolveComponent('OrgSwitcher') : nu
 
 const { apps } = await useApps()
 const activeApp = useActiveApp(apps)
+// The app whose nav the layout's sidebar shows. In multi-tenant mode app pages
+// bring their own sidebar, personal apps included, so the layout shows none.
+const sidebarApp = computed(() => config.public.tenancy ? null : activeApp.value)
 const route = useRoute()
+const { slug } = useActiveOrg()
+const homePath = computed(() => launcherPath(slug.value))
+
+const accountAvatar = computed(() => user.value?.avatar ? { src: user.value.avatar, alt: user.value.display_name || user.value.email } : undefined)
 
 const mobileSidebarOpen = ref(false)
+const mobileRailOpen = ref(false)
 
 watch(() => route.path, () => {
   mobileSidebarOpen.value = false
+  mobileRailOpen.value = false
 })
 </script>
 
@@ -24,10 +34,19 @@ watch(() => route.path, () => {
     <!-- Authenticated chrome -->
     <template v-if="user">
       <!-- Mobile top bar -->
-      <header class="lg:hidden sticky top-0 z-40 bg-(--ui-bg-elevated) border-b border-(--ui-border) py-2 px-3 flex items-center justify-between gap-2">
+      <header class="lg:hidden sticky top-0 z-40 bg-(--chrome-bg) border-b border-(--ui-border) py-2 px-3 flex items-center justify-between gap-2">
         <div class="flex items-center gap-2 min-w-0">
           <UButton
-            v-if="activeApp"
+            class="sm:hidden"
+            icon="i-lucide-grid-2x2"
+            variant="ghost"
+            color="neutral"
+            size="sm"
+            aria-label="Open app launcher"
+            @click="mobileRailOpen = true"
+          />
+          <UButton
+            v-if="sidebarApp"
             icon="i-lucide-menu"
             variant="ghost"
             color="neutral"
@@ -40,7 +59,7 @@ watch(() => route.path, () => {
             v-if="orgSwitcher"
           />
           <NuxtLink
-            to="/"
+            :to="homePath"
             class="text-base font-semibold truncate"
           >
             {{ activeApp?.title || config.public.appName }}
@@ -48,20 +67,12 @@ watch(() => route.path, () => {
         </div>
         <div class="flex items-center gap-1 shrink-0">
           <NotificationBell :active-app-id="activeApp?.id" />
-          <AppSwitcher />
-          <UButton
-            v-if="isHostAdmin"
-            to="/admin"
-            icon="i-lucide-shield-check"
-            variant="ghost"
-            color="neutral"
-            size="sm"
-            aria-label="Admin"
-            title="Admin"
-          />
+          <ThemeToggle size="sm" />
           <UButton
             to="/account"
-            icon="i-lucide-user"
+            :icon="accountAvatar ? undefined : 'i-lucide-user'"
+            :avatar="accountAvatar"
+            :ui="accountAvatar ? { base: 'p-0 rounded-full', leadingAvatarSize: 'sm' } : undefined"
             variant="ghost"
             color="neutral"
             size="sm"
@@ -73,15 +84,15 @@ watch(() => route.path, () => {
 
       <!-- Desktop top bar -->
       <!-- OrgSwitcher lives in the left group so it sits visually above the
-           AppRail (which starts at `w-14` directly below the header). -->
-      <header class="hidden lg:flex sticky top-0 z-40 bg-(--ui-bg-elevated) border-b border-(--ui-border) py-3 px-4 items-center justify-between gap-4">
+           AppRail (which starts directly below the header). -->
+      <header class="hidden lg:flex sticky top-0 z-40 bg-(--chrome-bg) border-b border-(--ui-border) py-3 px-4 items-center justify-between gap-4">
         <div class="flex items-center gap-3 min-w-0">
           <component
             :is="orgSwitcher"
             v-if="orgSwitcher"
           />
           <NuxtLink
-            to="/"
+            :to="homePath"
             class="text-xl font-semibold hover:text-(--ui-text-muted) transition-colors truncate"
           >
             {{ config.public.appName }}
@@ -89,20 +100,12 @@ watch(() => route.path, () => {
         </div>
         <div class="flex items-center gap-3">
           <NotificationBell :active-app-id="activeApp?.id" />
-          <AppSwitcher />
-          <UButton
-            v-if="isHostAdmin"
-            to="/admin"
-            icon="i-lucide-shield-check"
-            variant="ghost"
-            color="neutral"
-            size="sm"
-            aria-label="Admin"
-            title="Admin"
-          />
+          <ThemeToggle size="sm" />
           <UButton
             to="/account"
-            icon="i-lucide-user"
+            :icon="accountAvatar ? undefined : 'i-lucide-user'"
+            :avatar="accountAvatar"
+            :ui="accountAvatar ? { base: 'p-0 rounded-full', leadingAvatarSize: 'sm' } : undefined"
             variant="ghost"
             color="neutral"
             size="sm"
@@ -113,15 +116,15 @@ watch(() => route.path, () => {
       </header>
 
       <div class="flex">
-        <AppRail />
+        <AppRail class="hidden sm:flex sticky top-[49px] h-[calc(100vh-49px)] lg:top-[57px] lg:h-[calc(100vh-57px)]" />
 
         <aside
-          v-if="activeApp"
+          v-if="sidebarApp"
           class="hidden lg:flex w-64 shrink-0 border-r border-(--ui-border) sticky top-[57px] h-[calc(100vh-57px)]"
         >
           <AppSidebar
-            :key="activeApp.id"
-            :app="activeApp"
+            :key="sidebarApp.id"
+            :app="sidebarApp"
             class="w-full"
           />
         </aside>
@@ -131,17 +134,31 @@ watch(() => route.path, () => {
         </main>
       </div>
 
+      <!-- Mobile app rail drawer -->
+      <USlideover
+        v-model:open="mobileRailOpen"
+        side="left"
+        :ui="{ content: 'w-auto max-w-none' }"
+      >
+        <template #content>
+          <AppRail
+            class="flex h-full"
+            always-expanded
+          />
+        </template>
+      </USlideover>
+
       <!-- Mobile sidebar drawer -->
       <USlideover
-        v-if="activeApp"
+        v-if="sidebarApp"
         v-model:open="mobileSidebarOpen"
         side="left"
         :ui="{ content: 'max-w-xs' }"
       >
         <template #content>
           <AppSidebar
-            :key="activeApp.id"
-            :app="activeApp"
+            :key="sidebarApp.id"
+            :app="sidebarApp"
           />
         </template>
       </USlideover>
@@ -149,7 +166,7 @@ watch(() => route.path, () => {
 
     <!-- Unauthenticated -->
     <template v-else>
-      <header class="bg-(--ui-bg-elevated) border-b border-(--ui-border) py-4 sticky top-0 z-50">
+      <header class="bg-(--chrome-bg) border-b border-(--ui-border) py-4 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 flex justify-between items-center">
           <NuxtLink
             to="/"

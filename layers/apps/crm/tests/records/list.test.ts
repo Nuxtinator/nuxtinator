@@ -40,7 +40,7 @@ describe('filters', () => {
     const opts = withOrgHeader(auth, org.slug)
     await createContact(opts, { name: 'test-crm A', status: 'active' })
     await createContact(opts, { name: 'test-crm B', status: 'paused' })
-    await createContact(opts, { name: 'test-crm C', status: 'closed' })
+    await createContact(opts, { name: 'test-crm C', status: 'closed', reason_closed: 'duplicate' })
 
     const eq = await list(opts, { filters: JSON.stringify({ status: 'active' }) })
     expect(eq.total).toBe(1)

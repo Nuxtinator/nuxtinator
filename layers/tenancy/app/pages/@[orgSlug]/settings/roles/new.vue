@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { PermissionGroup, PermissionItem } from '../../../../components/OrgPermissionPicker.vue'
+
 definePageMeta({
   middleware: 'auth'
 })
@@ -8,28 +10,17 @@ const router = useRouter()
 const orgSlug = computed(() => route.params.orgSlug as string)
 const toast = useToast()
 
-interface PermissionItem {
-  perm: string
-  title: string
-  description: string
-}
 
-const { data: permsData } = await useFetch<{ permissions: PermissionItem[] }>(
+const { data: permsData } = await useFetch<{ groups: PermissionGroup[], permissions: PermissionItem[] }>(
   () => `/api/o/${orgSlug.value}/permissions`,
-  { watch: [orgSlug], default: () => ({ permissions: [] }) }
+  { watch: [orgSlug], default: () => ({ groups: [], permissions: [] }) }
 )
+const permGroups = computed(() => permsData.value?.groups ?? [])
 const allPerms = computed(() => permsData.value?.permissions ?? [])
 
 const name = ref('')
 const description = ref('')
 const selected = ref<Set<string>>(new Set())
-
-const toggle = (p: string) => {
-  const next = new Set(selected.value)
-  if (next.has(p)) next.delete(p)
-  else next.add(p)
-  selected.value = next
-}
 
 const saving = ref(false)
 const submit = async () => {
@@ -97,34 +88,18 @@ const submit = async () => {
         <h2 class="font-semibold">
           Permissions
         </h2>
-        <ul class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md max-h-96 overflow-y-auto">
-          <li
-            v-for="p in allPerms"
-            :key="p.perm"
-            class="flex items-center gap-3 p-3 cursor-pointer hover:bg-(--ui-bg-elevated)"
-            @click="toggle(p.perm)"
-          >
-            <UCheckbox
-              :model-value="selected.has(p.perm)"
-              @update:model-value="toggle(p.perm)"
-              @click.stop
-            />
-            <div class="min-w-0">
-              <div class="font-mono text-sm">
-                {{ p.perm }}
-              </div>
-              <div
-                v-if="p.title || p.description"
-                class="text-xs text-(--ui-text-muted)"
-              >
-                {{ p.title }}<span v-if="p.description"> — {{ p.description }}</span>
-              </div>
-            </div>
-          </li>
-        </ul>
+        <OrgPermissionPicker
+          v-model="selected"
+          :groups="permGroups"
+          :permissions="allPerms"
+          :disabled="saving"
+        />
       </div>
 
-      <div class="flex justify-end">
+      <div class="sticky bottom-0 -mx-4 px-4 py-3 flex items-center justify-end gap-3 border-t border-(--ui-border) bg-(--ui-bg)/95 backdrop-blur">
+        <span class="text-sm text-(--ui-text-muted)">
+          {{ selected.size }} permissions selected
+        </span>
         <UButton
           type="submit"
           :loading="saving"

@@ -1,6 +1,6 @@
 // PUT /api/inbox/identities/:userId { alias?, signature? }
 // Split permission model: changing an ALIAS (routable = attack surface) or
-// touching ANOTHER user's identity requires the admin role; a user may edit
+// touching ANOTHER user's identity requires inbox.settings.manage; a user may edit
 // only their OWN signature at the inbox.send tier. `undefined`/absent leaves a
 // field untouched; explicit `null` clears it.
 import { z } from 'zod'
@@ -27,9 +27,8 @@ export default defineEventHandler(async (event) => {
     const rawObj = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
     const changingAlias = Object.prototype.hasOwnProperty.call(rawObj, 'alias')
     const editingOther = userId !== ctx.userId
-    const isAdmin = ctx.roles.includes('admin')
-    if ((changingAlias || editingOther) && !isAdmin) {
-      throw createError({ statusCode: 403, statusMessage: 'Only an admin can change sending aliases or another user’s identity' })
+    if ((changingAlias || editingOther) && !ctx.perms.has('inbox.settings.manage')) {
+      throw createError({ statusCode: 403, statusMessage: 'Only an inbox settings manager can change sending aliases or another user’s identity' })
     }
 
     const patch: { alias?: string | null, signature?: string | null } = {}

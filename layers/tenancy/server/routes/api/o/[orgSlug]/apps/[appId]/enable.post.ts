@@ -1,15 +1,19 @@
 import { getRouterParam } from 'h3'
 import { withOrgPermission } from '#tenant/server'
+import { getApp } from '#core/server/utils/app-settings'
 
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, 'org.apps.manage', async (tx, ctx) => {
     const appId = getRouterParam(event, 'appId')
     if (!appId) throw createError({ statusCode: 400, statusMessage: 'appId required' })
 
-    const app = await tx.selectFrom('apps').select('status').where('id', '=', appId).executeTakeFirst()
-    if (!app) throw createError({ statusCode: 404, statusMessage: 'App not found' })
+    const app = await getApp(tx, appId)
+    if (!app?.installed || app.scope === 'user') throw createError({ statusCode: 404, statusMessage: 'App not found' })
     if (app.status === 'disabled') {
       throw createError({ statusCode: 409, statusMessage: 'App is disabled at the host level' })
+    }
+    if (app.status === 'host_controlled') {
+      throw createError({ statusCode: 409, statusMessage: 'App is managed by the host' })
     }
 
     const now = new Date().toISOString()

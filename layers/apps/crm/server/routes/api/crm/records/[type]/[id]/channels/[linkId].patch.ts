@@ -15,6 +15,7 @@ import { requireRecordUpdate } from '../../../../../../../utils/type-permissions
 import { assertRecordVisible, requireRecordType } from '../../../../../../../utils/list-records'
 import { claimChannel, linkChannel, setPrimary, unlinkChannel } from '../../../../../../../utils/channels'
 import { getRecord } from '../../../../../../../utils/record-storage'
+import { assertNotAccountOwned } from '../../../../../../../utils/account-link'
 
 const Body = z.object({
   value: z.string().min(1).optional(),
@@ -62,6 +63,7 @@ export default defineEventHandler(async (event) => {
     if (!link) {
       throw createError({ statusCode: 404, statusMessage: 'Channel link not found.' })
     }
+    if (body.value !== undefined) await assertNotAccountOwned(tx, id, { channelType: link.channel_type })
 
     // A value resolving to a different identity row relinks; the same
     // identity (e.g. a formatting-only edit) falls through to the in-place

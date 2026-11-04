@@ -25,7 +25,7 @@ Edit any layer's source directly here. Port-back to `nuxt-blueprints` is documen
 
 ## What the host owns
 
-The host shell stays thin. App layers feed it through **six in-process registries** in [server/utils/](../layers/core/server/utils/):
+The host shell stays thin. App layers feed it through **seven in-process registries** in [server/utils/](../layers/core/server/utils/):
 
 | Registry | File | What you call |
 |---|---|---|
@@ -34,11 +34,58 @@ The host shell stays thin. App layers feed it through **six in-process registrie
 | App static roles | [roles-registry.ts](../layers/core/server/utils/roles-registry.ts) | `registerStaticRole({ key, name, description, permissions, source })` |
 | App entries (launcher tiles) | [app-registry.ts](../layers/core/server/utils/app-registry.ts) | `registerApp({ id, title, path, icon, requiredPermission, order })` |
 | In-app nav items | [nav-registry.ts](../layers/core/server/utils/nav-registry.ts) | `registerNavItem({ appId, title, path, icon, requiredPermission, order })` |
+| Rail entries | [rail-registry.ts](../layers/core/server/utils/rail-registry.ts) | `registerRailItem({ appId, id, title, path, icon, requiredPermission, order })` |
 | Admin shell sections | [admin-section-registry.ts](../layers/core/server/utils/admin-section-registry.ts) | `registerAdminSection({ appId, title, path, icon, requiredPermission, order })` |
 
 Layers feed these at boot from a Nitro plugin. The host bridges each registry to the client via auth-gated, permission-filtered endpoints (`/api/_apps`, `/api/_nav`, `/api/_admin-sections`) consumed by composables (`useApps`, `useAppNav`, `useAdminSections`).
 
+### The app rail
+
+The rail on the left of every page lists one entry per app by default. An app that registers rail items shows those instead, so one app can contribute several entries. Each item shows while its app is on for the org and the user holds `requiredPermission`; paths take the single-tenant form or `/@:orgSlug/...`. Items and apps sort together on one `order` scale. The app's unread badge goes on its item at the app's own path, else on its first item.
+
+```ts
+// host server/plugins/rail.ts
+import { registerRailItem } from '#core/server/utils/rail-registry'
+import { configureApp } from '#core/server/utils/app-registry'
+
+export default defineNitroPlugin(() => {
+  registerRailItem({ appId: 'pt', id: 'dashboard', title: 'Dashboard', path: '/pt', icon: 'i-lucide-layout-dashboard', order: 10 })
+  registerRailItem({ appId: 'pt', id: 'campaigns', title: 'Campaigns', path: '/pt/campaigns', icon: 'i-lucide-flag', order: 20, requiredPermission: 'pt.campaigns.read' })
+  // Relabel, re-icon and move an installed app without editing its layer.
+  configureApp('crm', { title: 'Intercessors', icon: 'i-lucide-users', order: 45 })
+})
+```
+
+`configureApp` applies wherever the app appears (rail, launcher, `/admin/apps`, MCP), whichever plugin runs first. It also takes `defaultStatus`, which replaces the layer's registry default (a host admin's choice on `/admin/apps` still wins), so a host decides in code which installed apps are on by default.
+
+The rail shows icons only, with a toggle at the bottom that shows names next to them. Each browser remembers its choice; the mobile drawer always shows names. A host sets the rest in its `app.config.ts`:
+
+```ts
+export default defineAppConfig({
+  rail: {
+    expanded: true,     // start with names shown (default false)
+    launcher: false,    // hide the "All apps" link (default true)
+    orgSettings: false  // hide tenancy's organization settings link (default true)
+  }
+})
+```
+
+`launcher` also takes `{ title, icon, path }` to point the top link somewhere other than the app launcher, e.g. `{ title: 'Your sites', icon: 'i-lucide-church', path: '/orgs' }`. It shows on every page, inside an org or not, and is highlighted on `path` and the pages under it.
+
 The host itself ships **no** permissions or roles — operator-admin is the `users.is_admin` boolean (no slug), checked via `requireOperatorAdmin(event)` from [tenant-kernel/server.ts](../layers/core/tenant-kernel/server.ts).
+
+The `admin` role gets every registered permission. A host keeps a layer's permission from admins with `withholdFromAdmin` from a Nitro plugin, e.g. `withholdFromAdmin(['crm.schema.manage'])` to keep the CRM's schema builder from org admins; users then hold it only through another role or a per-user grant.
+
+### A host's own account page
+
+Core's `/account` page is a few `<SettingsGroup title="…">` cards, each stacking row components: `AccountAvatar`, `AccountDisplayName`, `AccountMemberSince`, `AccountEmail`, `AccountPassword`, `AccountSignInMethods` (one row per provider), `AccountSessions`, `AccountAppearance`, `AccountSignOut` and `AccountDelete`. Rows that edit something open their form under the row when clicked, one at a time. `AccountSections` renders the cards other layers register, such as OAuth's Connected apps, and goes between groups. A host that wants an account page in its own layout writes a page that groups the rows it wants, plus `<ReauthModal />`. It then points core at that page so the email-change and provider-link flows return there:
+
+```ts
+// nuxt.config.ts
+runtimeConfig: { public: { accountPath: '/profile' } }
+```
+
+`AccountAvatar` offers uploads only when public S3 storage is configured (`S3_ENDPOINT`, the access keys, `S3_BUCKET_NAME` and `S3_PUBLIC_BASE_URL`; `S3_PUBLIC_BUCKET_NAME` alone isn't enough); without it, the row shows the avatar and can remove it.
 
 ---
 
@@ -47,7 +94,7 @@ The host itself ships **no** permissions or roles — operator-admin is the `use
 App layer code imports tenancy helpers from two aliases:
 
 - `#tenant` — client composables (`useActiveOrg`, `useMaybeActiveOrg`, `useTenantFetch`, `getActiveSlug`)
-- `#tenant/server` — server helpers (`defineTenantHandler`, `requireOperatorAdmin`, `encodeFlowOrg` / `decodeFlowOrg`, `enableTenantScoping` for migrations)
+- `#tenant/server` — server helpers (`defineTenantHandler`, `requireOperatorAdmin`, `getUserPermissionsAcrossOrgs` / `getUserPermissionsForRequest` for out-of-request permission reads such as OAuth scope filtering, `getEnabledAppsForRequest` for the MCP app gate, `encodeFlowOrg` / `decodeFlowOrg`, `enableTenantScoping` for migrations)
 
 Two implementations ship — one in the host, one in [layers/tenancy/](../layers/tenancy/). The tenancy layer's [tenant-kernel module](../layers/tenancy/modules/tenant-kernel.ts) registers the alias first; the host's [tenant-kernel module](../layers/core/modules/tenant-kernel.ts) only registers if no other module did. Effect: tenancy version wins when present, single-mode is the fallback.
 
@@ -112,6 +159,28 @@ export default defineNuxtConfig({})
 ```
 
 If your layer imports a package that no other layer needs (e.g. a charting library, a parser), add it to `dependencies`. Anything shared with host or other layers — `kysely`, `kysely-postgres-js`, `postgres`, `h3`, `@nuxt/kit`, `@nuxt/ui`, `tailwindcss` — goes in `peerDependencies` so it resolves to the host's installed copy rather than getting duplicated under `.c12/` in production. Don't add a `main` field — Nuxt generates a `/// <reference types="layer-<id>" />` and TS would resolve it through `main`, picking up nuxt.config.ts in a context that breaks the typecheck.
+
+#### Requiring other layers
+
+Cross-layer imports (`#core/...`, another app layer's composables) are declared as `"*"` in `optionalDependencies` so module resolution works — that entry never carries a version. When your layer needs another layer to be present, or needs a minimum version of it (because it imports something that layer only gained in a later release), say so in `nuxtinator.requires`:
+
+```json
+// layers/apps/tasks/package.json
+{
+  "optionalDependencies": { "@nuxtinator/core": "*" },
+  "nuxtinator": {
+    "requires": { "@nuxtinator/core": ">=2.2.0" }
+  }
+}
+```
+
+Keys are package names, values are semver ranges (`"*"` = must be loaded, any version). Three things read it:
+
+- **`layers:update` / `layers:check`** (and the weekly layer-update PR) in a host pick, per layer, the newest version its policy allows whose requirements the others' picked versions meet. A layer whose newest release needs more than the host can resolve is held at an older release and reported. If no compatible set exists, nothing is written and the script exits non-zero.
+- **The build** (core's `layer-versions` module) checks every loaded layer's requirements. When both sides were fetched into the host's `_layers/`, an unmet requirement stops the build with e.g. `@nuxtinator/social-auth 0.3.0 needs @nuxtinator/core >=2.2.0 (loaded: 2.1.0)`. Layers loaded from anywhere else (this monorepo's workspace, a `NUXTINATOR_<ID>_PATH` checkout, a host's `apps/`) only warn, since their `version` lags their unreleased code. `/admin/updates` badges unmet requirements too.
+- **`bun run release`** refuses to tag a layer while a monorepo layer it requires has no pushed release in range — release the dependency first.
+
+Raise the minimum in the same change that starts using the new thing, so it ships with the release that needs it.
 
 Then add the layer to the workspace in the root [package.json](../package.json):
 
@@ -260,6 +329,8 @@ The default layout (host) renders the launcher rail + per-app sidebar around you
 
 A page that should *not* be org-prefixed — a public bridge or callback that owns no org context — opts out with `definePageMeta({ tenantExempt: true })`. The tenancy route guard then leaves it at its naive path instead of rewriting to `/@<slug>/…` or bouncing to `/orgs`, so a layer can exempt its own route without editing the guard. In single mode there's no guard, so the flag is a harmless no-op.
 
+Follow the UI rules in [layers/core/DESIGN.md](../layers/core/DESIGN.md): use core's components (`InfoTip`, `SidebarPanel`, `SettingsGroup`/`SettingsRow`, `useConfirm`/`ConfirmModal`) and theme tokens rather than hand-rolled markup and raw colors.
+
 ### 7. Wire it into the host
 
 Three places to update (in this order):
@@ -344,6 +415,87 @@ registerAdminSection({
 ```
 
 `/admin/...` routes don't get the `@<slug>` prefix — they're host-admin tooling.
+
+### Personal apps
+
+An app whose data belongs to each user, not to an org (a personal list, location sharing between people in different orgs), is a personal app. It is the same in every org and is turned on per user.
+
+```ts
+// nuxt.config.ts — build-time: keeps its pages at the bare path in every org
+export default defineNuxtConfig({
+  runtimeConfig: { public: { personalApps: { notes: '/notes' } } }
+})
+
+// server/plugins/register-notes.ts
+registerPermissions(NOTES_PERMISSIONS, NOTES_PERMISSION_META)
+registerApp({
+  id: 'notes',
+  title: 'Notes',
+  path: '/notes',
+  requiredPermission: 'notes.access',
+  scope: 'user',
+  permissions: [...NOTES_PERMISSIONS], // held by every user the app is on for
+  defaultStatus: 'host_controlled' // 'default' = every signed-in user, 'admins' = host admins only
+})
+// no registerDefaultGrants: roles grant personal-app permissions nothing
+```
+
+Handlers use `withUserPermission` from `#core/server/utils/personal-apps` instead of `withOrgPermission`; `ctx.userId` is the caller and `app.current_user` is set for RLS:
+
+```ts
+import { withUserPermission } from '#core/server/utils/personal-apps'
+
+export default defineEventHandler(event =>
+  withUserPermission(event, { appId: 'notes' }, 'notes.read', (tx, ctx) =>
+    tx.selectFrom('notes_items').selectAll().where('user_id', '=', ctx.userId).execute()))
+```
+
+Tables carry `user_id`, no `org_id`, and no `_T<NNN>_` migration. Enable RLS in the regular migration:
+
+```ts
+await sql`ALTER TABLE notes_items ENABLE ROW LEVEL SECURITY`.execute(db)
+await sql`
+  CREATE POLICY user_isolation ON notes_items FOR ALL
+    USING      (user_id = nullif(current_setting('app.current_user', true), '')::uuid)
+    WITH CHECK (user_id = nullif(current_setting('app.current_user', true), '')::uuid)
+`.execute(db)
+```
+
+A host admin turns an invite-only personal app on per user from `/admin/users` (or ticks it in the invite form), or for whole host groups from `/admin/apps` → Users; groups themselves are managed on `/admin/groups`. RLS on these tables holds only when the app connects as `app_user` — see [database-roles.md](database-roles.md). [list-of-100](../layers/apps/list-of-100/) is the worked example.
+
+#### Sharing personal items
+
+A personal item (a tree, a list, a collection) is shared with people, as a viewer or an editor. Each shareable resource gets its own share table, made in the app's migration by core's helper:
+
+```ts
+// migrations/notes_002_note_shares.ts
+import { createShareTable, dropShareTable, sharedWithMe, CURRENT_USER_SQL } from '@nuxtinator/core/share-tables'
+
+const SPEC = { table: 'notes_note_shares', resourceTable: 'notes_items', ownerColumn: 'user_id' }
+
+export async function up(db: Kysely<unknown>) {
+  await createShareTable(db, SPEC)
+  await sql.raw(`DROP POLICY user_isolation ON notes_items`).execute(db)
+  await sql.raw(`CREATE POLICY notes_read ON notes_items FOR SELECT USING (
+    user_id = ${CURRENT_USER_SQL} OR ${sharedWithMe(SPEC, 'notes_items.id')}
+  )`).execute(db)
+  await sql.raw(`CREATE POLICY notes_write ON notes_items FOR ALL
+    USING (user_id = ${CURRENT_USER_SQL}) WITH CHECK (user_id = ${CURRENT_USER_SQL})`).execute(db)
+}
+export async function down(db: Kysely<unknown>) { await dropShareTable(db, SPEC) }
+```
+
+`sharedWithMe(SPEC, expr, { role: 'editor' })` limits a policy to editor shares; child tables pass the expression naming their resource. Qualify `expr` with its table (`notes_items.id`, not `id`), or it binds to the share table's own `id`. Register the table at boot, and mount the share routes:
+
+```ts
+// server/plugins/register-notes.ts
+registerShareTable({ appId: 'notes', table: 'notes_note_shares' })
+
+// server/routes/api/notes/items/[id]/shares/index.ts, …/shares/[shareId].ts and …/shares/[shareId]/resend.post.ts
+export default defineShareHandler({ appId: 'notes', table: 'notes_note_shares', permission: 'notes.read' })
+```
+
+The page opens `<ShareDialog v-model:open :endpoint="`/api/notes/items/${id}/shares`" :title>`. The owner shares with a known person (someone who accepted a share from them, or whose share they accepted, in any app), by email invite, or by single-use link; nothing reaches anyone's account until they accept. A share invite creates an account only while self-registration is on, and stays off `/admin/invites`. Personal content goes with its owner: shares are deleted with the item. See [server/utils/shares.ts](../layers/core/server/utils/shares.ts).
 
 ### Database tables
 
@@ -435,7 +587,10 @@ The tenancy layer emits Nitro hooks layers can subscribe to. In single mode thes
 | `org.created` | `{ orgId, slug, createdByUserId }` | New org row inserted. |
 | `org.deleted` | `{ orgId, slug }` | Org is being deleted. Fires before the row cascade so subscribers can still read the org's rows (e.g. to collect S3 keys the cascade would strand). |
 | `user.created` | `{ userId, email, viaInvite }` | New user row inserted. (Fires in both modes.) |
+| `user.deleting` | `{ userId }` | Just before a user row is deleted, while everything tied to it still exists. (Both modes.) |
+| `user.deleted` | `{ userId, avatar }` | After a user's deletion has committed. (Both modes.) |
 | `user.verified` | `{ userId, email }` | User accepts invite or verifies email. (Both modes.) |
+| `user.updated` | `{ userId, fields }` | The user's `display_name` or `email` changed, from their profile or an operator's edit. (Both modes.) |
 | `membership.created` | `{ membershipId, userId, orgId, roles, createdByUserId }` | Membership row inserted. |
 | `membership.updated` | `{ membershipId, userId, orgId, oldRoles, newRoles }` | Roles changed. |
 | `membership.deleted` | `{ membershipId, userId, orgId }` | Membership removed. |
@@ -518,13 +673,13 @@ When [layers/tenancy/](../layers/tenancy/) is in `extends:`:
 - `host_admin` (BYPASSRLS) — used by migrations + cross-org `/api/admin/orgs/...` endpoints. Exposed as `adminDb` from `#tenant/admin-db`. **Layer code outside the tenancy layer must never import this.**
 - `app_user` (RLS-enforced) — the default for the host's `db` and for layer code.
 
-Connection URLs: `DATABASE_URL` for `host_admin`, `APP_DATABASE_URL` for `app_user`. Single-tenant deploys can set only `DATABASE_URL` — the host's `db` falls back to it.
+Connection URLs: `DATABASE_URL` for `host_admin`, `APP_DATABASE_URL` for `app_user`. Single-tenant deploys need both too, since personal-app tables use RLS — see [database-roles.md](database-roles.md).
 
 If you deploy through a connection pooler, configure transaction-pooling mode. `defineTenantHandler` uses `SET LOCAL`, which is transaction-scoped; session-pooling would leak `app.current_org` across requests. `prepare: false` is configured on the postgres-js driver to remain compatible with PgBouncer txn-pool.
 
 ### URL shape
 
-In multi mode, app pages mount at `/@:orgSlug/<app>/...` via `pages:extend` aliasing. APIs always live at `/api/<app>/...`; the org slug travels in an `X-Active-Org` header injected by the [fetch interceptor](../layers/tenancy/app/plugins/tenant-fetch-interceptor.client.ts).
+In multi mode, app pages mount at `/@:orgSlug/<app>/...` via `pages:extend` aliasing. APIs always live at `/api/<app>/...`; the org slug travels in an `X-Active-Org` header that the tenancy layer builds into the global `$fetch` instance via its [fetch-template module](../layers/tenancy/modules/tenant-fetch-template.ts). MCP tools instead take an optional `org` slug input, falling back to the same header.
 
 The tenancy layer's own pages live at `/@<slug>/settings/*` (org settings), `/orgs` (picker), `/orgs/new` (create org), `/admin/orgs` (host admin).
 

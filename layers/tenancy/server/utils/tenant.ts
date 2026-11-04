@@ -16,14 +16,26 @@
 //   5. If `opts.appId` was passed, 410 if that app is disabled for the org.
 //   6. Refresh the `active-org-slug` cookie (30d) so bare-URL hits redirect.
 //   7. Run the handler with `(tx, ctx)` where ctx has full org context.
+//
+// An OAuth bearer token signs in in place of the session (see core's
+// `bearer-auth.ts`). The middleware skips those requests, so step 2 resolves
+// the org here instead: an `/api/o/<slug>/` path or the `X-Active-Org` header,
+// else the user's only org, with the same membership (404) and suspension
+// (423) checks. The route must name a permission the token carries,
+// `ctx.perms` is narrowed to the token's scopes, and the cookie in step 6
+// isn't set.
 import type { H3Event, EventHandler, EventHandlerRequest } from 'h3'
 import type { Transaction, Kysely } from 'kysely'
 import { sql } from 'kysely'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { db } from '#core/server/utils/database'
+// Tracks each request transaction so `afterCommit` work runs once it commits.
+import { runTransaction } from '#core/server/utils/after-commit'
 import { requireAuth } from '#core/server/utils/auth'
-import { getRolePermissions } from '#core/server/utils/rbac'
+import { getBearerIdentity, narrowToScopes, requireBearerPermission, runAsOauthClient } from '#core/server/utils/bearer-auth'
+import { getRolePermissions, getUserPermissions } from '#core/server/utils/rbac'
 import { getUserGrantedPermissions } from '#core/server/utils/permission-grants'
+import { getPersonalAppPermissions } from '#core/server/utils/personal-apps'
 import type { Database } from '#core/server/database/schema'
 import type { Permission } from '#core/app/utils/permissions'
 
@@ -31,8 +43,11 @@ import type { Permission } from '#core/app/utils/permissions'
 // the three-tier merge. Imported here for use inside `defineTenantHandler`'s
 // `appId` opt; external callers import the helpers directly from
 // `./app-settings.ts` so Nitro auto-import doesn't see two copies.
-import { isAppEnabledForOrg } from './app-settings'
+import { getOrgEnabledApps, isAppEnabledForOrg } from './app-settings'
 import { adminDb } from './database-admin'
+
+// Prefixed like core's session cookies (NUXT_PUBLIC_COOKIE_PREFIX).
+const activeOrgCookie = () => `${useRuntimeConfig().public.cookiePrefix || ''}active-org-slug`
 
 export interface TenantContext {
   userId: string
@@ -44,12 +59,19 @@ export interface TenantContext {
   role: string | null
   roles: string[]
   // Effective permissions for this org: union(role perms) ∪ direct user
-  // grants (org-scoped via RLS).
+  // grants (org-scoped via RLS), narrowed to the token's scopes for an OAuth
+  // request.
   perms: Set<Permission>
+  // The OAuth client making the request; null for a session request.
+  clientId: string | null
 }
 
 export interface DefineTenantHandlerOpts {
   appId?: string
+  // Org slug an OAuth request selects, ahead of the path and header (e.g. an
+  // MCP tool's `org` input). Membership is checked like any other selection.
+  // A session request always runs in the org the middleware resolved.
+  org?: string
 }
 
 export type TenantHandler<T> = (
@@ -57,36 +79,82 @@ export type TenantHandler<T> = (
   ctx: TenantContext
 ) => Promise<T> | T
 
-// The shared core: validates middleware-supplied context, opens the txn, sets
-// the GUC, and yields. Used by both `defineTenantHandler` (returns an
-// EventHandler) and `withOrgContext` (function-call style, used inside an
-// existing defineEventHandler).
+interface RequestOrg {
+  orgId: string
+  orgSlug: string
+  orgName: string
+  roles: string[]
+}
+
+// The org of a session request, as the tenancy middleware resolved it.
+function middlewareOrg(event: H3Event): RequestOrg {
+  const orgSlug = event.context.orgSlug as string | undefined
+  const orgId = event.context.orgId as string | undefined
+  if (!orgSlug || !orgId) {
+    throw createError({ statusCode: 404, statusMessage: ORG_NOT_FOUND })
+  }
+  return {
+    orgId,
+    orgSlug,
+    orgName: (event.context.orgName as string | undefined) ?? '',
+    roles: (event.context.orgRoles as string[] | undefined) ?? []
+  }
+}
+
+// The org of an OAuth request: the caller's `org` option, an `/api/o/<slug>/`
+// path or the `X-Active-Org` header, else the user's only active org.
+// Membership and suspension are checked as the middleware checks them for a
+// session.
+async function bearerOrg(event: H3Event, userId: string, org?: string): Promise<RequestOrg> {
+  const pathSlug = (event.path || '').match(/^\/api\/o\/([^/?]+)/)?.[1]
+  const slug = org || (pathSlug ? decodeURIComponent(pathSlug) : getRequestHeader(event, 'x-active-org'))
+  let orgId: string | undefined
+  if (!slug) {
+    const owned = await memberOrgIds(userId)
+    if (owned.length !== 1) {
+      throw createError({ statusCode: 400, statusMessage: 'No organization selected. Send the X-Active-Org header.' })
+    }
+    orgId = owned[0]
+  }
+  const row = await adminDb
+    .selectFrom('orgs')
+    .innerJoin('memberships', 'memberships.org_id', 'orgs.id')
+    .select(['orgs.id', 'orgs.slug', 'orgs.name', 'orgs.suspended_at', 'memberships.roles'])
+    .where('memberships.user_id', '=', userId)
+    .where(eb => slug ? eb('orgs.slug', '=', slug) : eb('orgs.id', '=', orgId!))
+    .executeTakeFirst()
+  if (!row) throw createError({ statusCode: 404, statusMessage: ORG_NOT_FOUND })
+  if (row.suspended_at) throw createError({ statusCode: 423, statusMessage: 'This organization is suspended.' })
+  return { orgId: row.id, orgSlug: row.slug, orgName: row.name, roles: row.roles ?? [] }
+}
+
+// The shared core: resolves the caller and their org, opens the txn, sets
+// the GUC, and yields. Used by `defineTenantHandler` (returns an
+// EventHandler), `withOrgContext` (function-call style, used inside an
+// existing defineEventHandler) and `withOrgPermission`, which passes the
+// `requiredPerm` an OAuth request must carry as a scope.
 async function runWithOrgContext<T>(
   event: H3Event,
   opts: DefineTenantHandlerOpts,
+  requiredPerm: Permission | undefined,
   fn: TenantHandler<T>
 ): Promise<T> {
-  const authUser = requireAuth(event)
-  const orgSlug = event.context.orgSlug as string | undefined
-  const orgId = event.context.orgId as string | undefined
-  const orgName = (event.context.orgName as string | undefined) ?? ''
-  const memberRoles = (event.context.orgRoles as string[] | undefined) ?? []
+  const bearer = await getBearerIdentity(event)
+  if (bearer) requireBearerPermission(event, bearer, requiredPerm)
+  const userId = bearer?.userId ?? requireAuth(event).userId
+  const clientId = bearer?.clientId ?? null
+  const { orgId, orgSlug, orgName, roles: memberRoles } = bearer
+    ? await bearerOrg(event, bearer.userId, opts.org)
+    : middlewareOrg(event)
 
-  if (!orgSlug || !orgId) {
-    throw createError({
-      statusCode: 404,
-      statusMessage: 'This organization does not exist or you don\'t have access.'
-    })
-  }
-
-  return await db.transaction().execute(async (tx) => {
+  return await runAsOauthClient(clientId, () => runTransaction(db, async (tx) => {
     await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
 
     const perms = await getRolePermissions(tx, memberRoles, orgId)
     // Additive per-user grants ride on top of role-derived perms. The read
     // runs inside this transaction — after the GUC is set — so RLS scopes
     // the grants to the active org without an explicit org_id filter.
-    for (const perm of await getUserGrantedPermissions(tx, authUser.userId)) {
+    for (const perm of await getUserGrantedPermissions(tx, userId)) {
       perms.add(perm)
     }
 
@@ -100,24 +168,27 @@ async function runWithOrgContext<T>(
       }
     }
 
-    setCookie(event, 'active-org-slug', orgSlug, {
-      maxAge: 60 * 60 * 24 * 30,
-      sameSite: 'lax',
-      path: '/',
-      httpOnly: false
-    })
+    if (!bearer) {
+      setCookie(event, activeOrgCookie(), orgSlug, {
+        maxAge: 60 * 60 * 24 * 30,
+        sameSite: 'lax',
+        path: '/',
+        httpOnly: false
+      })
+    }
 
     const role = memberRoles[0] ?? null
     return await fn(tx, {
-      userId: authUser.userId,
+      userId,
       orgId,
       orgSlug,
       orgName,
       role,
       roles: memberRoles,
-      perms
+      perms: bearer ? narrowToScopes(perms, bearer.scopes) : perms,
+      clientId
     })
-  })
+  }))
 }
 
 export function defineTenantHandler<T>(fn: TenantHandler<T>): EventHandler<EventHandlerRequest, Promise<T>>
@@ -128,7 +199,7 @@ export function defineTenantHandler<T>(
 ): EventHandler<EventHandlerRequest, Promise<T>> {
   const opts: DefineTenantHandlerOpts = typeof optsOrFn === 'function' ? {} : optsOrFn
   const fn = (typeof optsOrFn === 'function' ? optsOrFn : maybeFn) as TenantHandler<T>
-  return defineEventHandler<EventHandlerRequest, Promise<T>>(event => runWithOrgContext(event, opts, fn))
+  return defineEventHandler<EventHandlerRequest, Promise<T>>(event => runWithOrgContext(event, opts, undefined, fn))
 }
 
 // Function-call style — for handlers already wrapped in `defineEventHandler`.
@@ -150,7 +221,7 @@ export function withOrgContext<T>(
 ): Promise<T> {
   const opts: DefineTenantHandlerOpts = typeof optsOrFn === 'function' ? {} : optsOrFn
   const fn = (typeof optsOrFn === 'function' ? optsOrFn : maybeFn) as TenantHandler<T>
-  return runWithOrgContext(event, opts, fn)
+  return runWithOrgContext(event, opts, undefined, fn)
 }
 
 export function withOrgPermission<T>(
@@ -174,7 +245,7 @@ export function withOrgPermission<T>(
   const opts: DefineTenantHandlerOpts = hasOpts ? (a as DefineTenantHandlerOpts) : {}
   const perm = (hasOpts ? b : a) as Permission
   const fn = (hasOpts ? c : b) as TenantHandler<T>
-  return runWithOrgContext(event, opts, async (tx, ctx) => {
+  return runWithOrgContext(event, opts, perm, async (tx, ctx) => {
     if (!ctx.perms.has(perm)) {
       throw createError({ statusCode: 403, statusMessage: `Permission required: ${perm}` })
     }
@@ -199,6 +270,161 @@ export async function computePermsForOrg(
     .executeTakeFirst()
   if (!membership) return new Set()
   return await getRolePermissions(client, membership.roles, orgId)
+}
+
+// Per-org effective permissions for a (user, org) pair, read the way
+// `runWithOrgContext` reads them: inside a transaction with the GUC set, so
+// `custom_roles` and `user_permission_grants` are RLS-scoped to that org.
+async function resolveOrgPerms(userId: string, orgId: string): Promise<Set<Permission>> {
+  return await runTransaction(db, async (tx) => {
+    await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
+    const perms = await computePermsForOrg(tx, userId, orgId)
+    for (const perm of await getUserGrantedPermissions(tx, userId)) {
+      perms.add(perm)
+    }
+    return perms
+  })
+}
+
+// Every permission the user holds anywhere: the host-level set (`users.roles`
+// plus everything when `is_admin`) unioned with the effective set of each org
+// they belong to (suspended orgs excluded) and with their personal apps'
+// permissions. The OAuth layer uses it as the
+// upper bound for consent and token issuance — tokens are not org-bound, the
+// org is chosen per call — and the MCP layer uses it for tools/list visibility.
+export async function getUserPermissionsAcrossOrgs(userId: string): Promise<Set<Permission>> {
+  const perms = await getUserPermissions(userId)
+  const memberships = await adminDb
+    .selectFrom('memberships')
+    .innerJoin('orgs', 'orgs.id', 'memberships.org_id')
+    .select('memberships.org_id')
+    .where('memberships.user_id', '=', userId)
+    .where('orgs.suspended_at', 'is', null)
+    .execute()
+  for (const m of memberships) {
+    for (const perm of await resolveOrgPerms(userId, m.org_id)) perms.add(perm)
+  }
+  for (const perm of await getPersonalAppPermissions(db, userId)) perms.add(perm)
+  return perms
+}
+
+// The user's effective permissions for the org a request targets. Org
+// discovery follows `runInOrgTransaction`: `opts.org`, then the middleware's
+// `event.context`, then the `X-Active-Org` header, then the `active-org-slug`
+// cookie — with the same membership and suspension checks (404 / 423). For a
+// selected org the set is what `withOrgPermission` grants there (membership
+// roles plus the user's grants in that org) plus personal-app permissions;
+// host-level roles and `is_admin` don't widen it. A request that selects no
+// org gets the across-orgs set, which is what org-less surfaces (a tool that
+// lists the user's orgs) need.
+export async function getUserPermissionsForRequest(
+  event: H3Event,
+  userId: string,
+  opts: { org?: string } = {}
+): Promise<Set<Permission>> {
+  let orgId: string | undefined
+  let slug: string | undefined
+  if (opts.org) {
+    slug = opts.org
+  } else {
+    orgId = event.context.orgId as string | undefined
+    if (!orgId) {
+      slug = (event.context.orgSlug as string | undefined)
+        ?? getRequestHeader(event, 'x-active-org')
+        ?? getCookie(event, activeOrgCookie())
+    }
+  }
+  if (!orgId && slug) {
+    orgId = await resolveSelectedOrg(slug, userId)
+  }
+  if (!orgId) return await getUserPermissionsAcrossOrgs(userId)
+
+  const perms = await resolveOrgPerms(userId, orgId)
+  // Personal apps are the same in every org.
+  for (const perm of await getPersonalAppPermissions(db, userId)) perms.add(perm)
+  return perms
+}
+
+export interface UserOrg {
+  id: string
+  slug: string
+  name: string
+  perms: Set<Permission>
+}
+
+export interface UserOrgsFilter {
+  // Keep only orgs where the user holds this permission.
+  permission?: Permission
+  // Keep only orgs that have this app enabled.
+  appId?: string
+  // Keep only these orgs (a caller's own selection, still membership-checked).
+  orgIds?: string[]
+}
+
+// The user's orgs (suspended excluded) with their effective permissions in
+// each, narrowed by `filter`. Permissions resolve the way `withOrgContext`
+// resolves them: membership roles through the org's overlay plus direct
+// grants, each read with that org's GUC set. Reads no org's tenant data.
+export async function listUserOrgs(userId: string, filter: UserOrgsFilter = {}): Promise<UserOrg[]> {
+  let q = adminDb
+    .selectFrom('memberships')
+    .innerJoin('orgs', 'orgs.id', 'memberships.org_id')
+    .select(['orgs.id', 'orgs.slug', 'orgs.name', 'memberships.roles'])
+    .where('memberships.user_id', '=', userId)
+    .where('orgs.suspended_at', 'is', null)
+    .orderBy('orgs.name')
+  if (filter.orgIds) {
+    const ids = filter.orgIds.filter(id => UUID_RE.test(id))
+    if (ids.length === 0) return []
+    q = q.where('orgs.id', 'in', ids)
+  }
+  const out: UserOrg[] = []
+  for (const r of await q.execute()) {
+    const org = await withOrgScope(r.id, async (tx) => {
+      if (filter.appId && !(await isAppEnabledForOrg(tx, r.id, filter.appId))) return null
+      const perms = await getRolePermissions(tx, r.roles, r.id)
+      for (const perm of await getUserGrantedPermissions(tx, userId)) perms.add(perm)
+      if (filter.permission && !perms.has(filter.permission)) return null
+      return { id: r.id, slug: r.slug, name: r.name, perms }
+    })
+    if (org) out.push(org)
+  }
+  return out
+}
+
+export interface OrgScopesFilter {
+  // Skip suspended orgs.
+  activeOnly?: boolean
+  // Skip orgs where this app is off.
+  appId?: string
+}
+
+// The orgs a session-less job (sweep, webhook, offboarding) visits in turn
+// with `withOrgScope`.
+export async function listOrgScopes(filter: OrgScopesFilter = {}): Promise<(string | null)[]> {
+  let q = adminDb.selectFrom('orgs').select('id').orderBy('created_at')
+  if (filter.activeOnly) q = q.where('suspended_at', 'is', null)
+  const ids = (await q.execute()).map(r => r.id)
+  if (!filter.appId) return ids
+  const out: string[] = []
+  for (const id of ids) {
+    if (await withOrgScope(id, tx => isAppEnabledForOrg(tx, id, filter.appId!))) out.push(id)
+  }
+  return out
+}
+
+// Runs `fn` in a transaction scoped to one org (`null`: no org). Each call
+// sees exactly that org's rows; visit several orgs by calling it once per org.
+export async function withOrgScope<T>(
+  orgId: string | null,
+  fn: (tx: Transaction<Database>) => Promise<T>
+): Promise<T> {
+  return await runTransaction(db, async (tx) => {
+    if (orgId) {
+      await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
+    }
+    return await fn(tx)
+  })
 }
 
 // Operator-admin gate. The bit (`users.is_admin`) lives in core; this is the
@@ -249,48 +475,159 @@ export function decodeFlowOrg(combined: string): { state: string, orgSlug: strin
   return { state, orgSlug: slug }
 }
 
+export type OrgTransactionFn<T> = (tx: Transaction<Database>) => Promise<T>
+
+// Caller-supplied org selection for `runInOrgTransaction`. `org` is a slug
+// taken from the request body (MCP tools expose it as an `org` input) and
+// requires `userId`; `userId` alone turns on membership enforcement for
+// whichever client-controlled source the org came from.
+export interface OrgTransactionOpts {
+  org?: string
+  userId?: string
+}
+
+const ORG_NOT_FOUND = 'This organization does not exist or you don\'t have access.'
+
+// Resolves a client-selected slug to an org id. Without `userId` an unknown
+// slug yields undefined. With `userId`, the org must exist, must not be
+// suspended, and the user must hold a membership; a missing org and a
+// missing membership collapse into the same 404 the tenancy middleware
+// returns so a probe can't tell them apart.
+async function resolveSelectedOrg(slug: string, userId?: string): Promise<string | undefined> {
+  if (!userId) {
+    const row = await adminDb
+      .selectFrom('orgs')
+      .select('id')
+      .where('slug', '=', slug)
+      .executeTakeFirst()
+    return row?.id
+  }
+  const row = await adminDb
+    .selectFrom('orgs')
+    .innerJoin('memberships', 'memberships.org_id', 'orgs.id')
+    .select(['orgs.id', 'orgs.suspended_at'])
+    .where('orgs.slug', '=', slug)
+    .where('memberships.user_id', '=', userId)
+    .executeTakeFirst()
+  if (!row) throw createError({ statusCode: 404, statusMessage: ORG_NOT_FOUND })
+  if (row.suspended_at) throw createError({ statusCode: 423, statusMessage: 'This organization is suspended.' })
+  return row.id
+}
+
+// Org ids the user actively belongs to. Backs the fallback for surfaces that
+// carry no org selector at all; only the single-membership case uses it, so
+// the order is immaterial.
+async function memberOrgIds(userId: string): Promise<string[]> {
+  const rows = await adminDb
+    .selectFrom('memberships')
+    .innerJoin('orgs', 'orgs.id', 'memberships.org_id')
+    .select('orgs.id')
+    .where('memberships.user_id', '=', userId)
+    .where('orgs.suspended_at', 'is', null)
+    .execute()
+  return rows.map(r => r.id)
+}
+
 // Open a transaction and run `fn(tx)` inside it with the active org's GUC set.
 // Used by code paths that aren't routed through `defineTenantHandler` but
-// still need to write to RLS-protected tables (notably the OAuth flow's
-// non-`/api/` endpoints, which can't go through the tenancy middleware).
+// still need to write to RLS-protected tables, such as the OAuth flow's
+// non-`/api/` endpoints, which can't go through the tenancy middleware.
 //
 // Org discovery (in priority order):
-//   1. `event.context.orgSlug` if set by upstream middleware
-//   2. `X-Active-Org` header — bearer-authenticated requests (MCP tools) carry
-//      the header but no session cookie, so the tenancy middleware (which
-//      requires a cookie session) never populates `event.context` for them.
-//      Client-controlled, same trust model as the cookie below: this selects
-//      the org, it does not authorize — authorization is the caller's gate
-//      (MCP: token scope + RBAC).
-//   3. `active-org-slug` cookie
-// If no org is found, opens the txn anyway with no GUC — RLS-protected
-// INSERTs will fail loudly via `current_org_id() → NULL → NOT NULL` constraint.
+//   1. `opts.org` — a slug from the caller's own input
+//   2. `event.context.orgId` / `orgSlug` set by upstream middleware, which has
+//      already verified the session user's membership
+//   3. `X-Active-Org` header — bearer-authenticated requests carry the header
+//      but no session cookie, so the tenancy middleware never populates
+//      `event.context` for them
+//   4. `active-org-slug` cookie
+//   5. the user's sole active membership, when `opts.userId` is given and
+//      nothing above selected an org
+// Sources 1, 3 and 4 are client-controlled: they select the org, they do not
+// authorize. Callers that know the acting user pass `opts.userId`, which
+// makes any client-selected org subject to a membership check (see
+// `resolveSelectedOrg`), enables source 5, and turns a user with several
+// orgs and no selection into a 400. Without `opts.userId` an unknown or
+// missing slug opens the txn with no GUC — RLS-protected INSERTs then fail
+// loudly via `current_org_id() → NULL`.
+export async function runInOrgTransaction<T>(event: H3Event, fn: OrgTransactionFn<T>): Promise<T>
+export async function runInOrgTransaction<T>(event: H3Event, opts: OrgTransactionOpts, fn: OrgTransactionFn<T>): Promise<T>
 export async function runInOrgTransaction<T>(
   event: H3Event,
-  fn: (tx: Transaction<Database>) => Promise<T>
+  optsOrFn: OrgTransactionOpts | OrgTransactionFn<T>,
+  maybeFn?: OrgTransactionFn<T>
 ): Promise<T> {
-  let orgId: string | undefined = event.context.orgId as string | undefined
-
-  if (!orgId) {
-    const slug = (event.context.orgSlug as string | undefined)
-      ?? getRequestHeader(event, 'x-active-org')
-      ?? getCookie(event, 'active-org-slug')
-    if (slug) {
-      const row = await adminDb
-        .selectFrom('orgs')
-        .select('id')
-        .where('slug', '=', slug)
-        .executeTakeFirst()
-      orgId = row?.id
-    }
+  const opts: OrgTransactionOpts = typeof optsOrFn === 'function' ? {} : optsOrFn
+  const fn = (typeof optsOrFn === 'function' ? optsOrFn : maybeFn) as OrgTransactionFn<T>
+  if (opts.org && !opts.userId) {
+    throw new Error('runInOrgTransaction: `org` requires `userId` so membership can be enforced')
   }
 
-  return await db.transaction().execute(async (tx) => {
+  const orgId = await resolveTransactionOrgId(event, opts)
+  if (!orgId && opts.userId) {
+    throw createError({ statusCode: 400, statusMessage: 'No organization selected. Pass `org` or send the X-Active-Org header.' })
+  }
+
+  return await runTransaction(db, async (tx) => {
     if (orgId) {
       await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
     }
     return await fn(tx)
   })
+}
+
+// App ids switched on for the org a request targets. The org is resolved the
+// way `runInOrgTransaction(event, { org, userId })` resolves it, so a gate on
+// this set checks the org the caller's transaction runs in. Null when no org
+// resolves (several memberships, none selected); org-scoped work then fails
+// with 400. The MCP layer gates tools on it.
+export async function getEnabledAppsForRequest(
+  event: H3Event,
+  userId: string,
+  opts: { org?: string } = {}
+): Promise<Set<string> | null> {
+  const orgId = await resolveTransactionOrgId(event, { org: opts.org, userId })
+  if (!orgId) return null
+  return await runTransaction(db, async (tx) => {
+    await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
+    return await getOrgEnabledApps(tx, orgId)
+  })
+}
+
+// Org discovery for `runInOrgTransaction` (see its comment for the order).
+async function resolveTransactionOrgId(event: H3Event, opts: OrgTransactionOpts): Promise<string | undefined> {
+  let orgId: string | undefined
+  let slug: string | undefined
+  if (opts.org) {
+    slug = opts.org
+  } else {
+    orgId = event.context.orgId as string | undefined
+    if (!orgId) {
+      slug = (event.context.orgSlug as string | undefined)
+        ?? getRequestHeader(event, 'x-active-org')
+        ?? getCookie(event, activeOrgCookie())
+    }
+  }
+  if (!orgId && slug) {
+    orgId = opts.org
+      // An explicit `org` is the caller's own selection — a slug that names
+      // no accessible org is a caller error and surfaces as 404 / 423.
+      ? await resolveSelectedOrg(slug, opts.userId)
+      // Header and cookie slugs are ambient request state that can be stale
+      // (org renamed, membership removed, cookie from another deployment).
+      // A miss falls through to the membership fallback instead of failing.
+      : await resolveSelectedOrg(slug, opts.userId).catch(() => undefined)
+  }
+  // Nothing selected an org. Surfaces that can't carry a selector land here:
+  // the OAuth consent flow runs on non-`/api/` paths the tenancy middleware
+  // never populates, and a browser navigation sends no `X-Active-Org`. With a
+  // single membership the org is unambiguous, so resolve it rather than
+  // opening a GUC-less transaction whose RLS-protected writes would fail.
+  if (!orgId && opts.userId) {
+    const owned = await memberOrgIds(opts.userId)
+    if (owned.length === 1) orgId = owned[0]
+  }
+  return orgId
 }
 
 // Open a transaction scoped to the org that owns the given project. Used by
@@ -321,7 +658,7 @@ export async function withProjectOrgContext<T>(
   if (!orgId) {
     throw createError({ statusCode: 404, statusMessage: 'Project not found' })
   }
-  return await db.transaction().execute(async (tx) => {
+  return await runTransaction(db, async (tx) => {
     await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
     return await fn(tx)
   })
@@ -353,6 +690,9 @@ export async function withRecordOrgContext<T>(
     idColumn?: string
     notFoundMessage?: string
     validateUuid?: boolean
+    // Public routes serving an app's records: refuse when the owning org is
+    // suspended or has the app disabled, as `defineTenantHandler` does.
+    appId?: string
   },
   fn: (tx: Transaction<Database>) => Promise<T>
 ): Promise<T> {
@@ -372,11 +712,59 @@ export async function withRecordOrgContext<T>(
   if (!orgId) {
     throw createError({ statusCode: 404, statusMessage: notFoundMessage })
   }
+  if (opts.appId) {
+    const org = await adminDb.selectFrom('orgs').select('suspended_at').where('id', '=', orgId).executeTakeFirst()
+    if (!org || org.suspended_at) {
+      throw createError({ statusCode: 423, statusMessage: 'This organization is suspended.' })
+    }
+  }
 
-  return await db.transaction().execute(async (tx) => {
+  return await runTransaction(db, async (tx) => {
     await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
+    if (opts.appId && !(await isAppEnabledForOrg(tx, orgId, opts.appId))) {
+      throw createError({ statusCode: 410, statusMessage: `App "${opts.appId}" is not enabled for this organization.` })
+    }
     return await fn(tx)
   })
+}
+
+// Check whether `userId` is a member of the org bound to the current
+// transaction (the `app.current_org` GUC set by `withOrgContext` /
+// `withRecordOrgContext`). Lets token-resolved routes (e.g. the videos share
+// endpoint) grant org-visibility access without the caller knowing the org id.
+// False when no GUC is set. `memberships` carries no RLS, so the regular DB
+// role can read it.
+export async function isActiveOrgMember(
+  tx: Transaction<Database>,
+  userId: string
+): Promise<boolean> {
+  const result = await sql<{ org_id: string | null }>`
+    select nullif(current_setting('app.current_org', true), '')::uuid as org_id
+  `.execute(tx)
+  const orgId = result.rows[0]?.org_id
+  if (!orgId) return false
+  const membership = await tx
+    .selectFrom('memberships')
+    .select('user_id')
+    .where('org_id', '=', orgId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst()
+  return !!membership
+}
+
+// Whether `appId` is enabled for the org bound to the current transaction (the
+// `app.current_org` GUC). False when no GUC is set. For public routes that
+// reach a second app on top of the `appId` `withRecordOrgContext` checks.
+export async function isAppEnabledForCurrentOrg(
+  tx: Transaction<Database>,
+  appId: string
+): Promise<boolean> {
+  const result = await sql<{ org_id: string | null }>`
+    select nullif(current_setting('app.current_org', true), '')::uuid as org_id
+  `.execute(tx)
+  const orgId = result.rows[0]?.org_id
+  if (!orgId) return false
+  return await isAppEnabledForOrg(tx, orgId, appId)
 }
 
 // Schema-retrofit helper for app layer migrations. Per-app tenancy migrations

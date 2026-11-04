@@ -3,6 +3,8 @@
 // cross-component stale cache. Always uses `$fetch` so the tenancy interceptor
 // (X-Active-Org header) is picked up at call time.
 
+import { getActiveSlug } from '#tenant'
+
 export type FilesItemKind = 'doc' | 'file' | 'site'
 
 export interface FilesItemSummary {
@@ -74,6 +76,29 @@ export function useFiles() {
     return await $fetch(`/api/files/items/${id}`, { method: 'DELETE' })
   }
 
+  // Uploads a binary as a kind='file' item. Uses XHR rather than $fetch because
+  // only XHR reports upload progress; `onProgress` gets 0–1 as bytes are sent.
+  function uploadFile(file: File, onProgress?: (fraction: number) => void) {
+    return new Promise<{ item: FilesItemSummary }>((resolve, reject) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', '/api/files/uploads')
+      xhr.responseType = 'json'
+      const slug = getActiveSlug()
+      if (slug) xhr.setRequestHeader('X-Active-Org', slug)
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) onProgress?.(e.loaded / e.total)
+      })
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response)
+        else reject({ statusCode: xhr.status, data: xhr.response, statusMessage: xhr.response?.statusMessage || `Upload failed (${xhr.status})` })
+      })
+      xhr.addEventListener('error', () => reject(new Error('Network error during upload.')))
+      xhr.send(fd)
+    })
+  }
+
   // Swap the binary on an uploaded (kind='file') item, keeping its id + share link.
   async function replaceFile(id: string, file: File) {
     const fd = new FormData()
@@ -120,15 +145,22 @@ export function useFiles() {
     return `${origin}/files/site/${token}`
   }
 
+  // Embeddable URL for a shared file (redirects to the stored bytes);
+  // `download` serves it as an attachment.
+  function rawUrl(token: string, download = false): string {
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    return `${origin}/files/raw/${token}${download ? '?download=1' : ''}`
+  }
+
   // The link to hand out for an item's share token, by kind.
   function shareUrl(item: { kind: FilesItemKind }, token: string): string {
     return item.kind === 'site' ? siteUrl(token) : publicUrl(token)
   }
 
   return {
-    list, get, createDoc, createSite, update, remove, replaceFile,
+    list, get, createDoc, createSite, update, remove, uploadFile, replaceFile,
     listVersions, restoreVersion, issueLink, revokeLink, search,
-    publicUrl, siteUrl, shareUrl
+    publicUrl, siteUrl, shareUrl, rawUrl
   }
 }
 

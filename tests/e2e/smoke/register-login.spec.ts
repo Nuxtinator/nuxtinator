@@ -13,7 +13,7 @@ import {
   createTestUser,
   waitForMailTo,
   extractTokenFromBody
-} from 'layer-core/test-helpers'
+} from '@nuxtinator/core/test-helpers'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 loadDotenv({ path: resolve(__dirname, '../../../dev/.env') })

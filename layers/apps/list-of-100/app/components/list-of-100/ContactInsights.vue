@@ -81,7 +81,7 @@ const options = computed(() => ({
   tooltip: {
     // Force dark text on light bg, then CSS below paints both with our tokens
     // so it adapts to color mode and the global `foreColor` doesn't bleed in.
-    theme: 'light',
+    theme: 'light' as const,
     x: {
       formatter: (val: number) => {
         const day = categories.value[val - 1]

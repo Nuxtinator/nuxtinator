@@ -12,6 +12,7 @@
 // asks for a record refetch instead of emitting a patch). Any action that
 // writes activity rows (field patch, rename, channel/consent change, share
 // change) refreshes the timeline so it stays in step without a full reload.
+// Setting a closed status asks for the reason first (CrmCloseRecordModal).
 import type { CrmChannelEntry } from '#crm'
 import { getCrmDetailPanels } from '#crm'
 import type { CrmTypeFields } from '../../../composables/useCrmTypes'
@@ -58,6 +59,10 @@ const canEdit = computed(() => record.value?.capabilities.canEdit ?? false)
 const canShare = computed(() => record.value?.capabilities.canShare ?? false)
 const canDelete = computed(() => record.value?.capabilities.canDelete ?? false)
 
+// A record linked to a user account shows that account's name and email
+// addresses; only the person changes them (see server/utils/account-link.ts).
+const accountLinked = computed(() => !!record.value?.userId)
+
 // The timeline self-fetches; this handle re-pulls it after actions on this
 // page that append activity rows.
 const timeline = ref<{ refresh: () => Promise<void> } | null>(null)
@@ -68,6 +73,18 @@ function refreshTimeline() {
 const statusField = computed(() =>
   fieldSettings.value?.fields.find(f => f.column === 'status') ?? null
 )
+
+// Closing: a status option flagged `closed` archives the record. When the
+// type has a reason field, closing asks for the reason first, and the reason
+// row only shows while the record is closed.
+const reasonField = computed(() => {
+  const key = fieldSettings.value?.closedReasonField
+  return key ? fieldSettings.value?.fields.find(f => f.key === key) ?? null : null
+})
+function isClosedStatus(value: unknown): boolean {
+  return typeof value === 'string' && !!statusField.value?.options?.[value]?.closed
+}
+const recordClosed = computed(() => isClosedStatus(record.value?.status))
 
 interface SectionGroup {
   key: string
@@ -82,7 +99,9 @@ interface SectionGroup {
 const sectionGroups = computed<SectionGroup[]>(() => {
   const def = fieldSettings.value
   if (!def) return []
-  const visible = def.fields.filter(f => !f.hidden && !f.orphan && f.column !== 'name')
+  const visible = def.fields.filter(f =>
+    !f.hidden && !f.orphan && f.column !== 'name'
+    && (f.key !== reasonField.value?.key || recordClosed.value))
   const known = new Set(Object.keys(def.sections))
   const groups = Object.entries(def.sections)
     .sort((a, b) => (a[1].order ?? 0) - (b[1].order ?? 0))
@@ -117,7 +136,16 @@ function onChannelsChanged() {
   refreshTimeline()
 }
 
+const closing = ref<{ status: string } | null>(null)
+const closingOpen = ref(false)
+const closingSaving = ref(false)
+
 async function commitField(field: CrmFieldSetting, value: unknown) {
+  if (field.column === 'status' && reasonField.value && isClosedStatus(value) && !recordClosed.value) {
+    closing.value = { status: value as string }
+    closingOpen.value = true
+    return
+  }
   try {
     await patchFields({ [field.key]: value })
     refreshTimeline()
@@ -127,6 +155,25 @@ async function commitField(field: CrmFieldSetting, value: unknown) {
       description: crmErrorMessage(err, `Failed to update ${field.label}`),
       color: 'error'
     })
+  }
+}
+
+async function closeRecord(reason: string) {
+  if (!closing.value || !statusField.value || !reasonField.value) return
+  closingSaving.value = true
+  try {
+    await patchFields({ [statusField.value.key]: closing.value.status, [reasonField.value.key]: reason })
+    closingOpen.value = false
+    refresh()
+    refreshTimeline()
+  } catch (err) {
+    toast.add({
+      title: 'Close failed',
+      description: crmErrorMessage(err, 'Failed to close record'),
+      color: 'error'
+    })
+  } finally {
+    closingSaving.value = false
   }
 }
 
@@ -180,7 +227,7 @@ async function removeRecord() {
         :status-field="statusField"
         :back-to="crmPath(`/${typeKey}`)"
         :back-label="typeInfo?.label ?? 'Back'"
-        :can-edit="canEdit"
+        :can-edit="canEdit && !accountLinked"
         :can-share="canShare"
         :can-delete="canDelete"
         :deleting="deleting"
@@ -188,6 +235,17 @@ async function removeRecord() {
         @share-changed="refreshTimeline"
         @delete="removeRecord"
       />
+
+      <p
+        v-if="accountLinked"
+        class="flex items-center gap-1.5 text-sm text-(--ui-text-muted)"
+      >
+        <UIcon
+          name="i-lucide-user-round-check"
+          class="size-4 shrink-0"
+        />
+        This person has an account. Their name and email address come from it, and only they can change them.
+      </p>
 
       <CrmFieldSection
         v-for="group in sectionGroups"
@@ -215,6 +273,7 @@ async function removeRecord() {
                 :field="field"
                 :entries="channelEntries(field)"
                 :editable="canEdit"
+                :addresses-locked="!!field.channelType && record.accountOwnedChannelTypes.includes(field.channelType)"
                 @refresh="onChannelsChanged"
               />
             </div>
@@ -247,6 +306,15 @@ async function removeRecord() {
         :type-key="typeKey"
         :record-id="recordId"
         :can-comment="canEdit"
+      />
+
+      <CrmCloseRecordModal
+        v-if="reasonField"
+        v-model:open="closingOpen"
+        :record-name="record.name"
+        :reason-field="reasonField"
+        :saving="closingSaving"
+        @confirm="closeRecord"
       />
 
       <p class="text-xs text-(--ui-text-muted)">

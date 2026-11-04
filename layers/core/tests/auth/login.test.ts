@@ -23,6 +23,16 @@ describe('POST /api/auth/login + GET /api/auth/me', () => {
     expect(err.statusCode).toBe(401)
   })
 
+  it('a concurrent burst of wrong passwords gets at most 10 tries per email', async () => {
+    const user = await createTestUser(sql, { password: 'rightpw' })
+    const results = await Promise.all(Array.from({ length: 30 }, (_, i) =>
+      $fetch('/api/auth/login', { method: 'POST', body: { email: user.email, password: `wrong-${i}` } }).catch(e => e)
+    ))
+    const statuses = results.map(r => r.statusCode)
+    expect(statuses.filter(s => s === 401).length).toBeLessThanOrEqual(10)
+    expect(statuses.filter(s => s === 429).length).toBeGreaterThanOrEqual(20)
+  })
+
   it('returns 401 when user is not verified', async () => {
     const user = await createTestUser(sql, { verified: false, password: 'pw' })
     const err = await $fetch('/api/auth/login', {
@@ -52,6 +62,16 @@ describe('POST /api/auth/login + GET /api/auth/me', () => {
 
     const setCookie = res.headers.get('set-cookie') || ''
     expect(setCookie).toMatch(/auth-token=/)
+  })
+
+  it('matches the email case-insensitively', async () => {
+    const user = await createTestUser(sql, { email: `test-core-MiXed-${Date.now()}@example.com`, password: 'pw' })
+    const res = await $fetch('/api/auth/login', {
+      method: 'POST',
+      body: { email: user.email.toUpperCase(), password: 'pw' }
+    })
+
+    expect(res.user.id).toBe(user.id)
   })
 
   it('GET /api/auth/me returns 401 without cookie', async () => {

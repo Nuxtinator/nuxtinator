@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
     if (!v) throw createError({ statusCode: 404, statusMessage: 'Version not found.' })
 
     const { section: updated, versionId: newVersionId } = await saveSectionContent(
-      tx, p.id, key, v.content as string, ctx.userId
+      tx, p.id, key, v.content as string, ctx.userId, { source: 'user' }
     )
 
     logUpdate('context_sections', section.id, ctx.userId, {

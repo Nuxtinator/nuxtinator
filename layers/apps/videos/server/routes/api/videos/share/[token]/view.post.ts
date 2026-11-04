@@ -1,14 +1,14 @@
 // POST /api/videos/share/:token/view
-// Mostly-public: bump view_count for a public video, skipping if the
-// requester is the owner. Mirrors the lookup mode of share/[token].get.ts —
-// authenticated requests resolve the video's own org via withRecordOrgContext
-// so RLS exposes it (an owner viewing their own non-public video is a no-op,
-// not a 404); anonymous requests use the public-only read.
+// Mostly-public: bump view_count for a public or org video, skipping the
+// owner's own views. Access mirrors share/[token].get.ts (public / owner /
+// org member) — every request resolves the video's own org via
+// withRecordOrgContext so RLS exposes it. An owner viewing their private video is a no-op, not an
+// error.
 
 import { sql } from 'kysely'
 import { db } from '#core/server/utils/database'
 import { getAuthUser } from '#core/server/utils/auth'
-import { withRecordOrgContext } from '#tenant/server'
+import { withRecordOrgContext, isActiveOrgMember } from '#tenant/server'
 
 export default defineEventHandler(async (event) => {
   const token = getRouterParam(event, 'token')
@@ -16,35 +16,38 @@ export default defineEventHandler(async (event) => {
 
   const auth = getAuthUser(event)
 
-  const video = auth
-    ? await withRecordOrgContext(
-        event,
-        { table: 'videos', id: token, idColumn: 'share_token', validateUuid: false, notFoundMessage: 'Video not found' },
-        async (tx) => {
-          return await tx.selectFrom('videos')
-            .select(['user_id', 'visibility'])
-            .where('share_token', '=', token)
-            .executeTakeFirst()
-        }
-      )
-    : await db.selectFrom('videos')
+  const { video, isOrgMember } = await withRecordOrgContext(
+    event,
+    { table: 'videos', id: token, idColumn: 'share_token', validateUuid: false, notFoundMessage: 'Video not found' },
+    async (tx) => {
+      const video = await tx.selectFrom('videos')
         .select(['user_id', 'visibility'])
         .where('share_token', '=', token)
         .executeTakeFirst()
+      const isOrgMember = video && auth ? await isActiveOrgMember(tx, auth.userId) : false
+      return { video, isOrgMember }
+    }
+  )
 
   if (!video) throw createError({ statusCode: 404, message: 'Video not found' })
 
   const isOwner = auth?.userId === video.user_id
-  if (video.visibility !== 'public' && !isOwner) {
+  const canView = video.visibility === 'public' || isOwner
+    || (video.visibility === 'org' && isOrgMember)
+  if (!canView) {
+    // Anonymous callers can't tell a hidden video from a missing one.
+    if (!auth) throw createError({ statusCode: 404, message: 'Video not found' })
     throw createError({ statusCode: 403, message: 'This video is private' })
   }
 
-  // Only public videos get counted, and never count the owner's own views.
-  // The SQL function itself filters on visibility='public', so a private
-  // owner-view becomes a no-op without erroring.
-  if (video.visibility === 'public' && !isOwner) {
+  // Public and org views count; the owner's own views never do. The SQL
+  // function also filters on visibility, so a stale call can't bump a
+  // video whose visibility changed underneath it.
+  const shouldCount = !isOwner
+    && (video.visibility === 'public' || video.visibility === 'org')
+  if (shouldCount) {
     await sql`SELECT bump_video_counter(${token}, 'view')`.execute(db)
   }
 
-  return { success: true, counted: video.visibility === 'public' && !isOwner }
+  return { success: true, counted: shouldCount }
 })

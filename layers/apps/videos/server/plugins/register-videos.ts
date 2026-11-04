@@ -22,6 +22,7 @@ export default defineNitroPlugin(() => {
     path: '/videos',
     icon: 'i-lucide-video',
     requiredPermission: 'videos.access',
+    defaultStatus: 'available',
     order: 30
   })
 

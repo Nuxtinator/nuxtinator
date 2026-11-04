@@ -57,7 +57,7 @@ go-saas/
 └── layers/
     ├── core/tests/                  ← core's tests
     │   ├── global-setup.ts
-    │   ├── helpers/                 ← exported as `layer-core/test-helpers`
+    │   ├── helpers/                 ← exported as `@nuxtinator/core/test-helpers`
     │   │   ├── index.ts
     │   │   ├── db.ts                ← getHostAdminDb / getAppUserDb / cleanupCoreTestData
     │   │   ├── auth.ts              ← createTestUser / generateTestToken / getAuthHeaders
@@ -66,13 +66,13 @@ go-saas/
     │   └── auth/*.test.ts
     └── tenancy/tests/
         ├── global-setup.ts
-        ├── helpers/                 ← exported as `layer-tenancy/test-helpers`
+        ├── helpers/                 ← exported as `@nuxtinator/tenancy/test-helpers`
         │   ├── index.ts             ← re-exports core helpers + tenancy helpers
         │   └── orgs.ts              ← createTestOrg / addTestMembership / createOrgWithAdmin / withOrgHeader
         └── orgs/*.test.ts
 ```
 
-Tests live with their layer. Cross-layer helper imports go through each layer's `package.json` `exports` map (`import { createTestUser } from 'layer-core/test-helpers'`).
+Tests live with their layer. Cross-layer helper imports go through each layer's `package.json` `exports` map (`import { createTestUser } from '@nuxtinator/core/test-helpers'`).
 
 ### Vitest projects
 

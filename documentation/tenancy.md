@@ -8,37 +8,12 @@ This document covers the **multi-tenant** operator setup. Layer-author guidance 
 
 ## Database role setup (one-time, manual)
 
-Tenant isolation is enforced via **Postgres Row-Level Security**. Two database roles are required:
+Tenant isolation is enforced via **Postgres Row-Level Security**, with the same two roles every deploy uses — see [database-roles.md](database-roles.md) for the SQL. Multi-tenant deploys add one thing: the owner role (`host_admin`) must have `BYPASSRLS`, since the tenancy layer's cross-org `/api/admin/orgs/*` endpoints use it through `adminDb`.
 
 | Role | Purpose | RLS |
 |---|---|---|
 | `host_admin` | Migrations + cross-org `/api/admin/orgs/*` endpoints | `BYPASSRLS` |
 | `app_user` | Default for all request handlers and layer code | RLS-enforced |
-
-Before booting the app, create both roles:
-
-```sql
--- Privileged role used by migrations + cross-org admin endpoints.
-CREATE ROLE host_admin LOGIN PASSWORD '<>' BYPASSRLS;
-GRANT ALL PRIVILEGES ON DATABASE <db> TO host_admin;
-GRANT ALL PRIVILEGES ON SCHEMA public TO host_admin;
-
--- Restricted role for app requests.
-CREATE ROLE app_user LOGIN PASSWORD '<>';   -- explicitly NOT BYPASSRLS
-GRANT CONNECT ON DATABASE <db> TO app_user;
-GRANT USAGE ON SCHEMA public TO app_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
-
--- CRITICAL: defaults must be FOR ROLE host_admin so future tables CREATEd by
--- migrations (which run as host_admin) automatically grant to app_user.
-ALTER DEFAULT PRIVILEGES FOR ROLE host_admin IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
-ALTER DEFAULT PRIVILEGES FOR ROLE host_admin IN SCHEMA public
-  GRANT USAGE, SELECT ON SEQUENCES TO app_user;
-```
-
-The tenancy layer's `tenancy_020_setup_db_roles.ts` migration also runs the GRANT block idempotently if `app_user` exists — but the `CREATE ROLE` step is operator territory.
 
 Verify:
 
@@ -58,7 +33,7 @@ APP_DATABASE_URL=postgres://app_user:...@localhost/<dbname>  # default for the h
 NUXT_TENANT_FLOW_SECRET=<random 32+ bytes hex>        # HMAC key for OAuth state-binding
 ```
 
-The host's `db` falls back to `DATABASE_URL` if `APP_DATABASE_URL` is unset (dev convenience). For production multi-tenant, both should be set so RLS isolation is real.
+`db`'s role must be one RLS applies to: if it is a superuser, has `BYPASSRLS`, or owns an RLS table, every request is refused with a 503 and the reason is logged as `[core] Row-level security is not enforced…` ([rls-guard.ts](../layers/core/server/utils/rls-guard.ts)). Set both variables, in dev too.
 
 `NUXT_TENANT_FLOW_SECRET` is consumed by `encodeFlowOrg`/`decodeFlowOrg` (see [layers/tenancy/server/utils/tenant.ts](../layers/tenancy/server/utils/tenant.ts)). Used by OAuth flows to bind the active org to the `state` parameter — without this, an OAuth flow started in org A and completed after a tab switch could land tokens in org B.
 
@@ -99,6 +74,22 @@ $$ SELECT nullif(current_setting('app.current_org', true), '')::uuid $$;
 So INSERTs that omit `org_id` get auto-stamped from the GUC inside `defineTenantHandler`'s transaction. Outside an org context the function returns NULL → fail-loud (NOT NULL constraint blocks the insert), never wrong-org.
 
 Layer migrations use the `enableTenantScoping(db, table)` helper from `#tenant/server` to set up the column + policy + RLS in one call.
+
+---
+
+## Visiting several orgs
+
+A transaction sees exactly one org. Work that covers several orgs visits each in turn, with that org's GUC set, using helpers from `#tenant/server`:
+
+- `listUserOrgs(userId, { permission?, appId?, orgIds? })` — the user's orgs (suspended excluded) with their effective permission set in each, narrowed by permission, enabled app or an explicit selection. Reads no tenant data.
+- `listOrgScopes({ activeOnly?, appId? })` — the org ids a session-less job visits: active ones only, and only where the app is on. Single mode returns `[null]`.
+- `withOrgScope(orgId, fn)` — a transaction scoped to one org (`null`: a plain transaction in single mode).
+
+```ts
+for (const orgId of await listOrgScopes({ activeOnly: true, appId: 'inbox' })) {
+  await withOrgScope(orgId, tx => sweep(tx))
+}
+```
 
 ---
 

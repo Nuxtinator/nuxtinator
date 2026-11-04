@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { SidebarNavItem } from '#core/app/utils/sidebar-nav'
 
-const { user } = useAuth()
 const route = useRoute()
 const mobileOpen = ref(false)
 
@@ -40,10 +39,10 @@ watch(() => route.path, () => {
 
 <template>
   <div class="min-h-screen bg-(--ui-bg) text-(--ui-text)">
-    <!-- Mobile top bar -->
-    <header class="lg:hidden bg-(--ui-bg-elevated) border-b border-(--ui-border) py-3 px-4 sticky top-0 z-40 flex items-center justify-between">
+    <header class="h-14 bg-(--chrome-bg) border-b border-(--ui-border) px-4 sticky top-0 z-40 flex items-center justify-between gap-3">
       <div class="flex items-center gap-3">
         <UButton
+          class="sm:hidden"
           icon="i-lucide-menu"
           variant="ghost"
           color="neutral"
@@ -52,35 +51,32 @@ watch(() => route.path, () => {
         />
         <span class="text-lg font-semibold">Admin</span>
       </div>
-      <span class="text-sm text-(--ui-text-muted) truncate max-w-[50%]">
-        {{ user?.display_name || user?.email }}
-      </span>
+      <UButton
+        :to="launcherPath()"
+        icon="i-lucide-x"
+        variant="ghost"
+        color="neutral"
+        size="sm"
+        aria-label="Close admin"
+        title="Close admin"
+      />
     </header>
 
-    <div class="lg:flex">
+    <div class="sm:flex">
       <!-- Desktop sidebar -->
-      <SidebarPanel
-        title="Admin"
-        class="hidden lg:flex w-64 min-h-screen sticky top-0 !h-screen"
-      >
+      <SidebarPanel class="hidden sm:flex w-64 shrink-0 sticky top-14 !h-[calc(100vh-3.5rem)]">
+        <NuxtLink
+          :to="launcherPath()"
+          class="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-(--ui-text-muted) hover:bg-(--ui-bg-accented) hover:text-(--ui-text) transition-colors"
+        >
+          <UIcon
+            name="i-lucide-arrow-left"
+            class="size-5 shrink-0"
+          />
+          Back to apps
+        </NuxtLink>
+        <USeparator class="my-3" />
         <SidebarNav :items="navItems" />
-        <template #footer>
-          <div class="space-y-2">
-            <div class="text-sm text-(--ui-text-muted) truncate">
-              {{ user?.display_name || user?.email }}
-            </div>
-            <NuxtLink
-              to="/"
-              class="flex items-center gap-2 text-sm text-(--ui-text-muted) hover:text-(--ui-text) transition-colors"
-            >
-              <UIcon
-                name="i-lucide-arrow-left"
-                class="size-4"
-              />
-              <span>Back to app</span>
-            </NuxtLink>
-          </div>
-        </template>
       </SidebarPanel>
 
       <!-- Mobile drawer -->
@@ -105,29 +101,23 @@ watch(() => route.path, () => {
                 />
               </div>
             </template>
+            <NuxtLink
+              :to="launcherPath()"
+              class="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-(--ui-text-muted) hover:bg-(--ui-bg-accented) hover:text-(--ui-text) transition-colors"
+            >
+              <UIcon
+                name="i-lucide-arrow-left"
+                class="size-5 shrink-0"
+              />
+              Back to apps
+            </NuxtLink>
+            <USeparator class="my-3" />
             <SidebarNav :items="navItems" />
-            <template #footer>
-              <div class="space-y-2">
-                <div class="text-sm text-(--ui-text-muted) truncate">
-                  {{ user?.display_name || user?.email }}
-                </div>
-                <NuxtLink
-                  to="/"
-                  class="flex items-center gap-2 text-sm text-(--ui-text-muted) hover:text-(--ui-text) transition-colors"
-                >
-                  <UIcon
-                    name="i-lucide-arrow-left"
-                    class="size-4"
-                  />
-                  <span>Back to app</span>
-                </NuxtLink>
-              </div>
-            </template>
           </SidebarPanel>
         </template>
       </USlideover>
 
-      <main class="flex-1 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
+      <main class="flex-1 min-w-0 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
         <slot />
       </main>
     </div>

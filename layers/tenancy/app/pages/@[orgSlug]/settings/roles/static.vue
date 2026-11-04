@@ -6,6 +6,7 @@ definePageMeta({
 const route = useRoute()
 const orgSlug = computed(() => route.params.orgSlug as string)
 const toast = useToast()
+const confirmAction = useConfirm()
 
 interface StaticRole {
   key: string
@@ -59,7 +60,7 @@ const fetchOverrides = async (key: string) => {
   try {
     const r = await $fetch<{ overrides: OverrideRow[] }>(
       `/api/o/${orgSlug.value}/role-overrides`,
-      { params: { role: key } }
+      { query: { role: key } }
     )
     const m = new Map<string, Effect>()
     for (const row of r.overrides) m.set(row.permission, row.effect)
@@ -137,11 +138,15 @@ const onSave = async () => {
 
 const onReset = async () => {
   if (!selectedRoleKey.value) return
-  if (!confirm(`Reset all overrides for "${selectedRole.value?.name}"? Returns the role to its static defaults.`)) return
+  if (!await confirmAction({
+    title: `Reset all overrides for "${selectedRole.value?.name}"?`,
+    description: 'The role returns to its static defaults.',
+    confirmLabel: 'Reset'
+  })) return
   try {
     await $fetch(`/api/o/${orgSlug.value}/role-overrides`, {
       method: 'DELETE',
-      params: { role: selectedRoleKey.value }
+      query: { role: selectedRoleKey.value }
     })
     overridesByRole.value = { ...overridesByRole.value, [selectedRoleKey.value]: new Map() }
     toast.add({ title: 'Overrides reset', color: 'success' })

@@ -18,6 +18,7 @@ import { assertRecordVisible, requireRecordType } from '../../../../../../../uti
 import { getRecordTypeFields } from '../../../../../../../utils/definition-settings'
 import { claimChannel, linkChannel } from '../../../../../../../utils/channels'
 import { getRecord } from '../../../../../../../utils/record-storage'
+import { assertNotAccountOwned } from '../../../../../../../utils/account-link'
 
 const Body = z.object({
   channelTypeKey: z.string().min(1),
@@ -55,6 +56,8 @@ export default defineEventHandler(async (event) => {
         statusMessage: `${body.fieldKey} holds ${def.channelType} channels, not ${body.channelTypeKey}.`
       })
     }
+
+    await assertNotAccountOwned(tx, id, { channelType: def.channelType })
 
     const channel = await claimChannel(tx, { channelType: body.channelTypeKey, value: body.value })
     await linkChannel(tx, ctx, id, body.fieldKey, channel.id, {

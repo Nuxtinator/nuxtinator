@@ -1,6 +1,6 @@
 {
   "name": "@nuxtinator/mcp",
-  "version": "1.0.0",
+  "version": "1.6.0",
   "private": true,
   "type": "module",
   "description": "Reusable Nuxt layer that turns a project into an MCP server (Streamable HTTP, stateless).",
@@ -13,13 +13,17 @@
     "test:ui": "vitest --ui"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.20.0",
-    "zod": "^3.23.0",
-    "zod-to-json-schema": "^3.23.0"
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.1.8"
   },
   "optionalDependencies": {
     "@nuxtinator/core": "*",
     "@nuxtinator/oauth": "*"
+  },
+  "nuxtinator": {
+    "requires": {
+      "@nuxtinator/core": ">=3.1.0"
+    }
   },
   "peerDependencies": {
     "@nuxt/kit": "^4.0.0",
@@ -30,10 +34,10 @@
     "postgres": "^3.4.7"
   },
   "devDependencies": {
-    "@nuxt/test-utils": "^3.23.0",
+    "@nuxt/test-utils": "^4.3.3",
     "@types/supertest": "^6.0.3",
-    "@vitest/ui": "^3.2.0",
+    "@vitest/ui": "^5.0.4",
     "supertest": "^7.2.2",
-    "vitest": "^3.2.0"
+    "vitest": "^5.0.4"
   }
 }

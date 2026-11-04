@@ -6,6 +6,7 @@ definePageMeta({
 const router = useRouter()
 const route = useRoute()
 const { login } = useAuth()
+const registrationOpen = await useRegistrationOpen()
 
 const state = reactive({
   email: '',
@@ -24,8 +25,12 @@ const resetError = ref('')
 const resetSuccess = ref(false)
 const sentToEmail = ref('')
 
+const redirectTarget = computed(() => typeof route.query.redirect === 'string' ? route.query.redirect : undefined)
+
 // Check for verification status in query params
 onMounted(() => {
+  error.value = authErrorMessage(route.query.auth_error)
+
   const verified = route.query.verified as string
   if (verified === 'success') {
     successMessage.value = 'Email verified successfully! You can now sign in.'
@@ -138,6 +143,12 @@ function switchToReset() {
           @close="error = ''"
         />
 
+        <AuthProviderButtons
+          intent="login"
+          :redirect="redirectTarget"
+          separator="or"
+        />
+
         <!-- Email Input -->
         <div class="space-y-2">
           <UFormField
@@ -200,27 +211,25 @@ function switchToReset() {
           Sign In
         </UButton>
 
-        <!-- Divider -->
-        <div class="relative">
-          <div class="absolute inset-0 flex items-center">
-            <div class="w-full border-t border-(--ui-border)" />
-          </div>
-          <div class="relative flex justify-center text-sm">
-            <span class="px-2 bg-(--ui-bg) text-(--ui-text-muted)">Don't have an account?</span>
-          </div>
-        </div>
+        <template v-if="registrationOpen">
+          <!-- Divider -->
+          <USeparator
+            label="Don't have an account?"
+            :ui="{ container: 'font-normal text-muted' }"
+          />
 
-        <!-- Register Link -->
-        <UButton
-          color="neutral"
-          variant="outline"
-          size="lg"
-          block
-          :disabled="loading"
-          @click="redirectToRegister"
-        >
-          Create Account
-        </UButton>
+          <!-- Register Link -->
+          <UButton
+            color="neutral"
+            variant="outline"
+            size="lg"
+            block
+            :disabled="loading"
+            @click="redirectToRegister"
+          >
+            Create Account
+          </UButton>
+        </template>
       </form>
     </UCard>
 

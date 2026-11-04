@@ -9,7 +9,7 @@ definePageMeta({
   middleware: 'auth'
 })
 
-const { list, createDoc, createSite, search: searchApi } = useFiles()
+const { list, createDoc, createSite, uploadFile, search: searchApi } = useFiles()
 const toast = useToast()
 
 // Pull a human message out of an $fetch/h3 error (body statusMessage first).
@@ -90,6 +90,9 @@ async function createNewItem() {
 // (the endpoint takes one file per request) and clear the model when done.
 const dropFiles = ref<File[] | null>(null)
 const uploading = ref(false)
+// The file currently being sent, its position in the batch, and bytes-sent
+// fraction (null once all bytes are sent and the server is storing it).
+const uploadStatus = ref<{ name: string, index: number, total: number, progress: number | null } | null>(null)
 
 // Markdown files are imported as editable docs rather than stored uploads.
 function isMarkdown(file: File): boolean {
@@ -106,7 +109,8 @@ async function uploadFiles(files: File[]) {
   let ok = 0
   let lastDocId: string | null = null
   try {
-    for (const file of files) {
+    for (const [index, file] of files.entries()) {
+      uploadStatus.value = { name: file.name, index: index + 1, total: files.length, progress: 0 }
       try {
         if (isMarkdown(file)) {
           const body_md = await file.text()
@@ -119,9 +123,9 @@ async function uploadFiles(files: File[]) {
           const res = await createSite({ title, html })
           lastDocId = res.item.id
         } else {
-          const fd = new FormData()
-          fd.append('file', file)
-          await $fetch('/api/files/uploads', { method: 'POST', body: fd })
+          await uploadFile(file, (fraction) => {
+            if (uploadStatus.value) uploadStatus.value.progress = fraction < 1 ? Math.round(fraction * 100) : null
+          })
         }
         ok++
       } catch (e) {
@@ -139,6 +143,7 @@ async function uploadFiles(files: File[]) {
     }
   } finally {
     uploading.value = false
+    uploadStatus.value = null
   }
 }
 
@@ -207,8 +212,22 @@ onMounted(load)
       description="Up to 50 MB each"
       :preview="false"
       :disabled="uploading"
-      class="mb-6 w-full"
+      class="w-full"
+      :class="uploadStatus ? 'mb-3' : 'mb-6'"
     />
+
+    <!-- Upload progress -->
+    <div v-if="uploadStatus" class="mb-6 flex flex-col gap-1.5">
+      <div class="flex items-center gap-2 text-sm">
+        <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin text-(--ui-text-muted) shrink-0" />
+        <span class="truncate flex-1">
+          {{ uploadStatus.progress === null ? 'Saving' : 'Uploading' }} {{ uploadStatus.name }}
+          <span v-if="uploadStatus.total > 1" class="text-(--ui-text-muted)">({{ uploadStatus.index }} of {{ uploadStatus.total }})</span>
+        </span>
+        <span v-if="uploadStatus.progress !== null" class="text-(--ui-text-muted) tabular-nums">{{ uploadStatus.progress }}%</span>
+      </div>
+      <UProgress v-model="uploadStatus.progress" size="sm" />
+    </div>
 
     <!-- Loading -->
     <div v-if="loading" class="text-center py-16 text-(--ui-text-muted)">

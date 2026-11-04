@@ -5,6 +5,11 @@
 // A confirmed provider failure releases the claim with backoff; a crash
 // mid-send leaves the row 'sent' without a provider id — at-most-once, the
 // same bias the inbound pipeline has.
+//
+// Missing configuration is not a failure and never consumes the retry budget:
+// an org with no contact address has its due mail held (still 'queued', same
+// attempts, hold_reason set) and goes out untouched on the first sweep after
+// an operator sets the address.
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import { isSuppressed } from '#crm/server'
@@ -98,12 +103,10 @@ async function prepareSend(tx: Tx, msg: InboxMessageRow): Promise<PreparedSend |
     await inboxMarkMessageFailed(tx, msg.id, 'Conversation missing')
     return null
   }
-  const channel = await tx
-    .selectFrom('crm_channels')
-    .select(['id', 'value'])
-    .where('id', '=', conversation.channel_id)
-    .executeTakeFirst()
-  const toEmail = msg.to_email || channel?.value || null
+  // The same resolver the detail endpoint shows as the reply recipient, so
+  // what staff see in the composer is exactly where the mail goes.
+  const target = await inboxResolveReplyTarget(tx, conversation, msg.to_email)
+  const toEmail = target.email
   if (!toEmail) {
     await inboxMarkMessageFailed(tx, msg.id, 'No recipient')
     return null
@@ -111,21 +114,25 @@ async function prepareSend(tx: Tx, msg: InboxMessageRow): Promise<PreparedSend |
   // Deliverability gate only — deliberately NOT canSend(): consent must not
   // block 1:1 conversational replies; a bounce stops sends, a marketing
   // unsubscribe doesn't.
-  if (channel && await isSuppressed(tx, channel.id)) {
+  if (target.channelId && await isSuppressed(tx, target.channelId)) {
     await inboxMarkMessageFailed(tx, msg.id, 'Recipient suppressed')
+    return null
+  }
+
+  // Configuration gate, deliberately ahead of the claim: without a From
+  // identity nothing can send, and that stays true until an operator changes a
+  // setting. Holding costs no attempt, where claiming and releasing would burn
+  // the retry budget and land the message in 'failed' — unrecoverable — within
+  // minutes. The sweep already holds a whole org's due mail in one pass; this
+  // covers a settings change landing mid-sweep.
+  const settings = await getInboxSettings(tx)
+  if (!settings.contactAddress) {
+    await inboxHoldForConfig(tx, msg.id, INBOX_HOLD_NO_CONTACT_ADDRESS)
     return null
   }
 
   const claimed = await inboxClaimForSend(tx, msg.id)
   if (!claimed) return null // another worker won
-
-  const settings = await getInboxSettings(tx)
-  if (!settings.contactAddress) {
-    // Without a From identity nothing can send — release so it retries once
-    // the org is configured.
-    await inboxReleaseForRetry(tx, claimed, 'Inbox contact address not configured')
-    return null
-  }
 
   const senderName = claimed.sender_user_id
     ? (await tx.selectFrom('users').select('display_name').where('id', '=', claimed.sender_user_id).executeTakeFirst())?.display_name ?? null
@@ -185,6 +192,24 @@ async function prepareSend(tx: Tx, msg: InboxMessageRow): Promise<PreparedSend |
 export async function inboxRunSendSweep(): Promise<void> {
   for (const orgId of await inboxListOrgScopes()) {
     const due = await inboxWithScopeTx(orgId, tx => inboxListDueQueued(tx))
+    if (due.length === 0) continue
+
+    // One settings read per org per sweep. An org with no From identity can't
+    // send anything, so its whole due batch is held together and reported once
+    // — not once per message, and not once for the whole sweep, which would
+    // hide which org needs attention.
+    const orgSettings = await inboxWithScopeTx(orgId, tx => getInboxSettings(tx))
+    if (!orgSettings.contactAddress) {
+      await inboxWithScopeTx(orgId, async (tx) => {
+        for (const msg of due) await inboxHoldForConfig(tx, msg.id, INBOX_HOLD_NO_CONTACT_ADDRESS)
+      })
+      console.warn(
+        `[inbox] ${due.length} queued message(s) held for org ${orgId ?? 'single-tenant'} — `
+        + 'no contact address configured; set one in Inbox settings to release them'
+      )
+      continue
+    }
+
     for (const msg of due) {
       let prep: PreparedSend | null = null
       try {

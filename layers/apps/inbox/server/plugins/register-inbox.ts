@@ -14,7 +14,13 @@ import {
   INBOX_SETTING_AUTO_ACK,
   INBOX_SETTING_CONTACT_FORM_API_KEY,
   INBOX_SETTING_GROUNDING_SOURCE_URLS,
-  sanitizeGroundingUrls
+  INBOX_SETTING_NOTIFY_USER_IDS,
+  INBOX_SETTING_AUTO_CLOSE_DAYS,
+  INBOX_AUTO_CLOSE_DAYS_DEFAULT,
+  sanitizeGroundingUrls,
+  sanitizeInboxNotifyUserIds,
+  sanitizeAutoCloseDays,
+  inboxSlugAddressesEnabled
 } from '../utils/inbox-settings'
 import { INBOX_SETTING_TAGS, sanitizeTagPalette, type InboxTag } from '../utils/inbox-tags'
 import { INBOX_AI_DRAFT_FEATURE } from '../utils/inbox-ai-draft'
@@ -34,7 +40,7 @@ export default defineNitroPlugin(() => {
     key: 'inbox_agent',
     name: 'Inbox Agent',
     description: 'Handles the shared email inbox — read, triage, compose, and reply.',
-    permissions: [...INBOX_PERMISSIONS],
+    permissions: ['inbox.access', 'inbox.read', 'inbox.send'],
     source: 'inbox'
   })
 
@@ -50,7 +56,8 @@ export default defineNitroPlugin(() => {
   registerSetting<string>({
     namespace: INBOX_SETTINGS_NAMESPACE,
     key: INBOX_SETTING_CONTACT_ADDRESS,
-    default: String(config.inboxContactAddress || '').toLowerCase(),
+    // Empty under slug addresses: getInboxSettings derives the org's address.
+    default: inboxSlugAddressesEnabled() ? '' : String(config.inboxContactAddress || '').toLowerCase(),
     parse: v => String(v ?? '').trim().toLowerCase(),
     label: 'Shared contact address'
   })
@@ -89,6 +96,20 @@ export default defineNitroPlugin(() => {
     parse: v => sanitizeGroundingUrls(v),
     label: 'AI grounding source URLs'
   })
+  registerSetting<string[]>({
+    namespace: INBOX_SETTINGS_NAMESPACE,
+    key: INBOX_SETTING_NOTIFY_USER_IDS,
+    default: [],
+    parse: v => sanitizeInboxNotifyUserIds(v),
+    label: 'Unassigned-mail email recipients'
+  })
+  registerSetting<number>({
+    namespace: INBOX_SETTINGS_NAMESPACE,
+    key: INBOX_SETTING_AUTO_CLOSE_DAYS,
+    default: INBOX_AUTO_CLOSE_DAYS_DEFAULT,
+    parse: v => sanitizeAutoCloseDays(v),
+    label: 'Auto-close pending conversations after (days)'
+  })
 
   // AI features — the admin AI page (@nuxtinator/ai) shows a model picker for
   // each. registerAiFeature is a no-op if the AI layer isn't loaded (core ships
@@ -120,15 +141,12 @@ export default defineNitroPlugin(() => {
     requiredPermission: 'inbox.access',
     order: 10
   })
-  // Nav filtering is permission-based only; the settings endpoints add the
-  // org-admin role gate on top, and the page shows an admin-required notice
-  // to senders who aren't admins.
   registerNavItem({
     appId: 'inbox',
     title: 'Settings',
     path: '/inbox/settings',
     icon: 'i-lucide-settings',
-    requiredPermission: 'inbox.send',
+    requiredPermission: 'inbox.settings.manage',
     order: 90
   })
 })

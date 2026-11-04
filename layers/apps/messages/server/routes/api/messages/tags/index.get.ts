@@ -1,10 +1,10 @@
 // GET /api/messages/tags
 // Returns the caller's tag vocabulary.
 
-import { withOrgContext } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 
 export default defineEventHandler(async (event) => {
-  return await withOrgContext(event, { appId: 'messages' }, async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'messages' }, 'messages.read', async (tx, ctx) => {
     const rows = await tx
       .selectFrom('messages_user_tags')
       .select(['tag_name', 'created_at'])

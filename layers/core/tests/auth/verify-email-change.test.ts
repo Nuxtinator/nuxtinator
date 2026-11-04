@@ -1,4 +1,4 @@
-// Email-change verification flow. The endpoint redirects to /profile with a
+// Email-change verification flow. The endpoint redirects to the account page with a
 // query string indicating the outcome.
 import { describe, it, expect, afterEach, afterAll } from 'vitest'
 import { fetch } from '@nuxt/test-utils/e2e'
@@ -72,7 +72,7 @@ describe('GET /api/auth/verify-email-change', () => {
     `
 
     const res = await visit(token)
-    expect(res.headers.get('location')).toMatch(/email_change=success/)
+    expect(res.headers.get('location')).toBe('/account?email_change=success')
 
     const rows = await sql<{ email: string, pending_email: string | null, email_change_token: string | null }[]>`
       SELECT email, pending_email, email_change_token FROM users WHERE id = ${user.id}

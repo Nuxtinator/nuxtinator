@@ -1,22 +1,22 @@
 <script setup lang="ts">
 const { orgs, pending } = await useUserOrgs()
 const { slug } = useActiveOrg()
+const chromeOrg = useChromeOrgSlug()
 const route = useRoute()
 const open = ref(false)
 
-const activeOrg = computed(() => orgs.value.find(o => o.slug === slug.value) ?? null)
+// Hosts that call their orgs something else set `orgSwitcher` in app config:
+// `{ title?, choose?, empty?, newLabel? }`. `newLabel` adds a link to /orgs/new.
+// No app-config default here: it would outrank app layers extended after tenancy.
+const appConfig = useAppConfig() as { orgSwitcher?: { title?: string, choose?: string, empty?: string, newLabel?: string } }
+const labels = computed(() => ({
+  title: appConfig.orgSwitcher?.title ?? 'Organizations',
+  choose: appConfig.orgSwitcher?.choose ?? 'Choose organization',
+  empty: appConfig.orgSwitcher?.empty ?? 'You don\'t belong to any organizations yet.',
+  newLabel: appConfig.orgSwitcher?.newLabel ?? null
+}))
 
-// Populated by `org-settings-access.global.ts` after the user first navigates
-// into /settings. If we haven't seen perms yet, default to showing the link —
-// the middleware will redirect non-admins on click and prime the cache for
-// next render.
-const settingsPerms = useState<Record<string, string[]>>('tenant:settings-perms', () => ({}))
-const canSeeSettings = computed(() => {
-  if (!activeOrg.value) return false
-  const perms = settingsPerms.value[activeOrg.value.slug]
-  if (!perms) return true
-  return perms.includes('org.settings.access')
-})
+const activeOrg = computed(() => orgs.value.find(o => o.slug === (slug.value ?? chromeOrg.value)) ?? null)
 
 // When the user is on `/@<current>/<section>/...`, switching to another org
 // should land on `/@<next>/<section>` so they stay in the same app/section.
@@ -24,12 +24,12 @@ const canSeeSettings = computed(() => {
 // is org-scoped data that doesn't exist in the target org (mail accountId,
 // thread id, etc.). The user re-navigates from the section root.
 //
-// If the current path isn't org-scoped, fall back to the new org's home.
+// If the current path isn't org-scoped, fall back to the new org's launcher.
 function pathForOrg(targetSlug: string): string {
   const m = route.path.match(/^\/@[^/]+(?:\/(.*))?$/)
-  if (!m) return `/@${targetSlug}/`
+  if (!m) return launcherPath(targetSlug)
   const rest = (m[1] || '').replace(/\/+$/, '')
-  if (!rest) return `/@${targetSlug}/`
+  if (!rest) return launcherPath(targetSlug)
   const firstSeg = rest.split('/')[0]!
   return `/@${targetSlug}/${firstSeg}`
 }
@@ -45,10 +45,10 @@ function pathForOrg(targetSlug: string): string {
       color="neutral"
       size="sm"
       class="max-w-[12rem]"
-      :aria-label="activeOrg ? `Active organization: ${activeOrg.name}` : 'Choose organization'"
+      :aria-label="activeOrg ? activeOrg.name : labels.choose"
     >
       <span class="truncate text-sm">
-        {{ activeOrg?.name || 'Choose organization' }}
+        {{ activeOrg?.name || labels.choose }}
       </span>
       <UIcon
         name="i-lucide-chevron-down"
@@ -59,7 +59,7 @@ function pathForOrg(targetSlug: string): string {
     <template #content>
       <div class="p-3">
         <p class="text-xs font-semibold uppercase tracking-wider text-(--ui-text-muted) px-1 pb-2">
-          Organizations
+          {{ labels.title }}
         </p>
 
         <div
@@ -73,7 +73,7 @@ function pathForOrg(targetSlug: string): string {
           v-else-if="orgs.length === 0"
           class="px-2 py-6 text-center text-sm text-(--ui-text-muted)"
         >
-          You don't belong to any organizations yet.
+          {{ labels.empty }}
         </div>
 
         <ul
@@ -87,7 +87,7 @@ function pathForOrg(targetSlug: string): string {
             <NuxtLink
               :to="pathForOrg(org.slug)"
               class="flex items-center justify-between gap-2 rounded-md px-2 py-2 hover:bg-(--ui-bg-accented) transition-colors"
-              :class="{ 'bg-(--ui-bg-accented)': org.slug === slug }"
+              :class="{ 'bg-(--ui-bg-accented)': org.slug === activeOrg?.slug }"
               @click="open = false"
             >
               <div class="min-w-0">
@@ -99,7 +99,7 @@ function pathForOrg(targetSlug: string): string {
                 </div>
               </div>
               <UIcon
-                v-if="org.slug === slug"
+                v-if="org.slug === activeOrg?.slug"
                 name="i-lucide-check"
                 class="size-4 text-(--ui-text)"
               />
@@ -112,31 +112,17 @@ function pathForOrg(targetSlug: string): string {
           </li>
         </ul>
 
-        <hr class="my-2 border-(--ui-border)">
-
         <NuxtLink
-          v-if="activeOrg && canSeeSettings"
-          :to="`/@${activeOrg.slug}/settings`"
-          class="flex items-center gap-2 rounded-md px-2 py-2 hover:bg-(--ui-bg-accented) transition-colors text-sm"
+          v-if="labels.newLabel"
+          to="/orgs/new"
+          class="mt-2 flex items-center gap-2 rounded-md px-2 py-2 text-sm text-(--ui-text-muted) hover:bg-(--ui-bg-accented) hover:text-(--ui-text) transition-colors"
           @click="open = false"
         >
           <UIcon
-            name="i-lucide-settings"
+            name="i-lucide-plus"
             class="size-4"
           />
-          Settings
-        </NuxtLink>
-
-        <NuxtLink
-          to="/orgs"
-          class="flex items-center gap-2 rounded-md px-2 py-2 hover:bg-(--ui-bg-accented) transition-colors text-sm"
-          @click="open = false"
-        >
-          <UIcon
-            name="i-lucide-settings-2"
-            class="size-4"
-          />
-          Manage organizations
+          {{ labels.newLabel }}
         </NuxtLink>
       </div>
     </template>

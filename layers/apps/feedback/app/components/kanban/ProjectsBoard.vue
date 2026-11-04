@@ -209,7 +209,7 @@ function cardCountInColumn(columnId: string): number {
 // the project name already sits in the page header, so the rail only carries
 // vertically-written labels.
 const gridTemplate = computed(
-  () => `${props.fillHeight ? '40px' : '240px'} repeat(${sortedColumns.value.length}, minmax(240px, 1fr))`
+  () => `${props.fillHeight ? '40px' : '160px'} repeat(${sortedColumns.value.length}, minmax(240px, 1fr))`
 )
 
 // One grid row per rendered lane row: pooled (collapsed) projects contribute

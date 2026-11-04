@@ -39,8 +39,8 @@ export function useActiveOrg(): ActiveOrg {
 // to "this might run on a global route" reads naturally.
 export const useMaybeActiveOrg = useActiveOrg
 
-// Source-of-truth-as-string-or-null. Used by the global $fetch interceptor
-// (which needs the value at request time, not a Vue ref).
+// Source-of-truth-as-string-or-null, for code that needs the value at call
+// time rather than a Vue ref (route guard, upload helpers).
 export function getActiveSlug(): string | null {
   const route = useRoute()
   const raw = route.params?.orgSlug
@@ -50,6 +50,6 @@ export function getActiveSlug(): string | null {
 }
 
 // Convenience wrapper — adds `X-Active-Org` to fetches. Equivalent to plain
-// `$fetch` once the global interceptor in `tenant-fetch-interceptor.client.ts`
-// is loaded; exists so app code can grep for it explicitly.
+// `$fetch`, whose instance the `tenant-fetch-template` module builds the header
+// injection into; exists so app code can grep for it explicitly.
 export const useTenantFetch = $fetch

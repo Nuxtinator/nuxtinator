@@ -10,10 +10,10 @@ export default defineEventHandler(async (event) => {
   const { current_password, new_password } = body
 
   // Validate input
-  if (!current_password || typeof current_password !== 'string') {
+  if (current_password !== undefined && typeof current_password !== 'string') {
     throw createError({
       statusCode: 400,
-      statusMessage: 'Current password is required'
+      statusMessage: 'Current password must be a string'
     })
   }
 
@@ -38,14 +38,6 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // Don't allow same password
-  if (current_password === new_password) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: 'New password must be different from current password'
-    })
-  }
-
   // Get current user password hash
   const current = await db
     .selectFrom('users')
@@ -60,28 +52,41 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // Verify current password
-  const isCurrentPasswordValid = current.password
-    ? await bcrypt.compare(current_password, current.password)
-    : false
+  // Changing an existing password is confirmed by the current one (or a recent
+  // re-authentication); setting a first password on a provider-only account
+  // needs a recent re-authentication.
+  if (current.password && current_password) {
+    // Don't allow same password
+    if (current_password === new_password) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: 'New password must be different from current password'
+      })
+    }
 
-  if (!isCurrentPasswordValid) {
-    // Log failed password change attempt
-    logEvent({
-      eventType: 'PASSWORD_CHANGE_FAILED',
-      tableName: 'users',
-      recordId: user.userId,
-      userId: user.userId,
-      userAgent: getHeader(event, 'user-agent') || undefined,
-      metadata: {
-        reason: 'invalid_current_password'
-      }
-    })
+    // Verify current password
+    const isCurrentPasswordValid = await bcrypt.compare(current_password, current.password)
 
-    throw createError({
-      statusCode: 401,
-      statusMessage: 'Current password is incorrect'
-    })
+    if (!isCurrentPasswordValid) {
+      // Log failed password change attempt
+      logEvent({
+        eventType: 'PASSWORD_CHANGE_FAILED',
+        tableName: 'users',
+        recordId: user.userId,
+        userId: user.userId,
+        userAgent: getHeader(event, 'user-agent') || undefined,
+        metadata: {
+          reason: 'invalid_current_password'
+        }
+      })
+
+      throw createError({
+        statusCode: 401,
+        statusMessage: 'Current password is incorrect'
+      })
+    }
+  } else {
+    await requireRecentAuth(event)
   }
 
   // Hash new password
@@ -95,6 +100,9 @@ export default defineEventHandler(async (event) => {
     .where('id', '=', user.userId)
     .execute()
 
+  // Other devices signed in with the old password are signed out.
+  await revokeUserSessions(user.userId, user.sid)
+
   // Log successful password change
   logEvent({
     eventType: 'PASSWORD_CHANGED',
@@ -102,7 +110,7 @@ export default defineEventHandler(async (event) => {
     recordId: user.userId,
     userId: user.userId,
     userAgent: getHeader(event, 'user-agent') || undefined,
-    metadata: {}
+    metadata: { first_password: !current.password }
   })
 
   return {

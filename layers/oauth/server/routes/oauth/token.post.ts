@@ -1,9 +1,8 @@
 import type { H3Event } from 'h3'
 import { sql } from 'kysely'
 import { db } from '#core/server/utils/database'
-import { getUserPermissions } from '#core/server/utils/rbac'
-import { checkRateLimit, logRateLimitExceeded } from '#core/server/utils/rate-limit'
-import { logEvent } from '#core/server/utils/activity-logger'
+import { getUserPermissionsAcrossOrgs } from '#tenant/server'
+import { consumeRateLimit, logRateLimitExceeded } from '#core/server/utils/rate-limit'
 import { getOauthConfig } from '../../utils/oauth-config'
 import {
   sha256Hex,
@@ -15,12 +14,14 @@ import {
 } from '../../utils/oauth-crypto'
 import {
   filterScopesByPermissions,
+  getAdvertisedScopes,
   hasAnyPermissionScope,
   parseScopeString,
   OFFLINE_ACCESS_SCOPE
 } from '../../utils/oauth-validation'
 import { logOauthEvent, OAUTH_EVENTS } from '../../utils/oauth-audit'
 import { revokeFamily } from '../../utils/oauth-revoke'
+import { getClientIp } from '#core/server/utils/client-ip'
 
 type TokenErrorCode
   = | 'invalid_request'
@@ -53,9 +54,12 @@ export default defineEventHandler(async (event) => {
   const cfg = getOauthConfig()
 
   // Rate limit
-  const ip = getRequestIP(event, { xForwardedFor: true }) || 'unknown'
+  const ip = getClientIp(event)
   const userAgent = getHeader(event, 'user-agent') || undefined
-  const rate = await checkRateLimit('ratelimit.oauth.token', 'ip', ip, 60 * 1000, 60)
+  // Counts and records in one locked step, so parallel requests can't all pass.
+  // Kept under the `ratelimit.*` namespace (not `oauth.*`) so it's prunable
+  // bookkeeping, not an audit event in the events view.
+  const rate = await consumeRateLimit('ratelimit.oauth.token', 'ip', ip, 60 * 1000, 60)
   if (!rate.allowed) {
     logRateLimitExceeded(ip, '/oauth/token', userAgent)
     setResponseStatus(event, 429)
@@ -63,10 +67,6 @@ export default defineEventHandler(async (event) => {
     setNoCache(event)
     return { error: 'too_many_requests' }
   }
-  // Record the attempt so the window above actually accumulates — checkRateLimit
-  // only counts, it never records. Kept under the `ratelimit.*` namespace (not
-  // `oauth.*`) so it's prunable bookkeeping, not an audit event in the events view.
-  logEvent({ eventType: 'ratelimit.oauth.token', metadata: { ip } })
 
   // Content-Type check (accept application/x-www-form-urlencoded[; charset=...])
   const contentType = getHeader(event, 'content-type') || ''
@@ -211,7 +211,7 @@ async function handleAuthorizationCodeGrant(event: H3Event, cfg: ReturnType<type
     return tokenError(event, 400, 'invalid_grant', 'User no longer valid')
   }
 
-  const userPerms = await getUserPermissions(claimed.user_id)
+  const userPerms = await getUserPermissionsAcrossOrgs(claimed.user_id)
   const originalScopes = parseScopeString(claimed.scope)
   const grantedScopes = filterScopesByPermissions(originalScopes, userPerms)
   if (grantedScopes.length !== originalScopes.length) {
@@ -400,7 +400,7 @@ async function handleRefreshTokenGrant(event: H3Event, cfg: ReturnType<typeof ge
 
   const client = await db
     .selectFrom('oauth_clients')
-    .select(['enabled'])
+    .select(['enabled', 'dynamic'])
     .where('client_id', '=', clientId)
     .executeTakeFirst()
   if (!client?.enabled) {
@@ -428,9 +428,13 @@ async function handleRefreshTokenGrant(event: H3Event, cfg: ReturnType<typeof ge
     return tokenError(event, 400, 'invalid_grant', 'user no longer valid')
   }
 
-  const userPerms = await getUserPermissions(claimed.user_id)
+  const userPerms = await getUserPermissionsAcrossOrgs(claimed.user_id)
   const originalScopes = parseScopeString(claimed.scope)
-  const grantedScopes = filterScopesByPermissions(originalScopes, userPerms)
+  // A dynamic client's cap is the advertised set (see authorize.get.ts), so a
+  // scope the server stopped advertising drops out of its refreshed tokens.
+  const advertised = client.dynamic ? new Set(getAdvertisedScopes()) : null
+  const cappedScopes = advertised ? originalScopes.filter(s => advertised.has(s)) : originalScopes
+  const grantedScopes = filterScopesByPermissions(cappedScopes, userPerms)
   if (grantedScopes.length !== originalScopes.length) {
     logOauthEvent({
       event: OAUTH_EVENTS.SCOPE_REDUCED,

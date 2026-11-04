@@ -1,13 +1,18 @@
 // POST /api/context/portfolios — create a portfolio in the active org.
+// `template` picks a registered portfolio template (omitted = the default);
+// `builtin_sections` picks which of its sections it starts with (omitted =
+// all, [] = none).
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
 import { logCreate } from '#core/server/utils/activity-logger'
-import { slugifyPortfolioName, ensureUniqueSlug } from '../../../../utils/portfolio-helpers'
+import { createPortfolio } from '../../../../utils/portfolio-helpers'
 
 const Body = z.object({
   name: z.string().trim().min(1).max(120),
   color: z.string().trim().max(20).nullable().optional(),
-  slug: z.string().trim().regex(/^[a-z][a-z0-9-]{1,39}$/).optional()
+  slug: z.string().trim().regex(/^[a-z][a-z0-9-]{1,39}$/).optional(),
+  template: z.string().min(1).max(64).optional(),
+  builtin_sections: z.array(z.string().min(1).max(64)).max(50).optional()
 })
 
 export default defineEventHandler(async (event) => {
@@ -16,19 +21,8 @@ export default defineEventHandler(async (event) => {
     if (!parsed.success) {
       throw createError({ statusCode: 400, statusMessage: 'Invalid body', data: parsed.error.flatten() })
     }
-    const { name, color } = parsed.data
-    const requestedSlug = parsed.data.slug ?? slugifyPortfolioName(name)
-    const slug = await ensureUniqueSlug(tx, requestedSlug)
 
-    const inserted = await tx
-      .insertInto('context_portfolios')
-      .values({
-        slug,
-        name,
-        color: color ?? null
-      })
-      .returning(['id', 'slug', 'name', 'color', 'icon_url', 'created_at', 'updated_at'])
-      .executeTakeFirstOrThrow()
+    const inserted = await createPortfolio(tx, parsed.data, ctx.userId)
 
     logCreate('context_portfolios', inserted.id, ctx.userId, { slug: inserted.slug, name: inserted.name })
 

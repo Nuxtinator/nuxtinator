@@ -1,16 +1,16 @@
 {
   "name": "@nuxtinator/inbox",
-  "version": "0.1.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./nuxt.config.ts"
   },
   "dependencies": {
-    "croner": "^9.0.0",
-    "dompurify": "^3.2.0",
-    "nodemailer": "^7.0.6",
-    "sanitize-html": "^2.17.4"
+    "croner": "^10.0.1",
+    "dompurify": "^3.4.13",
+    "nodemailer": "^10.1.0",
+    "sanitize-html": "^2.17.7"
   },
   "devDependencies": {
     "@types/sanitize-html": "^2.13.0"
@@ -20,11 +20,18 @@
     "@nuxtinator/core": "*",
     "@nuxtinator/crm": "*"
   },
+  "nuxtinator": {
+    "requires": {
+      "@nuxtinator/core": ">=3.1.0",
+      "@nuxtinator/crm": "*"
+    }
+  },
   "peerDependencies": {
+    "@nuxt/kit": "^4.0.0",
     "h3": "^1.0.0",
     "kysely": "^0.28.0",
     "nuxt": "^4.0.0",
     "vue": "^3.0.0",
-    "zod": "^3.23.0"
+    "zod": "^4.1.8"
   }
 }

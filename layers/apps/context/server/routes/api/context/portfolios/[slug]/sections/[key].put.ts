@@ -21,7 +21,9 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 400, statusMessage: 'Invalid body', data: parsed.error.flatten() })
     }
 
-    const { section, versionId } = await saveSectionContent(tx, p.id, key, parsed.data.content, ctx.userId)
+    const { section, versionId } = await saveSectionContent(
+      tx, p.id, key, parsed.data.content, ctx.userId, { source: 'user' }
+    )
 
     logUpdate('context_sections', section.id, ctx.userId, {
       portfolio_id: p.id,

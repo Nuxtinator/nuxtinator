@@ -37,7 +37,7 @@
         </template>
         Watch Video
       </UButton>
-      <UButton to="/library" variant="outline">
+      <UButton to="/videos" variant="outline">
         <template #leading>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
             <rect x="2" y="3" width="20" height="18" rx="2" ry="2"></rect>

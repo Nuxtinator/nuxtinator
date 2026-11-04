@@ -10,7 +10,7 @@ import {
   closeTestDatabases,
   cleanupTenancyTestData,
   cleanupCoreTestData
-} from 'layer-tenancy/test-helpers'
+} from '@nuxtinator/tenancy/test-helpers'
 import { cleanupAiTestData } from './helpers'
 
 const HOST_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../../dev')

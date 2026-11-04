@@ -10,7 +10,9 @@
 // the orgs cascades through everything per-app — but we explicitly DELETE
 // the tenant tables first to also catch rows seeded into orgs we no longer own.
 import type postgres from 'postgres'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { expect } from 'vitest'
+import { url as nuxtUrl } from '@nuxt/test-utils/e2e'
 import {
   createTestUser,
   getAuthHeaders,
@@ -19,9 +21,9 @@ import {
   createTestOrg,
   addTestMembership,
   type TestOrg
-} from 'layer-tenancy/test-helpers'
+} from '@nuxtinator/tenancy/test-helpers'
 
-export * from 'layer-tenancy/test-helpers'
+export * from '@nuxtinator/tenancy/test-helpers'
 
 // Users / orgs are tagged with `test-feedback-` so per-layer cleanup stays
 // scoped. Anything tagged `test-tenancy-` or `test-core-` is owned by other
@@ -143,6 +145,70 @@ export async function getColumnByName(
   return rows[0]!
 }
 
+// --- MCP over the real /mcp transport ---
+
+export interface McpToolResult {
+  content: Array<{ type: string, text: string }>
+  structuredContent?: Record<string, unknown>
+  isError?: boolean
+}
+
+// Mint an oauth client + token family + access token with the same row shapes
+// the token endpoint writes. The token's resource must equal the server's
+// mcpResource, read from its RFC 9728 metadata so the test doesn't depend on
+// the configured site URL. The client id is `test-feedback-` prefixed so
+// cleanup can scope its delete.
+export async function issueMcpBearer(
+  sql: ReturnType<typeof postgres>,
+  userId: string,
+  scopes: string[]
+): Promise<string> {
+  const metaRes = await fetch(nuxtUrl('/.well-known/oauth-protected-resource'))
+  const meta = await metaRes.json() as { resource: string }
+  const clientId = `test-feedback-${randomBytes(8).toString('hex')}`
+  await sql`
+    INSERT INTO oauth_clients (client_id, client_name, redirect_uris)
+    VALUES (${clientId}, 'test-feedback mcp client', ${['http://localhost/callback']})
+  `
+  const familyId = randomUUID()
+  await sql`
+    INSERT INTO oauth_token_families (family_id, user_id, client_id)
+    VALUES (${familyId}, ${userId}, ${clientId})
+  `
+  const token = `oat_${randomBytes(32).toString('hex')}`
+  const tokenHash = createHash('sha256').update(token).digest('hex')
+  await sql`
+    INSERT INTO oauth_access_tokens (token_hash, client_id, user_id, scope, resource, family_id, expires)
+    VALUES (${tokenHash}, ${clientId}, ${userId}, ${scopes.join(' ')}, ${meta.resource}, ${familyId}, now() + interval '1 hour')
+  `
+  return token
+}
+
+// One JSON-RPC tools/call over Streamable HTTP. The stateless transport
+// answers with an SSE frame; unwrap the data line to the tool result.
+export async function callMcpTool(
+  token: string,
+  name: string,
+  args: Record<string, unknown>
+): Promise<McpToolResult> {
+  const res = await fetch(nuxtUrl('/mcp'), {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'accept': 'application/json, text/event-stream',
+      'mcp-protocol-version': '2025-11-25',
+      'authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } })
+  })
+  const text = await res.text()
+  expect(res.status, text).toBe(200)
+  const dataLine = text.trim().split('\n').find(l => l.startsWith('data:'))
+  const rpc = JSON.parse(dataLine ? dataLine.slice('data:'.length).trim() : text) as { result?: McpToolResult, error?: unknown }
+  expect(rpc.error, JSON.stringify(rpc.error)).toBeUndefined()
+  return rpc.result!
+}
+
 // Wipe every feedback_* / projects / swimlanes / cards / card_column_history /
 // feedback_attachments row owned by data this layer's tests created. Anything
 // linked to a user whose email is `test-%@example.com` is fair game — the
@@ -196,4 +262,9 @@ export async function cleanupFeedbackTestData(sql: ReturnType<typeof postgres>):
   // explicitly wipe.
   await sql`DELETE FROM orgs WHERE slug LIKE 'test-feedback-%'`
   await sql`DELETE FROM users WHERE email LIKE 'test-feedback-%@example.com'`
+
+  // OAuth clients minted by `issueMcpBearer`. Their token families and access
+  // tokens cascade off the user rows deleted just above, so the client rows
+  // are unreferenced by the time this runs.
+  await sql`DELETE FROM oauth_clients WHERE client_id LIKE 'test-feedback-%'`
 }

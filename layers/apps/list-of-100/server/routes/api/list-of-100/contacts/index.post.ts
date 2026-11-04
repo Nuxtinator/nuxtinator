@@ -3,7 +3,7 @@
 // The UI surfaces a warning past 100; the server allows the row.
 
 import { z } from 'zod'
-import { withOrgPermission } from '#tenant/server'
+import { withUserPermission } from '#core/server/utils/personal-apps'
 import { logCreate } from '#core/server/utils/activity-logger'
 
 const Body = z.object({
@@ -14,7 +14,7 @@ const Body = z.object({
 })
 
 export default defineEventHandler(async (event) => {
-  return await withOrgPermission(event, { appId: 'list-of-100' }, 'list-of-100.write', async (tx, ctx) => {
+  return await withUserPermission(event, { appId: 'list-of-100' }, 'list-of-100.write', async (tx, ctx) => {
     const parsed = Body.safeParse(await readBody(event))
     if (!parsed.success) {
       throw createError({ statusCode: 400, statusMessage: 'Invalid body', data: parsed.error.flatten() })

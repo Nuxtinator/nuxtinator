@@ -1,6 +1,6 @@
 import type { H3Event } from 'h3'
 import { db } from '#core/server/utils/database'
-import { getUserPermissions } from '#core/server/utils/rbac'
+import { getUserPermissionsForRequest } from '#tenant/server'
 import type { Permission } from '#core/app/utils/permissions'
 import { isRegisteredPermission } from '#core/server/utils/permissions-registry'
 import { sha256Hex } from './oauth-crypto'
@@ -72,6 +72,12 @@ function sendAuthError(event: H3Event, status: number, opts: UnauthorizedOpts, e
     statusCode: status,
     statusMessage: errorKey
   })
+}
+
+// 403 for a valid token that lacks `scope`, with the `insufficient_scope`
+// challenge clients use to ask the user for more.
+export function rejectInsufficientScope(event: H3Event, scope: string): never {
+  sendAuthError(event, 403, { requiredScope: scope, error: 'insufficient_scope' }, 'Forbidden')
 }
 
 // Validates token + audience + family + client-enabled. Does NOT enforce a
@@ -148,7 +154,7 @@ export async function requireBearerScope(event: H3Event, requiredScope: string):
   const auth = await requireValidBearer(event, requiredScope)
 
   if (!auth.scopes.includes(requiredScope)) {
-    sendAuthError(event, 403, { requiredScope, error: 'insufficient_scope' }, 'Forbidden')
+    rejectInsufficientScope(event, requiredScope)
   }
 
   // RBAC check: scope alone does not grant — current user permission is source of truth.
@@ -156,7 +162,7 @@ export async function requireBearerScope(event: H3Event, requiredScope: string):
   // Runtime registry check (`isRegisteredPermission`), not the host's empty
   // static PERMISSIONS array — layer-contributed scopes must reach the RBAC gate.
   if (requiredScope !== OFFLINE_ACCESS_SCOPE && isRegisteredPermission(requiredScope)) {
-    const perms = await getUserPermissions(auth.userId)
+    const perms = await getUserPermissionsForRequest(event, auth.userId)
     if (!perms.has(requiredScope as Permission)) {
       sendAuthError(event, 403, { requiredScope, error: 'insufficient_scope' }, 'Forbidden')
     }

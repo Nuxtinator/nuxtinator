@@ -1,0 +1,24 @@
+{
+  "name": "helpinator-widget",
+  "version": "0.1.0",
+  "description": "Portable <helpinator-widget> Vite IIFE web component — AI help chat for any site.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "build:watch": "vite build --watch"
+  },
+  "dependencies": {
+    "dompurify": "^3.4.13",
+    "marked": "^14.1.0",
+    "vue": "^3.5.20"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "terser": "^5.46.0",
+    "vite": "^5.4.21"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

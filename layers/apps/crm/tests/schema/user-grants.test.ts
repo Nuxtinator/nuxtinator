@@ -87,6 +87,22 @@ describe('user-grants routes', () => {
     expect(deniedAgain.statusCode).toBe(403)
   })
 
+  it('a non-admin grantor can only grant permissions they hold', async () => {
+    const { org, auth } = await createCrmOrgWith(sql, ['admin'])
+    const designer = await addCrmMember(sql, org.id, ['member'])
+    const other = await addCrmMember(sql, org.id, ['member'])
+    await postGrant(withOrgHeader(auth, org.slug), designer.user.id, 'crm.schema.manage')
+    const designerOpts = withOrgHeader(designer.auth, org.slug)
+
+    const escalate = await postGrant(designerOpts, designer.user.id, 'crm.contacts.view_all').catch(e => e)
+    expect(escalate.statusCode).toBe(403)
+    const forOther = await postGrant(designerOpts, other.user.id, 'crm.contacts.view_all').catch(e => e)
+    expect(forOther.statusCode).toBe(403)
+
+    const held = await postGrant(designerOpts, other.user.id, 'crm.schema.manage')
+    expect(held.items).toMatchObject([{ permission: 'crm.schema.manage' }])
+  })
+
   it('rejects non-crm slugs, unregistered crm slugs, and non-member targets', async () => {
     const { org, auth } = await createCrmOrgWith(sql, ['admin'])
     const member = await addCrmMember(sql, org.id, ['member'])

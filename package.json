@@ -9,6 +9,7 @@
     "dev",
     "layers/core",
     "layers/tenancy",
+    "layers/social-auth",
     "layers/email-mailgun",
     "layers/ai",
     "layers/oauth",
@@ -22,6 +23,23 @@
     "layers/apps/context",
     "layers/apps/crm",
     "layers/apps/inbox",
+    "layers/apps/helpinator",
     "layers/apps/workflows"
-  ]
+  ],
+  "//overrides": "Minimum patched versions for transitive dependencies carrying published advisories. Every pin stays inside the major its dependents declare, so it only lifts the floor. Drop an entry once every dependent resolves at or above it on its own.",
+  "overrides": {
+    "@babel/core": "^7.29.7",
+    "@hono/node-server": "^1.19.17",
+    "body-parser": "^2.3.0",
+    "brace-expansion": "^5.0.9",
+    "fast-uri": "^3.1.5",
+    "form-data": "^4.0.6",
+    "hono": "^4.13.2",
+    "ip-address": "^10.5.0",
+    "js-yaml": "^4.3.1",
+    "nanoid": "^3.3.18",
+    "postcss": "^8.5.26",
+    "qs": "^6.15.3",
+    "tar": "^7.5.22"
+  }
 }

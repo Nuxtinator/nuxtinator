@@ -7,6 +7,8 @@ import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import { getRolePermissions } from '#core/server/utils/rbac'
 import { createNotification } from '#core/server/utils/notifications'
+import { getSetting } from '#core/server/utils/settings-store'
+import { INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_NOTIFY_USER_IDS, sanitizeInboxNotifyUserIds } from './inbox-settings'
 
 type Tx = Transaction<Database>
 
@@ -46,20 +48,27 @@ export async function inboxUsersWithAccess(tx: Tx, orgId: string | null): Promis
   }
 
   // Additive per-user grants (core user_permission_grants; RLS scopes the
-  // read to the active org in multi mode).
+  // read to the active org in multi mode). A grant only counts for a current
+  // member.
+  const memberIds = new Set(candidates.map(c => c.id))
   const granted = await tx
     .selectFrom('user_permission_grants')
     .select('user_id')
     .where('permission', '=', 'inbox.access')
     .execute()
-  for (const g of granted) out.add(g.user_id)
+  for (const g of granted) {
+    if (memberIds.has(g.user_id)) out.add(g.user_id)
+  }
 
   return [...out]
 }
 
-// New-mail notice: the assignee gets an immediate email; an unassigned
-// conversation raises a bell-only broadcast to everyone with inbox access
-// (email 'none' — a busy shared inbox must not mass-mail the whole team).
+// New-mail notice: the assignee gets an immediate email, provided they can
+// still open the inbox. Otherwise (unassigned, or the assignee has left or
+// lost access) it raises a bell to everyone with inbox access, and additionally
+// emails the users named in the `inbox:notify_user_ids` setting — an explicit
+// opt-in list, so a busy shared inbox never mass-mails the whole team. With
+// the setting empty (the default) the broadcast is bell-only.
 // The notification body is a plain-text snapshot (subject + excerpt + sender +
 // attachment list) — core rows carry title/body/link only, so richer HTML
 // would need an inbox-owned mailer.
@@ -91,7 +100,8 @@ export async function inboxNotifyNewMessage(
   const body = lines.length ? lines.join('\n') : null
   const link = `/inbox/${opts.conversationId}`
 
-  if (opts.assignedUserId) {
+  const userIds = await inboxUsersWithAccess(tx, opts.orgId)
+  if (opts.assignedUserId && userIds.includes(opts.assignedUserId)) {
     await createNotification(tx, {
       userId: opts.assignedUserId,
       appId: 'inbox',
@@ -103,15 +113,20 @@ export async function inboxNotifyNewMessage(
     return
   }
 
-  const userIds = await inboxUsersWithAccess(tx, opts.orgId)
   if (userIds.length === 0) return
+  // Intersected with inbox access rather than trusted outright: a stored id
+  // whose user has since lost the app should not be mailed a link they can't
+  // open.
+  const emailed = new Set(sanitizeInboxNotifyUserIds(
+    await getSetting<string[]>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_NOTIFY_USER_IDS)
+  ))
   await createNotification(tx, userIds.map(userId => ({
     userId,
     appId: 'inbox',
     title,
     body,
     link,
-    email: 'none' as const
+    email: emailed.has(userId) ? 'immediate' as const : 'none' as const
   })))
 }
 

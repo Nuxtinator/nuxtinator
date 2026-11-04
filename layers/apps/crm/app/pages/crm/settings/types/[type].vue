@@ -17,6 +17,7 @@ const admin = useCrmSchemaAdmin()
 const crmPath = useCrmPath()
 
 const sidebarOpen = ref(false)
+const { shown: sidebarShown } = useCrmSidebar()
 const ready = ref(false)
 const pageError = ref<string | null>(null)
 const fieldSettings = ref<CrmTypeFields | null>(null)
@@ -90,6 +91,27 @@ async function toggleTypeHidden(hidden: boolean) {
     await admin.updateType(typeKey.value, { hidden })
   } catch (err) {
     pageError.value = crmErrorMessage(err, 'Failed to update record type')
+  } finally {
+    busy.value = false
+  }
+}
+
+// --- Closing -----------------------------------------------------------------
+
+// Single-choice fields that can hold why a record was closed.
+const reasonFieldItems = computed(() =>
+  (fieldSettings.value?.fields ?? [])
+    .filter(f => f.kind === 'key_select' && !f.column && !f.orphan)
+    .map(f => ({ label: f.label, value: f.key }))
+)
+
+async function setReasonField(key: string | null) {
+  busy.value = true
+  pageError.value = null
+  try {
+    await admin.updateType(typeKey.value, { closedReasonField: key })
+  } catch (err) {
+    pageError.value = crmErrorMessage(err, 'Failed to update the reason field')
   } finally {
     busy.value = false
   }
@@ -170,9 +192,13 @@ async function moveField(field: CrmFieldSetting, dir: -1 | 1) {
   <div class="flex h-[calc(100vh-57px)] -mx-4 sm:-mx-6 lg:-mx-8 -my-6 lg:-my-8">
     <CrmSidebar v-model:open="sidebarOpen" />
 
-    <section class="flex-1 flex flex-col min-w-0 border-l-0 lg:border-l border-(--ui-border) overflow-hidden">
+    <section
+      class="flex-1 flex flex-col min-w-0 border-l-0 border-(--ui-border) overflow-hidden"
+      :class="{ 'lg:border-l': sidebarShown }"
+    >
       <header class="flex items-center gap-2 px-4 py-3 border-b border-(--ui-border) bg-(--ui-bg)">
         <UButton
+          v-if="sidebarShown"
           class="lg:hidden"
           icon="i-lucide-menu"
           variant="ghost"
@@ -293,6 +319,42 @@ async function moveField(field: CrmFieldSetting, dir: -1 | 1) {
               }"
               @submit="onSaveMeta"
             />
+          </section>
+
+          <section
+            v-if="!isOrphan && typeInfo.statusField"
+            class="space-y-3"
+          >
+            <h2 class="text-base font-semibold">
+              Closing
+              <InfoTip text="Records are closed (archived) by setting a status marked as closed in the status field's options. Pick the field that holds why: closing then asks for a reason, and reopening clears it." />
+            </h2>
+            <UFormField label="Reason closed field">
+              <div class="flex items-center gap-2">
+                <USelectMenu
+                  :model-value="typeInfo.closedReasonField ?? undefined"
+                  :items="reasonFieldItems"
+                  value-key="value"
+                  label-key="label"
+                  placeholder="No reason field"
+                  :search-input="false"
+                  class="w-full sm:w-72"
+                  :disabled="busy"
+                  @update:model-value="setReasonField(String($event))"
+                />
+                <UButton
+                  v-if="typeInfo.closedReasonField"
+                  icon="i-lucide-x"
+                  variant="ghost"
+                  color="neutral"
+                  size="sm"
+                  aria-label="Reset the reason field to the default"
+                  title="Reset to the default"
+                  :disabled="busy"
+                  @click="setReasonField(null)"
+                />
+              </div>
+            </UFormField>
           </section>
 
           <section

@@ -23,7 +23,14 @@ in production and Mailpit (`localhost:1025`, UI on `:8025`) in development.
   sends); Mailgun unsubscribes flip the channel's marketing consent; contact
   chips + create-contact-from-conversation on every thread.
 - **Triage UI**: 3-pane inbox (scope folders / list / thread) with search,
-  status strip, assignment, review queue, and a rich-text composer.
+  status strip, assignment, review queue, bulk actions (close / assign / tag a
+  checked set), and a rich-text composer whose To line shows whether the reply
+  address is verified or suppressed (sending is blocked while a suppression
+  stands).
+- **Housekeeping**: a nightly sweep closes pending conversations quiet for
+  longer than the org's threshold (default 14 days, 0 disables; held threads
+  never expire); contact-form senders get an address-confirmation link in the
+  auto-ack, redeemed at `/api/inbox/verify/:token`.
 
 ## Environment
 
@@ -33,11 +40,16 @@ in production and Mailpit (`localhost:1025`, UI on `:8025`) in development.
 | `MAILGUN_WEBHOOK_SIGNING_KEY` | prod | Webhook HMAC verification — the **HTTP webhook signing key** (Settings → API Keys), NOT the sending key |
 | `INBOX_DOMAIN` | yes | Domain inbound mail is addressed to (single-tenant default; per-org override via settings) |
 | `INBOX_CONTACT_ADDRESS` | yes | Shared From identity + base of `contact+<token>` reply addresses |
+| `INBOX_SLUG_ADDRESSES` | no | `true` in multi-tenant deploys where orgs share `INBOX_DOMAIN`: an org on it gets `<org slug>@INBOX_DOMAIN` as its contact address (derived, never stored) and new mail to it routes by slug. Personal aliases are off on the shared domain; an operator can still give an org its own domain |
 | `INBOX_SEND_SWEEP_SECONDS` | no | Send sweep cadence (default 20) |
+| `INBOX_AUTO_CLOSE_CRON` | no | UTC cron for the nightly auto-close sweep (default `0 4 * * *`); the per-org quiet threshold is an inbox setting |
+| `NUXT_PUBLIC_SITE_URL` | yes | Canonical origin for links in mail (the auto-ack's confirmation link is dropped when unset) |
 
 Multi-tenant: each org claims its own inbound (sub)domain via the settings store
-(namespace `inbox`, keys `inbound_domain` / `contact_address` / `auto_ack_enabled`).
-Two orgs must never claim the same domain — such mail is unroutable and dropped.
+(namespace `inbox`, keys `inbound_domain` / `contact_address` / `auto_ack_enabled` /
+`auto_close_days`).
+Two orgs must never claim the same domain — such mail is unroutable and dropped,
+except the shared domain under `INBOX_SLUG_ADDRESSES`, which routes by slug.
 
 ## Mailgun setup (per environment)
 
@@ -62,10 +74,37 @@ should return 4xx (never 404) — that confirms the route is reachable.
 ## Permissions
 
 - `inbox.access` — open the app, read, triage (status/assign/review flags)
+- `inbox.read` — read conversations from an AI client over MCP (no triage)
 - `inbox.send` — compose and reply, spam blocklist
+- `inbox.settings.manage` — the settings page: inbox configuration and
+  teammates' sending aliases
 
 Default grants: `admin` everything, `member` nothing (grant via role or per-user
-grants).
+grants). The `inbox_agent` role has `inbox.access`, `inbox.read` and `inbox.send`.
+
+## MCP tools
+
+When the host also loads the MCP layer, the inbox registers tools for AI
+clients (all with `appId: 'inbox'` and an optional `org` slug):
+
+| Tool | Scope | Effect |
+|---|---|---|
+| `inbox_list_conversations` | `inbox.read` | read |
+| `inbox_read_conversation` | `inbox.read` | read |
+| `inbox_list_for_record` | `inbox.read` | read |
+| `inbox_list_assignees` | `inbox.read` | read |
+| `inbox_get_drafting_background` | `inbox.read` | read |
+| `inbox_save_draft` | `inbox.send` | write (AI draft, never sent) |
+| `inbox_add_comment` | `inbox.access` | write |
+| `inbox_update_conversation` | `inbox.access` | write (status, assignee, tags; never spam) |
+| `inbox_send_reply` | `inbox.send` | destructive (sends mail outside the org) |
+
+Text written by outside senders is wrapped in `<untrusted_email nonce="…">`
+markers with a fresh nonce per response. Held messages return no body unless
+the call sets `includeHeld`. Writes show on the conversation timeline under the
+user, labelled "via <client name>". Replies to a suppressed address, or sent
+while the inbox has no sending address, are refused with 409 here and in the
+composer route alike.
 
 ## Local development
 

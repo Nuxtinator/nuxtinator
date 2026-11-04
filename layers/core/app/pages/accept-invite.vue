@@ -5,21 +5,39 @@ definePageMeta({
 
 const router = useRouter()
 const route = useRoute()
-const { checkAuth } = useAuth()
+const { user, checkAuth } = useAuth()
 
 const token = computed(() => (typeof route.query.token === 'string' ? route.query.token : ''))
 
 const state = reactive({
+  email: '',
   display_name: '',
   password: '',
   confirmPassword: ''
 })
 
-const inviteEmail = ref('')
+interface InviteInfo {
+  kind: 'email' | 'link'
+  email: string | null
+  display_name: string
+  inviter_name: string | null
+  orgs: Array<{ slug: string, name: string }>
+  apps: Array<{ id: string, title: string }>
+  share: boolean
+  can_create_account: boolean
+}
+
+const info = ref<InviteInfo | null>(null)
 const loading = ref(false)
 const submitting = ref(false)
-const error = ref('')
+const error = ref(authErrorMessage(route.query.auth_error))
+const verificationSent = ref(false)
 const inviteState = ref<'loading' | 'valid' | 'invalid' | 'expired'>('loading')
+
+const joiningWhat = computed(() => {
+  const names = [...(info.value?.orgs.map(o => o.name) ?? []), ...(info.value?.apps.map(a => a.title) ?? [])]
+  return names.length ? names.join(', ') : 'this workspace'
+})
 
 onMounted(async () => {
   if (!token.value) {
@@ -28,11 +46,9 @@ onMounted(async () => {
   }
   loading.value = true
   try {
-    const data = await $fetch<{ email: string, display_name: string }>(
-      '/api/auth/invite-info',
-      { query: { token: token.value } }
-    )
-    inviteEmail.value = data.email
+    const data = await $fetch<InviteInfo>('/api/auth/invite-info', { query: { token: token.value } })
+    info.value = data
+    state.email = data.email ?? ''
     state.display_name = data.display_name
     inviteState.value = 'valid'
   } catch (err: any) {
@@ -50,6 +66,10 @@ const passwordMatch = computed(() => {
 async function handleAccept() {
   error.value = ''
 
+  if (info.value?.kind === 'link' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(state.email.trim())) {
+    error.value = 'Enter a valid email address'
+    return
+  }
   if (state.display_name.trim().length < 2) {
     error.value = 'Display name must be at least 2 characters'
     return
@@ -66,22 +86,49 @@ async function handleAccept() {
 
   submitting.value = true
   try {
-    const res = await $fetch<{ success: boolean, redirect: string }>('/api/auth/accept-invite', {
+    const res = await $fetch<{ success: boolean, redirect?: string, requiresVerification?: boolean }>('/api/auth/accept-invite', {
       method: 'POST',
       body: {
         token: token.value,
         password: state.password,
-        display_name: state.display_name.trim()
+        display_name: state.display_name.trim(),
+        ...(info.value?.kind === 'link' ? { email: state.email.trim().toLowerCase() } : {})
       }
     })
+    if (res.requiresVerification) {
+      verificationSent.value = true
+      return
+    }
     await checkAuth()
-    // Server picks the right landing page (single-org → /@<slug>/, multi → /orgs).
+    // Server picks the right landing page (single-org → /@<slug>/dashboard, multi → /orgs).
     await navigateTo(res?.redirect || '/orgs', { replace: true })
   } catch (err: any) {
     error.value = err?.data?.statusMessage || err?.data?.message || 'Failed to accept invitation. Please try again.'
   } finally {
     submitting.value = false
   }
+}
+
+// Signed in already: the invite is accepted into this account.
+async function handleJoin() {
+  error.value = ''
+  submitting.value = true
+  try {
+    const res = await $fetch<{ success: boolean, redirect?: string }>('/api/auth/accept-invite', {
+      method: 'POST',
+      body: { token: token.value }
+    })
+    await navigateTo(res?.redirect || launcherPath(), { replace: true })
+  } catch (err: any) {
+    error.value = err?.data?.statusMessage || 'Failed to accept invitation. Please try again.'
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function useDifferentAccount() {
+  await $fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
+  await checkAuth()
 }
 </script>
 
@@ -92,7 +139,7 @@ async function handleAccept() {
         Accept Invitation
       </h1>
       <p class="text-(--ui-text-muted)">
-        Set your password to activate your account
+        Create your account, or join with one you already have
       </p>
     </div>
 
@@ -151,6 +198,96 @@ async function handleAccept() {
         </UButton>
       </div>
 
+      <div
+        v-else-if="verificationSent"
+        class="space-y-4"
+      >
+        <UAlert
+          color="success"
+          variant="soft"
+          title="Check your email"
+          description="We sent a verification link to your address. Verify it, then sign in."
+        />
+        <UButton
+          color="primary"
+          size="lg"
+          block
+          @click="router.push('/login')"
+        >
+          Go to Sign In
+        </UButton>
+      </div>
+
+      <div
+        v-else-if="user"
+        class="space-y-6"
+      >
+        <UAlert
+          v-if="error"
+          color="error"
+          variant="soft"
+          :title="error"
+        />
+        <p
+          v-if="info?.share"
+          class="text-(--ui-text-muted)"
+        >
+          {{ info.inviter_name || 'Someone' }} shared something with you.
+        </p>
+        <p
+          v-else
+          class="text-(--ui-text-muted)"
+        >
+          <template v-if="info?.inviter_name">
+            {{ info.inviter_name }} invited you to join
+          </template>
+          <template v-else>
+            You've been invited to join
+          </template>
+          <strong>{{ joiningWhat }}</strong>.
+        </p>
+        <p class="text-(--ui-text-muted)">
+          You're signed in as <strong>{{ user.email }}</strong>.
+        </p>
+        <UButton
+          color="primary"
+          size="lg"
+          block
+          :loading="submitting"
+          @click="handleJoin"
+        >
+          {{ info?.share ? 'Accept' : 'Join' }} as {{ user.email }}
+        </UButton>
+        <UButton
+          color="neutral"
+          variant="ghost"
+          size="lg"
+          block
+          :disabled="submitting"
+          @click="useDifferentAccount"
+        >
+          Use a different account
+        </UButton>
+      </div>
+
+      <div
+        v-else-if="info?.share && !info.can_create_account"
+        class="space-y-6"
+      >
+        <p class="text-(--ui-text-muted)">
+          {{ info.inviter_name || 'Someone' }} shared something with you. Sign in to accept it.
+          If you don't have an account yet, ask the site's administrator for one.
+        </p>
+        <UButton
+          color="primary"
+          size="lg"
+          block
+          :to="`/login?redirect=${encodeURIComponent(route.fullPath)}`"
+        >
+          Sign in
+        </UButton>
+      </div>
+
       <form
         v-else
         class="space-y-6"
@@ -165,12 +302,36 @@ async function handleAccept() {
           @close="error = ''"
         />
 
-        <UFormField label="Email">
+        <p
+          v-if="info?.share"
+          class="text-(--ui-text-muted)"
+        >
+          {{ info.inviter_name || 'Someone' }} shared something with you.
+        </p>
+        <p
+          v-else-if="info?.orgs.length || info?.apps.length"
+          class="text-(--ui-text-muted)"
+        >
+          You've been invited to join <strong>{{ joiningWhat }}</strong>.
+        </p>
+
+        <AuthProviderButtons
+          intent="login"
+          :invite="token"
+          separator="or create an account"
+        />
+
+        <UFormField
+          label="Email"
+          name="email"
+          :required="info?.kind === 'link'"
+        >
           <UInput
-            :model-value="inviteEmail"
+            v-model="state.email"
             type="email"
             size="lg"
-            disabled
+            :disabled="info?.kind === 'email' || submitting"
+            autocomplete="email"
             class="w-full"
           />
         </UFormField>
@@ -236,8 +397,19 @@ async function handleAccept() {
           :loading="submitting"
           :disabled="submitting || !state.password || !state.confirmPassword || !passwordMatch"
         >
-          Activate Account
+          Create Account
         </UButton>
+
+        <p class="text-center text-sm text-(--ui-text-muted)">
+          Already have an account?
+          <NuxtLink
+            :to="`/login?redirect=${encodeURIComponent(route.fullPath)}`"
+            class="underline"
+          >
+            Sign in
+          </NuxtLink>
+          to accept with it.
+        </p>
       </form>
     </UCard>
   </div>

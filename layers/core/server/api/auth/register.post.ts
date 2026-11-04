@@ -1,20 +1,21 @@
 import bcrypt from 'bcrypt'
-import jwt from 'jsonwebtoken'
-import { randomUUID } from 'crypto'
-import { db, sql } from '../../utils/database'
-import { logRegisterAttempt, logEvent } from '../../utils/activity-logger'
+import { db } from '../../utils/database'
 import { sendTemplateEmail } from '#email'
-import { checkRateLimit, logRateLimitExceeded } from '../../utils/rate-limit'
-import { readBody, getHeader, setResponseHeader, setCookie } from 'h3'
+import { consumeRateLimit, logRateLimitExceeded } from '../../utils/rate-limit'
+import { getClientIp } from '../../utils/client-ip'
+import { readBody, getHeader, setResponseHeader } from 'h3'
 import { getSiteUrl } from '../../utils/site-url'
+import { createUserAccount } from '../../utils/accounts'
+import { normalizeEmail } from '../../utils/email-address'
+import { isSelfRegistrationOpen } from '../../utils/registration'
+import { startSession, nativeTokenFields } from '../../utils/sessions'
 import { useRuntimeConfig, createError } from '#imports'
-
-// Advisory-lock key used to serialize concurrent registrations so the
-// first-user count check and insert can't interleave (ASCII 'reg1').
-const REGISTRATION_LOCK_KEY = 1919248689
+import { launcherPath } from '#core/app/utils/launcher'
 
 export default defineEventHandler(async (event) => {
-  const { email, password, display_name } = await readBody(event)
+  const body = await readBody(event)
+  const { password, display_name } = body ?? {}
+  const email = normalizeEmail(body?.email)
 
   if (!email || !password || !display_name) {
     throw createError({ statusCode: 400, statusMessage: 'Email, password, and display name are required' })
@@ -24,10 +25,14 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Display name must be at least 2 characters long' })
   }
 
-  // Check rate limit by IP
-  const clientIp = getHeader(event, 'x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  if (!(await isSelfRegistrationOpen(db))) {
+    throw createError({ statusCode: 403, statusMessage: 'Registration is closed', data: { code: 'registration_closed' } })
+  }
+
+  // Rate limit by client IP; counting and recording the attempt is one atomic step.
+  const clientIp = getClientIp(event)
   const userAgent = getHeader(event, 'user-agent') || undefined
-  const rateCheck = await checkRateLimit('REGISTER_ATTEMPT', 'ip', clientIp, 15 * 60 * 1000, 10)
+  const rateCheck = await consumeRateLimit('REGISTER_ATTEMPT', 'ip', clientIp, 15 * 60 * 1000, 10)
 
   if (!rateCheck.allowed) {
     logRateLimitExceeded(clientIp, '/api/auth/register', userAgent)
@@ -38,89 +43,20 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // Log this registration attempt
-  logRegisterAttempt(clientIp, userAgent)
-
   // Hash password
   const hashedPassword = await bcrypt.hash(password, 12)
 
-  // Generate unique ID and token key
-  const userId = randomUUID()
-  const tokenKey = randomUUID()
-  const now = new Date().toISOString()
-  const tokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+  // First-user check + insert run atomically inside a transaction (see
+  // createUserAccount). The activity-log insert also rides on this
+  // transaction so the "who got the admin role" audit row commits with the
+  // user row.
+  const { userId, tokenKey, isFirstUser } = await db.transaction().execute(trx =>
+    createUserAccount(trx, { email, display_name, passwordHash: hashedPassword, verified: false, selfSignup: true }, userAgent)
+  )
 
-  // First-user check + insert run atomically inside a transaction, with a
-  // session-level advisory lock to serialize concurrent registrations. The
-  // activity-log insert also rides on this transaction so the "who got the
-  // admin role" audit row commits with the user row.
-  const { isFirstUser } = await db.transaction().execute(async (trx) => {
-    await sql`SELECT pg_advisory_xact_lock(${sql.lit(REGISTRATION_LOCK_KEY)})`.execute(trx)
-
-    // Check if user already exists
-    const existingUser = await trx
-      .selectFrom('users')
-      .select('id')
-      .where('email', '=', email)
-      .executeTakeFirst()
-
-    if (existingUser) {
-      throw createError({ statusCode: 409, statusMessage: 'User with this email already exists' })
-    }
-
-    const countRow = await trx
-      .selectFrom('users')
-      .select(eb => eb.fn.count<string>('id').as('count'))
-      .executeTakeFirst()
-
-    const firstUser = Number(countRow?.count ?? 0) === 0
-
-    // First user is auto-promoted to host admin (single-bit, not a role).
-    // Org-level admin assignment happens later when an org is created — host
-    // admin is orthogonal to org membership.
-    await trx
-      .insertInto('users')
-      .values({
-        id: userId,
-        created: now,
-        updated: now,
-        email,
-        password: hashedPassword,
-        verified: firstUser,
-        is_admin: firstUser,
-        display_name,
-        avatar: '',
-        token_key: tokenKey,
-        token_expires_at: firstUser ? null : tokenExpiresAt
-      })
-      .execute()
-
-    if (firstUser) {
-      await logEvent({
-        eventType: 'first_user_promoted',
-        userId,
-        userAgent,
-        metadata: { email }
-      }, trx)
-    }
-
-    return { isFirstUser: firstUser }
-  })
-
-  // First user gets auto-logged-in — no verification email, JWT cookie set directly.
+  // First user gets auto-logged-in — no verification email, session started directly.
   if (isFirstUser) {
-    const token = jwt.sign(
-      { userId, email, display_name },
-      useRuntimeConfig().jwtSecret,
-      { expiresIn: '120d' }
-    )
-
-    setCookie(event, 'auth-token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 120
-    })
+    const tokens = await startSession(event, { id: userId, email, display_name })
 
     return {
       success: true,
@@ -128,8 +64,9 @@ export default defineEventHandler(async (event) => {
       requiresVerification: false,
       // Multi-tenant: first user has no orgs yet — land them on the picker,
       // where they create the first org via the host-admin endpoint. Single-
-      // tenant: no orgs exist, so land on home.
-      redirect: useRuntimeConfig(event).public.tenancy === true ? '/orgs' : '/',
+      // tenant: no orgs exist, so land on the launcher.
+      redirect: useRuntimeConfig(event).public.tenancy === true ? '/orgs' : launcherPath(),
+      ...nativeTokenFields(event, tokens),
       user: {
         id: userId,
         email,

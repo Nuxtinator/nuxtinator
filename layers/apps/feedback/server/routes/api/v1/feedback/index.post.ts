@@ -19,6 +19,7 @@ import { getWidgetAuthUser } from '../../../../utils/widget-auth'
 import { enforceWidgetRateLimit, widgetClientIp } from '../../../../utils/rate-limit'
 import { withProjectOrgContext } from '#tenant/server'
 import { logCreate } from '#core/server/utils/activity-logger'
+import { afterCommit } from '#core/server/utils/after-commit'
 import { uploadToS3, generateSignedUrl, deleteFromS3 } from '#core/server/utils/storage'
 import { notifyNewFeedbackCard } from '../../../../utils/notify-recipients'
 
@@ -48,6 +49,18 @@ function clampString(v: unknown, max = CHAR_CAP): string {
   return s.length > max ? s.slice(0, max) : s
 }
 
+// An absolute http(s) URL, else ''. Staff open page_url as a link, so other
+// schemes (javascript:, data:) are never stored.
+function httpUrl(v: unknown): string {
+  const s = clampString(v)
+  try {
+    const protocol = new URL(s).protocol
+    return protocol === 'http:' || protocol === 'https:' ? s : ''
+  } catch {
+    return ''
+  }
+}
+
 interface IncomingFile {
   kind: 'screenshot' | 'attachment'
   filename: string
@@ -61,10 +74,10 @@ function sanitizeFilename(name: string): string {
 }
 
 export default defineEventHandler(async (event) => {
-  const authUser = getWidgetAuthUser(event)
   // Per-IP cap first — before parsing multipart / reading file bytes. Anonymous
   // submissions are the abuse path, so they get a tighter limit than signed-in.
-  await enforceWidgetRateLimit(event, 'ratelimit.feedback.submit', 'ip', widgetClientIp(event), authUser ? 20 : 5, 60_000)
+  const signedIn = !!getWidgetAuthUser(event, null)
+  await enforceWidgetRateLimit(event, 'ratelimit.feedback.submit', 'ip', widgetClientIp(event), signedIn ? 20 : 5, 60_000)
 
   const contentType = (getHeader(event, 'content-type') || '').toLowerCase()
   const isMultipart = contentType.startsWith('multipart/form-data')
@@ -127,6 +140,7 @@ export default defineEventHandler(async (event) => {
   if (!projectId) {
     throw createError({ statusCode: 400, statusMessage: 'project_id required' })
   }
+  const authUser = getWidgetAuthUser(event, projectId)
   // Per-project cap before any S3 upload — bounds flooding of a single target
   // even across rotating IPs.
   await enforceWidgetRateLimit(event, 'ratelimit.feedback.submit.project', 'project', projectId, 60, 60_000)
@@ -182,7 +196,7 @@ export default defineEventHandler(async (event) => {
     problem_description,
     suggested_fix,
     screenshot_url: typeof body.screenshot_url === 'string' ? body.screenshot_url : '',
-    page_url: typeof body.page_url === 'string' ? body.page_url : '',
+    page_url: httpUrl(body.page_url),
     page_path: typeof body.page_path === 'string' ? body.page_path : '',
     locale: typeof body.locale === 'string' ? body.locale : '',
     referrer: typeof body.referrer === 'string' ? body.referrer : '',
@@ -256,15 +270,16 @@ export default defineEventHandler(async (event) => {
         : []
 
       // Notify the project's configured digest recipients about the new inbox
-      // card. Writes in this txn so a card and its notices commit together;
+      // card once it has committed, so a failed notice never loses the card;
       // core's daily digest sweep turns these into one email per recipient.
-      await notifyNewFeedbackCard(tx, {
+      await afterCommit(tx, scope => scope(notifyTx => notifyNewFeedbackCard(notifyTx, {
+        cardId: card.id,
         cardTitle: notificationTitle,
         projectName: project?.name ?? null,
         subType: sub,
         actorId: authUser?.userId ?? null,
         projectPostMeta: project?.post_meta
-      })
+      })))
 
       return { card, attachmentRows }
     })

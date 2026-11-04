@@ -259,7 +259,7 @@ describe('feedback cards CRUD', () => {
     expect(history[0]!.column_id).toBe(done.id)
   })
 
-  it('PATCH /:id/move: cross-project move inserts new card + deletes old', async () => {
+  it('PATCH /:id/move: cross-project move keeps the card and its attachments', async () => {
     const { org, auth } = await createFeedbackOrgWith(sql, ['admin'])
     const projectA = await createTestProject(sql, { org_id: org.id })
     const projectB = await createTestProject(sql, { org_id: org.id })
@@ -272,27 +272,35 @@ describe('feedback cards CRUD', () => {
       column_id: doing.id,
       title: 'cross-proj'
     })
+    await sql`
+      INSERT INTO feedback_attachments (card_id, kind, storage_key, filename, mime_type, size_bytes, org_id)
+      VALUES (${card.id}, 'screenshot', 'test/key.png', 'shot.png', 'image/png', 1, ${org.id})
+    `
 
-    const moved = await $fetch<{ id: string, project_id: string, title: string }>(
+    // The panel sends the card's current swimlane, which belongs to project A.
+    const moved = await $fetch<{ id: string, project_id: string, swimlane_id: string, column_id: string }>(
       `/api/feedback/cards/${card.id}/move`,
       {
         method: 'PATCH',
         body: {
           column_id: done.id,
-          swimlane_id: projectB.default_swimlane_id,
+          swimlane_id: projectA.default_swimlane_id,
           project_id: projectB.id
         },
         ...withOrgHeader(auth, org.slug)
       }
     )
 
-    // Server inserts a new row and deletes the old; the returned id is new.
-    expect(moved.id).not.toBe(card.id)
-    expect(moved.project_id).toBe(projectB.id)
-    expect(moved.title).toBe('cross-proj')
-
-    const oldRows = await sql<{ id: string }[]>`SELECT id FROM cards WHERE id = ${card.id}`
-    expect(oldRows.length).toBe(0)
+    expect(moved).toMatchObject({
+      id: card.id,
+      project_id: projectB.id,
+      swimlane_id: projectB.default_swimlane_id,
+      column_id: done.id
+    })
+    const attachments = await sql`SELECT id FROM feedback_attachments WHERE card_id = ${card.id}`
+    expect(attachments.length).toBe(1)
+    const history = await sql<{ column_id: string }[]>`SELECT column_id FROM card_column_history WHERE card_id = ${card.id}`
+    expect(history.map(h => h.column_id)).toContain(done.id)
   })
 
   it('PATCH /:id/move: 400 without column_id', async () => {

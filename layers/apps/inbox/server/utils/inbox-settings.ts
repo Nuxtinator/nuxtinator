@@ -3,7 +3,9 @@
 // register-inbox.ts with runtimeConfig-derived defaults; the DB holds only
 // explicit per-org overrides, and RLS scopes reads to the caller's org
 // through the transaction.
+import { sql } from 'kysely'
 import { getSetting } from '#core/server/utils/settings-store'
+import { urlLooksPublic } from '#core/server/utils/safe-fetch'
 import type { DbClient } from '#core/server/utils/settings'
 
 export const INBOX_SETTINGS_NAMESPACE = 'inbox'
@@ -13,6 +15,29 @@ export const INBOX_SETTING_BRAND_FROM_NAME = 'brand_from_name'
 export const INBOX_SETTING_AUTO_ACK = 'auto_ack_enabled'
 export const INBOX_SETTING_CONTACT_FORM_API_KEY = 'contact_form_api_key'
 export const INBOX_SETTING_GROUNDING_SOURCE_URLS = 'grounding_source_urls'
+export const INBOX_SETTING_NOTIFY_USER_IDS = 'notify_user_ids'
+export const INBOX_SETTING_AUTO_CLOSE_DAYS = 'auto_close_days'
+
+export const INBOX_AUTO_CLOSE_DAYS_DEFAULT = 14
+export const INBOX_AUTO_CLOSE_DAYS_MAX = 365
+
+// Coerce a stored quiet threshold into whole days. 0 disables the sweep;
+// anything non-numeric falls back to the code default, out-of-range clamps.
+export function sanitizeAutoCloseDays(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return INBOX_AUTO_CLOSE_DAYS_DEFAULT
+  return Math.min(Math.max(Math.trunc(n), 0), INBOX_AUTO_CLOSE_DAYS_MAX)
+}
+
+// Coerce a stored notify list into deduped user-id strings, preserving order.
+export function sanitizeInboxNotifyUserIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  for (const v of value) {
+    if (typeof v === 'string' && v && !out.includes(v)) out.push(v)
+  }
+  return out
+}
 
 // Sanitize a stored grounding-URL list: keep http(s) strings, trim, dedupe,
 // preserve order.
@@ -23,11 +48,22 @@ export function sanitizeGroundingUrls(value: unknown): string[] {
   for (const v of value) {
     if (typeof v !== 'string') continue
     const url = v.trim()
-    if (!/^https?:\/\//i.test(url) || seen.has(url)) continue
+    if (!/^https?:\/\//i.test(url) || !urlLooksPublic(url) || seen.has(url)) continue
     seen.add(url)
     out.push(url)
   }
   return out
+}
+
+// Whether the caller may change the inbound domain and contact address. In
+// multi mode they decide which org receives a domain's mail and whose address
+// replies come from, so only an operator admin (users.is_admin), who also sets
+// the domain up on the mail provider, may change them. Single mode has one
+// inbox, so its admins can.
+export async function inboxMailIdentityEditable(tx: DbClient, ctx: { orgId: string | null, userId: string }): Promise<boolean> {
+  if (!ctx.orgId) return true
+  const user = await tx.selectFrom('users').select('is_admin').where('id', '=', ctx.userId).executeTakeFirst()
+  return !!user?.is_admin
 }
 
 export interface InboxSettings {
@@ -35,6 +71,8 @@ export interface InboxSettings {
   // webhook's org routing. One distinct (sub)domain per org.
   inboundDomain: string
   // Shared From identity and the base of contact+<token> reply addresses.
+  // Under slug addresses, <org slug>@<shared domain> for an org on the shared
+  // domain.
   contactAddress: string
   // Display name on shared-address sends and courtesy mail ("Acme Support").
   // Personal-alias sends carry the agent's own name instead.
@@ -48,23 +86,66 @@ export interface InboxSettings {
   // Page URLs the AI grounding sync snapshots into grounding_documents. Empty =
   // the drafter grounds only on the tone guide + knowledge base.
   groundingSourceUrls: string[]
+  // Who is emailed immediately when mail lands on an unassigned conversation.
+  // Everyone with inbox access still gets the bell; only these users get mail.
+  // Empty = bell only, so a busy inbox never mass-mails the whole team.
+  notifyUserIds: string[]
+  // Days a pending conversation may sit without a contact reply before the
+  // daily sweep closes it. 0 = never auto-close.
+  autoCloseDays: number
 }
 
 export async function getInboxSettings(tx: DbClient): Promise<InboxSettings> {
-  const [inboundDomain, contactAddress, brandFromName, autoAckEnabled, contactFormApiKey, groundingSourceUrls] = await Promise.all([
+  const [inboundDomain, contactAddress, brandFromName, autoAckEnabled, contactFormApiKey, groundingSourceUrls, notifyUserIds, autoCloseDays] = await Promise.all([
     getSetting<string>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_INBOUND_DOMAIN),
     getSetting<string>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_CONTACT_ADDRESS),
     getSetting<string>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_BRAND_FROM_NAME),
     getSetting<boolean>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_AUTO_ACK),
     getSetting<string>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_CONTACT_FORM_API_KEY),
-    getSetting<string[]>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_GROUNDING_SOURCE_URLS)
+    getSetting<string[]>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_GROUNDING_SOURCE_URLS),
+    getSetting<string[]>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_NOTIFY_USER_IDS),
+    getSetting<number>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_AUTO_CLOSE_DAYS)
   ])
+  const domain = String(inboundDomain || '').toLowerCase()
+  let contact = String(contactAddress || '').toLowerCase()
+  if (!contact) contact = await inboxSlugAddressFor(tx, domain)
   return {
-    inboundDomain: String(inboundDomain || '').toLowerCase(),
-    contactAddress: String(contactAddress || '').toLowerCase(),
+    inboundDomain: domain,
+    contactAddress: contact,
     brandFromName: String(brandFromName || '').trim(),
     autoAckEnabled: autoAckEnabled !== false,
     contactFormApiKey: String(contactFormApiKey || ''),
-    groundingSourceUrls: sanitizeGroundingUrls(groundingSourceUrls)
+    groundingSourceUrls: sanitizeGroundingUrls(groundingSourceUrls),
+    notifyUserIds: sanitizeInboxNotifyUserIds(notifyUserIds),
+    autoCloseDays: sanitizeAutoCloseDays(autoCloseDays)
   }
+}
+
+// Slug addresses: every org may share INBOX_DOMAIN, where the local part is the
+// org slug. Orgs only exist with the tenancy layer, so it needs multi mode.
+export function inboxSlugAddressesEnabled(): boolean {
+  try {
+    const config = useRuntimeConfig()
+    return !!config.inboxSlugAddresses && !!config.public.tenancy
+  } catch {
+    return false
+  }
+}
+
+// The domain every org shares under slug addresses; '' when they are off.
+export function inboxSharedDomain(): string {
+  if (!inboxSlugAddressesEnabled()) return ''
+  return String(useRuntimeConfig().inboxDomain || '').toLowerCase()
+}
+
+// <slug>@<shared domain> for the org bound to `tx` when `inboundDomain` is the
+// shared domain; '' otherwise. Derived on every read, so it follows renames.
+export async function inboxSlugAddressFor(tx: DbClient, inboundDomain: string): Promise<string> {
+  const shared = inboxSharedDomain()
+  if (!shared || inboundDomain !== shared) return ''
+  const res = await sql<{ slug: string }>`
+    select slug from orgs where id = nullif(current_setting('app.current_org', true), '')::uuid
+  `.execute(tx)
+  const slug = res.rows[0]?.slug
+  return slug ? `${slug}@${shared}` : ''
 }

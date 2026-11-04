@@ -13,7 +13,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'orderedIds must be strings' })
   }
 
-  return await withOrgPermission(event, 'feedback.write', async (tx) => {
+  return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx) => {
     for (let i = 0; i < orderedIds.length; i++) {
       const projectId = orderedIds[i] as string
       // Use `jsonb_set` instead of `||` with a stringified object. postgres-js

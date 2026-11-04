@@ -14,13 +14,12 @@
 
 import { db } from '#core/server/utils/database'
 import { sendEmail } from '#email'
-import { PERMISSION_META } from '#core/app/utils/permissions'
 import { tryGetOauthConfig } from '../utils/oauth-config'
+import { oauthScopeLabel } from '../utils/oauth-scope-labels'
 import type { OauthConsentGrantedPayload } from '../types'
 
 function describeScope(scope: string): string {
-  const meta = (PERMISSION_META as Record<string, { title: string, description: string }>)[scope]
-  return meta?.title || scope
+  return oauthScopeLabel(scope).title
 }
 
 function escapeHtml(s: string): string {

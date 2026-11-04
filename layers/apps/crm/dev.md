@@ -41,15 +41,14 @@ inbound senders get history before they become contacts). Per-contact stuff (lab
 
 **Consent ≠ suppression, and both live on the channel.**
 - `crm_channel_consents`: current expressed intent, one row per channel × purpose
-  (join rows with timestamps + capture meta — never array columns; that was Doxa's
-  documented regret). No row = unknown.
+  (join rows with timestamps + capture meta — never array columns). No row = unknown.
 - `crm_consent_events`: append-only compliance proof — carries the literal value
   snapshot + a sha256 fingerprint so history survives channel erasure, plus
   ip/user-agent/actor/source capture.
 - `crm_channel_suppressions`: deliverability (hard_bounce | complaint | manual). An
   unsubscribe flips consent and never writes here; a bounce writes here and never
   touches consent — transactional mail must keep flowing past an unsubscribe
-  (Klaviyo/Doxa lesson). One active suppression per channel (partial unique
+  (Klaviyo lesson). One active suppression per channel (partial unique
   `WHERE cleared_at IS NULL`); only `manual` can be cleared.
 - `canSend(tx, { channelType, normalizedValue, purpose })` in the kernel is the single
   gate future sender layers call: opt_in AND not suppressed.

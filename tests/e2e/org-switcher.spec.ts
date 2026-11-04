@@ -8,8 +8,8 @@ import {
   getHostAdminDb,
   closeTestDatabases,
   cleanupCoreTestData
-} from 'layer-core/test-helpers'
-import { cleanupTenancyTestData } from 'layer-tenancy/test-helpers'
+} from '@nuxtinator/core/test-helpers'
+import { cleanupTenancyTestData } from '@nuxtinator/tenancy/test-helpers'
 import { loginIntoMultipleOrgs } from './helpers/login'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -32,14 +32,32 @@ test('multi-org user: picker shows all orgs; dropdown switches to another', asyn
   await expect(page.locator('body')).toContainText(b!.name)
 
   // Click into orgA
-  await page.locator(`a[href="/@${a!.slug}/"]`).first().click()
-  await expect(page).toHaveURL(new RegExp(`/@${a!.slug}/?$`), { timeout: 5000 })
+  await page.locator(`a[href="/@${a!.slug}/dashboard"]`).first().click()
+  await expect(page).toHaveURL(new RegExp(`/@${a!.slug}/dashboard$`), { timeout: 5000 })
 
   // Open OrgSwitcher dropdown (the trigger has aria-label "Active organization: ...")
   await page.getByRole('button', { name: new RegExp(`Active organization: ${a!.name}`, 'i') }).click()
 
   // Click the other org in the popover
-  await page.locator(`a[href="/@${b!.slug}/"]`).first().click()
-  await expect(page).toHaveURL(new RegExp(`/@${b!.slug}/?$`), { timeout: 5000 })
+  await page.locator(`a[href="/@${b!.slug}/dashboard"]`).first().click()
+  await expect(page).toHaveURL(new RegExp(`/@${b!.slug}/dashboard$`), { timeout: 5000 })
   await expect(page.locator('body')).toContainText(b!.name)
+})
+
+test('switching from an app into an org that has it disabled lands on that org\'s home', async ({ page }) => {
+  const { orgs } = await loginIntoMultipleOrgs(page, 2)
+  const [a, b] = orgs
+  const sql = getHostAdminDb()
+  await sql`
+    INSERT INTO org_apps (org_id, app_id, enabled, source)
+    VALUES (${b!.id}, 'messages', false, 'org_admin')
+    ON CONFLICT (org_id, app_id) DO UPDATE SET enabled = false, source = 'org_admin'
+  `
+
+  await page.goto(`/@${a!.slug}/messages`)
+  await expect(page).toHaveURL(new RegExp(`/@${a!.slug}/messages$`))
+
+  await page.getByRole('button', { name: new RegExp(`Active organization: ${a!.name}`, 'i') }).click()
+  await page.locator(`a[href="/@${b!.slug}/messages"]`).first().click()
+  await expect(page).toHaveURL(new RegExp(`/@${b!.slug}/dashboard$`), { timeout: 5000 })
 })

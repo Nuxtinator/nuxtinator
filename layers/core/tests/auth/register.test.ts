@@ -26,6 +26,22 @@ describe('POST /api/auth/register', () => {
   afterEach(async () => {
     await cleanupCoreTestData(sql)
   })
+  it('keys the rate limit on the proxy-resolved client IP, not a spoofed leftmost entry', async () => {
+    const client = testIp()
+    const statuses: number[] = []
+    for (let i = 0; i < 11; i++) {
+      const res = await $fetch('/api/auth/register', {
+        method: 'POST',
+        // A client-supplied fake address sits left of what the trusted proxy appended.
+        headers: { 'x-forwarded-for': `203.0.113.${i}, ${client}` },
+        body: { email: `test-core-${randomUUID().slice(0, 8)}@example.com`, password: 'password123', display_name: 'Rate Test' }
+      }).then(() => 200, e => e.statusCode)
+      statuses.push(res)
+    }
+    expect(statuses.slice(0, 10).every(s => s !== 429)).toBe(true)
+    expect(statuses[10]).toBe(429)
+  })
+
   it('returns 400 when fields are missing', async () => {
     const err = await $fetch('/api/auth/register', {
       method: 'POST',
@@ -34,6 +50,18 @@ describe('POST /api/auth/register', () => {
     }).catch(e => e)
 
     expect(err.statusCode).toBe(400)
+  })
+
+  it('stores the email lowercased', async () => {
+    const id = randomUUID().slice(0, 8)
+    await $fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'x-forwarded-for': testIp() },
+      body: { email: ` TEST-CORE-REG-${id}@Example.com `, password: 'testpassword123', display_name: 'Reg User' }
+    })
+
+    const rows = await sql`SELECT email FROM users WHERE lower(email) = ${`test-core-reg-${id}@example.com`}`
+    expect(rows.map(r => r.email)).toEqual([`test-core-reg-${id}@example.com`])
   })
 
   it('creates an unverified user, sends verification email, and the token verifies', async () => {

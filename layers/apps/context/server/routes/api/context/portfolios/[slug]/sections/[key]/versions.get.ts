@@ -1,13 +1,14 @@
 // GET /api/context/portfolios/:slug/sections/:key/versions — list versions DESC.
 import { withOrgPermission } from '#tenant/server'
 import { getPortfolioBySlugOr404 } from '../../../../../../../utils/portfolio-helpers'
-import { loadSection } from '../../../../../../../utils/section-helpers'
+import { loadSection, requireKnownSection } from '../../../../../../../utils/section-helpers'
 
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, { appId: 'context' }, 'context.read', async (tx) => {
     const slug = getRouterParam(event, 'slug') ?? ''
     const key = getRouterParam(event, 'key') ?? ''
     const p = await getPortfolioBySlugOr404(tx, slug)
+    await requireKnownSection(tx, p.id, key)
     const section = await loadSection(tx, p.id, key)
     if (!section) return { versions: [] }
 
@@ -19,6 +20,7 @@ export default defineEventHandler(async (event) => {
         'v.content',
         'v.edited_at',
         'v.edited_by',
+        'v.source',
         'u.display_name as edited_by_name'
       ])
       .where('v.section_id', '=', section.id)

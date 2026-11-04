@@ -23,8 +23,8 @@ import {
   getHostAdminDb,
   closeTestDatabases,
   cleanupCoreTestData
-} from 'layer-core/test-helpers'
-import { cleanupTenancyTestData } from 'layer-tenancy/test-helpers'
+} from '@nuxtinator/core/test-helpers'
+import { cleanupTenancyTestData } from '@nuxtinator/tenancy/test-helpers'
 import {
   cleanupFeedbackTestData,
   createTestProject,
@@ -181,6 +181,35 @@ test('edit a card via the side panel; updated title appears on the board', async
   ])
 
   await expect(page.locator('text=' + newTitle).first()).toBeVisible({ timeout: 5000 })
+})
+
+test('opening a card from its notification link opens the panel and marks the notice read', async ({ page }) => {
+  const sql = getHostAdminDb()
+  const { user, org } = await loginIntoNewOrg(page, { roles: ['admin'] })
+  const project = await createTestProject(sql, { org_id: org.id })
+  const inbox = await getColumnByName(sql, 'FEEDBACK INBOX')
+  const card = await createTestCard(sql, {
+    org_id: org.id,
+    project_id: project.id,
+    swimlane_id: project.default_swimlane_id,
+    column_id: inbox.id,
+    title: 'test-feedback-notified'
+  })
+  const [notice] = await sql<{ id: string }[]>`
+    INSERT INTO notifications (user_id, app_id, title, link, org_id)
+    VALUES (${user.id}, 'feedback', 'New bug', ${`/feedback?card=${card.id}`}, ${org.id})
+    RETURNING id
+  `
+
+  await Promise.all([
+    page.waitForResponse(r => r.url().includes(`/api/feedback/cards/${card.id}/read`) && r.status() === 200, { timeout: 30_000 }),
+    page.goto(`/@${org.slug}/feedback?card=${card.id}`)
+  ])
+
+  const panel = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: /edit card/i }) })
+  await expect(panel.getByRole('textbox', { name: 'Title' })).toHaveValue('test-feedback-notified')
+  const [row] = await sql<{ read_at: Date | null }[]>`SELECT read_at FROM notifications WHERE id = ${notice!.id}`
+  expect(row!.read_at).not.toBeNull()
 })
 
 test('delete a card via the context menu; card disappears from the board', async ({ page }) => {

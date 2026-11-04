@@ -40,12 +40,24 @@ export interface McpToolResult<O = unknown> {
 
 export interface McpToolDef<I = unknown, O = unknown> {
   name: string
+  // What people see the tool called, e.g. "Move Card"; sent as the MCP
+  // tool `title`.
+  title?: string
   description: string
-  scope: Permission
+  // Omitted only on read-only tools any valid bearer may call (e.g. listing
+  // the bearer's own orgs): no token-scope or RBAC check, read rate bucket.
+  scope?: Permission
+  // Sent to clients as the MCP `readOnlyHint` / `destructiveHint` tool
+  // annotations, so they can decide whether to confirm before calling.
+  // A read-only tool also skips the writes-per-token rate-limit bucket.
+  readOnly?: boolean
   destructive?: boolean
   input: ZodSchema<I>
   output?: ZodSchema<O>
   rateLimit?: McpToolRateLimit
+  // Org-scoped app the tool belongs to. When set, calls targeting an org
+  // with that app switched off are refused, and tools/list hides the tool.
+  appId?: string
   handler: (input: I, ctx: McpToolContext) => Promise<McpToolResult<O>>
 }
 
@@ -70,6 +82,8 @@ export interface McpResourceReadResult {
 export interface McpResourceDef {
   uriPattern: string
   scope: Permission
+  // Same as `McpToolDef.appId`, for resources/list and resources/read.
+  appId?: string
   list: (ctx: McpResourceContext) => Promise<McpResourceListItem[]>
   read: (uri: string, ctx: McpResourceContext) => Promise<McpResourceReadResult>
 }
@@ -78,6 +92,7 @@ export interface McpResourceDef {
 export type McpAuthorizationError =
   | { error: 'insufficient_scope'; required: Permission; surface: 'token'; actionable: 're_authorize' }
   | { error: 'insufficient_permission'; required: Permission; surface: 'rbac'; actionable: 'contact_admin' }
+  | { error: 'app_disabled'; app: string; surface: 'org'; actionable: 'contact_admin' }
 
 export function defineMcpTool<I, O>(def: McpToolDef<I, O>): McpToolDef<I, O> {
   return def

@@ -2,7 +2,9 @@
 // for seeding files_* rows and cleaning up. All seeded data is prefixed
 // `test-files-` (users, orgs) so cleanup stays scoped.
 import type postgres from 'postgres'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { expect } from 'vitest'
+import { url as nuxtUrl } from '@nuxt/test-utils/e2e'
 import {
   createTestUser,
   getAuthHeaders,
@@ -11,9 +13,9 @@ import {
   createTestOrg,
   addTestMembership,
   type TestOrg
-} from 'layer-tenancy/test-helpers'
+} from '@nuxtinator/tenancy/test-helpers'
 
-export * from 'layer-tenancy/test-helpers'
+export * from '@nuxtinator/tenancy/test-helpers'
 
 export async function createFilesUser(
   sql: ReturnType<typeof postgres>,
@@ -120,6 +122,69 @@ export async function getShareToken(
   return (rows[0]?.share_token as string | null) ?? null
 }
 
+// --- MCP over the real /mcp transport ---
+
+export interface McpToolResult {
+  content: Array<{ type: string, text: string }>
+  structuredContent?: Record<string, unknown>
+  isError?: boolean
+}
+
+// Mint an oauth client + token family + access token with the same row shapes
+// the token endpoint writes. The token's resource must equal the server's
+// mcpResource, read from its RFC 9728 metadata. The client id is
+// `test-files-` prefixed so cleanup can scope its delete.
+export async function issueMcpBearer(
+  sql: ReturnType<typeof postgres>,
+  userId: string,
+  scopes: string[]
+): Promise<string> {
+  const metaRes = await fetch(nuxtUrl('/.well-known/oauth-protected-resource'))
+  const meta = await metaRes.json() as { resource: string }
+  const clientId = `test-files-${randomBytes(8).toString('hex')}`
+  await sql`
+    INSERT INTO oauth_clients (client_id, client_name, redirect_uris)
+    VALUES (${clientId}, 'test-files mcp client', ${['http://localhost/callback']})
+  `
+  const familyId = randomUUID()
+  await sql`
+    INSERT INTO oauth_token_families (family_id, user_id, client_id)
+    VALUES (${familyId}, ${userId}, ${clientId})
+  `
+  const token = `oat_${randomBytes(32).toString('hex')}`
+  const tokenHash = createHash('sha256').update(token).digest('hex')
+  await sql`
+    INSERT INTO oauth_access_tokens (token_hash, client_id, user_id, scope, resource, family_id, expires)
+    VALUES (${tokenHash}, ${clientId}, ${userId}, ${scopes.join(' ')}, ${meta.resource}, ${familyId}, now() + interval '1 hour')
+  `
+  return token
+}
+
+// One JSON-RPC tools/call over Streamable HTTP. The stateless transport
+// answers with an SSE frame; unwrap the data line to the tool result.
+export async function callMcpTool(
+  token: string,
+  name: string,
+  args: Record<string, unknown>
+): Promise<McpToolResult> {
+  const res = await fetch(nuxtUrl('/mcp'), {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'accept': 'application/json, text/event-stream',
+      'mcp-protocol-version': '2025-11-25',
+      'authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } })
+  })
+  const text = await res.text()
+  expect(res.status, text).toBe(200)
+  const dataLine = text.trim().split('\n').find(l => l.startsWith('data:'))
+  const rpc = JSON.parse(dataLine ? dataLine.slice('data:'.length).trim() : text) as { result?: McpToolResult, error?: unknown }
+  expect(rpc.error, JSON.stringify(rpc.error)).toBeUndefined()
+  return rpc.result!
+}
+
 export async function cleanupFilesTestData(sql: ReturnType<typeof postgres>): Promise<void> {
   await sql`
     DELETE FROM files_versions
@@ -135,4 +200,6 @@ export async function cleanupFilesTestData(sql: ReturnType<typeof postgres>): Pr
   await sql`DELETE FROM orgs WHERE slug LIKE 'test-files-%' OR slug LIKE 'test-tenancy-%'`
   await sql`DELETE FROM activity_logs WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'test-%@example.com')`
   await sql`DELETE FROM users WHERE email LIKE 'test-files-%@example.com'`
+  // Clients minted by issueMcpBearer; their tokens cascade off the users above.
+  await sql`DELETE FROM oauth_clients WHERE client_id LIKE 'test-files-%'`
 }

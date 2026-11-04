@@ -6,7 +6,7 @@ export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
   if (!id) throw createError({ statusCode: 400, statusMessage: 'id required' })
 
-  return await withOrgPermission(event, 'feedback.write', async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
     const card = await tx
       .selectFrom('cards')
       .selectAll()

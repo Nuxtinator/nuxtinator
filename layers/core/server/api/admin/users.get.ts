@@ -5,14 +5,11 @@ import { requireOperatorAdmin } from '#tenant/server'
 const SORTABLE_COLUMNS = ['display_name', 'email', 'status', 'created', 'last_login'] as const
 type SortColumn = typeof SORTABLE_COLUMNS[number]
 
-// Lifecycle order used by the "status" sort. Active first, then not-verified
-// self-registrations, then pending invites, then expired ones — keeps healthy
-// accounts at the top under default desc and surfaces stale invites under asc.
+// Lifecycle order used by the "status" sort: active first, then not-verified
+// self-registrations. Pending invites are not users; see /api/admin/invites.
 const STATUS_ORDER_SQL = `CASE
     WHEN users.verified = true THEN 0
-    WHEN users.password IS NOT NULL THEN 1
-    WHEN users.token_expires_at > now() THEN 2
-    ELSE 3
+    ELSE 1
   END`
 
 export default defineEventHandler(async (event) => {
@@ -66,8 +63,6 @@ export default defineEventHandler(async (event) => {
       'users.verified',
       'users.created',
       'users.is_admin',
-      'users.password',
-      'users.token_expires_at',
       eb => eb
         .selectFrom('activity_logs')
         .select(eb2 => eb2.fn.max('activity_logs.timestamp').as('last_login'))
@@ -113,18 +108,9 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const now = Date.now()
-  const decorated = rows.map(({ password, token_expires_at, ...rest }) => {
-    let status: 'active' | 'not_verified' | 'pending_invite' | 'expired_invite'
-    if (rest.verified) {
-      status = 'active'
-    } else if (password !== null) {
-      status = 'not_verified'
-    } else {
-      const expiresMs = token_expires_at ? new Date(token_expires_at).getTime() : 0
-      status = expiresMs > now ? 'pending_invite' : 'expired_invite'
-    }
-    return { ...rest, status, orgs: orgsByUser.get(rest.id) ?? [] }
+  const decorated = rows.map((row) => {
+    const status: 'active' | 'not_verified' = row.verified ? 'active' : 'not_verified'
+    return { ...row, status, orgs: orgsByUser.get(row.id) ?? [] }
   })
 
   return {

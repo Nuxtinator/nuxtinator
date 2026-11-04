@@ -3,14 +3,14 @@
 // Removes the caller's tag from this item.
 
 import { z } from 'zod'
-import { withOrgContext } from '#tenant/server'
+import { withOrgPermission } from '#tenant/server'
 
 const Body = z.object({
   tag: z.string().trim().min(1).max(40)
 })
 
 export default defineEventHandler(async (event) => {
-  return await withOrgContext(event, { appId: 'messages' }, async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'messages' }, 'messages.read', async (tx, ctx) => {
     const itemId = getRouterParam(event, 'id')!
 
     const parsed = Body.safeParse(await readBody(event))

@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
 import { logCreate } from '#core/server/utils/activity-logger'
 import { getPortfolioBySlugOr404 } from '../../../../../../../../utils/portfolio-helpers'
-import { loadSection, saveSectionContent, isKnownSectionKey } from '../../../../../../../../utils/section-helpers'
+import { loadSection, saveSectionContent, requireKnownSection } from '../../../../../../../../utils/section-helpers'
 import { sha256 } from '../../../../../../../../utils/comments'
 
 const Body = z.object({
@@ -29,11 +29,10 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 400, statusMessage: 'anchor_end must be >= anchor_start.' })
     }
 
+    await requireKnownSection(tx, p.id, key)
     let section = await loadSection(tx, p.id, key)
     if (!section) {
-      const known = await isKnownSectionKey(tx, p.id, key)
-      if (!known) throw createError({ statusCode: 404, statusMessage: `Unknown section key: ${key}` })
-      const { section: created } = await saveSectionContent(tx, p.id, key, '', ctx.userId)
+      const { section: created } = await saveSectionContent(tx, p.id, key, '', ctx.userId, { source: 'user' })
       section = created
     }
 

@@ -29,8 +29,8 @@ export default defineNuxtPlugin(() => {
   // and want modals to cover the chat bubble.
   Object.assign(slot.style, {
     position: 'fixed',
-    bottom: '20px',
-    right: '20px',
+    bottom: '0',
+    right: '0',
     zIndex: '40'
   } as Partial<CSSStyleDeclaration>)
 

@@ -8,6 +8,7 @@
 // records 404 like missing ones.
 
 import { withOrgContext } from '#tenant/server'
+import { accountOwnedChannelTypes } from '../../../../../utils/account-link'
 import {
   assertRecordVisible,
   canUpdateRecord,
@@ -36,6 +37,8 @@ export default defineEventHandler(async (event) => {
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
       createdBy: record.createdBy,
+      userId: record.userId,
+      accountOwnedChannelTypes: accountOwnedChannelTypes(record.userId),
       capabilities: {
         canEdit: await canUpdateRecord(tx, ctx, typeKey, id),
         canShare: caps.share,

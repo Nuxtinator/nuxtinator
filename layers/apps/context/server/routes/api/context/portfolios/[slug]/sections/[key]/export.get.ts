@@ -13,7 +13,7 @@ export default defineEventHandler(async (event) => {
     const known = await isKnownSectionKey(tx, p.id, key)
     if (!known) throw createError({ statusCode: 404, statusMessage: `Unknown section key: ${key}` })
 
-    const defs = await getPortfolioSections(tx, p.id)
+    const defs = await getPortfolioSections(tx, p)
     const def = defs.find(d => d.key === key)
     const section = await loadSection(tx, p.id, key)
     const md = formatSectionMarkdown(def?.title ?? key, section?.content ?? '')

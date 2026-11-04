@@ -27,7 +27,7 @@ claude
 Point it at this repo and describe what you want:
 
 ```
-Read https://raw.githubusercontent.com/corsacca/nuxtinator/master/README.md and follow its assembly instructions to scaffold a new Nuxt app.
+Read https://raw.githubusercontent.com/Nuxtinator/nuxtinator/master/README.md and follow its assembly instructions to scaffold a new Nuxt app.
 ```
 
 Optionally include which layers you want:
@@ -59,6 +59,7 @@ Dev server: <http://localhost:2080>.
 | [core](layers/core/) | Always | Auth, admin shell, RBAC, registries, single-mode `#tenant` kernel, migrations runner, launcher chrome. Never optional. | [layers.md](documentation/layers.md) |
 | [tenancy](layers/tenancy/) | Optional | Multi-tenant orgs + memberships + RLS. Adds `/@:slug/...` URL aliases and the multi-mode `#tenant` kernel. Omit for single-tenant. | [tenancy.md](documentation/tenancy.md) |
 | [email-mailgun](layers/email-mailgun/) | Choice | Mailgun (HTTP API in prod, MailHog locally). Provides `#email`. | — |
+| [social-auth](layers/social-auth/) | Optional | Sign in with Google and Sign in with Apple, for the web app and native apps. | [README](layers/social-auth/README.md) |
 | [oauth](layers/oauth/) | Optional | OAuth 2.1 issuer (token, consent, admin endpoints). | — |
 | [mcp](layers/mcp/) | Optional | MCP server transport. Depends on `oauth`. | — |
 | [apps/messages](layers/apps/messages/) | Optional | Team messaging app (channels, DMs, comments, reactions). | — |
@@ -92,7 +93,7 @@ Net: one `node_modules/` at the root, no per-layer install, no per-layer duplica
 Bootstrap is three commands wrapped as `bun run setup`:
 
 1. `bun install` — installs the consumer's root deps including `giget`. The `_layers/*` workspaces glob doesn't match yet (the directory doesn't exist).
-2. `bun run sync-layers` — calls `giget` for each selected layer; extracts `github:corsacca/nuxtinator/layers/<id>#<ref>` into `_layers/<id>/`.
+2. `bun run sync-layers` — calls `giget` for each selected layer; extracts `github:Nuxtinator/nuxtinator/layers/<id>#<ref>` into `_layers/<id>/`.
 3. `bun install` (second pass) — bun re-evaluates the workspaces glob, now finds `_layers/<id>/` directories, hoists their deps into the root `node_modules/.bun/` store, and creates `node_modules/@nuxtinator/<id>/` symlinks.
 
 Day-to-day is just `bun run dev`. Updating: `NUXTINATOR_REF=<tag>` in `.env`, then `bun run setup` again (the layer dirs get force-cleaned and refetched).
@@ -122,13 +123,13 @@ NODE_ENV=development
 
 **Database TLS** auto-negotiates by default — postgres.js `prefer`: it asks the server (via `SSLRequest`) and uses TLS when the server offers it, falling back to plaintext when it doesn't. So a local Postgres with no TLS, a private-network Postgres/PgBouncer that speaks plaintext (Docker, Dokploy, Fly internal networking), and a managed Postgres that requires TLS all connect with no configuration. To force a specific posture, append `?sslmode=...` to `DATABASE_URL`/`APP_DATABASE_URL` — the standard libpq modes (`disable`, `allow`, `prefer`, `require`, `verify-full`) are honored. Note that `prefer` and `require` do **not** verify the server certificate; use `verify-full` (with a CA the cert chains to) for real MITM protection.
 
-### Tenancy (multi-tenant only)
+### App database role
 
 ```env
-APP_DATABASE_URL=postgres://app_user:...@.../db   # falls back to DATABASE_URL if unset
+APP_DATABASE_URL=postgres://app_user:...@.../db   # RLS-enforced role for the app's `db`
 ```
 
-Multi-tenant production also requires a transaction-pooling connection pooler. See [tenancy.md](documentation/tenancy.md).
+Every deploy needs it: requests are refused while the app connects as a role that skips row-level security. See [database-roles.md](documentation/database-roles.md). Multi-tenant production also requires a transaction-pooling connection pooler — see [tenancy.md](documentation/tenancy.md).
 
 ### Email (Mailgun)
 
@@ -173,6 +174,7 @@ S3_PUBLIC_BASE_URL=               # public read URL (custom domain on the public
 - [documentation/getting-started.md](documentation/getting-started.md) — manual setup walkthrough (if you'd rather not use Claude)
 - [documentation/layers.md](documentation/layers.md) — what each layer owns, the `#tenant` kernel contract, how to write your own layer
 - [documentation/single-tenant-deploy.md](documentation/single-tenant-deploy.md) — deploying without `tenancy`
+- [documentation/deploy-behind-a-proxy.md](documentation/deploy-behind-a-proxy.md) — `NUXT_TRUSTED_PROXIES`: which proxies may speak for the client IP (Cloudflare, PaaS)
 - [documentation/tenancy.md](documentation/tenancy.md) — multi-tenant: roles, RLS, transaction-pooling
 - [documentation/dev-setup.md](documentation/dev-setup.md) — for working on this monorepo itself
 
@@ -196,6 +198,7 @@ Read the **Available layers** table above. Map casual language to layer names:
 - "single-tenant" / "no orgs" / "just one team" → omit `tenancy`
 - "Mailgun" / "email" (default backend) → `email-mailgun`
 - "no email" / "skip email" → omit any email layer
+- "Sign in with Google" / "Sign in with Apple" / "social login" → `social-auth`
 - "OAuth" / "OAuth server" / "issue tokens" → `oauth`
 - "MCP" / "Model Context Protocol" → `mcp` (and `oauth`, automatically)
 - "calendar" → `apps/calendar`
@@ -246,7 +249,7 @@ A few things to confirm:
 Pull the `prod/` directory from this repo into the user's project:
 
 ```bash
-bunx giget github:corsacca/nuxtinator/prod#master . --force
+bunx giget github:Nuxtinator/nuxtinator/prod#master . --force
 ```
 
 The `#master` ref is required: giget defaults to `main`, but this repo's default branch is `master`, so a bare command 404s. Run from the user's project directory. `giget` is used here only as a one-shot file-copy tool — it extracts the `prod/` subtree. The extracted template is **already wired with the consumer recipe**:
@@ -289,9 +292,9 @@ _layers
 
 The scaffolded `.env.example` contains the union of every layer's vars. Trim it to the layers the user selected:
 
-- Always keep the **Core** block (`APP_TITLE`, `DATABASE_URL`, `JWT_SECRET`, `NUXT_SECRET_ENCRYPTION_KEY`, `NUXT_PUBLIC_SITE_URL`, `NODE_ENV`).
-- Keep `APP_DATABASE_URL` only if `tenancy` is selected.
+- Always keep the **Core** block (`APP_TITLE`, `DATABASE_URL`, `APP_DATABASE_URL`, `JWT_SECRET`, `NUXT_SECRET_ENCRYPTION_KEY`, `NUXT_PUBLIC_SITE_URL`, `NODE_ENV`).
 - Keep the `MAILGUN_*` + `SMTP_FROM*` block only if `email-mailgun` is selected.
+- Keep `NUXT_SOCIAL_AUTH_*` only if `social-auth` is selected.
 - Keep `OAUTH_*` only if `oauth` is selected.
 - Keep `MCP_*` only if `mcp` is selected.
 - Keep `S3_*` only if a layer that uploads is selected (`videos`, `messages`, etc.).

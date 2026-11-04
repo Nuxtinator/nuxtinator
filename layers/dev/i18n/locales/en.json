@@ -1,0 +1,10 @@
+{
+  "dev": {
+    "i18n": {
+      "title": "Translation sandbox",
+      "intro": "This page is public and translated by the dev layer's locale files.",
+      "greeting": "Hello, {name}!",
+      "untranslated": "This sentence only exists in English, so every locale shows it in English."
+    }
+  }
+}

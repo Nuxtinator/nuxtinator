@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { readBody, getHeader } from 'h3'
-import { db } from '#core/server/utils/database'
+import { db, sql } from '#core/server/utils/database'
 import { requireOperatorAdmin } from '#tenant/server'
 import { requireAuth } from '../../../utils/auth'
 import { validateRoleNames } from '../../../utils/rbac'
 import { logEvent } from '../../../utils/activity-logger'
-import { getSiteUrl } from '../../../utils/site-url'
 import { sendTemplateEmail } from '#email'
+import { createInvite, emitInviteAttached, findPendingInvite } from '../../../utils/invites'
+import { getApps } from '../../../utils/app-settings'
+import { setUserAppGrant } from '../../../utils/personal-apps'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -17,13 +19,19 @@ interface Attachment {
 
 // Host-admin multi-org invite. Body shape:
 //
-//   { email, display_name?, attachments: [{ orgId, roles }, ...] }
+//   { email?, display_name?, link?: true, attachments: [{ orgId, roles }, ...], apps?: [appId, ...] }
+//
+// `apps` are personal apps (`registerApp({ scope: 'user' })`) to turn on for
+// the user. In multi-tenant mode an invite needs at least one org or app.
 //
 // Logic:
-//   * If the user exists → silent attach (no email). Insert one membership
-//     row per attachment; skip duplicates (409 listing the conflicts).
-//   * If not → create the user (password=null, verified=false), insert N
-//     membership rows, send ONE invite email.
+//   * `link: true` → create a single-use invite link with no email and return
+//     its URL for the admin to share.
+//   * If a user with `email` exists → silent attach (no email). Insert one
+//     membership row per attachment; skip duplicates (409 listing the conflicts).
+//     Grant each app.
+//   * If not → create an invite for that address (its orgs ride on the invite)
+//     and send ONE invite email. No user row exists until it's accepted.
 //
 // No subset-delegation. Host admin has god-mode by definition; subset is a
 // discipline for org-level admins (per Phase 4.2).
@@ -32,20 +40,31 @@ export default defineEventHandler(async (event) => {
   const admin = requireAuth(event)
 
   // Org attachments are a multi-tenant concept; the orgs/memberships tables only
-  // exist when the tenancy layer is loaded. In single-tenant mode an invite just
-  // creates the user — any attachments in the body are ignored.
+  // exist when the tenancy layer is loaded. In single-tenant mode an invite
+  // carries no orgs — any attachments in the body are ignored.
   const tenancyEnabled = useRuntimeConfig(event).public.tenancy === true
 
   const body = await readBody(event)
   const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : ''
   const display_name = typeof body?.display_name === 'string' ? body.display_name.trim() : ''
   const attachmentsRaw = Array.isArray(body?.attachments) ? body.attachments : null
+  const link = body?.link === true
+  const appsRaw: unknown[] = Array.isArray(body?.apps) ? body.apps : []
 
-  if (!EMAIL_RE.test(email)) {
+  if (!link && !EMAIL_RE.test(email)) {
     throw createError({ statusCode: 400, statusMessage: 'A valid email is required' })
   }
-  if (tenancyEnabled && (!attachmentsRaw || attachmentsRaw.length === 0)) {
-    throw createError({ statusCode: 400, statusMessage: 'attachments must include at least one org' })
+
+  const personalAppIds = new Set((await getApps(db)).filter(a => a.installed && a.scope === 'user').map(a => a.id))
+  const apps = [...new Set(appsRaw)].map((a) => {
+    if (typeof a !== 'string' || !personalAppIds.has(a)) {
+      throw createError({ statusCode: 400, statusMessage: `Unknown personal app: ${String(a)}` })
+    }
+    return a
+  })
+
+  if (tenancyEnabled && (!attachmentsRaw || attachmentsRaw.length === 0) && apps.length === 0) {
+    throw createError({ statusCode: 400, statusMessage: 'attachments must include at least one org, or apps at least one personal app' })
   }
 
   // Attachments only carry meaning in multi-tenant mode; leave the list empty in
@@ -78,66 +97,100 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const now = new Date()
-  const nowIso = now.toISOString()
-  const tokenExpiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
+  if (link) {
+    const invite = await createInvite(db, {
+      email: null,
+      display_name: display_name || null,
+      invitedBy: hostAdminId,
+      orgs: attachments,
+      apps
+    })
+
+    logEvent({
+      eventType: 'invite_link_created',
+      tableName: 'invites',
+      recordId: invite.id,
+      userId: hostAdminId,
+      userAgent: getHeader(event, 'user-agent') || undefined,
+      metadata: { attachments, apps }
+    }).catch(() => {})
+
+    return {
+      invite: { id: invite.id, kind: 'link', url: invite.url, expires_at: invite.expiresAt },
+      attachments: attachments.map(a => ({ orgId: a.orgId, status: 'pending' })),
+      apps
+    }
+  }
+
+  const nowIso = new Date().toISOString()
 
   // Look up existing user by email.
   const existing = await db
     .selectFrom('users')
     .select(['id', 'email', 'display_name', 'verified'])
-    .where('email', '=', email)
+    .where(sql`lower(email)`, '=', email)
     .executeTakeFirst()
 
-  let userId: string
-  let isNewUser: boolean
-  let inviteToken: string | null = null
-
-  if (existing) {
-    userId = existing.id
-    isNewUser = false
-
-    // 409 the entire request if the user is already a member of any of the
-    // requested orgs — saves the operator from a partial-success state.
-    if (tenancyEnabled && attachments.length > 0) {
-      const dupes = await (db as any)
-        .selectFrom('memberships')
-        .select('org_id')
-        .where('user_id', '=', userId)
-        .where('org_id', 'in', attachments.map(a => a.orgId))
-        .execute() as Array<{ org_id: string }>
-      if (dupes.length > 0) {
-        throw createError({
-          statusCode: 409,
-          statusMessage: `User is already a member of: ${dupes.map(d => d.org_id).join(', ')}`
-        })
-      }
-    }
-  } else {
-    if (display_name.length < 2) {
-      throw createError({ statusCode: 400, statusMessage: 'Display name must be at least 2 characters for new users' })
+  if (!existing) {
+    if (await findPendingInvite(db, email)) {
+      throw createError({ statusCode: 409, statusMessage: 'An invitation is already pending for this email. Resend it from the pending invites list.' })
     }
 
-    userId = randomUUID()
-    inviteToken = randomUUID()
-    isNewUser = true
+    const invite = await createInvite(db, {
+      email,
+      display_name: display_name || null,
+      invitedBy: hostAdminId,
+      orgs: attachments,
+      apps
+    })
 
-    await db
-      .insertInto('users')
-      .values({
-        id: userId,
-        created: nowIso,
-        updated: nowIso,
-        email,
-        display_name,
-        avatar: '',
-        password: null,
-        verified: false,
-        is_admin: false,
-        token_key: inviteToken,
-        token_expires_at: tokenExpiresAt
+    try {
+      await sendTemplateEmail({
+        to: email,
+        template: 'invite',
+        data: {
+          userName: display_name,
+          inviterName: admin.display_name,
+          inviteUrl: invite.url
+        }
       })
-      .execute()
+    } catch (err) {
+      console.error('Error sending invite email:', err)
+    }
+
+    logEvent({
+      eventType: 'invite_sent_multi',
+      tableName: 'invites',
+      recordId: invite.id,
+      userId: hostAdminId,
+      userAgent: getHeader(event, 'user-agent') || undefined,
+      metadata: { email, attachments, apps }
+    }).catch(() => {})
+
+    return {
+      invite: { id: invite.id, kind: 'email', email, expires_at: invite.expiresAt },
+      attachments: attachments.map(a => ({ orgId: a.orgId, status: 'pending' })),
+      apps
+    }
+  }
+
+  const userId = existing.id
+
+  // 409 the entire request if the user is already a member of any of the
+  // requested orgs — saves the operator from a partial-success state.
+  if (tenancyEnabled && attachments.length > 0) {
+    const dupes = await (db as any)
+      .selectFrom('memberships')
+      .select('org_id')
+      .where('user_id', '=', userId)
+      .where('org_id', 'in', attachments.map(a => a.orgId))
+      .execute() as Array<{ org_id: string }>
+    if (dupes.length > 0) {
+      throw createError({
+        statusCode: 409,
+        statusMessage: `User is already a member of: ${dupes.map(d => d.org_id).join(', ')}`
+      })
+    }
   }
 
   // Insert N membership rows in a single transaction.
@@ -154,16 +207,12 @@ export default defineEventHandler(async (event) => {
     if (memberships.length > 0) {
       await (trx as any).insertInto('memberships').values(memberships).execute()
     }
+    for (const appId of apps) {
+      await setUserAppGrant(trx, { userId, appId, granted: true, grantedBy: hostAdminId })
+    }
   })
 
   const nitro = useNitroApp()
-  if (isNewUser) {
-    try {
-      await nitro.hooks.callHook('user.created', { userId, email, viaInvite: true })
-    } catch (err) {
-      console.warn('[hook user.created] handler threw:', err)
-    }
-  }
   for (const m of memberships) {
     try {
       await nitro.hooks.callHook('membership.created', {
@@ -177,45 +226,25 @@ export default defineEventHandler(async (event) => {
       console.warn('[hook membership.created] handler threw:', err)
     }
   }
-
-  // Send a single invite email iff this is a new user.
-  if (isNewUser && inviteToken) {
-    const inviteUrl = `${getSiteUrl()}/accept-invite?token=${inviteToken}`
-    try {
-      await sendTemplateEmail({
-        to: email,
-        template: 'invite',
-        data: {
-          userName: display_name,
-          inviterName: admin.display_name,
-          inviteUrl
-        }
-      })
-    } catch (err) {
-      console.error('Error sending invite email:', err)
-    }
-  }
+  await emitInviteAttached(userId, hostAdminId, apps)
 
   logEvent({
-    eventType: isNewUser ? 'invite_sent_multi' : 'invite_attached_multi',
+    eventType: 'invite_attached_multi',
     tableName: 'users',
     recordId: userId,
     userId: hostAdminId,
     userAgent: getHeader(event, 'user-agent') || undefined,
-    metadata: { email, attachments: attachments.map(a => ({ orgId: a.orgId, roles: a.roles })) }
+    metadata: { email, attachments: attachments.map(a => ({ orgId: a.orgId, roles: a.roles })), apps }
   }).catch(() => {})
 
   return {
     user: {
       id: userId,
       email,
-      display_name: existing?.display_name ?? display_name,
-      verified: !!existing?.verified,
-      created: nowIso
+      display_name: existing.display_name,
+      verified: existing.verified
     },
-    attachments: attachments.map(a => ({
-      orgId: a.orgId,
-      status: existing ? 'attached' : 'pending'
-    }))
+    attachments: attachments.map(a => ({ orgId: a.orgId, status: 'attached' })),
+    apps
   }
 })

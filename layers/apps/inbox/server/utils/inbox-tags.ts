@@ -106,6 +106,30 @@ export async function inboxSetConversationTags(tx: Tx, id: string, slugs: string
     .execute()
 }
 
+// Union palette-valid slugs into each conversation's tag set, keeping the
+// existing tags and their order. Returns the ids that gained at least one
+// tag — rows already carrying every slug are untouched.
+export async function inboxBulkAddTags(tx: Tx, ids: string[], slugs: string[]): Promise<string[]> {
+  if (ids.length === 0 || slugs.length === 0) return []
+  const rows = await sql<{ id: string }>`
+    UPDATE inbox_conversations c
+    SET tags = c.tags || added.tags, updated_at = now()
+    FROM (
+      SELECT c2.id, COALESCE(
+        (SELECT jsonb_agg(v.slug)
+          FROM jsonb_array_elements_text(${JSON.stringify(slugs)}::text::jsonb) AS v(slug)
+          WHERE NOT (c2.tags ? v.slug)),
+        '[]'::jsonb
+      ) AS tags
+      FROM inbox_conversations c2
+      WHERE c2.id IN (${sql.join(ids)})
+    ) added
+    WHERE c.id = added.id AND added.tags <> '[]'::jsonb
+    RETURNING c.id
+  `.execute(tx)
+  return rows.rows.map(r => r.id)
+}
+
 // Per-tag conversation counts for the rail badges. Cross-status folders —
 // counts ignore the status filter, excluding only spam as noise.
 export async function inboxTagCounts(tx: Tx): Promise<Record<string, number>> {

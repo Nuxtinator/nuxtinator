@@ -1,8 +1,14 @@
 // POST /api/videos/upload-complete
 // Persists video metadata after the browser has uploaded the file to S3.
+// The object keys must be the ones upload-url derives from videoId, and the
+// row's primary key is that videoId, so a caller can only claim objects under
+// a fresh id — never another video's file.
 
 import { randomBytes } from 'crypto'
 import { withOrgContext } from '#tenant/server'
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm', 'avi']
 
 export default defineEventHandler(async (event) => {
   return await withOrgContext(event, { appId: 'videos' }, async (tx, ctx) => {
@@ -24,6 +30,15 @@ export default defineEventHandler(async (event) => {
 
     if (!videoId || !videoKey) {
       throw createError({ statusCode: 400, message: 'videoId and videoKey are required' })
+    }
+    if (typeof videoId !== 'string' || !UUID_RE.test(videoId)) {
+      throw createError({ statusCode: 400, message: 'Invalid videoId' })
+    }
+    if (!VIDEO_EXTENSIONS.some(ext => videoKey === `${videoId}.${ext}`)) {
+      throw createError({ statusCode: 400, message: 'videoKey does not match videoId' })
+    }
+    if (thumbnailKey && thumbnailKey !== `${videoId}-thumb.jpg`) {
+      throw createError({ statusCode: 400, message: 'thumbnailKey does not match videoId' })
     }
 
     const resolvedVisibility: 'private' | 'org' | 'public' =

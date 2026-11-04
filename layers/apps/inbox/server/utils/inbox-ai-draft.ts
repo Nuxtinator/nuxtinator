@@ -6,7 +6,7 @@
 import { createError } from 'h3'
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
-import { generate, getFeatureModel } from '#ai/server'
+import { generate } from '#ai/server'
 import type { AiTextPart } from '#ai/server'
 import { resolveTypePermission } from '#crm/server'
 import { inboxGetConversation } from './inbox-conversations'
@@ -109,14 +109,12 @@ export async function generateInboxDraft(
   const conversation = await inboxGetConversation(tx, conversationId)
   if (!conversation) throw createError({ statusCode: 404, statusMessage: 'Conversation not found' })
 
-  const [messages, contactRecord, staticPack, knowledgeBlock, model] = await Promise.all([
+  const [messages, contactRecord, staticPack, knowledgeBlock] = await Promise.all([
     // Held rows never reach AI context — see inboxAiContextMessages.
     inboxListMessages(tx, conversationId).then(inboxAiContextMessages),
     formatInboxContactRecord(tx, ctx, conversation.channel_id),
     getInboxStaticPack(tx, ctx.orgId),
-    getInboxKnowledgeBlock(tx),
-    // Resolve the per-org model for the draft feature.
-    getFeatureModel(tx, INBOX_AI_DRAFT_FEATURE)
+    getInboxKnowledgeBlock(tx)
   ])
 
   const direction = opts.direction?.trim().slice(0, 2000)
@@ -145,7 +143,8 @@ export async function generateInboxDraft(
   )
 
   const { input } = await withTransientRetry(() => generate<Partial<InboxDraftResult>>({
-    model,
+    tx,
+    feature: INBOX_AI_DRAFT_FEATURE,
     system,
     messages: [{ role: 'user', content: userSegments.join('\n\n') }],
     tool: DRAFT_TOOL,

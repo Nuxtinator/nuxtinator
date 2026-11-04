@@ -1,5 +1,5 @@
 // AI readiness for the inbox. Gates the AI draft button / add-to-KB action on
-// whether AI is configured AND a model is enabled for the feature (per org).
+// whether AI is configured AND a model is enabled for the feature.
 export interface InboxAiStatus {
   configured: boolean
   hasEnabledModel: boolean

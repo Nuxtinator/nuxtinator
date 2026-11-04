@@ -56,8 +56,8 @@ export const useAuth = () => {
         } else if (response.redirect && response.redirect.startsWith('/')) {
           await navigateTo(response.redirect)
         } else {
-          // No server-provided redirect: single-tenant home, else the org picker.
-          await navigateTo(useRuntimeConfig().public.tenancy ? '/orgs' : '/')
+          // No server-provided redirect: single-tenant launcher, else the org picker.
+          await navigateTo(useRuntimeConfig().public.tenancy ? '/orgs' : launcherPath())
         }
 
         return { success: true }
@@ -122,11 +122,13 @@ export const useAuth = () => {
 
   const isLoggedIn = computed(() => !!user.value)
 
-  const deleteAccount = async (password: string) => {
+  // Without a password the server requires a recent re-authentication; wrap
+  // the call in `useReauth().withReauth` to prompt for it.
+  const deleteAccount = async (password?: string) => {
     try {
       const response = await $fetch('/api/profile/account', {
         method: 'DELETE',
-        body: { password }
+        body: password ? { password } : {}
       }) as { success: boolean, message?: string }
 
       if (response.success) {
@@ -138,6 +140,7 @@ export const useAuth = () => {
 
       return { success: false, message: 'Account deletion failed' }
     } catch (error: any) {
+      if (error?.data?.data?.reauth) throw error
       return {
         success: false,
         message: error.data?.statusMessage || 'An error occurred while deleting your account'

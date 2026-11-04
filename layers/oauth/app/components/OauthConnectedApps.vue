@@ -8,16 +8,26 @@
 
 import { h } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
-import { PERMISSION_META } from '#core/app/utils/permissions'
 
 interface ConnectedApp {
   client_id: string
   client_name: string
   dynamic: boolean
   scope: string
+  // Each scope with the title people read it by.
+  scopes: { scope: string, title: string, description: string }[]
+  // Every permission the app asked for, grouped by app, with whether it's
+  // granted.
+  groups: PermissionGroup[]
   granted_at: string
   last_used_at: string | null
   has_active_tokens: boolean
+}
+
+interface PermissionGroup {
+  key: string
+  title: string
+  scopes: { scope: string, title: string, description: string, granted: boolean }[]
 }
 
 interface ConnectedAppsResponse {
@@ -27,11 +37,6 @@ interface ConnectedAppsResponse {
 const UBadge = resolveComponent('UBadge')
 const UIcon = resolveComponent('UIcon')
 const UTooltip = resolveComponent('UTooltip')
-
-function describeScope(scope: string): string {
-  const meta = (PERMISSION_META as Record<string, { title: string, description: string }>)[scope]
-  return meta?.title || scope
-}
 
 const toast = useToast()
 
@@ -88,6 +93,65 @@ const handleRevoke = async () => {
   }
 }
 
+// ── Edit permissions modal ──────────────────────────────────────────
+const editTarget = ref<ConnectedApp | null>(null)
+const editTicked = ref<Set<string>>(new Set())
+const saving = ref(false)
+const editOpen = computed({
+  get: () => editTarget.value !== null,
+  set: (val: boolean) => {
+    if (!val && !saving.value) editTarget.value = null
+  }
+})
+
+const requestEdit = (app: ConnectedApp) => {
+  editTicked.value = new Set(app.groups.flatMap(g => g.scopes.filter(s => s.granted).map(s => s.scope)))
+  editTarget.value = app
+}
+
+const setTicked = (scopes: string[], on: boolean) => {
+  const next = new Set(editTicked.value)
+  for (const s of scopes) {
+    if (on) next.add(s)
+    else next.delete(s)
+  }
+  editTicked.value = next
+}
+
+const groupState = (group: PermissionGroup): boolean | 'indeterminate' => {
+  const on = group.scopes.filter(s => editTicked.value.has(s.scope)).length
+  if (on === 0) return false
+  return on === group.scopes.length ? true : 'indeterminate'
+}
+
+const editDirty = computed(() => {
+  const app = editTarget.value
+  if (!app) return false
+  return app.groups.some(g => g.scopes.some(s => s.granted !== editTicked.value.has(s.scope)))
+})
+
+const handleSaveEdit = async () => {
+  if (!editTarget.value) return
+  saving.value = true
+  const target = editTarget.value
+  try {
+    await $fetch(`/api/oauth/connected-apps/${encodeURIComponent(target.client_id)}`, {
+      method: 'PATCH',
+      body: { scopes: [...editTicked.value] }
+    })
+    toast.add({ title: 'Permissions updated', color: 'success' })
+    await refresh()
+    editTarget.value = null
+  } catch (err: unknown) {
+    const message = (err as { data?: { statusMessage?: string }; statusMessage?: string })?.data?.statusMessage
+      || (err as { statusMessage?: string })?.statusMessage
+      || 'Failed to update permissions'
+    toast.add({ title: 'Error', description: message, color: 'error' })
+  } finally {
+    saving.value = false
+  }
+}
+
 // ── Formatting helpers ──────────────────────────────────────────────
 const formatRelative = (iso: string | null): string => {
   if (!iso) return 'Never'
@@ -102,9 +166,6 @@ const formatRelative = (iso: string | null): string => {
 const formatDate = (iso: string): string =>
   new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 
-const scopeChips = (scope: string): string[] =>
-  scope.split(/\s+/).filter(Boolean)
-
 // ── Connection guide (collapsible + tabs) ──────────────────────────
 //
 // One tab per major MCP client. Each tab carries a ready-to-paste
@@ -117,6 +178,15 @@ const mcpUrl = computed(() => {
   const base = (config.public.siteUrl as string) || ''
   if (!base) return '/mcp'
   return `${base.replace(/\/$/, '')}/mcp`
+})
+
+// Local identifier each client registers this server under. Slugified
+// from the host's app title so the snippets name the deployment they
+// point at; `mcp` when no title is configured.
+const mcpServerName = computed(() => {
+  const title = (config.public.appName as string) || ''
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  return slug || 'mcp'
 })
 
 interface ClientGuide {
@@ -137,28 +207,29 @@ interface ClientGuide {
 
 const clientGuides = computed<ClientGuide[]>(() => {
   const url = mcpUrl.value
+  const name = mcpServerName.value
   return [
     {
       key: 'claude-code',
       label: 'Claude Code',
       icon: 'i-lucide-terminal',
       description: 'Native HTTP + OAuth.',
-      aiPrompt: `Add the doxa-cms MCP server at ${url} using HTTP transport, then restart to authenticate.`,
-      manualLocation: 'Run from the project folder where you want it available:',
+      aiPrompt: `Add the ${name} MCP server at ${url} using HTTP transport at user scope so it is available in every project, then restart to authenticate.`,
+      manualLocation: 'Run from any folder; user scope makes it available in every project:',
       manualLanguage: 'bash',
-      manualSnippet: `claude mcp add doxa-cms --transport http ${url}`
+      manualSnippet: `claude mcp add --scope user ${name} --transport http ${url}`
     },
     {
       key: 'claude-desktop',
       label: 'Claude Desktop',
       icon: 'i-lucide-monitor',
       description: 'Stdio-only. Bridges OAuth + HTTP via mcp-remote.',
-      aiPrompt: `Edit my Claude Desktop config (~/Library/Application Support/Claude/claude_desktop_config.json on macOS, %APPDATA%\\Claude\\claude_desktop_config.json on Windows) to add an MCP server named "doxa-cms" that runs \`npx -y mcp-remote ${url}\`.`,
+      aiPrompt: `Edit my Claude Desktop config (~/Library/Application Support/Claude/claude_desktop_config.json on macOS, %APPDATA%\\Claude\\claude_desktop_config.json on Windows) to add an MCP server named "${name}" that runs \`npx -y mcp-remote ${url}\`.`,
       manualLocation: 'Edit ~/Library/Application Support/Claude/claude_desktop_config.json (macOS) or %APPDATA%\\Claude\\claude_desktop_config.json (Windows):',
       manualLanguage: 'json',
       manualSnippet: JSON.stringify({
         mcpServers: {
-          'doxa-cms': {
+          [name]: {
             command: 'npx',
             args: ['-y', 'mcp-remote', url]
           }
@@ -170,22 +241,22 @@ const clientGuides = computed<ClientGuide[]>(() => {
       label: 'Codex',
       icon: 'i-lucide-square-terminal',
       description: 'Stdio-only. Bridges OAuth + HTTP via mcp-remote.',
-      aiPrompt: `Add an MCP server named "doxa-cms" to my ~/.codex/config.toml that runs \`npx -y mcp-remote ${url}\`.`,
+      aiPrompt: `Add an MCP server named "${name}" to my ~/.codex/config.toml that runs \`npx -y mcp-remote ${url}\`.`,
       manualLocation: 'Edit ~/.codex/config.toml:',
       manualLanguage: 'toml',
-      manualSnippet: `[mcp_servers.doxa-cms]\ncommand = "npx"\nargs = ["-y", "mcp-remote", "${url}"]`
+      manualSnippet: `[mcp_servers.${name}]\ncommand = "npx"\nargs = ["-y", "mcp-remote", "${url}"]`
     },
     {
       key: 'cursor',
       label: 'Cursor',
       icon: 'i-lucide-mouse-pointer-2',
       description: 'Native HTTP + OAuth.',
-      aiPrompt: `Add an MCP server named "doxa-cms" pointing at ${url} to my Cursor MCP config (~/.cursor/mcp.json).`,
+      aiPrompt: `Add an MCP server named "${name}" pointing at ${url} to my Cursor MCP config (~/.cursor/mcp.json).`,
       manualLocation: 'Settings → MCP → Add new MCP server, or edit ~/.cursor/mcp.json:',
       manualLanguage: 'json',
       manualSnippet: JSON.stringify({
         mcpServers: {
-          'doxa-cms': {
+          [name]: {
             url
           }
         }
@@ -195,13 +266,13 @@ const clientGuides = computed<ClientGuide[]>(() => {
       key: 'vscode',
       label: 'VS Code',
       icon: 'i-lucide-code-2',
-      description: 'Native HTTP + OAuth via Copilot Chat (1.99+).',
-      aiPrompt: `Add an MCP server named "doxa-cms" of type http pointing at ${url} to .vscode/mcp.json so I can use it in this workspace.`,
-      manualLocation: 'Add to .vscode/mcp.json (workspace) or your user settings:',
+      description: 'Native HTTP + OAuth via Copilot Chat (1.102+).',
+      aiPrompt: `Add an MCP server named "${name}" of type http pointing at ${url} to my user-level VS Code MCP config (Command Palette → "MCP: Open User Configuration") so it is available in every workspace.`,
+      manualLocation: 'Command Palette → "MCP: Open User Configuration", then add to the user-level mcp.json:',
       manualLanguage: 'json',
       manualSnippet: JSON.stringify({
         servers: {
-          'doxa-cms': {
+          [name]: {
             type: 'http',
             url
           }
@@ -213,12 +284,12 @@ const clientGuides = computed<ClientGuide[]>(() => {
       label: 'Gemini CLI',
       icon: 'i-lucide-sparkles',
       description: 'Bridges OAuth + HTTP via mcp-remote.',
-      aiPrompt: `Add an MCP server named "doxa-cms" to my ~/.gemini/settings.json that runs \`npx -y mcp-remote ${url}\`.`,
+      aiPrompt: `Add an MCP server named "${name}" to my ~/.gemini/settings.json that runs \`npx -y mcp-remote ${url}\`.`,
       manualLocation: 'Add to ~/.gemini/settings.json:',
       manualLanguage: 'json',
       manualSnippet: JSON.stringify({
         mcpServers: {
-          'doxa-cms': {
+          [name]: {
             command: 'npx',
             args: ['-y', 'mcp-remote', url]
           }
@@ -299,10 +370,10 @@ const columns: TableColumn<ConnectedApp>[] = [
     // is one hover away via the tooltip's `text` prop. Newlines render
     // because we override `content.class` with `whitespace-pre-line`.
     cell: ({ row }) => {
-      const scopes = scopeChips(row.original.scope)
+      const scopes = row.original.scopes
       const count = scopes.length
       const label = `${count} permission${count === 1 ? '' : 's'}`
-      const tooltipText = scopes.map(s => `• ${describeScope(s)}`).join('\n')
+      const tooltipText = scopes.map(s => `• ${s.title}`).join('\n')
       return h(UTooltip, {
         text: tooltipText,
         delayDuration: 100,
@@ -330,7 +401,15 @@ const columns: TableColumn<ConnectedApp>[] = [
   {
     id: 'actions',
     header: '',
-    cell: ({ row }) => h('div', { class: 'flex justify-end' }, [
+    cell: ({ row }) => h('div', { class: 'flex justify-end gap-2' }, [
+      h(resolveComponent('UButton'), {
+        color: 'neutral',
+        variant: 'outline',
+        size: 'sm',
+        icon: 'i-lucide-sliders-horizontal',
+        'aria-label': `Edit permissions for ${row.original.client_name}`,
+        onClick: () => requestEdit(row.original)
+      }, () => 'Edit'),
       h(resolveComponent('UButton'), {
         color: 'error',
         variant: 'soft',
@@ -479,6 +558,60 @@ const columns: TableColumn<ConnectedApp>[] = [
         </div>
       </template>
     </UCollapsible>
+
+    <UModal
+      v-model:open="editOpen"
+      :dismissible="!saving"
+      :title="`Permissions for ${editTarget?.client_name ?? ''}`"
+    >
+      <template #body>
+        <div class="space-y-3">
+          <div
+            v-for="group in editTarget?.groups ?? []"
+            :key="group.key"
+            class="rounded-lg border border-(--ui-border) p-3"
+          >
+            <UCheckbox
+              v-if="group.scopes.length > 1"
+              :model-value="groupState(group)"
+              :label="group.title"
+              :ui="{ label: 'font-semibold' }"
+              @update:model-value="(v) => setTicked(group.scopes.map(s => s.scope), v === true)"
+            />
+            <div :class="group.scopes.length > 1 ? 'mt-2 ps-6 space-y-2' : ''">
+              <UCheckbox
+                v-for="item in group.scopes"
+                :key="item.scope"
+                :model-value="editTicked.has(item.scope)"
+                :label="item.title"
+                :description="item.description || undefined"
+                :ui="group.scopes.length > 1 ? undefined : { label: 'font-semibold' }"
+                @update:model-value="(v) => setTicked([item.scope], v === true)"
+              />
+            </div>
+          </div>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex w-full justify-end gap-3">
+          <UButton
+            variant="ghost"
+            color="neutral"
+            :disabled="saving"
+            @click="editTarget = null"
+          >
+            Cancel
+          </UButton>
+          <UButton
+            :loading="saving"
+            :disabled="!editDirty"
+            @click="handleSaveEdit"
+          >
+            Save
+          </UButton>
+        </div>
+      </template>
+    </UModal>
 
     <UModal v-model:open="revokeOpen" :dismissible="!revoking">
       <template #content>

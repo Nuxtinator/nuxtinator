@@ -7,6 +7,7 @@ definePageMeta({
 
 const route = useRoute()
 const router = useRouter()
+const confirmAction = useConfirm()
 
 const contacts = ref<ListContact[]>([])
 const progress = ref<ListProgress>({ total: 0, contactedLast30d: 0, prayedLast30d: 0 })
@@ -116,7 +117,7 @@ async function changeFaith(id: string, faith: FaithStatus) {
 }
 
 async function deleteContact(contact: ListContact) {
-  if (!confirm(`Remove ${contact.name} from your list?`)) return
+  if (!await confirmAction({ title: `Remove ${contact.name} from your list?`, confirmLabel: 'Remove' })) return
   await $fetch(`/api/list-of-100/contacts/${contact.id}`, { method: 'DELETE' })
   removeContact(contact.id)
   await refreshProgress()

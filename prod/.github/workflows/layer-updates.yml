@@ -27,10 +27,30 @@ jobs:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
       - run: bun install
+      # Fails (no PR) when the layers' declared requirements can't all be met.
       - name: Resolve layer updates into the lockfile
-        run: bun run layers:update
+        shell: bash
+        run: bun run layers:update | tee "$RUNNER_TEMP/layers-update.txt"
         env:
           LAYER_SOURCE_TOKEN: ${{ secrets.LAYER_SOURCE_TOKEN }} # only for private sources
+      - name: Write the PR body
+        shell: bash
+        run: |
+          {
+            cat <<'EOF'
+          Automated layer update — `layers.lock.json` was advanced to the
+          newest versions within each layer's declared range in `layers.ts`
+          that satisfy every layer's declared requirements.
+
+          Merging this rebuilds the app on the new layer code. Major updates
+          outside a layer's range are not included here; widen the range in
+          `layers.ts` to adopt one.
+
+          ```
+          EOF
+            cat "$RUNNER_TEMP/layers-update.txt"
+            echo '```'
+          } > "$RUNNER_TEMP/pr-body.md"
       - uses: peter-evans/create-pull-request@v6
         id: cpr
         with:
@@ -38,13 +58,7 @@ jobs:
           branch: layer-updates
           title: 'Layer updates available'
           commit-message: 'chore: bump layer versions'
-          body: |
-            Automated layer update — `layers.lock.json` was advanced to the
-            newest versions within each layer's declared range in `layers.ts`.
-
-            Merging this rebuilds the app on the new layer code. Major updates
-            outside a layer's range are not included here; widen the range in
-            `layers.ts` to adopt one.
+          body-path: ${{ runner.temp }}/pr-body.md
           labels: layer-update
 
       # In-range (minor/patch) updates only change layers.lock.json, so every PR

@@ -33,9 +33,14 @@ const staticRoles = computed(() => staticData.value?.roles ?? [])
 const customRoles = computed(() => customData.value?.roles ?? [])
 
 const toast = useToast()
+const confirmAction = useConfirm()
 
 const onDeleteCustom = async (r: CustomRole) => {
-  if (!confirm(`Delete custom role "${r.name}"? Members keeping this role will lose its permissions on next request.`)) return
+  if (!await confirmAction({
+    title: `Delete custom role "${r.name}"?`,
+    description: 'Members with this role lose its permissions on their next request.',
+    confirmLabel: 'Delete'
+  })) return
   try {
     await $fetch(`/api/o/${orgSlug.value}/roles/${r.id}`, { method: 'DELETE' })
     toast.add({ title: 'Role deleted', color: 'success' })

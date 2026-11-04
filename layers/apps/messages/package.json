@@ -1,6 +1,6 @@
 {
   "name": "@nuxtinator/messages",
-  "version": "1.0.0",
+  "version": "1.2.5",
   "private": true,
   "type": "module",
   "exports": {
@@ -9,19 +9,24 @@
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
-    "croner": "^9.0.0",
-    "dompurify": "^3.2.0",
+    "croner": "^10.0.1",
+    "dompurify": "^3.4.13",
     "emoji-mart": "^5.6.0",
-    "marked": "^14.1.0"
+    "marked": "^18.1.1"
   },
   "optionalDependencies": {
     "@nuxtinator/core": "*"
+  },
+  "nuxtinator": {
+    "requires": {
+      "@nuxtinator/core": ">=3.1.0"
+    }
   },
   "peerDependencies": {
     "h3": "^1.0.0",
     "kysely": "^0.28.0",
     "nuxt": "^4.0.0",
     "vue": "^3.0.0",
-    "zod": "^3.23.0"
+    "zod": "^4.1.8"
   }
 }

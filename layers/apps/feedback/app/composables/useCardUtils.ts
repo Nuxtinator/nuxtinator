@@ -1,4 +1,14 @@
+import type { InjectionKey, Ref } from 'vue'
 import type { KanbanCardModel } from '../components/kanban/types'
+
+/** Users the board can show on cards (submitter, assignee); `avatar` is '' when unset. */
+export interface BoardUser {
+  id: string
+  display_name: string | null
+  avatar: string
+}
+
+export const BOARD_USERS_KEY: InjectionKey<Ref<BoardUser[]>> = Symbol('feedback-board-users')
 
 /**
  * Cards in the DOING column carry a workflow phase in post_meta.phase. These
@@ -68,6 +78,19 @@ export function cardLabels(card: KanbanCardModel): string[] {
   const v = card.post_meta?.labels
   if (!Array.isArray(v)) return []
   return v.filter((x): x is string => typeof x === 'string' && FEEDBACK_LABELS.some(l => l.value === x))
+}
+
+/** Feedback sub-types (`post_meta.feedback_sub_type`) with their card pill. */
+export const FEEDBACK_TYPES = [
+  { value: 'bug', label: 'Bug', icon: 'i-lucide-bug', pillClass: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300' },
+  { value: 'idea', label: 'Idea', icon: 'i-lucide-lightbulb', pillClass: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300' }
+] as const
+
+export type FeedbackType = (typeof FEEDBACK_TYPES)[number]
+
+export function feedbackType(card: KanbanCardModel): FeedbackType | null {
+  if (card.post_type !== 'feedback') return null
+  return FEEDBACK_TYPES.find(t => t.value === card.post_meta?.feedback_sub_type) ?? null
 }
 
 /**

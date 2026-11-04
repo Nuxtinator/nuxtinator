@@ -1,0 +1,9 @@
+{
+  "dev": {
+    "i18n": {
+      "title": "Bac à sable de traduction",
+      "intro": "Cette page est publique et traduite par les fichiers de langue de la couche dev.",
+      "greeting": "Bonjour, {name} !"
+    }
+  }
+}
