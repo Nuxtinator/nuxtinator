@@ -10,7 +10,7 @@ const open = defineModel<boolean>('open', { default: false })
 
 const route = useRoute()
 const step = ref<1 | 2>(1)
-const form = reactive({ name: '', color: '#7c3aed' })
+const form = reactive({ name: '', color: '#7c3aed', visibility: 'org', teamIds: [] as string[] })
 const selected = ref(new Set<string>())
 const submitting = ref(false)
 const errorMsg = ref<string | null>(null)
@@ -32,6 +32,8 @@ watch(open, async (v) => {
     step.value = 1
     form.name = ''
     form.color = '#7c3aed'
+    form.visibility = 'org'
+    form.teamIds = []
     errorMsg.value = null
     try {
       templates.value ??= (await $fetch<{ templates: TemplateOption[] }, string>('/api/context/templates')).templates
@@ -44,6 +46,7 @@ watch(open, async (v) => {
 })
 
 function next() {
+  if (form.visibility === 'teams' && form.teamIds.length === 0) return
   if (form.name.trim()) step.value = 2
 }
 
@@ -69,7 +72,8 @@ async function create() {
         name: form.name.trim(),
         color: form.color || null,
         template: templateId.value,
-        builtin_sections: (template.value?.sections ?? []).map(s => s.key).filter(k => selected.value.has(k))
+        builtin_sections: (template.value?.sections ?? []).map(s => s.key).filter(k => selected.value.has(k)),
+        ...(form.visibility === 'teams' ? { visibility: 'teams', teamIds: form.teamIds } : {})
       }
     })
     open.value = false

@@ -497,6 +497,39 @@ export default defineShareHandler({ appId: 'notes', table: 'notes_note_shares', 
 
 The page opens `<ShareDialog v-model:open :endpoint="`/api/notes/items/${id}/shares`" :title>`. The owner shares with a known person (someone who accepted a share from them, or whose share they accepted, in any app), by email invite, or by single-use link; nothing reaches anyone's account until they accept. A share invite creates an account only while self-registration is on, and stays off `/admin/invites`. Personal content goes with its owner: shares are deleted with the item. See [server/utils/shares.ts](../layers/core/server/utils/shares.ts).
 
+### Limiting content to teams
+
+An org app can let editors limit a container (a project, a portfolio) to some of the org's teams. The org's groups must run as teams (`/@<slug>/settings/groups`). It's enforced in app code by core's [team-access.ts](../layers/core/server/utils/team-access.ts), not by RLS, so the container table keeps its plain org policy.
+
+1. In a regular migration, add `visibility text NOT NULL DEFAULT 'org'` (`org` | `teams`) to the container table and create `<app>_<container>_teams (container_id → container ON DELETE CASCADE, group_id → groups ON DELETE RESTRICT, PRIMARY KEY (container_id, group_id))`, indexed on `group_id`. Give the teams table a `_T` migration with the usual org scoping. Feedback's `feedback_012` / `feedback_T011` are the model.
+2. Declare `<app>.all_teams` ("show all teams"), left out of member grants, and register the container from your Nitro plugin:
+
+   ```ts
+   registerTeamContainer({
+     appId: 'feedback',
+     table: 'projects',
+     visibilityColumn: 'visibility',
+     teamsTable: 'feedback_project_teams',
+     allTeamsPermission: 'feedback.all_teams'
+   })
+   ```
+
+   The registration also feeds the group-usage check, so a team in use can't be deleted and the org can't switch back to audiences.
+3. In every member-facing route and MCP tool, resolve the scope once and check through it:
+
+   ```ts
+   return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.read', async (tx, ctx) => {
+     const scope = await getTeamScope(event, tx, ctx, 'feedback')
+     const rows = await tx.selectFrom('projects').selectAll().where(teamVisible(scope, 'projects')).execute()
+     // by id or slug, and for children, with the container's id:
+     await assertTeamAccess(tx, scope, 'projects', projectId) // 404
+   })
+   ```
+
+   Moves check both containers. Create and update read `{ visibility, teamIds }` with `readContainerTeamsInput` and save them with `setContainerTeams`, which refuses teams the caller isn't on and saves that would lock them out. Notifications and emails about a container go through `filterRecipients`. Paths with no user (a public widget, a bot, a job looping over `listOrgScopes`) skip the helper and keep reaching every container.
+4. In the UI, put `<TeamAccessField app-id v-model:visibility v-model:team-ids :current-teams>` in the container's create and settings forms and `<ShowAllTeamsToggle app-id @change>` in the app's chrome for holders of `<app>.all_teams`.
+5. Test every route that takes an id or slug with a caller off the team, expecting 404.
+
 ### Database tables
 
 Create a `server/database/schema.d.ts` and merge your tables into core's global

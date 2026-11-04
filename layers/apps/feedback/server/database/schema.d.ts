@@ -2,6 +2,7 @@ import type { ColumnType, Generated } from 'kysely'
 
 export type FeedbackPostType = 'task' | 'feature' | 'bug' | 'artifact' | 'feedback'
 export type FeedbackAttachmentKind = 'screenshot' | 'attachment'
+export type FeedbackProjectVisibility = 'org' | 'teams'
 
 export interface ProjectsTable {
   id: Generated<string>
@@ -10,8 +11,15 @@ export interface ProjectsTable {
   is_expanded: Generated<boolean>
   allowed_origins: Generated<string[]>
   post_meta: Generated<Record<string, any>>
+  visibility: Generated<FeedbackProjectVisibility>
   created_at: ColumnType<Date, string | Date | undefined, string | Date>
   updated_at: ColumnType<Date, string | Date | undefined, string | Date>
+}
+
+export interface FeedbackProjectTeamsTable {
+  container_id: string
+  group_id: string
+  created_at: ColumnType<Date, string | Date | undefined, string | Date>
 }
 
 export interface FeedbackAuthCodesTable {
@@ -94,5 +102,6 @@ declare global {
     card_column_history: CardColumnHistoryTable
     feedback_attachments: FeedbackAttachmentsTable
     feedback_auth_codes: FeedbackAuthCodesTable
+    feedback_project_teams: FeedbackProjectTeamsTable
   }
 }

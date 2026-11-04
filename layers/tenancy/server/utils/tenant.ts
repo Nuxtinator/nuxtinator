@@ -13,7 +13,9 @@
 //   4. Compute the user's effective permission set for this org —
 //      union(membership role perms) ∪ direct grants (`user_permission_grants`,
 //      org-scoped by RLS since the read runs after the GUC is set).
-//   5. If `opts.appId` was passed, 410 if that app is disabled for the org.
+//   5. If `opts.appId` was passed, 410 if that app is disabled for the org,
+//      and 403 if its access list names org groups the caller is in none of
+//      (the team gate).
 //   6. Refresh the `active-org-slug` cookie (30d) so bare-URL hits redirect.
 //   7. Run the handler with `(tx, ctx)` where ctx has full org context.
 //
@@ -36,6 +38,7 @@ import { getBearerIdentity, narrowToScopes, requireBearerPermission, runAsOauthC
 import { getRolePermissions, getUserPermissions } from '#core/server/utils/rbac'
 import { getUserGrantedPermissions } from '#core/server/utils/permission-grants'
 import { getPersonalAppPermissions } from '#core/server/utils/personal-apps'
+import { APP_TEAM_GATE_MESSAGE, isAppOpenToUser } from '#core/server/utils/groups'
 import type { Database } from '#core/server/database/schema'
 import type { Permission } from '#core/app/utils/permissions'
 
@@ -166,6 +169,9 @@ async function runWithOrgContext<T>(
           statusMessage: `App "${opts.appId}" is not enabled for this organization.`
         })
       }
+      if (!(await isAppOpenToUser(tx, { appId: opts.appId, orgId, userId }))) {
+        throw createError({ statusCode: 403, statusMessage: APP_TEAM_GATE_MESSAGE })
+      }
     }
 
     if (!bearer) {
@@ -286,6 +292,25 @@ async function resolveOrgPerms(userId: string, orgId: string): Promise<Set<Permi
   })
 }
 
+// A user's permissions in the org bound to the current transaction (the GUC
+// set by `withOrgContext` / `withOrgScope`), without a request: for checks
+// about someone other than the caller, such as who may receive a container's
+// content. Empty when no org is set or the user isn't a member.
+export async function getMemberPermissions(
+  tx: Transaction<Database>,
+  userId: string
+): Promise<Set<Permission>> {
+  const result = await sql<{ org_id: string | null }>`
+    select nullif(current_setting('app.current_org', true), '')::uuid as org_id
+  `.execute(tx)
+  const orgId = result.rows[0]?.org_id
+  if (!orgId) return new Set()
+  const perms = await computePermsForOrg(tx, userId, orgId)
+  if (perms.size === 0) return perms
+  for (const perm of await getUserGrantedPermissions(tx, userId)) perms.add(perm)
+  return perms
+}
+
 // Every permission the user holds anywhere: the host-level set (`users.roles`
 // plus everything when `is_admin`) unioned with the effective set of each org
 // they belong to (suspended orgs excluded) and with their personal apps'
@@ -355,7 +380,8 @@ export interface UserOrg {
 export interface UserOrgsFilter {
   // Keep only orgs where the user holds this permission.
   permission?: Permission
-  // Keep only orgs that have this app enabled.
+  // Keep only orgs that have this app enabled and open to the user (the
+  // team gate).
   appId?: string
   // Keep only these orgs (a caller's own selection, still membership-checked).
   orgIds?: string[]
@@ -382,6 +408,7 @@ export async function listUserOrgs(userId: string, filter: UserOrgsFilter = {}):
   for (const r of await q.execute()) {
     const org = await withOrgScope(r.id, async (tx) => {
       if (filter.appId && !(await isAppEnabledForOrg(tx, r.id, filter.appId))) return null
+      if (filter.appId && !(await isAppOpenToUser(tx, { appId: filter.appId, orgId: r.id, userId }))) return null
       const perms = await getRolePermissions(tx, r.roles, r.id)
       for (const perm of await getUserGrantedPermissions(tx, userId)) perms.add(perm)
       if (filter.permission && !perms.has(filter.permission)) return null

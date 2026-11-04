@@ -22,6 +22,7 @@ const navItems = computed<SidebarNavItem[]>(() => {
     { to: base, label: 'General', icon: 'i-lucide-settings', exact: true },
     { to: `${base}/members`, label: 'Members', icon: 'i-lucide-users' },
     { to: `${base}/roles`, label: 'Roles', icon: 'i-lucide-shield' },
+    { to: `${base}/groups`, label: 'Groups', icon: 'i-lucide-users-round' },
     { to: `${base}/apps`, label: 'Apps', icon: 'i-lucide-grid-2x2' },
     { to: `${base}/audit`, label: 'Activity', icon: 'i-lucide-history' },
     ...(registered.value?.sections ?? []).map(s => ({ to: s.to, label: s.title, icon: s.icon }))

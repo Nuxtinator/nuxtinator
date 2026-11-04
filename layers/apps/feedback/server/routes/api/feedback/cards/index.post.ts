@@ -1,6 +1,7 @@
 import { readBody } from 'h3'
 import { withOrgPermission } from '#tenant/server'
 import { logCreate } from '#core/server/utils/activity-logger'
+import { assertFeedbackProjectAccess, getFeedbackTeamScope } from '../../../../utils/project-teams'
 
 function normDate(v: unknown): string | null {
   if (v === null || v === undefined || v === '') return null
@@ -23,6 +24,9 @@ export default defineEventHandler(async (event) => {
   if (!columnId) throw createError({ statusCode: 400, statusMessage: 'column_id required' })
 
   return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
+    const scope = await getFeedbackTeamScope(event, tx, ctx)
+    await assertFeedbackProjectAccess(tx, scope, projectId)
+
     const row = await tx
       .insertInto('cards')
       .values({

@@ -5,6 +5,7 @@
 
 import { sql, type Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
+import { canSeeContainer, type TeamScope } from '#core/server/utils/team-access'
 import type { ContextAssistantProposal, ContextAssistantProposalStatus } from '../database/schema'
 
 type Tx = Transaction<Database>
@@ -117,9 +118,13 @@ export async function getOwnedConversation(
   return (row as ConversationRow | undefined) ?? null
 }
 
-export async function getOwnedConversationOr404(tx: Tx, id: string, userId: string): Promise<ConversationRow> {
+// Also 404 when the conversation is bound to a portfolio the caller's teams
+// can no longer see.
+export async function getOwnedConversationOr404(tx: Tx, id: string, userId: string, scope: TeamScope | null): Promise<ConversationRow> {
   const row = await getOwnedConversation(tx, id, userId)
-  if (!row) {
+  const hidden = !!row?.portfolio_id && scope !== null
+    && !(await canSeeContainer(tx, scope, 'context_portfolios', row.portfolio_id))
+  if (!row || hidden) {
     throw createError({ statusCode: 404, statusMessage: 'Conversation not found.' })
   }
   return row

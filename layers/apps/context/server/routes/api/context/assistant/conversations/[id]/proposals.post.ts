@@ -11,7 +11,7 @@ import {
   getMessageInConversation,
   setProposalStatus
 } from '../../../../../../utils/assistant-conversations'
-import { getPortfolioBySlugOr404 } from '../../../../../../utils/portfolio-helpers'
+import { getContextTeamScope, getPortfolioBySlugOr404 } from '../../../../../../utils/portfolio-helpers'
 import { saveSectionContent } from '../../../../../../utils/section-helpers'
 
 const Body = z.object({
@@ -23,7 +23,8 @@ const Body = z.object({
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, { appId: 'context' }, 'context.assistant.chat', async (tx, ctx) => {
     const id = getRouterParam(event, 'id') ?? ''
-    const conversation = await getOwnedConversationOr404(tx, id, ctx.userId)
+    const teamScope = await getContextTeamScope(event, tx, ctx)
+    const conversation = await getOwnedConversationOr404(tx, id, ctx.userId, teamScope)
 
     const parsed = Body.safeParse(await readBody(event))
     if (!parsed.success) {
@@ -48,7 +49,7 @@ export default defineEventHandler(async (event) => {
     if (!ctx.perms.has('context.write') || !ctx.perms.has('context.assistant.apply')) {
       throw createError({ statusCode: 403, statusMessage: 'Permission required: context.assistant.apply' })
     }
-    const portfolio = await getPortfolioBySlugOr404(tx, proposal.portfolio_slug)
+    const portfolio = await getPortfolioBySlugOr404(tx, proposal.portfolio_slug, teamScope)
     const { section, versionId } = await saveSectionContent(
       tx, portfolio.id, proposal.section_key, proposal.proposed_content, ctx.userId, { source: 'assistant' }
     )

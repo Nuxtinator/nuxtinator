@@ -3,6 +3,7 @@ import { registerDefaultGrants } from '#core/server/utils/default-grants-registr
 import { registerApp } from '#core/server/utils/app-registry'
 import { registerNavItem } from '#core/server/utils/nav-registry'
 import { registerSetting } from '#core/server/utils/settings-registry'
+import { registerTeamContainer } from '#core/server/utils/team-access'
 import {
   FEEDBACK_PERMISSIONS,
   FEEDBACK_PERMISSION_META,
@@ -17,6 +18,14 @@ import {
 export default defineNitroPlugin(() => {
   registerPermissions(FEEDBACK_PERMISSIONS, FEEDBACK_PERMISSION_META)
   registerDefaultGrants('feedback', FEEDBACK_DEFAULT_GRANTS)
+
+  registerTeamContainer({
+    appId: 'feedback',
+    table: 'projects',
+    visibilityColumn: 'visibility',
+    teamsTable: 'feedback_project_teams',
+    allTeamsPermission: 'feedback.all_teams'
+  })
 
   // Org-wide default notification recipients. Used when a project hasn't chosen
   // its own list. Default is empty (notify no one); the value is a user-id list

@@ -4,15 +4,15 @@
 // request tx; the embedding runs after it, in short scoped transactions.
 import { withOrgPermission } from '#tenant/server'
 import { txScopeOf } from '#core/server/utils/after-commit'
-import { getPortfolioBySlugOr404 } from '../../../../../../../utils/portfolio-helpers'
+import { getContextTeamScope, getPortfolioBySlugOr404 } from '../../../../../../../utils/portfolio-helpers'
 import { loadSection, requireKnownSection } from '../../../../../../../utils/section-helpers'
 import { indexSectionScoped } from '../../../../../../../utils/section-index'
 
 export default defineEventHandler(async (event) => {
-  const target = await withOrgPermission(event, { appId: 'context' }, 'context.write', async (tx) => {
+  const target = await withOrgPermission(event, { appId: 'context' }, 'context.write', async (tx, ctx) => {
     const slug = getRouterParam(event, 'slug') ?? ''
     const key = getRouterParam(event, 'key') ?? ''
-    const p = await getPortfolioBySlugOr404(tx, slug)
+    const p = await getPortfolioBySlugOr404(tx, slug, await getContextTeamScope(event, tx, ctx))
     await requireKnownSection(tx, p.id, key)
     const section = await loadSection(tx, p.id, key)
     return section ? { sectionId: section.id, scope: await txScopeOf(tx) } : null

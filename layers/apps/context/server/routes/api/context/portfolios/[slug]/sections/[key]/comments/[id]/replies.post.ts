@@ -2,7 +2,7 @@
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
 import { logCreate } from '#core/server/utils/activity-logger'
-import { getPortfolioBySlugOr404 } from '../../../../../../../../../utils/portfolio-helpers'
+import { getContextTeamScope, getPortfolioBySlugOr404 } from '../../../../../../../../../utils/portfolio-helpers'
 import { loadSection, requireKnownSection } from '../../../../../../../../../utils/section-helpers'
 
 const Body = z.object({
@@ -14,7 +14,7 @@ export default defineEventHandler(async (event) => {
     const slug = getRouterParam(event, 'slug') ?? ''
     const key = getRouterParam(event, 'key') ?? ''
     const commentId = getRouterParam(event, 'id') ?? ''
-    const p = await getPortfolioBySlugOr404(tx, slug)
+    const p = await getPortfolioBySlugOr404(tx, slug, await getContextTeamScope(event, tx, ctx))
     await requireKnownSection(tx, p.id, key)
     const section = await loadSection(tx, p.id, key)
     if (!section) throw createError({ statusCode: 404, statusMessage: 'Section not found.' })

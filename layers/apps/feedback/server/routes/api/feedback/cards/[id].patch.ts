@@ -3,6 +3,7 @@ import { sql } from 'kysely'
 import { withOrgPermission } from '#tenant/server'
 import { logUpdate } from '#core/server/utils/activity-logger'
 import { markCardNotificationsRead } from '../../../../utils/notify-recipients'
+import { assertFeedbackCardAccess, getFeedbackTeamScope } from '../../../../utils/project-teams'
 
 const ALLOWED_TYPES = ['task', 'feature', 'bug', 'artifact', 'feedback'] as const
 
@@ -20,6 +21,8 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event) ?? {}
 
   return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
+    await assertFeedbackCardAccess(tx, await getFeedbackTeamScope(event, tx, ctx), id)
+
     const updates: Record<string, any> = {}
 
     if (typeof body.title === 'string') updates.title = body.title

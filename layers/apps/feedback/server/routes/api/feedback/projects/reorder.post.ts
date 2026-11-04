@@ -1,6 +1,8 @@
 import { readBody } from 'h3'
 import { sql } from 'kysely'
 import { withOrgPermission } from '#tenant/server'
+import { teamVisible } from '#core/server/utils/team-access'
+import { getFeedbackTeamScope, withFeedbackProjectTeams } from '../../../../utils/project-teams'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event) ?? {}
@@ -13,7 +15,8 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'orderedIds must be strings' })
   }
 
-  return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx) => {
+  return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
+    const scope = await getFeedbackTeamScope(event, tx, ctx)
     for (let i = 0; i < orderedIds.length; i++) {
       const projectId = orderedIds[i] as string
       // Use `jsonb_set` instead of `||` with a stringified object. postgres-js
@@ -28,6 +31,7 @@ export default defineEventHandler(async (event) => {
           updated_at: sql`now()`
         })
         .where('id', '=', projectId)
+        .where(teamVisible(scope, 'projects'))
         .execute()
     }
 
@@ -35,10 +39,11 @@ export default defineEventHandler(async (event) => {
       .selectFrom('projects')
       .selectAll()
       .where('id', 'in', orderedIds as string[])
+      .where(teamVisible(scope, 'projects'))
       .orderBy(sql`coalesce((post_meta->>'sort_order')::int, 9999)`)
       .orderBy('created_at')
       .execute()
 
-    return rows
+    return await withFeedbackProjectTeams(tx, rows)
   })
 })

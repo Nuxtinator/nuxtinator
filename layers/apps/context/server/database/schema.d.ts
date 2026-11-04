@@ -9,8 +9,18 @@ export interface ContextPortfoliosTable {
   order: number | null
   // Registered portfolio template id; null = the default template.
   template: string | null
+  // 'org' = everyone in the org; 'teams' = only the teams in context_portfolio_teams.
+  visibility: Generated<ContextPortfolioVisibility>
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
+export type ContextPortfolioVisibility = 'org' | 'teams'
+
+export interface ContextPortfolioTeamsTable {
+  container_id: string
+  group_id: string
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
 // Whether a section's vector chunks match its current content. 'none' = never
@@ -162,6 +172,7 @@ export interface ContextSuggestionsTable {
 declare global {
   interface NuxtinatorDatabaseTables {
     context_portfolios: ContextPortfoliosTable
+    context_portfolio_teams: ContextPortfolioTeamsTable
     context_sections: ContextSectionsTable
     context_section_chunks: ContextSectionChunksTable
     context_section_versions: ContextSectionVersionsTable

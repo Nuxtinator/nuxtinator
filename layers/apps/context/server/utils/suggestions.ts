@@ -10,6 +10,7 @@ import type { Database } from '#core/server/database/schema'
 import type { Permission } from '#core/app/utils/permissions'
 import { getRolePermissions } from '#core/server/utils/rbac'
 import { createNotification } from '#core/server/utils/notifications'
+import { assertTeamAccess, filterRecipients, teamVisible, type TeamScope } from '#core/server/utils/team-access'
 import type { ContextSuggestionStatus } from '../database/schema'
 import { MAX_SECTION_BYTES, saveSectionContent } from './section-helpers'
 import { getPortfolioSections } from './section-settings'
@@ -167,12 +168,15 @@ async function usersWithPermission(tx: Tx, perm: Permission): Promise<string[]> 
   return [...out]
 }
 
-// One bell notification per reviewer, batched into their daily digest email.
+// One bell notification per reviewer who can see the portfolio, batched into
+// their daily digest email.
 async function notifyReviewers(
   tx: Tx,
   input: { setId: string, portfolioId: string, authorId: string, note: string | null, keys: string[] }
 ): Promise<void> {
-  const reviewers = await usersWithPermission(tx, REVIEW_PERMISSION)
+  const reviewers = await filterRecipients(
+    tx, 'context_portfolios', input.portfolioId, await usersWithPermission(tx, REVIEW_PERMISSION)
+  )
   if (reviewers.length === 0) return
 
   const author = await tx
@@ -220,11 +224,13 @@ export interface SuggestionSetSummary {
 }
 
 // Review queue. `open` = sets with at least one pending suggestion; `closed`
-// = everything decided. Non-reviewers only see their own sets.
+// = everything decided. Non-reviewers only see their own sets, and nobody
+// sees sets on portfolios their teams can't see.
 export async function listSuggestionSets(
   tx: Tx,
   viewer: SuggestionViewer,
-  opts: { state: 'open' | 'closed', limit?: number }
+  opts: { state: 'open' | 'closed', limit?: number },
+  scope: TeamScope | null
 ): Promise<SuggestionSetSummary[]> {
   const hasPending = sql<boolean>`exists (
     select 1 from context_suggestions p
@@ -245,6 +251,7 @@ export async function listSuggestionSets(
       'ss.created_at'
     ])
     .where(opts.state === 'open' ? hasPending : sql<boolean>`not ${hasPending}`)
+    .$if(scope !== null, qb => qb.where(teamVisible(scope!, 'context_portfolios', 'p')))
     .orderBy('ss.created_at', opts.state === 'open' ? 'asc' : 'desc')
     .limit(opts.limit ?? 100)
   if (!viewer.isReviewer) q = q.where('ss.author_id', '=', viewer.userId)
@@ -331,7 +338,8 @@ function notFound(): never {
 export async function getSuggestionSetOr404(
   tx: Tx,
   setId: string,
-  viewer: SuggestionViewer
+  viewer: SuggestionViewer,
+  scope: TeamScope | null
 ): Promise<SuggestionSetDetail> {
   if (!UUID_RE.test(setId)) notFound()
   const set = await tx
@@ -349,6 +357,7 @@ export async function getSuggestionSetOr404(
       'ss.created_at'
     ])
     .where('ss.id', '=', setId)
+    .$if(scope !== null, qb => qb.where(teamVisible(scope!, 'context_portfolios', 'p')))
     .executeTakeFirst()
   if (!set || (!viewer.isReviewer && set.author_id !== viewer.userId)) notFound()
 
@@ -395,6 +404,19 @@ export async function getSuggestionSetOr404(
       }
     })
   }
+}
+
+// 404 unless the set exists and the caller's teams can see its portfolio.
+// Routes that act on a set by id call it before anything else.
+export async function assertSuggestionSetVisible(tx: Tx, setId: string, scope: TeamScope): Promise<void> {
+  if (!UUID_RE.test(setId)) notFound()
+  const set = await tx
+    .selectFrom('context_suggestion_sets')
+    .select('portfolio_id')
+    .where('id', '=', setId)
+    .executeTakeFirst()
+  if (!set) notFound()
+  await assertTeamAccess(tx, scope, 'context_portfolios', set.portfolio_id, 'Suggestion not found.')
 }
 
 // Pending suggestions in a set, narrowed to `ids` when given. Every id must
@@ -604,10 +626,12 @@ export async function pendingCountsByKey(tx: Tx, portfolioId: string): Promise<M
 }
 
 // Number of open sets the viewer can see in the queue.
-export async function countOpenSets(tx: Tx, viewer: SuggestionViewer): Promise<number> {
+export async function countOpenSets(tx: Tx, viewer: SuggestionViewer, scope: TeamScope | null): Promise<number> {
   let q = tx
     .selectFrom('context_suggestion_sets as ss')
+    .innerJoin('context_portfolios as p', 'p.id', 'ss.portfolio_id')
     .select(sql<string>`count(*)`.as('n'))
+    .$if(scope !== null, qb => qb.where(teamVisible(scope!, 'context_portfolios', 'p')))
     .where(sql<boolean>`exists (
       select 1 from context_suggestions p
       where p.set_id = ss.id and p.status = 'pending'
@@ -617,16 +641,18 @@ export async function countOpenSets(tx: Tx, viewer: SuggestionViewer): Promise<n
   return Number(row.n)
 }
 
-// The caller's own suggestions, newest first, for the MCP `list_suggestions`
-// tool.
+// The caller's own suggestions on portfolios their teams can see, newest
+// first, for the MCP `list_suggestions` tool.
 export async function listOwnSuggestions(
   tx: Tx,
   authorId: string,
-  opts: { portfolioId?: string, status?: ContextSuggestionStatus, limit: number }
+  opts: { portfolioId?: string, status?: ContextSuggestionStatus, limit: number },
+  scope: TeamScope | null
 ) {
   let q = tx
     .selectFrom('context_suggestions as sg')
     .innerJoin('context_suggestion_sets as ss', 'ss.id', 'sg.set_id')
+    .innerJoin('context_portfolios as p', 'p.id', 'sg.portfolio_id')
     .select([
       'sg.id',
       'sg.set_id',
@@ -639,6 +665,7 @@ export async function listOwnSuggestions(
       sql<number>`length(sg.proposed_content)`.as('proposed_content_length')
     ])
     .where('ss.author_id', '=', authorId)
+    .$if(scope !== null, qb => qb.where(teamVisible(scope!, 'context_portfolios', 'p')))
     .orderBy('sg.created_at', 'desc')
     .limit(opts.limit)
   if (opts.portfolioId) q = q.where('sg.portfolio_id', '=', opts.portfolioId)

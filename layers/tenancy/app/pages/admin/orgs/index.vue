@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { GroupsManagerUser } from '#core/app/components/GroupsManager.vue'
+
 definePageMeta({
   layout: 'admin',
   middleware: ['auth', 'admin']
@@ -28,6 +30,25 @@ const deleteModalOpen = computed({
   get: () => deleteTarget.value !== null,
   set: (open) => { if (!open) deleteTarget.value = null }
 })
+
+const groupsOrg = ref<AdminOrg | null>(null)
+const groupsOpen = computed({
+  get: () => groupsOrg.value !== null,
+  set: (open) => { if (!open) groupsOrg.value = null }
+})
+
+// The org's members, filtered here: the host-admin member list isn't searchable.
+const searchOrgMembers = async (q: string): Promise<GroupsManagerUser[]> => {
+  if (!groupsOrg.value) return []
+  const res = await $fetch<{ members: { user_id: string, display_name: string, email: string | null }[] }, string>(
+    `/api/admin/orgs/${groupsOrg.value.id}/members`
+  )
+  const needle = q.toLowerCase()
+  return res.members
+    .filter(m => m.display_name?.toLowerCase().includes(needle) || m.email?.toLowerCase().includes(needle))
+    .slice(0, 10)
+    .map(m => ({ id: m.user_id, display_name: m.display_name, email: m.email }))
+}
 
 const openDelete = (o: AdminOrg) => {
   deleteTarget.value = o
@@ -107,6 +128,14 @@ const handleDelete = async () => {
             Suspended
           </UBadge>
           <UButton
+            icon="i-lucide-users-round"
+            variant="ghost"
+            color="neutral"
+            size="sm"
+            :aria-label="`${o.name} groups`"
+            @click="groupsOrg = o"
+          />
+          <UButton
             :to="`/@${o.slug}/settings`"
             icon="i-lucide-settings"
             variant="ghost"
@@ -125,6 +154,21 @@ const handleDelete = async () => {
         </div>
       </li>
     </ul>
+
+    <USlideover
+      v-model:open="groupsOpen"
+      :title="groupsOrg ? `${groupsOrg.name} — groups` : ''"
+      :ui="{ content: 'max-w-2xl' }"
+    >
+      <template #body>
+        <GroupsManager
+          v-if="groupsOrg"
+          :api-base="`/api/admin/orgs/${groupsOrg.id}/groups`"
+          :search-users="searchOrgMembers"
+          mode-editable
+        />
+      </template>
+    </USlideover>
 
     <UModal v-model:open="deleteModalOpen">
       <template #content>

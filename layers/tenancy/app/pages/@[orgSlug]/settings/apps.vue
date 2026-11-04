@@ -16,6 +16,7 @@ interface OrgApp {
   enabled: boolean
   source: 'auto' | 'org_admin' | 'host' | null
   lockedByHost: boolean
+  groups: string[]
 }
 
 const { data, pending, refresh } = await useFetch<{ apps: OrgApp[] }>(
@@ -26,6 +27,17 @@ const { data, pending, refresh } = await useFetch<{ apps: OrgApp[] }>(
 const apps = computed(() => data.value?.apps ?? [])
 
 const { refresh: refreshRailApps } = await useApps()
+
+const teamsApp = ref<OrgApp | null>(null)
+const teamsOpen = computed({
+  get: () => teamsApp.value !== null,
+  set: (v: boolean) => { if (!v) teamsApp.value = null }
+})
+
+const onTeamsSaved = async () => {
+  invalidateAppAccess(orgSlug.value)
+  await Promise.all([refresh(), refreshRailApps()])
+}
 
 const onToggle = async (app: OrgApp) => {
   if (app.lockedByHost) return
@@ -85,6 +97,12 @@ const onToggle = async (app: OrgApp) => {
               >
                 {{ app.description }}
               </div>
+              <div
+                v-if="app.groups.length > 0"
+                class="text-xs text-(--ui-text-muted) mt-1"
+              >
+                Only for {{ app.groups.join(', ') }}
+              </div>
               <div class="text-xs text-(--ui-text-muted) mt-1">
                 {{ app.globalStatus === 'host_controlled'
                   ? 'Managed by host'
@@ -97,13 +115,32 @@ const onToggle = async (app: OrgApp) => {
               </div>
             </div>
           </div>
-          <USwitch
-            :model-value="app.enabled"
-            :disabled="app.lockedByHost"
-            @update:model-value="() => onToggle(app)"
-          />
+          <div class="flex items-center gap-3 shrink-0">
+            <UButton
+              v-if="app.enabled"
+              variant="outline"
+              color="neutral"
+              size="sm"
+              icon="i-lucide-users"
+              @click="teamsApp = app"
+            >
+              Groups
+            </UButton>
+            <USwitch
+              :model-value="app.enabled"
+              :disabled="app.lockedByHost"
+              @update:model-value="() => onToggle(app)"
+            />
+          </div>
         </li>
       </ul>
     </div>
+
+    <AppGroupsModal
+      v-model:open="teamsOpen"
+      :endpoint="teamsApp ? `/api/o/${orgSlug}/apps/${teamsApp.appId}/groups` : null"
+      :title="teamsApp ? `Who can open ${teamsApp.title}` : ''"
+      @saved="onTeamsSaved"
+    />
   </div>
 </template>

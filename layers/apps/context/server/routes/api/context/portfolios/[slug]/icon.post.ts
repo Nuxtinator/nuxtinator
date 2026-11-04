@@ -3,14 +3,14 @@ import { sql } from 'kysely'
 import { withOrgPermission } from '#tenant/server'
 import { uploadToS3, validateImageType, validateFileSize } from '#core/server/utils/storage'
 import { logUpdate } from '#core/server/utils/activity-logger'
-import { getPortfolioBySlugOr404 } from '../../../../../utils/portfolio-helpers'
+import { getContextTeamScope, getPortfolioBySlugOr404, PORTFOLIO_COLUMNS } from '../../../../../utils/portfolio-helpers'
 
 const MAX_SIZE_MB = 5
 
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, { appId: 'context' }, 'context.write', async (tx, ctx) => {
     const slug = getRouterParam(event, 'slug') ?? ''
-    const p = await getPortfolioBySlugOr404(tx, slug)
+    const p = await getPortfolioBySlugOr404(tx, slug, await getContextTeamScope(event, tx, ctx))
 
     const parts = await readMultipartFormData(event)
     if (!parts) {
@@ -40,7 +40,7 @@ export default defineEventHandler(async (event) => {
       .updateTable('context_portfolios')
       .set({ icon_url: result.url, updated_at: sql<Date>`now()` })
       .where('id', '=', p.id)
-      .returning(['id', 'slug', 'name', 'color', 'icon_url', 'template', 'created_at', 'updated_at'])
+      .returning(PORTFOLIO_COLUMNS)
       .executeTakeFirstOrThrow()
 
     logUpdate('context_portfolios', p.id, ctx.userId, { icon_url: result.url })

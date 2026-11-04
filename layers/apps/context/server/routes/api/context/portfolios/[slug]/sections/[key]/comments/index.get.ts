@@ -1,16 +1,16 @@
 // GET /api/context/portfolios/:slug/sections/:key/comments
 // Query: include_resolved=true to show resolved comments (default: only open).
 import { withOrgPermission } from '#tenant/server'
-import { getPortfolioBySlugOr404 } from '../../../../../../../../utils/portfolio-helpers'
+import { getContextTeamScope, getPortfolioBySlugOr404 } from '../../../../../../../../utils/portfolio-helpers'
 import { loadSection, requireKnownSection } from '../../../../../../../../utils/section-helpers'
 import { isAnchorStale } from '../../../../../../../../utils/comments'
 
 export default defineEventHandler(async (event) => {
-  return await withOrgPermission(event, { appId: 'context' }, 'context.read', async (tx) => {
+  return await withOrgPermission(event, { appId: 'context' }, 'context.read', async (tx, ctx) => {
     const slug = getRouterParam(event, 'slug') ?? ''
     const key = getRouterParam(event, 'key') ?? ''
     const includeResolved = String(getQuery(event).include_resolved ?? '').toLowerCase() === 'true'
-    const p = await getPortfolioBySlugOr404(tx, slug)
+    const p = await getPortfolioBySlugOr404(tx, slug, await getContextTeamScope(event, tx, ctx))
     await requireKnownSection(tx, p.id, key)
     const section = await loadSection(tx, p.id, key)
     if (!section) return { comments: [] }

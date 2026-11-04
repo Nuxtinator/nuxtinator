@@ -12,6 +12,7 @@
 
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
+import type { TeamScope } from '#core/server/utils/team-access'
 import { aiUsageSubject, type AiDbClient, type AiTool, type AiToolHandler, type AiMessage, type AiTextPart } from '#ai/server'
 import { listPortfolios, type PortfolioRow } from './portfolio-helpers'
 import { getPortfolioSections, type MergedSection } from './section-settings'
@@ -105,9 +106,9 @@ function wordCount(text: string): number {
   return t ? t.split(/\s+/).length : 0
 }
 
-async function loadPortfolioEntries(tx: Tx, scope: AssistantScope): Promise<PortfolioEntry[]> {
+async function loadPortfolioEntries(tx: Tx, scope: AssistantScope, teamScope: TeamScope): Promise<PortfolioEntry[]> {
   const portfolios: PortfolioRow[] = scope.kind === 'all'
-    ? await listPortfolios(tx)
+    ? await listPortfolios(tx, teamScope)
     : [scope.portfolio]
   if (portfolios.length === 0) return []
 
@@ -289,13 +290,16 @@ function renderHits(scope: AssistantScope, entries: PortfolioEntry[], hits: Sect
   }).join('\n')
 }
 
+// `teamScope` is the caller's: the all scope lists, and search reaches, only
+// the portfolios their teams can see.
 export async function buildAssistantContext(
   tx: Tx,
   scope: AssistantScope,
   userCanEdit: boolean,
+  teamScope: TeamScope,
   opts: { userMessage?: string } = {}
 ): Promise<AssistantContext> {
-  const entries = await loadPortfolioEntries(tx, scope)
+  const entries = await loadPortfolioEntries(tx, scope, teamScope)
   const bySlug = new Map(entries.map(e => [e.portfolio.slug, e]))
   const scopedSlug = scope.kind === 'all' ? null : scope.portfolio.slug
   const contextLoaded: string[] = []
@@ -326,7 +330,7 @@ export async function buildAssistantContext(
   let autoHits: SectionSearchHit[] = []
   if (caps.search > 0 && opts.userMessage?.trim()) {
     try {
-      autoHits = await searchSections(tx, { portfolioIds, query: opts.userMessage, limit: SEARCH_HITS })
+      autoHits = await searchSections(tx, { portfolioIds, query: opts.userMessage, limit: SEARCH_HITS, teamScope })
     } catch (err) {
       console.error('[context] assistant auto-search failed:', (err as Error)?.message ?? err)
     }
@@ -386,7 +390,7 @@ export async function buildAssistantContext(
       if (!query) return 'Error: a query is required.'
       searches++
       try {
-        const hits = await searchSections(tx, { portfolioIds, query, limit: SEARCH_HITS })
+        const hits = await searchSections(tx, { portfolioIds, query, limit: SEARCH_HITS, teamScope })
         return `## Search hits for "${query}":\n${renderHits(scope, entries, hits)}`
       } catch (err) {
         return `Error: search is unavailable right now (${(err as { statusMessage?: string })?.statusMessage ?? 'embedding failed'}).`

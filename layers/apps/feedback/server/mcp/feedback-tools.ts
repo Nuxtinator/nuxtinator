@@ -21,6 +21,13 @@ import { sql, type Kysely, type Transaction } from 'kysely'
 import { defineMcpTool, mcpError, mcpLog } from '#mcp-layer'
 import type { Database as CoreDatabase } from '#core/server/database/schema'
 import { withOrgPermission } from '#tenant/server'
+import { teamVisible } from '#core/server/utils/team-access'
+import {
+  assertFeedbackCardAccess,
+  assertFeedbackProjectAccess,
+  getFeedbackTeamScope,
+  withFeedbackProjectTeams
+} from '../utils/project-teams'
 
 // The mcp-audit layer types its executor as `Kysely<CoreDatabase>` (core-only
 // schema), while feedback-layer transactions carry the augmented Database
@@ -74,12 +81,14 @@ export const listProjectsTool = defineMcpTool({
   scope: 'feedback.read',
   input: z.object({ org: orgInput }).strict(),
   handler: async (input, ctx) => {
-    return await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.read', async (tx) => {
-      const projects = await tx
+    return await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.read', async (tx, tctx) => {
+      const scope = await getFeedbackTeamScope(ctx.event, tx, tctx)
+      const projects = await withFeedbackProjectTeams(tx, await tx
         .selectFrom('projects')
-        .select(['id', 'name', 'description', 'created_at'])
+        .select(['id', 'name', 'description', 'visibility', 'created_at'])
+        .where(teamVisible(scope, 'projects'))
         .orderBy('created_at', 'asc')
-        .execute()
+        .execute())
       const columns = await tx
         .selectFrom('columns')
         .select(['id', 'name', 'position'])
@@ -90,6 +99,8 @@ export const listProjectsTool = defineMcpTool({
           id: p.id,
           name: p.name,
           description: p.description,
+          visibility: p.visibility,
+          teams: p.teams.map(t => t.name),
           created_at: p.created_at.toISOString()
         })),
         columns: columns.map(c => ({ id: c.id, name: c.name, position: c.position }))
@@ -111,9 +122,12 @@ export const listCardsTool = defineMcpTool({
     limit: z.number().int().min(1).max(200).optional()
   }).strict(),
   handler: async (input, ctx) => {
-    return await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.read', async (tx) => {
+    return await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.read', async (tx, tctx) => {
+      const scope = await getFeedbackTeamScope(ctx.event, tx, tctx)
+      if (input.project_id) await assertFeedbackProjectAccess(tx, scope, input.project_id)
       let qb = tx
         .selectFrom('cards as k')
+        .innerJoin('projects as p', 'p.id', 'k.project_id')
         .leftJoin('columns as c', 'c.id', 'k.column_id')
         .select([
           'k.id', 'k.project_id', 'k.title', 'k.post_type', 'k.priority',
@@ -122,6 +136,7 @@ export const listCardsTool = defineMcpTool({
         ])
         .orderBy('c.position', 'asc')
         .orderBy('k.last_moved_at', 'desc')
+        .where(teamVisible(scope, 'projects', 'p'))
         .limit(input.limit ?? 100)
       if (input.project_id) qb = qb.where('k.project_id', '=', input.project_id)
       if (input.column) {
@@ -222,13 +237,8 @@ export const createCardTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx) => {
-        const project = await tx
-          .selectFrom('projects')
-          .select('id')
-          .where('id', '=', input.project_id)
-          .executeTakeFirst()
-        if (!project) throw createError({ statusCode: 404, statusMessage: 'Project not found.' })
+      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx, tctx) => {
+        await assertFeedbackProjectAccess(tx, await getFeedbackTeamScope(ctx.event, tx, tctx), input.project_id)
 
         const swimlane = await tx
           .selectFrom('swimlanes')
@@ -285,7 +295,8 @@ export const moveCardTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx, tctx) => {
+        await assertFeedbackCardAccess(tx, await getFeedbackTeamScope(ctx.event, tx, tctx), input.card_id)
         const column = await resolveColumn(tx, input.column)
         const updated = await tx
           .updateTable('cards')
@@ -336,7 +347,8 @@ export const updateCardTool = defineMcpTool({
   ),
   handler: async (input, ctx) => {
     try {
-      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx) => {
+      const result = await withOrgPermission(ctx.event, { appId: 'feedback', org: input.org }, 'feedback.write', async (tx, tctx) => {
+        await assertFeedbackCardAccess(tx, await getFeedbackTeamScope(ctx.event, tx, tctx), input.card_id)
         const card = await tx
           .selectFrom('cards')
           .select(['id', 'description', 'post_meta'])

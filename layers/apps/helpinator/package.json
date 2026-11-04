@@ -22,7 +22,8 @@
   },
   "optionalDependencies": {
     "@nuxtinator/ai": "*",
-    "@nuxtinator/context": "*",
+    "@nuxtinator/context": ">=1.14.0",
+      "@nuxtinator/core": ">=3.4.0",
     "@nuxtinator/core": "*",
     "@nuxtinator/inbox": "*",
     "@nuxtinator/tenancy": "*"
@@ -30,7 +31,8 @@
   "nuxtinator": {
     "requires": {
       "@nuxtinator/ai": ">=0.10.0",
-      "@nuxtinator/context": "*"
+      "@nuxtinator/context": ">=1.14.0",
+      "@nuxtinator/core": ">=3.4.0"
     }
   },
   "peerDependencies": {

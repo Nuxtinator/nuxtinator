@@ -14,6 +14,7 @@ import type {
 
 const toast = useToast()
 const confirmAction = useConfirm()
+const { hasPermission } = usePermissions()
 
 definePageMeta({
   middleware: 'auth'
@@ -161,6 +162,12 @@ watch(orgSlug, () => {
   loadAll().then(() => startPoll())
 })
 
+async function onShowAllTeams() {
+  stopPoll()
+  await loadAll()
+  startPoll()
+}
+
 // ---------- Project modal ----------
 const projectModalOpen = ref(false)
 const projectForm = ref({
@@ -169,8 +176,13 @@ const projectForm = ref({
   description: '',
   allowedOrigins: '',
   notifyUserIds: [] as string[],
+  visibility: 'org',
+  teamIds: [] as string[],
+  currentTeams: [] as Project['teams'],
   mode: 'create' as 'create' | 'edit'
 })
+// Users who could see the project being edited, for its notify picker.
+const projectRecipientUsers = ref<BoardUser[]>([])
 
 // Candidate recipients for the per-project notify picker, shaped for
 // USelectMenu (value = user id, label = display name).
@@ -180,11 +192,14 @@ const userItems = computed(() =>
 
 // Picker items for a recipient list: the candidates plus any selected id that
 // no longer matches one, so a removed user still shows and can be unselected.
-function recipientItems(selected: string[]) {
-  const known = new Set(userItems.value.map(u => u.id))
+function recipientItems(selected: string[], candidates = userItems.value) {
+  const known = new Set(candidates.map(u => u.id))
   const stale = selected.filter(id => !known.has(id)).map(id => ({ id, label: 'Removed user' }))
-  return [...userItems.value, ...stale]
+  return [...candidates, ...stale]
 }
+const projectUserItems = computed(() =>
+  projectRecipientUsers.value.map(u => ({ id: u.id, label: u.display_name || 'Unnamed user' }))
+)
 const projectBusy = ref(false)
 
 // The allowed-origins textarea accepts one origin per line (commas/spaces also
@@ -194,7 +209,17 @@ function parseOriginsInput(value: string): string[] {
 }
 
 function openCreateProject() {
-  projectForm.value = { id: '', name: '', description: '', allowedOrigins: '', notifyUserIds: [], mode: 'create' }
+  projectForm.value = {
+    id: '',
+    name: '',
+    description: '',
+    allowedOrigins: '',
+    notifyUserIds: [],
+    visibility: 'org',
+    teamIds: [],
+    currentTeams: [],
+    mode: 'create'
+  }
   projectModalOpen.value = true
 }
 function openRenameProject(p: Project) {
@@ -205,9 +230,28 @@ function openRenameProject(p: Project) {
     description: p.description ?? '',
     allowedOrigins: (p.allowed_origins ?? []).join('\n'),
     notifyUserIds: Array.isArray(notify) ? notify.filter((v): v is string => typeof v === 'string') : [],
+    visibility: p.visibility ?? 'org',
+    teamIds: (p.teams ?? []).map(t => t.id),
+    currentTeams: p.teams ?? [],
     mode: 'edit'
   }
+  projectRecipientUsers.value = assignableUsers.value
   projectModalOpen.value = true
+  $fetch<{ users: BoardUser[] }>('/api/feedback/assignees', { query: { project_id: p.id } })
+    .then((res) => {
+      if (projectForm.value.id === p.id) projectRecipientUsers.value = res.users
+    })
+    .catch(() => {})
+}
+
+// Visibility and teams for a project save, only when they differ from what
+// the project has, so saving other fields never re-runs the team checks.
+function teamAccessChanges(p?: Project) {
+  const { visibility, teamIds } = projectForm.value
+  const before = (p?.teams ?? []).map(t => t.id).sort().join(',')
+  const changed = visibility !== (p?.visibility ?? 'org')
+    || (visibility === 'teams' && [...teamIds].sort().join(',') !== before)
+  return changed ? { visibility, teamIds: visibility === 'teams' ? teamIds : [] } : {}
 }
 async function submitProject() {
   if (!projectForm.value.name.trim()) return
@@ -218,7 +262,8 @@ async function submitProject() {
         method: 'POST',
         body: {
           name: projectForm.value.name.trim(),
-          description: projectForm.value.description
+          description: projectForm.value.description,
+          ...teamAccessChanges()
         }
       })
       projects.value.push(p)
@@ -236,7 +281,8 @@ async function submitProject() {
           name: projectForm.value.name.trim(),
           description: projectForm.value.description,
           allowed_origins: parseOriginsInput(projectForm.value.allowedOrigins),
-          post_meta
+          post_meta,
+          ...teamAccessChanges(existing)
         }
       })
       const i = projects.value.findIndex(x => x.id === updated.id)
@@ -733,6 +779,11 @@ async function onReorderProjects(payload: { orderedIds: string[] }) {
       >{{ zoomLevel }}%</span>
 
       <div class="flex items-center gap-2 shrink-0">
+        <ShowAllTeamsToggle
+          v-if="hasPermission('feedback.all_teams')"
+          app-id="feedback"
+          @change="onShowAllTeams"
+        />
         <UButton
           variant="ghost"
           size="sm"
@@ -830,6 +881,12 @@ async function onReorderProjects(payload: { orderedIds: string[] }) {
           <UFormField label="Description">
             <UTextarea v-model="projectForm.description" :rows="2" class="w-full" />
           </UFormField>
+          <TeamAccessField
+            v-model:visibility="projectForm.visibility"
+            v-model:team-ids="projectForm.teamIds"
+            app-id="feedback"
+            :current-teams="projectForm.currentTeams"
+          />
           <UFormField
             v-if="projectForm.mode === 'edit'"
             label="Project key"
@@ -873,7 +930,7 @@ async function onReorderProjects(payload: { orderedIds: string[] }) {
           >
             <USelectMenu
               v-model="projectForm.notifyUserIds"
-              :items="recipientItems(projectForm.notifyUserIds)"
+              :items="recipientItems(projectForm.notifyUserIds, projectUserItems)"
               value-key="id"
               label-key="label"
               multiple

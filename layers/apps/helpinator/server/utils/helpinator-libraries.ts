@@ -7,6 +7,7 @@ import type { Database } from '#core/server/database/schema'
 import type { HelpinatorLibraryKind } from '../database/schema'
 import { HELPINATOR_UUID_RE } from './helpinator-widgets'
 import { urlLooksPublic } from '#core/server/utils/safe-fetch'
+import { assertTeamAccess, type TeamScope } from '#core/server/utils/team-access'
 
 // `HELPINATOR_CRAWL_ALLOW_PRIVATE=true` lets the crawler reach private and
 // loopback addresses (local development against a site on your own machine).
@@ -64,19 +65,39 @@ export function helpinatorAssertContextRead(ctx: { perms: Set<string> }): void {
 }
 
 // For a widget save: portfolio libraries in `nextIds` that weren't already
-// bound (`currentIds`) need context.read.
-export async function helpinatorAssertCanBind(tx: Tx, ctx: { perms: Set<string> }, nextIds: string[], currentIds: string[] = []): Promise<void> {
+// bound (`currentIds`) need context.read, and their portfolios must be ones
+// the caller's teams can see (`contextScope`, Context's team scope).
+export async function helpinatorAssertCanBind(
+  tx: Tx,
+  ctx: { perms: Set<string> },
+  contextScope: TeamScope,
+  nextIds: string[],
+  currentIds: string[] = []
+): Promise<void> {
   const added = nextIds.filter(id => !currentIds.includes(id))
   if (added.length === 0) return
-  const libs = await helpinatorGetLibraries(tx, added)
-  if (libs.some(l => l.kind === 'portfolio')) helpinatorAssertContextRead(ctx)
+  const libs = (await helpinatorGetLibraries(tx, added)).filter(l => l.kind === 'portfolio')
+  if (libs.length === 0) return
+  helpinatorAssertContextRead(ctx)
+  for (const lib of libs) {
+    if (lib.portfolio_id) await assertTeamAccess(tx, contextScope, 'context_portfolios', lib.portfolio_id, 'Portfolio not found')
+  }
 }
 
-async function assertPortfolio(tx: Tx, kind: HelpinatorLibraryKind, portfolioId: string | null | undefined): Promise<string | null> {
+// A newly chosen portfolio must be one the caller's teams can see; one the
+// library already points at stays, so others can still edit the library.
+async function assertPortfolio(
+  tx: Tx,
+  kind: HelpinatorLibraryKind,
+  portfolioId: string | null | undefined,
+  contextScope: TeamScope,
+  currentId: string | null = null
+): Promise<string | null> {
   if (kind !== 'portfolio') return null
   if (!portfolioId) throw createError({ statusCode: 400, statusMessage: 'A portfolio library needs a portfolio.' })
   const row = await tx.selectFrom('context_portfolios').select('id').where('id', '=', portfolioId).executeTakeFirst()
   if (!row) throw createError({ statusCode: 400, statusMessage: 'Unknown portfolio' })
+  if (portfolioId !== currentId) await assertTeamAccess(tx, contextScope, 'context_portfolios', portfolioId, 'Portfolio not found')
   return portfolioId
 }
 
@@ -115,8 +136,13 @@ export async function helpinatorAssertLibraries(tx: Tx, ids: string[], defaultId
   return rows
 }
 
-export async function helpinatorCreateLibrary(tx: Tx, input: HelpinatorLibraryInputValue, userId: string): Promise<HelpinatorLibraryRow> {
-  const portfolioId = await assertPortfolio(tx, input.kind, input.portfolio_id)
+export async function helpinatorCreateLibrary(
+  tx: Tx,
+  input: HelpinatorLibraryInputValue,
+  userId: string,
+  contextScope: TeamScope
+): Promise<HelpinatorLibraryRow> {
+  const portfolioId = await assertPortfolio(tx, input.kind, input.portfolio_id, contextScope)
   return await tx
     .insertInto('helpinator_libraries')
     .values({
@@ -132,10 +158,15 @@ export async function helpinatorCreateLibrary(tx: Tx, input: HelpinatorLibraryIn
 
 // Kind is fixed after creation: pages and sources only make sense on a website
 // library, and a portfolio pointer only on a portfolio one.
-export async function helpinatorUpdateLibrary(tx: Tx, id: string, input: HelpinatorLibraryInputValue): Promise<HelpinatorLibraryRow> {
+export async function helpinatorUpdateLibrary(
+  tx: Tx,
+  id: string,
+  input: HelpinatorLibraryInputValue,
+  contextScope: TeamScope
+): Promise<HelpinatorLibraryRow> {
   const existing = await helpinatorGetLibraryOr404(tx, id)
   if (input.kind !== existing.kind) throw createError({ statusCode: 400, statusMessage: 'A library\'s kind cannot change.' })
-  const portfolioId = await assertPortfolio(tx, existing.kind, input.portfolio_id)
+  const portfolioId = await assertPortfolio(tx, existing.kind, input.portfolio_id, contextScope, existing.portfolio_id)
   return await tx
     .updateTable('helpinator_libraries')
     .set({ name: input.name, portfolio_id: portfolioId, description: input.description.trim(), updated_at: sql`now()` })

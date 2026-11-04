@@ -7,6 +7,8 @@ interface PortfolioListItem {
   name: string
   color: string | null
   icon_url: string | null
+  visibility: 'org' | 'teams'
+  teams: { id: string, name: string }[]
 }
 
 interface SectionMeta {
@@ -44,6 +46,13 @@ const { data: portfoliosData } = await useAsyncData(
 )
 const portfolios = computed(() => portfoliosData.value?.portfolios ?? [])
 
+const { hasPermission } = usePermissions()
+const canShowAllTeams = computed(() => hasPermission('context.all_teams'))
+
+async function onShowAllTeams() {
+  await refreshNuxtData(['context-sidebar-portfolios', 'context-portfolio-order', 'context-suggestions-pending-count'])
+}
+
 const { data: sectionsData } = await useAsyncData(
   () => `context-sidebar-sections-${activeSlug.value ?? ''}`,
   () => activeSlug.value
@@ -68,6 +77,10 @@ const sections = computed(() => sectionsData.value?.sections ?? [])
         aria-label="New portfolio"
         @click.stop="$emit('create')"
       />
+    </div>
+
+    <div v-if="canShowAllTeams" class="px-1" @click.stop>
+      <ShowAllTeamsToggle app-id="context" @change="onShowAllTeams" />
     </div>
 
     <p v-if="portfolios.length === 0" class="px-2 py-2 text-xs text-(--ui-text-muted)">
@@ -98,6 +111,12 @@ const sections = computed(() => sectionsData.value?.sections ?? [])
             />
           </span>
           <span class="truncate flex-1">{{ p.name }}</span>
+          <UIcon
+            v-if="p.visibility === 'teams'"
+            name="i-lucide-users"
+            class="size-3 shrink-0 text-(--ui-text-dimmed)"
+            :title="`Only ${p.teams.map(t => t.name).join(', ')}`"
+          />
         </NuxtLink>
 
         <nav
