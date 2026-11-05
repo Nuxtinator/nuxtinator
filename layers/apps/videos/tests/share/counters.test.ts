@@ -1,9 +1,9 @@
-// POST /api/videos/share/:token/play  — bump play_count for public + org videos
-// POST /api/videos/share/:token/view  — bump view_count for public + org videos,
+// POST /api/videos/share/:token/play  — bump play_count for link, team + org videos
+// POST /api/videos/share/:token/view  — bump view_count for link, team + org videos,
 //                                        skipping owner self-views
 //
-// Both endpoints gate access like share/[token].get.ts (public / owner / org
-// member) and go through the SECURITY DEFINER `bump_video_counter` SQL
+// Both endpoints gate access like share/[token].get.ts (link / owner / org
+// member / team member) and go through the SECURITY DEFINER `bump_video_counter` SQL
 // function so the no-GUC path can write past the RLS write policy.
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
@@ -62,14 +62,14 @@ describe('POST /api/videos/share/:token/play', () => {
     expect(c.play_count).toBe(5)
   })
 
-  it('org video: anonymous play gets 404 (existence not revealed)', async () => {
+  it('org video: anonymous play gets 401 and doesn\'t count', async () => {
     const { org, user } = await createVideosOrgWith(sql, ['admin'])
     const video = await createTestVideo(sql, {
       org_id: org.id, user_id: user.id, visibility: 'org', play_count: 0
     })
 
     const err = await $fetch(`/api/videos/share/${video.share_token}/play`, { method: 'POST' }).catch(e => e)
-    expect(err.statusCode).toBe(404)
+    expect(err.statusCode).toBe(401)
 
     const c = await getCounters(sql, video.id)
     expect(c.play_count).toBe(0)

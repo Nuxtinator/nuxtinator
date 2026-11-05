@@ -2,7 +2,8 @@ export const VIDEOS_PERMISSIONS = [
   'videos.access',
   'videos.read',
   'videos.write',
-  'videos.moderate'
+  'videos.moderate',
+  'videos.all_teams'
 ] as const
 
 export type VideosPermission = typeof VIDEOS_PERMISSIONS[number]
@@ -14,7 +15,7 @@ export const VIDEOS_PERMISSION_META: Record<string, { title: string, description
   },
   'videos.read': {
     title: 'Read videos',
-    description: 'View org-shared videos in the team library.'
+    description: 'View team and org videos in the shared library.'
   },
   'videos.write': {
     title: 'Manage own videos',
@@ -22,7 +23,11 @@ export const VIDEOS_PERMISSION_META: Record<string, { title: string, description
   },
   'videos.moderate': {
     title: 'Moderate videos',
-    description: 'Edit, delete, or re-share any video in the org.'
+    description: 'Edit, delete, or re-share any team or org video in the org.'
+  },
+  'videos.all_teams': {
+    title: 'Show all teams',
+    description: 'See every team\'s videos in the org (never private ones).'
   }
 }
 

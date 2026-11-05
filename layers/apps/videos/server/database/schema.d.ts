@@ -3,11 +3,12 @@
 // server/database/schema.ts).
 import type { ColumnType, Generated } from 'kysely'
 
-export type VideoVisibility = 'private' | 'org' | 'public'
+export type VideoVisibility = 'private' | 'team' | 'org'
 
 export interface VideosTable {
   id: Generated<string>
-  user_id: string
+  // Null once the uploader's account is deleted (team and org videos only).
+  user_id: string | null
   org_id: string
   title: string | null
   s3_key: string
@@ -18,6 +19,9 @@ export interface VideosTable {
   height: number | null
   share_token: string
   visibility: Generated<VideoVisibility>
+  // Set only for `team` videos.
+  team_id: string | null
+  link_enabled: Generated<boolean>
   view_count: Generated<number>
   play_count: Generated<number>
   source: string | null
@@ -28,8 +32,16 @@ export interface VideosTable {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
+// Storage keys of deleted videos, removed from storage after the delete commits.
+export interface VideosBlobDeletesTable {
+  id: Generated<string>
+  s3_key: string
+  created_at: Generated<Date>
+}
+
 declare global {
   interface NuxtinatorDatabaseTables {
     videos: VideosTable
+    videos_blob_deletes: VideosBlobDeletesTable
   }
 }

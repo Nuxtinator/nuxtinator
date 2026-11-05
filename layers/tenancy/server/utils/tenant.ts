@@ -7,7 +7,9 @@
 //      Nitro middleware (which validated the user's membership in this org).
 //      404 if absent — caller didn't go through the middleware.
 //   3. Open a Kysely transaction on `db` and `SET LOCAL app.current_org`
-//      INSIDE that transaction. This is the only place the GUC gets set —
+//      (and `app.current_user`, the caller, which user-keyed policies such as
+//      private videos read) INSIDE that transaction. This is the only place
+//      the GUC gets set —
 //      middleware doesn't because `SET LOCAL` is transaction-scoped and
 //      pooled connections (PgBouncer txn-pool) wouldn't carry it forward.
 //   4. Compute the user's effective permission set for this org —
@@ -152,6 +154,7 @@ async function runWithOrgContext<T>(
 
   return await runAsOauthClient(clientId, () => runTransaction(db, async (tx) => {
     await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
+    await sql`select set_config('app.current_user', ${userId}, true)`.execute(tx)
 
     const perms = await getRolePermissions(tx, memberRoles, orgId)
     // Additive per-user grants ride on top of role-derived perms. The read
@@ -579,8 +582,8 @@ async function memberOrgIds(userId: string): Promise<string[]> {
 // Sources 1, 3 and 4 are client-controlled: they select the org, they do not
 // authorize. Callers that know the acting user pass `opts.userId`, which
 // makes any client-selected org subject to a membership check (see
-// `resolveSelectedOrg`), enables source 5, and turns a user with several
-// orgs and no selection into a 400. Without `opts.userId` an unknown or
+// `resolveSelectedOrg`), enables source 5, turns a user with several
+// orgs and no selection into a 400, and sets `app.current_user`. Without `opts.userId` an unknown or
 // missing slug opens the txn with no GUC — RLS-protected INSERTs then fail
 // loudly via `current_org_id() → NULL`.
 export async function runInOrgTransaction<T>(event: H3Event, fn: OrgTransactionFn<T>): Promise<T>
@@ -604,6 +607,9 @@ export async function runInOrgTransaction<T>(
   return await runTransaction(db, async (tx) => {
     if (orgId) {
       await sql`select set_config('app.current_org', ${orgId}, true)`.execute(tx)
+    }
+    if (opts.userId) {
+      await sql`select set_config('app.current_user', ${opts.userId}, true)`.execute(tx)
     }
     return await fn(tx)
   })
