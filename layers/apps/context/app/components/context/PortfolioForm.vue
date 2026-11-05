@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const form = defineModel<{ name: string, color: string, visibility: string, teamIds: string[] }>('modelValue', { required: true })
+const form = defineModel<{ name: string, color: string, visibility: string, teamIds: string[], fresh?: boolean }>('modelValue', { required: true })
 defineProps<{ submitting?: boolean, error?: string | null, submitLabel?: string }>()
 defineEmits(['submit'])
 </script>
@@ -15,6 +15,7 @@ defineEmits(['submit'])
     <TeamAccessField
       v-model:visibility="form.visibility"
       v-model:team-ids="form.teamIds"
+      v-model:fresh="form.fresh"
       app-id="context"
     />
     <p v-if="error" class="text-(--ui-error) text-sm">

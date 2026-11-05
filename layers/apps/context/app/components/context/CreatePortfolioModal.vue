@@ -10,7 +10,7 @@ const open = defineModel<boolean>('open', { default: false })
 
 const route = useRoute()
 const step = ref<1 | 2>(1)
-const form = reactive({ name: '', color: '#7c3aed', visibility: 'org', teamIds: [] as string[] })
+const form = reactive({ name: '', color: '#7c3aed', visibility: 'org', teamIds: [] as string[], fresh: true })
 const selected = ref(new Set<string>())
 const submitting = ref(false)
 const errorMsg = ref<string | null>(null)
@@ -34,6 +34,7 @@ watch(open, async (v) => {
     form.color = '#7c3aed'
     form.visibility = 'org'
     form.teamIds = []
+    form.fresh = true
     errorMsg.value = null
     try {
       templates.value ??= (await $fetch<{ templates: TemplateOption[] }, string>('/api/context/templates')).templates

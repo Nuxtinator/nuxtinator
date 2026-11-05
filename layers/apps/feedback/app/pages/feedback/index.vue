@@ -195,6 +195,7 @@ const projectForm = ref({
   visibility: 'org',
   teamIds: [] as string[],
   currentTeams: [] as Project['teams'],
+  fresh: false,
   mode: 'create' as 'create' | 'edit'
 })
 // Users who could see the project being edited, for its notify picker.
@@ -234,6 +235,7 @@ function openCreateProject() {
     visibility: 'org',
     teamIds: [],
     currentTeams: [],
+    fresh: true,
     mode: 'create'
   }
   projectModalOpen.value = true
@@ -249,6 +251,7 @@ function openRenameProject(p: Project) {
     visibility: p.visibility ?? 'org',
     teamIds: (p.teams ?? []).map(t => t.id),
     currentTeams: p.teams ?? [],
+    fresh: false,
     mode: 'edit'
   }
   projectRecipientUsers.value = assignableUsers.value
@@ -271,6 +274,7 @@ function teamAccessChanges(p?: Project) {
 }
 async function submitProject() {
   if (!projectForm.value.name.trim()) return
+  if (projectForm.value.visibility === 'teams' && projectForm.value.teamIds.length === 0) return
   projectBusy.value = true
   try {
     if (projectForm.value.mode === 'create') {
@@ -900,6 +904,7 @@ async function onReorderProjects(payload: { orderedIds: string[] }) {
           <TeamAccessField
             v-model:visibility="projectForm.visibility"
             v-model:team-ids="projectForm.teamIds"
+            v-model:fresh="projectForm.fresh"
             app-id="feedback"
             :current-teams="projectForm.currentTeams"
           />

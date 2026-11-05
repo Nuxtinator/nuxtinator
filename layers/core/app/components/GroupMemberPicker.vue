@@ -75,37 +75,31 @@ const people = computed(() => {
       v-else
       class="max-h-80 overflow-y-auto divide-y divide-(--ui-border) border border-(--ui-border) rounded-md"
     >
-      <li
+      <CheckboxRow
         v-for="u in people"
         :key="u.id"
-        class="px-3 py-2 cursor-pointer hover:bg-(--ui-bg-elevated)"
-        @click="busyId !== u.id && emit('toggle', u, !selectedIds.has(u.id))"
+        :checked="selectedIds.has(u.id)"
+        :label="nameOf(u)"
+        :disabled="busyId === u.id"
+        @toggle="emit('toggle', u, $event)"
       >
-        <!-- Mouse clicks land on the row; a keyboard press on the box bubbles up to it. -->
-        <div class="flex items-center gap-3 pointer-events-none">
-          <UCheckbox
-            :model-value="selectedIds.has(u.id)"
-            :disabled="busyId === u.id"
-            :aria-label="nameOf(u)"
-          />
-          <UAvatar
-            :src="u.avatar || undefined"
-            :alt="nameOf(u)"
-            size="sm"
-          />
-          <div class="min-w-0">
-            <div class="text-sm font-medium truncate">
-              {{ nameOf(u) }}
-            </div>
-            <div
-              v-if="u.email && u.email !== nameOf(u)"
-              class="text-xs text-(--ui-text-muted) truncate"
-            >
-              {{ u.email }}
-            </div>
+        <UAvatar
+          :src="u.avatar || undefined"
+          :alt="nameOf(u)"
+          size="sm"
+        />
+        <div class="min-w-0">
+          <div class="text-sm font-medium truncate">
+            {{ nameOf(u) }}
+          </div>
+          <div
+            v-if="u.email && u.email !== nameOf(u)"
+            class="text-xs text-(--ui-text-muted) truncate"
+          >
+            {{ u.email }}
           </div>
         </div>
-      </li>
+      </CheckboxRow>
     </ul>
   </div>
 </template>
