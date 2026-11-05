@@ -3,6 +3,7 @@ import { registerDefaultGrants } from '#core/server/utils/default-grants-registr
 import { registerApp } from '#core/server/utils/app-registry'
 import { registerNavItem } from '#core/server/utils/nav-registry'
 import { registerAdminSection } from '#core/server/utils/admin-section-registry'
+import { registerTeamContainer } from '#core/server/utils/team-access'
 import { registerRecordsVisibilitySource } from '#records/server'
 import {
   VIEWS_PERMISSIONS,
@@ -14,6 +15,15 @@ import { boardVisibilitySource } from '../utils/board-visibility'
 export default defineNitroPlugin(() => {
   registerPermissions(VIEWS_PERMISSIONS, VIEWS_PERMISSION_META)
   registerDefaultGrants('views', VIEWS_DEFAULT_GRANTS)
+
+  registerTeamContainer({
+    appId: 'views',
+    table: 'views_definitions',
+    visibilityColumn: 'visibility',
+    teamsTable: 'views_teams',
+    ownerColumn: 'owner_id',
+    allTeamsPermission: 'views.all_teams'
+  })
 
   registerApp({
     id: 'views',

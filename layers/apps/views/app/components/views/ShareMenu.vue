@@ -1,9 +1,9 @@
 <script setup lang="ts">
-// Share management popover: who has the view, at what level, plus adding
-// people from the org directory. Shares only take effect while visibility
-// isn't private — a private view surfaces that and offers the owner the
-// one-click flip to 'shared'.
-import type { ViewsShareEntry, ViewDetail } from '../../utils/views-types'
+// Share management popover: who can open the view (everyone, its teams, or
+// nobody else — the owner's call, saved as it changes) and the people it is
+// shared with, at what level, picked from the org directory. A person's share
+// applies whatever the view's visibility.
+import type { ViewsShareEntry, ViewDetail, ViewsVisibility } from '../../utils/views-types'
 
 const props = defineProps<{
   view: ViewDetail
@@ -101,17 +101,43 @@ async function removeShare(share: ViewsShareEntry) {
 
 const isOwner = computed(() => props.view.accessLevel === 'owner')
 
-async function makeShared() {
+const visibility = ref<string>(props.view.visibility)
+const teamIds = ref<string[]>(props.view.teams.map(t => t.id))
+const savingAccess = ref(false)
+
+function resetAccess() {
+  visibility.value = props.view.visibility
+  teamIds.value = props.view.teams.map(t => t.id)
+}
+watch(() => [props.view.visibility, props.view.teams], resetAccess)
+
+function accessChanged(): boolean {
+  if (visibility.value !== props.view.visibility) return true
+  if (visibility.value !== 'teams') return false
+  const saved = new Set(props.view.teams.map(t => t.id))
+  return teamIds.value.length !== saved.size || teamIds.value.some(id => !saved.has(id))
+}
+
+async function saveAccess() {
+  if (savingAccess.value || !accessChanged()) return
+  savingAccess.value = true
   try {
     await $fetch(`/api/views/${props.view.id}`, {
       method: 'PATCH',
-      body: { visibility: 'shared' }
+      body: {
+        visibility: visibility.value as ViewsVisibility,
+        teamIds: visibility.value === 'teams' ? teamIds.value : []
+      }
     })
     emit('changed')
   } catch (err) {
-    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to change visibility') })
+    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to change who can open the view') })
+    resetAccess()
+  } finally {
+    savingAccess.value = false
   }
 }
+watch([visibility, teamIds], saveAccess)
 </script>
 
 <template>
@@ -131,27 +157,16 @@ async function makeShared() {
           Share "{{ view.name }}"
         </h3>
 
-        <UAlert
-          v-if="view.visibility === 'private'"
-          color="warning"
-          variant="subtle"
-          icon="i-lucide-lock"
-          title="This view is private — shares apply once it isn't."
-        >
-          <template
-            v-if="isOwner"
-            #actions
-          >
-            <UButton
-              size="xs"
-              color="warning"
-              variant="soft"
-              @click="makeShared"
-            >
-              Make it shared
-            </UButton>
-          </template>
-        </UAlert>
+        <TeamAccessField
+          v-model:visibility="visibility"
+          v-model:team-ids="teamIds"
+          app-id="views"
+          none-value="private"
+          :current-teams="view.teams"
+          :disabled="!isOwner || savingAccess"
+        />
+
+        <USeparator label="People" />
 
         <div class="flex items-center gap-2">
           <USelectMenu

@@ -9,7 +9,7 @@ const Body = z.object({
   name: z.string().trim().min(1).max(120),
   icon: z.string().max(64).optional(),
   recordTypeKey: z.string().min(1).max(80),
-  visibility: z.enum(['private', 'shared', 'org']).optional(),
+  visibility: z.enum(['private', 'org']).optional(),
   definition: z.unknown().optional(),
   tab: z.object({
     name: z.string().trim().max(80).optional(),

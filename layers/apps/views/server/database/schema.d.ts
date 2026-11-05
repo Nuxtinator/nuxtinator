@@ -5,7 +5,7 @@ import type { ColumnType, Generated } from 'kysely'
 
 // Code-owned vocabularies (mirrored by CHECK constraints in the migrations).
 export type ViewsLayout = 'kanban' | 'table' | 'list'
-export type ViewsVisibility = 'private' | 'shared' | 'org'
+export type ViewsVisibility = 'private' | 'org' | 'teams'
 export type ViewsShareLevel = 'view' | 'edit'
 
 export interface ViewsViewsTable {
@@ -45,6 +45,13 @@ export interface ViewTabsTable {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
+// The teams a view with visibility 'teams' opens to.
+export interface ViewTeamsTable {
+  container_id: string
+  group_id: string
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
 // The records added by hand to a view whose tabs show only those.
 export interface ViewItemsTable {
   view_id: string
@@ -69,6 +76,7 @@ declare global {
   interface NuxtinatorDatabaseTables {
     views_definitions: ViewsViewsTable
     views_shares: ViewSharesTable
+    views_teams: ViewTeamsTable
     views_tabs: ViewTabsTable
     views_items: ViewItemsTable
     views_cards: ViewCardsTable

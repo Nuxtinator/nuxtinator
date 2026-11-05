@@ -1,5 +1,6 @@
 export const VIEWS_PERMISSIONS = [
-  'views.use'
+  'views.use',
+  'views.all_teams'
 ] as const
 
 export type ViewsPermission = typeof VIEWS_PERMISSIONS[number]
@@ -8,6 +9,10 @@ export const VIEWS_PERMISSION_META: Record<string, { title: string, description:
   'views.use': {
     title: 'Use Views',
     description: 'Open the Views app and create boards and tables. What each view shows is still governed by record permissions.'
+  },
+  'views.all_teams': {
+    title: 'Share with any team',
+    description: 'Open a view to any team in the org, not only teams you are on.'
   }
 }
 

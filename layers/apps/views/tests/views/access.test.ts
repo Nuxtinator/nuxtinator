@@ -1,6 +1,6 @@
-// The view access matrix through the routes: private / shared / org
-// visibility crossed with owner / share levels / stranger / org-admin, plus
-// the admin governance endpoints.
+// The view access matrix through the routes: private / teams / org
+// visibility crossed with owner / share levels / team members / stranger /
+// org-admin, plus the admin governance endpoints.
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import {
@@ -88,27 +88,20 @@ describe('view access matrix', () => {
     expect(renamed.name).toBe('renamed by owner')
   })
 
-  it('shares grant their level, only while visibility is not private', async () => {
+  it('shares grant their level on a private view', async () => {
     const { org, auth } = await createViewsOrgWith(sql, ['admin'])
     const owner = withOrgHeader(auth, org.slug)
     const invitee = await addViewsMember(sql, org.id)
     const inviteeOpts = withOrgHeader(invitee.auth, org.slug)
 
-    // Share on a private view: dormant.
     const view = await createView(owner)
     await $fetch(`/api/views/${view.id}/shares`, {
       method: 'POST',
       body: { userId: invitee.user.id, level: 'view' },
       ...owner
     })
-    await expectStatus($fetch(`/api/views/${view.id}`, inviteeOpts), 404)
-
-    // Flip to shared: the share applies at its level.
-    await $fetch(`/api/views/${view.id}`, {
-      method: 'PATCH',
-      body: { visibility: 'shared' },
-      ...owner
-    })
+    const listed = await $fetch<{ items: ViewDetail[] }>('/api/views', inviteeOpts)
+    expect(listed.items.map(v => v.id)).toContain(view.id)
     const seen = await $fetch<ViewDetail>(`/api/views/${view.id}`, inviteeOpts)
     expect(seen.accessLevel).toBe('view')
     await expectStatus($fetch(`/api/views/${view.id}/tabs/${view.tabs[0]!.id}`, {
@@ -154,7 +147,7 @@ describe('view access matrix', () => {
     const invitee = await addViewsMember(sql, org.id)
     const inviteeOpts = withOrgHeader(invitee.auth, org.slug)
 
-    const view = await createView(owner, { visibility: 'shared' })
+    const view = await createView(owner)
     await $fetch(`/api/views/${view.id}/shares`, {
       method: 'POST',
       body: { userId: invitee.user.id, level: 'view' },
@@ -185,6 +178,60 @@ describe('view access matrix', () => {
     const seen = await $fetch<ViewDetail>(`/api/views/${view.id}`, memberOpts)
     expect(seen.accessLevel).toBe('view')
     expect(seen.sharedWithMe).toBe(false)
+  })
+
+  it('teams visibility opens the view to its teams\' members only', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['admin'])
+    const owner = withOrgHeader(auth, org.slug)
+    const insider = await addViewsMember(sql, org.id)
+    const outsider = await addViewsMember(sql, org.id)
+    const insiderOpts = withOrgHeader(insider.auth, org.slug)
+    const outsiderOpts = withOrgHeader(outsider.auth, org.slug)
+
+    await $fetch(`/api/o/${org.slug}/groups/mode`, { method: 'PUT', body: { mode: 'teams' }, ...owner })
+    const team = await $fetch<{ id: string }>(`/api/o/${org.slug}/groups`, {
+      method: 'POST',
+      body: { name: 'test-views-team' },
+      ...owner
+    })
+    await $fetch(`/api/o/${org.slug}/groups/${team.id}/members/${insider.user.id}`, { method: 'PUT', ...owner })
+
+    const view = await createView(owner)
+    const limited = await $fetch<ViewDetail & { teams: Array<{ id: string }> }>(`/api/views/${view.id}`, {
+      method: 'PATCH',
+      body: { visibility: 'teams', teamIds: [team.id] },
+      ...owner
+    })
+    expect(limited.visibility).toBe('teams')
+    expect(limited.teams.map(t => t.id)).toEqual([team.id])
+
+    const seen = await $fetch<ViewDetail>(`/api/views/${view.id}`, insiderOpts)
+    expect(seen.accessLevel).toBe('view')
+    const listed = await $fetch<{ items: ViewDetail[] }>('/api/views', insiderOpts)
+    expect(listed.items.map(v => v.id)).toContain(view.id)
+
+    await expectStatus($fetch(`/api/views/${view.id}`, outsiderOpts), 404)
+    const notListed = await $fetch<{ items: ViewDetail[] }>('/api/views', outsiderOpts)
+    expect(notListed.items.map(v => v.id)).not.toContain(view.id)
+
+    // Only the owner decides who can open it.
+    await expectStatus($fetch(`/api/views/${view.id}`, {
+      method: 'PATCH',
+      body: { visibility: 'org' },
+      ...insiderOpts
+    }), 403)
+
+    // A team a view is open to can't be deleted.
+    await expectStatus($fetch(`/api/o/${org.slug}/groups/${team.id}`, { method: 'DELETE', ...owner }), 409)
+
+    // Back to private: the team loses it.
+    const back = await $fetch<ViewDetail & { teams: unknown[] }>(`/api/views/${view.id}`, {
+      method: 'PATCH',
+      body: { visibility: 'private' },
+      ...owner
+    })
+    expect(back.teams).toEqual([])
+    await expectStatus($fetch(`/api/views/${view.id}`, insiderOpts), 404)
   })
 
   it('delete is owner-only, and the org admin role counts as owner', async () => {

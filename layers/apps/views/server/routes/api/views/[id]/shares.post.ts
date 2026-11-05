@@ -1,8 +1,7 @@
 // POST /api/views/:id/shares — add or re-level a share
 // ({ userId, level }). Owner or 'edit' manage shares. Sharing to the owner
-// is meaningless and rejected. Shares only take effect while the view's
-// visibility is not 'private' — the UI pairs adding the first share with
-// flipping visibility to 'shared'.
+// is meaningless and rejected. A share applies whatever the view's
+// visibility.
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
 import { requireView } from '../../../../utils/views'

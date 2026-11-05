@@ -3,7 +3,7 @@
 import type { RecordsFilterGroup } from '#records/client'
 
 export type ViewsLayout = 'kanban' | 'table' | 'list'
-export type ViewsVisibility = 'private' | 'shared' | 'org'
+export type ViewsVisibility = 'private' | 'org' | 'teams'
 export type ViewsAccessLevel = 'view' | 'edit' | 'owner'
 
 export type ViewsConnectionDisplay = 'names' | 'count' | 'progress'
@@ -77,6 +77,8 @@ export interface ViewDetail extends Omit<ViewSummary, 'layout' | 'tabCount'> {
   tabs: ViewsTab[]
   /** The view reached the caller through a share row of their own. */
   sharedWithMe: boolean
+  /** The teams a view with visibility 'teams' opens to. */
+  teams: Array<{ id: string, name: string, archived: boolean }>
 }
 
 /**

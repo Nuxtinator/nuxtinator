@@ -82,7 +82,6 @@ const KANBAN_MODE_ITEMS = [
 ]
 const VISIBILITY_ITEMS = [
   { label: 'Private — only me', value: 'private' },
-  { label: 'Shared — people I invite', value: 'shared' },
   { label: 'Organization — everyone', value: 'org' }
 ]
 

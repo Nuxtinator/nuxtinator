@@ -2,11 +2,10 @@
 // these instead of inlining its own queries.
 //
 // Access model: the owner (and the host `admin` role) holds every level;
-// share rows grant 'view' or 'edit' but only while the view's visibility is
-// not 'private' (flipping a view back to private instantly locks everyone
-// out without deleting its shares); visibility 'org' grants a baseline
-// 'view' to any caller that reached the route (which already required
-// `views.use`). Opening a view never widens record access by itself — what
+// share rows grant 'view' or 'edit' whatever the visibility; visibility 'org'
+// grants a baseline 'view' to any caller that reached the route (which
+// already required `views.use`), and 'teams' grants it to members of the
+// view's teams (views_teams). Opening a view never widens record access by itself — what
 // a viewer sees inside it is the records kernel's answer, which includes the
 // hand-picked records of views they can open for types that allow it (see
 // boardVisibilitySource).
@@ -17,7 +16,7 @@
 
 import { z } from 'zod'
 import { sql } from 'kysely'
-import type { Selectable, Transaction } from 'kysely'
+import type { RawBuilder, Selectable, SqlBool, Transaction } from 'kysely'
 import { generateKeyBetween } from 'fractional-indexing'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
@@ -28,7 +27,8 @@ import {
   requireTypePermission,
   type RecordsFilterGroup
 } from '#records/server'
-import type { ViewsLayout, ViewsShareLevel } from '../database/schema'
+import { getContainerTeams, type ContainerTeam } from '#core/server/utils/team-access'
+import type { ViewsLayout, ViewsShareLevel, ViewsVisibility } from '../database/schema'
 
 type Tx = Transaction<Database>
 
@@ -214,6 +214,18 @@ export interface ViewAccess {
   viaShare: boolean
 }
 
+/**
+ * Whether `userId` reaches the view (aliased `alias` in the query) through
+ * its visibility: org-wide, or a 'teams' view with one of their teams.
+ */
+export function viewOpenToUser(alias: string, userId: string): RawBuilder<SqlBool> {
+  const col = (name: string) => sql.ref(`${alias}.${name}`)
+  return sql<SqlBool>`(${col('visibility')} = 'org' or (${col('visibility')} = 'teams' and exists (
+    select 1 from views_teams vt join group_members gm on gm.group_id = vt.group_id
+    where vt.container_id = ${col('id')} and gm.user_id = ${userId}::uuid
+  )))`
+}
+
 export async function getViewAccess(
   tx: Tx,
   ctx: TenantContext,
@@ -222,7 +234,6 @@ export async function getViewAccess(
   if (view.owner_id === ctx.userId || ctx.roles.includes('admin')) {
     return { level: 'owner', viaShare: false }
   }
-  if (view.visibility === 'private') return null
   const share = await tx
     .selectFrom('views_shares')
     .select('level')
@@ -230,7 +241,14 @@ export async function getViewAccess(
     .where('user_id', '=', ctx.userId)
     .executeTakeFirst()
   if (share) return { level: share.level as ViewsShareLevel, viaShare: true }
-  return view.visibility === 'org' ? { level: 'view', viaShare: false } : null
+  if (view.visibility === 'private') return null
+  const open = await tx
+    .selectFrom('views_definitions as v')
+    .select('v.id')
+    .where('v.id', '=', view.id)
+    .where(viewOpenToUser('v', ctx.userId))
+    .executeTakeFirst()
+  return open ? { level: 'view', viaShare: false } : null
 }
 
 /**
@@ -340,7 +358,7 @@ export interface ViewSummary {
   /** The first tab's layout — what opening the view shows. */
   layout: ViewsLayout
   tabCount: number
-  visibility: 'private' | 'shared' | 'org'
+  visibility: ViewsVisibility
   ownerId: string
   ownerName: string
   accessLevel: ViewsAccessLevel
@@ -358,8 +376,8 @@ export async function listViews(tx: Tx, ctx: TenantContext): Promise<ViewSummary
       .on('s.user_id', '=', ctx.userId))
     .where(eb => eb.or([
       eb('v.owner_id', '=', ctx.userId),
-      eb('v.visibility', '=', 'org'),
-      eb.and([eb('v.visibility', '=', 'shared'), eb('s.user_id', 'is not', null)])
+      eb('s.user_id', 'is not', null),
+      viewOpenToUser('v', ctx.userId)
     ]))
     .select([
       'v.id', 'v.name', 'v.icon', 'v.record_type_key', 'v.visibility',
@@ -410,7 +428,8 @@ export function toViewDetail(
   access: ViewsAccessLevel,
   ownerName: string,
   /** Whether the caller reached the view through a share row of their own. */
-  sharedWithMe = false
+  sharedWithMe = false,
+  teams: ContainerTeam[] = []
 ) {
   return {
     id: view.id,
@@ -422,6 +441,7 @@ export function toViewDetail(
     ownerName,
     accessLevel: access,
     sharedWithMe,
+    teams,
     definition: view.definition as ViewDefinition,
     tabs: tabs.map(toTabDetail),
     createdAt: view.created_at,
@@ -443,14 +463,15 @@ export async function loadViewDetail(
     .select('display_name')
     .where('id', '=', view.owner_id)
     .executeTakeFirstOrThrow()
-  return toViewDetail(view, await listTabs(tx, view.id), access, owner.display_name, viaShare)
+  const teams = (await getContainerTeams(tx, 'views_definitions', [view.id])).get(view.id) ?? []
+  return toViewDetail(view, await listTabs(tx, view.id), access, owner.display_name, viaShare, teams)
 }
 
 export interface CreateViewInput {
   name: string
   icon?: string
   recordTypeKey: string
-  visibility?: 'private' | 'shared' | 'org'
+  visibility?: 'private' | 'org'
   /** View-level definition: base filter, hand-picked records. */
   definition?: unknown
   /** The view's first tab. */

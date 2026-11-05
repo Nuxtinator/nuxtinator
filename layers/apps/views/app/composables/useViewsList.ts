@@ -1,6 +1,6 @@
 // The accessible-views list (landing page + sidebar) and view creation.
 // Grouping is presentation: "mine" = I own it, everything else splits by
-// how it reached me (a direct share vs. org-wide visibility).
+// how it reached me (a share or one of my teams vs. org-wide visibility).
 
 import type {
   ViewDetail,
@@ -46,7 +46,7 @@ export function useViewsList() {
   const myId = computed<string | null>(() => (user.value as { id?: string } | null)?.id ?? null)
   const mine = computed(() => items.value.filter(v => v.ownerId === myId.value))
   const sharedWithMe = computed(() =>
-    items.value.filter(v => v.ownerId !== myId.value && v.visibility === 'shared'))
+    items.value.filter(v => v.ownerId !== myId.value && v.visibility !== 'org'))
   const orgWide = computed(() =>
     items.value.filter(v => v.ownerId !== myId.value && v.visibility === 'org'))
 

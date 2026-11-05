@@ -135,7 +135,6 @@ describe('shared custom boards grant visibility', () => {
 
     const board = await createView(owner, {
       recordTypeKey: 'item',
-      visibility: 'shared',
       definition: { columns: [{ key: 'ideas', label: 'Ideas' }] }
     })
     await $fetch(`/api/views/${board.id}/shares`, { method: 'POST', body: { userId: friend.user.id, level: 'view' }, ...owner })

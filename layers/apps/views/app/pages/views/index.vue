@@ -28,7 +28,7 @@ function viewIcon(view: ViewSummary): string {
 
 const VISIBILITY_BADGES: Record<string, { label: string, icon: string }> = {
   private: { label: 'Private', icon: 'i-lucide-lock' },
-  shared: { label: 'Shared', icon: 'i-lucide-users' },
+  teams: { label: 'Teams', icon: 'i-lucide-users' },
   org: { label: 'Organization', icon: 'i-lucide-building-2' }
 }
 </script>

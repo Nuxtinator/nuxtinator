@@ -167,7 +167,7 @@ async function touchView(tx: Tx, viewId: string): Promise<void> {
 export const listViewsTool = defineMcpTool({
   name: 'views_list',
   title: 'List Views',
-  description: 'List the views you can open: your own, ones shared with you, and org-wide ones, with the record type each shows and its tabs (each tab is a board, list or table).',
+  description: 'List the views you can open: your own, ones shared with you or your teams, and org-wide ones, with the record type each shows and its tabs (each tab is a board, list or table).',
   appId: 'views',
   scope: 'views.use',
   readOnly: true,
@@ -214,7 +214,7 @@ export const createViewTool = defineMcpTool({
     columns: z.array(z.string().trim().min(1).max(80)).min(1).max(50).optional().describe('Boards only: column names for a board with its own columns.'),
     cardFields: z.array(z.string().max(80)).max(20).optional().describe('Fields shown on each card, list row or as table columns; defaults to the type\'s card layout.'),
     filter: filterInput.optional(),
-    visibility: z.enum(['private', 'shared', 'org']).optional()
+    visibility: z.enum(['private', 'org']).optional()
   }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, async (tx, tenant) => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// One open view: header (name, visibility, its tabs, view menu), the active
+// One open view: header (name, its tabs, share, view menu), the active
 // tab's toolbar and renderer, and the interaction plumbing — optimistic moves
 // with the poll loop suspended while a drag settles, quick-add through the
 // records create route, the list's done checkbox, and tab and definition
@@ -12,8 +12,7 @@ import type {
   ViewsConnectionDisplay,
   ViewsDefinition,
   ViewsTab,
-  ViewsTabView,
-  ViewsVisibility
+  ViewsTabView
 } from '../../utils/views-types'
 import { VIEWS_LAYOUT_META, viewsDragMode } from '../../utils/views-types'
 import type { ViewsMovePayload } from '../../composables/useViewsDetail'
@@ -509,10 +508,6 @@ async function submitRename() {
   if (saved) renameOpen.value = false
 }
 
-async function setVisibility(visibility: ViewsVisibility) {
-  await patchView({ visibility }, 'Failed to change visibility')
-}
-
 // --- leaving a shared view --------------------------------------------------
 
 const { user } = useAuth()
@@ -547,12 +542,6 @@ async function deleteView() {
   }
 }
 
-const VISIBILITY_META: Record<ViewsVisibility, { label: string, icon: string }> = {
-  private: { label: 'Private', icon: 'i-lucide-lock' },
-  shared: { label: 'Shared', icon: 'i-lucide-users' },
-  org: { label: 'Organization', icon: 'i-lucide-building-2' }
-}
-
 const viewFilterCount = computed(() => recordsFilterRuleCount(view.value?.definition.filter))
 
 const menuItems = computed(() => {
@@ -579,19 +568,6 @@ const menuItems = computed(() => {
   }
   items.push(main)
   if (isOwner.value) {
-    items.push([
-      {
-        label: 'Visibility',
-        icon: VISIBILITY_META[view.value?.visibility ?? 'private'].icon,
-        children: (Object.keys(VISIBILITY_META) as ViewsVisibility[]).map(key => ({
-          label: VISIBILITY_META[key].label,
-          icon: VISIBILITY_META[key].icon,
-          type: 'checkbox' as const,
-          checked: view.value?.visibility === key,
-          onSelect: () => setVisibility(key)
-        }))
-      }
-    ])
     items.push([{
       label: 'Delete view',
       icon: 'i-lucide-trash-2',
@@ -632,15 +608,6 @@ const menuItems = computed(() => {
       <h1 class="text-lg font-semibold truncate shrink-0 max-w-[30%]">
         {{ view?.name ?? '…' }}
       </h1>
-      <UBadge
-        v-if="view"
-        variant="subtle"
-        color="neutral"
-        :icon="VISIBILITY_META[view.visibility].icon"
-        class="hidden sm:inline-flex shrink-0"
-      >
-        {{ VISIBILITY_META[view.visibility].label }}
-      </UBadge>
 
       <nav
         v-if="view"
