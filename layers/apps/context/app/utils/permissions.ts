@@ -9,7 +9,8 @@ export const CONTEXT_PERMISSIONS = [
   'context.assistant.chat',
   'context.assistant.apply',
   'context.settings',
-  'context.suggestion.review'
+  'context.suggestion.review',
+  'context.all_teams'
 ] as const
 
 export type ContextPermission = typeof CONTEXT_PERMISSIONS[number]
@@ -58,6 +59,10 @@ export const CONTEXT_PERMISSION_META: Record<string, { title: string, descriptio
   'context.suggestion.review': {
     title: 'Review suggestions',
     description: 'Approve or reject section updates suggested through MCP.'
+  },
+  'context.all_teams': {
+    title: 'Show all teams',
+    description: 'See and open every team\'s portfolios with the show-all-teams switch.'
   }
 }
 
@@ -85,5 +90,6 @@ declare module '#permissions' {
     'context.assistant.apply': true
     'context.settings': true
     'context.suggestion.review': true
+    'context.all_teams': true
   }
 }

@@ -1,7 +1,7 @@
 // Core's own entries in the settings registry.
 import { registerSetting } from '../utils/settings-registry'
 import { REGISTRATION_SETTINGS_NAMESPACE, SETTING_SELF_REGISTRATION } from '../utils/registration'
-import { GROUPS_SETTINGS_NAMESPACE, SETTING_GROUP_MODE, parseGroupMode, type GroupMode } from '../utils/groups'
+import { GROUPS_SETTINGS_NAMESPACE, SETTING_GROUP_MODE, SETTING_ORG_GROUP_MODE, parseGroupMode, type GroupMode } from '../utils/groups'
 
 export default defineNitroPlugin(() => {
   registerSetting<boolean>({
@@ -19,5 +19,14 @@ export default defineNitroPlugin(() => {
     default: 'audiences',
     parse: parseGroupMode,
     label: 'Group mode'
+  })
+
+  // An org's groups (an org setting).
+  registerSetting<GroupMode>({
+    namespace: GROUPS_SETTINGS_NAMESPACE,
+    key: SETTING_ORG_GROUP_MODE,
+    default: 'teams',
+    parse: parseGroupMode,
+    label: 'Org group mode'
   })
 })

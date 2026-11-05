@@ -8,7 +8,8 @@
 //     resolves the user's permission set from `users.roles[]` unioned with
 //     their direct grants (`user_permission_grants`), then calls the handler.
 //     There is no `app.current_org` GUC, no app-enable check, no per-org
-//     overlay.
+//     overlay. With `appId`, the team gate applies: an app whose access
+//     list names host groups opens only for their members (403 otherwise).
 //   - An OAuth bearer token signs in in place of the session (see
 //     `bearer-auth.ts`): the route must name a permission the token carries,
 //     and `ctx.perms` is narrowed to the token's scopes.
@@ -28,6 +29,7 @@ import { getBearerIdentity, narrowToScopes, requireBearerPermission, runAsOauthC
 import { getRolePermissions } from '#core/server/utils/rbac'
 import { getUserGrantedPermissions } from '#core/server/utils/permission-grants'
 import { getPersonalAppPermissions } from '#core/server/utils/personal-apps'
+import { APP_TEAM_GATE_MESSAGE, isAppOpenToUser } from '#core/server/utils/groups'
 import type { Database } from '#core/server/database/schema'
 import type { Permission } from '#core/app/utils/permissions'
 
@@ -87,6 +89,7 @@ async function resolveSinglePerms(
 // must carry as a scope.
 async function runWithSingleContext<T>(
   event: H3Event,
+  opts: DefineTenantHandlerOpts,
   perm: Permission | undefined,
   fn: TenantHandler<T>
 ): Promise<T> {
@@ -96,6 +99,9 @@ async function runWithSingleContext<T>(
   const clientId = bearer?.clientId ?? null
   return await runAsOauthClient(clientId, () => runTransaction(db, async (tx) => {
     const { roles, perms } = await resolveSinglePerms(tx, userId)
+    if (opts.appId && !(await isAppOpenToUser(tx, { appId: opts.appId, orgId: null, userId }))) {
+      throw createError({ statusCode: 403, statusMessage: APP_TEAM_GATE_MESSAGE })
+    }
     return await fn(tx, {
       userId,
       orgId: null,
@@ -114,13 +120,14 @@ export function defineTenantHandler<T>(
   optsOrFn: DefineTenantHandlerOpts | TenantHandler<T>,
   maybeFn?: TenantHandler<T>
 ): EventHandler<EventHandlerRequest, Promise<T>> {
+  const opts: DefineTenantHandlerOpts = typeof optsOrFn === 'function' ? {} : optsOrFn
   const fn = (typeof optsOrFn === 'function' ? optsOrFn : maybeFn) as TenantHandler<T>
-  return defineEventHandler<EventHandlerRequest, Promise<T>>(event => runWithSingleContext(event, undefined, fn))
+  return defineEventHandler<EventHandlerRequest, Promise<T>>(event => runWithSingleContext(event, opts, undefined, fn))
 }
 
 // Function-call style — for handlers already wrapped in `defineEventHandler`.
-// Same semantics as `defineTenantHandler`. Single-mode ignores `opts.appId`
-// (no app-enable check exists in single deploys).
+// Same semantics as `defineTenantHandler`. Single deploys have no per-org app
+// switch, so `opts.appId` only drives the team gate.
 export function withOrgContext<T>(
   event: H3Event,
   fn: TenantHandler<T>
@@ -135,8 +142,9 @@ export function withOrgContext<T>(
   optsOrFn: DefineTenantHandlerOpts | TenantHandler<T>,
   maybeFn?: TenantHandler<T>
 ): Promise<T> {
+  const opts: DefineTenantHandlerOpts = typeof optsOrFn === 'function' ? {} : optsOrFn
   const fn = (typeof optsOrFn === 'function' ? optsOrFn : maybeFn) as TenantHandler<T>
-  return runWithSingleContext(event, undefined, fn)
+  return runWithSingleContext(event, opts, undefined, fn)
 }
 
 // Same as `withOrgContext` plus a permission gate on `ctx.perms`.
@@ -158,9 +166,10 @@ export function withOrgPermission<T>(
   c?: TenantHandler<T>
 ): Promise<T> {
   const hasOpts = typeof a === 'object'
+  const opts: DefineTenantHandlerOpts = hasOpts ? (a as DefineTenantHandlerOpts) : {}
   const perm = (hasOpts ? b : a) as Permission
   const fn = (hasOpts ? c : b) as TenantHandler<T>
-  return runWithSingleContext(event, perm, async (tx, ctx) => {
+  return runWithSingleContext(event, opts, perm, async (tx, ctx) => {
     if (!ctx.perms.has(perm)) {
       throw createError({ statusCode: 403, statusMessage: `Permission required: ${perm}` })
     }
@@ -177,6 +186,17 @@ export async function getUserPermissionsAcrossOrgs(userId: string): Promise<Set<
   const { perms } = await resolveSinglePerms(db, userId)
   for (const perm of await getPersonalAppPermissions(db, userId)) perms.add(perm)
   return perms
+}
+
+// A user's permissions in the current transaction's org, without a request:
+// for checks about someone other than the caller (who may receive a
+// container's content). Single mode has one tenant, so it's the set
+// `defineTenantHandler` would compute for them.
+export async function getMemberPermissions(
+  tx: Transaction<Database>,
+  userId: string
+): Promise<Set<Permission>> {
+  return (await resolveSinglePerms(tx, userId)).perms
 }
 
 // The user's effective permissions for the org a request targets. Single

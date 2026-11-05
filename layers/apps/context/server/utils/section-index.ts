@@ -26,6 +26,7 @@ import {
   type AiReindexer,
   type AiReindexProgress
 } from '#ai/server'
+import { teamVisible, type TeamScope } from '#core/server/utils/team-access'
 import { getPortfolioSections } from './section-settings'
 
 type Tx = Transaction<Database>
@@ -169,9 +170,11 @@ export interface SectionSearchHit {
 // Nearest chunks to `query` across `portfolioIds`, collapsed to the best chunk
 // per section. `queryVector` lets a caller that already embedded the query
 // (helpinator merging two indexes) skip the second embedding call.
+// `teamScope` drops portfolios the caller's teams can't see; member-facing
+// callers pass it, Helpinator's public bot doesn't.
 export async function searchSections(
   tx: Tx,
-  opts: { portfolioIds: string[], query?: string, queryVector?: number[], queryModel?: string, limit?: number }
+  opts: { portfolioIds: string[], query?: string, queryVector?: number[], queryModel?: string, limit?: number, teamScope?: TeamScope }
 ): Promise<SectionSearchHit[]> {
   const limit = opts.limit ?? 8
   if (opts.portfolioIds.length === 0 || !(await sectionIndexAvailable())) return []
@@ -192,6 +195,9 @@ export async function searchSections(
     .select(['c.portfolio_id', 'c.section_id', 's.section_key', 'c.heading', 'c.content'])
     .select(cosineDistance('c.embedding', vector).as('distance'))
     .where('c.portfolio_id', 'in', opts.portfolioIds)
+    .$if(!!opts.teamScope, qb => qb
+      .innerJoin('context_portfolios as p', 'p.id', 'c.portfolio_id')
+      .where(teamVisible(opts.teamScope!, 'context_portfolios', 'p')))
     .where('c.model', '=', model)
     .orderBy(sql`c.embedding <=> ${vectorSql(vector)}`)
     .limit(limit * 3)

@@ -228,8 +228,8 @@ describe('DELETE /api/context/portfolios/:slug/sections/:key', () => {
         body: { content: 'hi', quoted_text: 'We', anchor_start: 0, anchor_end: 2 },
         ...opts
       })
-    ]) {
-      const err = await call.catch(e => e)
+    ].map(p => p.catch(e => e))) {
+      const err = await call
       expect(err.statusCode).toBe(404)
     }
 

@@ -41,4 +41,7 @@ export interface KanbanProjectModel {
   is_expanded: boolean
   allowed_origins: string[]
   post_meta: Record<string, any>
+  // 'org' or 'teams'; `teams` lists the teams a 'teams' project is limited to.
+  visibility: string
+  teams: { id: string, name: string, archived: boolean }[]
 }

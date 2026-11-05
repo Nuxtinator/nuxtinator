@@ -1,6 +1,8 @@
 import { getRouterParam } from 'h3'
 import { withOrgPermission } from '#tenant/server'
 import { logDelete } from '#core/server/utils/activity-logger'
+import { getFeedbackTeamScope } from '../../../../utils/project-teams'
+import { canSeeContainer } from '#core/server/utils/team-access'
 
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
@@ -13,7 +15,10 @@ export default defineEventHandler(async (event) => {
       .where('id', '=', id)
       .executeTakeFirst()
 
-    if (!swimlane) throw createError({ statusCode: 404, statusMessage: 'Swimlane not found' })
+    const scope = await getFeedbackTeamScope(event, tx, ctx)
+    if (!swimlane || !(await canSeeContainer(tx, scope, 'projects', swimlane.project_id))) {
+      throw createError({ statusCode: 404, statusMessage: 'Swimlane not found' })
+    }
     if (swimlane.is_default) {
       throw createError({ statusCode: 400, statusMessage: 'Cannot delete default swimlane' })
     }

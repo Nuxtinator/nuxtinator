@@ -14,7 +14,8 @@ export const ORG_PERMISSIONS = [
   'org.roles.write',
   'org.roles.delete',
   'org.settings.write',
-  'org.apps.manage'
+  'org.apps.manage',
+  'org.groups.manage'
 ] as const
 
 export type OrgPermission = typeof ORG_PERMISSIONS[number]
@@ -62,7 +63,11 @@ export const ORG_PERMISSION_META: Record<string, { title: string, description: s
   },
   'org.apps.manage': {
     title: 'Manage apps',
-    description: 'Enable or disable apps for this org.'
+    description: 'Enable or disable apps for this org, and limit them to groups.'
+  },
+  'org.groups.manage': {
+    title: 'Manage groups',
+    description: 'Create and edit this org\'s groups, choose whether they run as audiences or teams, and set who is in them.'
   }
 }
 

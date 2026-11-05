@@ -19,19 +19,37 @@ Every function takes the caller's tenant transaction (`tx` from
 
 | Area | Exports |
 |---|---|
-| Portfolios | `createPortfolio`, `getPortfolioById`, `getPortfolioBySlug`, `getPortfolioBySlugOr404`, `listPortfolios` |
+| Portfolios | `createPortfolio`, `getPortfolioById`, `getPortfolioBySlug`, `getPortfolioBySlugOr404`, `listPortfolios`, `getContextTeamScope` |
 | Sections | `getPortfolioSections`, `loadSection`, `saveSectionContent`, `addSection` |
 | Suggestions | `createSuggestionSet`, `decideSuggestions`, `withdrawSuggestions`, `pendingForSection` |
 | Templates | `registerPortfolioTemplate`, `getRegisteredPortfolioTemplate`, `getRegisteredPortfolioTemplates`, `DEFAULT_PORTFOLIO_TEMPLATE_ID` |
 | Types | `PortfolioRow`, `CreatePortfolioInput`, `SectionDef`, `MergedSection`, `PortfolioRef`, `SectionRow`, `SaveSectionOptions`, `AddSectionInput`, `PortfolioTemplate`, `NewSuggestion`, `SuggestionViewer`, `CreatedSuggestionSet`, `DecidedSuggestion`, `SectionPendingSuggestions`, `ContextSectionVersionSource`, `ContextSuggestionStatus` |
 
 ```ts
-import { getPortfolioBySlugOr404, getPortfolioSections, saveSectionContent } from '#context/server'
+import { getContextTeamScope, getPortfolioBySlugOr404, getPortfolioSections, saveSectionContent } from '#context/server'
 
-const portfolio = await getPortfolioBySlugOr404(tx, slug)
+const scope = await getContextTeamScope(event, tx, ctx) // ctx from withOrgPermission
+const portfolio = await getPortfolioBySlugOr404(tx, slug, scope)
 const sections = await getPortfolioSections(tx, portfolio) // a portfolio row or its id
 await saveSectionContent(tx, portfolio.id, 'team', markdown, userId, { source: 'user' })
 ```
+
+### Team restriction
+
+A portfolio can be limited to teams (`visibility: 'teams'`, core's
+team-access helper). Someone not on those teams gets a 404 for it, and it is
+missing from their lists, search and pickers, unless they hold
+`context.all_teams` and turn on "show all teams".
+
+- The portfolio lookups (`getPortfolioById`, `getPortfolioBySlug`,
+  `getPortfolioBySlugOr404`, `listPortfolios`) take the caller's team scope
+  from `getContextTeamScope(event, tx, ctx)` as their last argument. Any
+  member-facing route passes it. Without a scope they read every portfolio in
+  the org: only for paths with no user, such as background jobs or a public
+  bot.
+- Every other export takes a portfolio row, a portfolio id or a suggestion
+  set id and doesn't check teams. Look the portfolio up with the caller's
+  scope first.
 
 ## Portfolio templates
 

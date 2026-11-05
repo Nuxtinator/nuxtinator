@@ -1,4 +1,6 @@
 // DELETE /api/context/assistant/conversations/:id
+// The owner can delete their conversation even once a portfolio it drew on is
+// hidden from their teams.
 import { withOrgPermission } from '#tenant/server'
 import { deleteConversation } from '../../../../../utils/assistant-conversations'
 

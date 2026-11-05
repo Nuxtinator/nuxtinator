@@ -1,6 +1,6 @@
 // GET /api/context/portfolios/:slug/sections/:key — read one section.
 import { withOrgPermission } from '#tenant/server'
-import { getPortfolioBySlugOr404 } from '../../../../../../utils/portfolio-helpers'
+import { getContextTeamScope, getPortfolioBySlugOr404 } from '../../../../../../utils/portfolio-helpers'
 import { loadSection, isKnownSectionKey } from '../../../../../../utils/section-helpers'
 import { getPortfolioSections } from '../../../../../../utils/section-settings'
 import { sectionIndexAvailable } from '../../../../../../utils/section-index'
@@ -11,7 +11,7 @@ export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, { appId: 'context' }, 'context.read', async (tx, ctx) => {
     const slug = getRouterParam(event, 'slug') ?? ''
     const key = getRouterParam(event, 'key') ?? ''
-    const p = await getPortfolioBySlugOr404(tx, slug)
+    const p = await getPortfolioBySlugOr404(tx, slug, await getContextTeamScope(event, tx, ctx))
 
     const known = await isKnownSectionKey(tx, p.id, key)
     if (!known) throw createError({ statusCode: 404, statusMessage: `Unknown section key: ${key}` })

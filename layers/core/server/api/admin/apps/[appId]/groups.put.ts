@@ -5,8 +5,9 @@ import { logEvent } from '../../../../utils/activity-logger'
 import { getApp } from '../../../../utils/app-settings'
 import { setAppGroups } from '../../../../utils/groups'
 
-// Host admin sets which host groups can open a personal app. Takes effect
-// while the app's status is 'host_controlled' (or 'available').
+// Host admin sets which host groups can open an app. For a personal app it
+// takes effect while the app's status is 'host_controlled' (or 'available');
+// for an org app in single mode it limits the app to those groups' members.
 export default defineEventHandler(async (event) => {
   const { userId } = await requireOperatorAdmin(event)
   const appId = getRouterParam(event, 'appId')
@@ -19,8 +20,10 @@ export default defineEventHandler(async (event) => {
   }
 
   const app = await getApp(db, appId)
-  if (!app?.installed || app.scope !== 'user') {
-    throw createError({ statusCode: 404, statusMessage: 'Personal app not found' })
+  // Org apps take host groups only in single mode; with tenancy, an org's
+  // admins list the org's own groups.
+  if (!app?.installed || (app.scope !== 'user' && useRuntimeConfig().public.tenancy)) {
+    throw createError({ statusCode: 404, statusMessage: 'App not found' })
   }
 
   await db.transaction().execute(trx => setAppGroups(trx, { appId, orgId: null, groupIds, grantedBy: userId }))

@@ -1,23 +1,30 @@
 // Groups: named sets of users. A host group (`org_id` NULL) is managed by host
-// admins and can gate personal apps; an org's groups belong to that org.
+// admins and can gate personal apps; an org's groups belong to that org and
+// can gate its org apps. In single mode host groups also gate org apps. In
+// teams mode a group can also limit content (see team-access.ts).
 //
 // What a group means comes from the group mode, never from the row:
-//   'audiences' (default) — groups only gate apps; members don't see the group
-//                           or each other.
-//   'teams'               — members see the group and its members.
-// The host's own groups take the instance-wide mode (a host setting).
+//   'audiences' — groups only gate apps; members don't see the group or each
+//                 other.
+//   'teams'     — members see the group and its members, and content can be
+//                 limited to it.
+// The host's own groups take the instance-wide mode (a host setting, default
+// audiences); an org's groups take the org's mode (an org setting, default
+// teams).
 //
 // None of the group tables has RLS. Who may see a group or its members is
 // decided here and in the handlers, the same way the users table is.
 
 import { sql } from 'kysely'
 import type { DbClient } from './settings'
-import { clearHostSetting, getHostSetting, setHostSetting } from './settings-store'
+import { clearHostSetting, clearSetting, getHostSetting, getSetting, setHostSetting, setSetting } from './settings-store'
+import { getRegisteredApp } from './app-registry'
 
 export type GroupMode = 'audiences' | 'teams'
 
 export const GROUPS_SETTINGS_NAMESPACE = 'core'
 export const SETTING_GROUP_MODE = 'group_mode'
+export const SETTING_ORG_GROUP_MODE = 'org_group_mode'
 
 export function parseGroupMode(value: unknown): GroupMode {
   return value === 'teams' ? 'teams' : 'audiences'
@@ -28,16 +35,33 @@ export async function getHostGroupMode(tx: DbClient): Promise<GroupMode> {
   return await getHostSetting<GroupMode>(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_GROUP_MODE)
 }
 
-// Changes the mode of the host's own groups. Switching to audiences is refused
-// (409) while content is limited to any host group, since audience groups
-// can't be picked to limit content. Audiences is the default, so choosing it
-// drops the override.
+// The mode of one scope's groups: the host's (`orgId` null) or an org's. An
+// org's mode is an org setting, so `tx` must run in that org (its GUC set).
+export async function getGroupMode(tx: DbClient, orgId: string | null): Promise<GroupMode> {
+  if (orgId === null) return await getHostGroupMode(tx)
+  return parseGroupMode(await getSetting(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_ORG_GROUP_MODE))
+}
+
+// Changes the mode of the host's own groups. See `setGroupMode`.
 export async function setHostGroupMode(tx: DbClient, mode: GroupMode): Promise<void> {
-  const current = await getHostGroupMode(tx)
+  await setGroupMode(tx, null, mode)
+}
+
+// Changes the mode of one scope's groups. Switching to audiences is refused
+// (409) while content is limited to any of the scope's groups, since audience
+// groups can't be picked to limit content. Choosing the scope's default
+// drops the override. For an org, `tx` must run in that org.
+export async function setGroupMode(tx: DbClient, orgId: string | null, mode: GroupMode): Promise<void> {
+  const current = await getGroupMode(tx, orgId)
   if (current === mode) return
   if (mode === 'audiences') {
-    const hostGroups = await tx.selectFrom('groups').select('id').where('org_id', 'is', null).execute()
-    const usage = await getGroupUsage(tx, hostGroups.map(g => g.id))
+    const scopeGroups = await tx
+      .selectFrom('groups')
+      .select('id')
+      .$if(orgId === null, qb => qb.where('org_id', 'is', null))
+      .$if(orgId !== null, qb => qb.where('org_id', '=', orgId!))
+      .execute()
+    const usage = await getGroupUsage(tx, scopeGroups.map(g => g.id))
     if (usage.length > 0) {
       throw createError({
         statusCode: 409,
@@ -45,9 +69,12 @@ export async function setHostGroupMode(tx: DbClient, mode: GroupMode): Promise<v
         data: { usage }
       })
     }
-    await clearHostSetting(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_GROUP_MODE)
-  } else {
+    if (orgId === null) await clearHostSetting(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_GROUP_MODE)
+    else await setSetting(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_ORG_GROUP_MODE, mode)
+  } else if (orgId === null) {
     await setHostSetting(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_GROUP_MODE, mode)
+  } else {
+    await clearSetting(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_ORG_GROUP_MODE)
   }
 }
 
@@ -164,8 +191,10 @@ export async function setGroupArchived(tx: DbClient, id: string, archived: boole
     .execute()
 }
 
-// Refused (409, with what uses it) while content is limited to the group.
-// App access lists don't block it: that access just goes with the group.
+// Refused (409) while content is limited to the group, or while an org app's
+// access list names it: an access list left empty opens the app to everyone.
+// A personal app's list doesn't block it, since dropping the group there only
+// narrows who can open the app.
 export async function deleteGroup(tx: DbClient, id: string): Promise<void> {
   const usage = await getGroupUsage(tx, [id])
   if (usage.length > 0) {
@@ -173,6 +202,16 @@ export async function deleteGroup(tx: DbClient, id: string): Promise<void> {
       statusCode: 409,
       statusMessage: 'This group is still in use. Move that content off the group, or archive the group instead.',
       data: { usage }
+    })
+  }
+  const gated = (await tx.selectFrom('app_groups').select('app_id').where('group_id', '=', id).execute())
+    .map(r => getRegisteredApp(r.app_id))
+    .filter(app => app && app.scope !== 'user')
+    .map(app => app!.title)
+  if (gated.length > 0) {
+    throw createError({
+      statusCode: 409,
+      statusMessage: `This group opens ${gated.join(', ')}. Take it off those apps' access first, or archive the group instead.`
     })
   }
   await tx.deleteFrom('groups').where('id', '=', id).execute()
@@ -276,4 +315,46 @@ export async function setAppGroups(
       .where('group_id', 'in', removed)
       .execute()
   }
+}
+
+export const APP_TEAM_GATE_MESSAGE = 'This app is open only to certain teams, and you are not on one of them.'
+
+// The team gate on org apps. An org app whose access list (`app_groups`) names
+// groups of the scope (the org's, or host groups in single mode) opens only for
+// members of one of them; an app with none listed is open. Checked on paths
+// that have a user, never in session-less job loops.
+export async function isAppOpenToUser(
+  tx: DbClient,
+  input: { appId: string, orgId: string | null, userId: string }
+): Promise<boolean> {
+  return !(await appsClosedToUser(tx, input.orgId, input.userId, [input.appId])).has(input.appId)
+}
+
+// The app ids, among `appIds` (every app when omitted), that list groups of
+// the scope and that `userId` is in none of.
+export async function appsClosedToUser(
+  tx: DbClient,
+  orgId: string | null,
+  userId: string,
+  appIds?: string[]
+): Promise<Set<string>> {
+  if (appIds && appIds.length === 0) return new Set()
+  const rows = await tx
+    .selectFrom('app_groups')
+    .innerJoin('groups', 'groups.id', 'app_groups.group_id')
+    .leftJoin('group_members', join => join
+      .onRef('group_members.group_id', '=', 'app_groups.group_id')
+      .on('group_members.user_id', '=', userId))
+    .select(['app_groups.app_id', 'group_members.user_id'])
+    .$if(orgId === null, qb => qb.where('groups.org_id', 'is', null))
+    .$if(orgId !== null, qb => qb.where('groups.org_id', '=', orgId!))
+    .$if(!!appIds, qb => qb.where('app_groups.app_id', 'in', appIds!))
+    .execute()
+  const listed = new Set<string>()
+  const open = new Set<string>()
+  for (const r of rows) {
+    listed.add(r.app_id)
+    if (r.user_id) open.add(r.app_id)
+  }
+  return new Set([...listed].filter(id => !open.has(id)))
 }

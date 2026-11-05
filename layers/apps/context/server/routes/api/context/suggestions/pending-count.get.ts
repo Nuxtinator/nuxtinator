@@ -2,11 +2,12 @@
 // for the sidebar badge.
 import { withOrgPermission } from '#tenant/server'
 import { countOpenSets, REVIEW_PERMISSION } from '../../../../utils/suggestions'
+import { getContextTeamScope } from '../../../../utils/portfolio-helpers'
 
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, { appId: 'context' }, 'context.read', async (tx, ctx) => {
     const isReviewer = ctx.perms.has(REVIEW_PERMISSION)
-    const count = await countOpenSets(tx, { userId: ctx.userId, isReviewer })
+    const count = await countOpenSets(tx, { userId: ctx.userId, isReviewer }, await getContextTeamScope(event, tx, ctx))
     return { count, is_reviewer: isReviewer }
   })
 })

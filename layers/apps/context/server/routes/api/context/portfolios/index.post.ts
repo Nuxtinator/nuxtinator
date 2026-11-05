@@ -1,11 +1,12 @@
 // POST /api/context/portfolios — create a portfolio in the active org.
 // `template` picks a registered portfolio template (omitted = the default);
 // `builtin_sections` picks which of its sections it starts with (omitted =
-// all, [] = none).
+// all, [] = none). `visibility` + `teamIds` limit it to teams.
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
 import { logCreate } from '#core/server/utils/activity-logger'
-import { createPortfolio } from '../../../../utils/portfolio-helpers'
+import { readContainerTeamsInput, setContainerTeams } from '#core/server/utils/team-access'
+import { createPortfolio, getContextTeamScope, withContextPortfolioTeams } from '../../../../utils/portfolio-helpers'
 
 const Body = z.object({
   name: z.string().trim().min(1).max(120),
@@ -17,15 +18,21 @@ const Body = z.object({
 
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, { appId: 'context' }, 'context.portfolio.create', async (tx, ctx) => {
-    const parsed = Body.safeParse(await readBody(event))
+    const body = await readBody(event)
+    const parsed = Body.safeParse(body)
     if (!parsed.success) {
       throw createError({ statusCode: 400, statusMessage: 'Invalid body', data: parsed.error.flatten() })
     }
+    const teamsInput = readContainerTeamsInput('context_portfolios', body)
 
-    const inserted = await createPortfolio(tx, parsed.data, ctx.userId)
+    let inserted = await createPortfolio(tx, parsed.data, ctx.userId)
+    if (teamsInput) {
+      await setContainerTeams(tx, await getContextTeamScope(event, tx, ctx), 'context_portfolios', inserted.id, teamsInput)
+      inserted = { ...inserted, visibility: teamsInput.visibility as typeof inserted.visibility }
+    }
 
-    logCreate('context_portfolios', inserted.id, ctx.userId, { slug: inserted.slug, name: inserted.name })
+    logCreate('context_portfolios', inserted.id, ctx.userId, { slug: inserted.slug, name: inserted.name, visibility: inserted.visibility })
 
-    return inserted
+    return (await withContextPortfolioTeams(tx, [inserted]))[0]
   })
 })

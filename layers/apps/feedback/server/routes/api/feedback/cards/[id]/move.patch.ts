@@ -3,6 +3,7 @@ import { sql } from 'kysely'
 import { withOrgPermission } from '#tenant/server'
 import { logUpdate } from '#core/server/utils/activity-logger'
 import { markCardNotificationsRead } from '../../../../../utils/notify-recipients'
+import { assertFeedbackCardAccess, assertFeedbackProjectAccess, assertSwimlaneInProject, getFeedbackTeamScope } from '../../../../../utils/project-teams'
 
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
@@ -18,6 +19,9 @@ export default defineEventHandler(async (event) => {
   }
 
   return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
+    const scope = await getFeedbackTeamScope(event, tx, ctx)
+    await assertFeedbackCardAccess(tx, scope, id)
+
     const card = await tx
       .selectFrom('cards')
       .selectAll()
@@ -29,13 +33,17 @@ export default defineEventHandler(async (event) => {
     await markCardNotificationsRead(tx, ctx.userId, id)
 
     const isCrossProject = targetProjectId !== null && targetProjectId !== card.project_id
+    if (isCrossProject) await assertFeedbackProjectAccess(tx, scope, targetProjectId)
 
     const updates: Record<string, any> = {
       column_id: columnId,
       last_moved_at: sql`now()`,
       updated_at: sql`now()`
     }
-    if (swimlaneId) updates.swimlane_id = swimlaneId
+    if (swimlaneId && !isCrossProject) {
+      await assertSwimlaneInProject(tx, card.project_id, swimlaneId)
+      updates.swimlane_id = swimlaneId
+    }
 
     // Moving to another project keeps the card's id, so its attachments,
     // history and notification links follow it. The card lands in the given

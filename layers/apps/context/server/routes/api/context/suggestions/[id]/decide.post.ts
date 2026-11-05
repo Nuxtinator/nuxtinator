@@ -5,7 +5,8 @@
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
 import { logUpdate } from '#core/server/utils/activity-logger'
-import { decideSuggestions, getSuggestionSetOr404 } from '../../../../../utils/suggestions'
+import { assertSuggestionSetVisible, decideSuggestions, getSuggestionSetOr404 } from '../../../../../utils/suggestions'
+import { getContextTeamScope } from '../../../../../utils/portfolio-helpers'
 
 const Body = z.object({
   action: z.enum(['approve', 'reject']),
@@ -17,6 +18,8 @@ const Body = z.object({
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, { appId: 'context' }, 'context.suggestion.review', async (tx, ctx) => {
     const id = getRouterParam(event, 'id') ?? ''
+    const scope = await getContextTeamScope(event, tx, ctx)
+    await assertSuggestionSetVisible(tx, id, scope)
     const parsed = Body.safeParse(await readBody(event))
     if (!parsed.success) {
       throw createError({ statusCode: 400, statusMessage: 'Invalid body', data: parsed.error.flatten() })
@@ -38,6 +41,6 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    return { set: await getSuggestionSetOr404(tx, id, { userId: ctx.userId, isReviewer: true }) }
+    return { set: await getSuggestionSetOr404(tx, id, { userId: ctx.userId, isReviewer: true }, scope) }
   })
 })

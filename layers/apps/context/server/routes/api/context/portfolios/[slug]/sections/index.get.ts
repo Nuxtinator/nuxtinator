@@ -1,14 +1,14 @@
 // GET /api/context/portfolios/:slug/sections — list sections with metadata,
 // plus the portfolio template's sections it doesn't have (`missing_builtins`).
 import { withOrgPermission } from '#tenant/server'
-import { getPortfolioBySlugOr404 } from '../../../../../../utils/portfolio-helpers'
+import { getContextTeamScope, getPortfolioBySlugOr404 } from '../../../../../../utils/portfolio-helpers'
 import { getPortfolioSections, getTemplateSections } from '../../../../../../utils/section-settings'
 import { pendingCountsByKey } from '../../../../../../utils/suggestions'
 
 export default defineEventHandler(async (event) => {
-  return await withOrgPermission(event, { appId: 'context' }, 'context.read', async (tx) => {
+  return await withOrgPermission(event, { appId: 'context' }, 'context.read', async (tx, ctx) => {
     const slug = getRouterParam(event, 'slug') ?? ''
-    const p = await getPortfolioBySlugOr404(tx, slug)
+    const p = await getPortfolioBySlugOr404(tx, slug, await getContextTeamScope(event, tx, ctx))
 
     const defs = await getPortfolioSections(tx, p)
     const rows = await tx
