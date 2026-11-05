@@ -30,8 +30,6 @@ onMounted(() => {
     // Avatars fall back to ids; nothing to surface on a card.
   })
 })
-const userName = (id: string) => byId.value.get(id)?.name ?? null
-
 // People are named, not just pictured: an image avatar is often missing and
 // initials alone can't tell two same-initial colleagues apart.
 const displayName = (id: string) => byId.value.get(id)?.name ?? 'Unknown user'
@@ -39,68 +37,7 @@ const displayName = (id: string) => byId.value.get(id)?.name ?? 'Unknown user'
 // Beyond a handful the names stop fitting; the rest show as a count.
 const USER_CAP = 3
 
-const fieldMap = computed(() => new Map(props.fields.map(f => [f.key, f])))
-
-const INTRINSIC_DEFS: Record<string, Pick<RecordsFieldSetting, 'key' | 'kind' | 'label'>> = {
-  created_at: { key: 'created_at', kind: 'datetime', label: 'Created' },
-  updated_at: { key: 'updated_at', kind: 'datetime', label: 'Updated' }
-}
-
-interface CardValue {
-  key: string
-  label: string
-  text: string
-  /** Set for user fields — rendered as avatars in place of the text. */
-  userIds?: string[]
-  /** Set for connection fields shown as progress — rendered as a bar. */
-  progress?: { done: number, total: number }
-}
-
-function userIdsOf(raw: unknown): string[] {
-  if (Array.isArray(raw)) return raw.map(String).filter(Boolean)
-  return typeof raw === 'string' && raw !== '' ? [raw] : []
-}
-
-const values = computed<CardValue[]>(() => {
-  const out: CardValue[] = []
-  for (const key of props.cardFields) {
-    if (key === 'name') continue
-    const intrinsic = INTRINSIC_DEFS[key]
-    if (intrinsic) {
-      const raw = key === 'created_at' ? props.item.createdAt : props.item.updatedAt
-      const text = formatRecordsValue(raw, intrinsic as RecordsFieldSetting)
-      if (text && text !== '—') out.push({ key, label: intrinsic.label, text })
-      continue
-    }
-    const field = fieldMap.value.get(key)
-      ?? (key === 'status' ? props.fields.find(f => f.column === 'status') : undefined)
-    if (!field) continue
-    let raw: unknown = null
-    if (field.column === 'status' || key === 'status') raw = props.item.status
-    else if (viewsFieldStorage(field) === 'jsonb') raw = props.item.data[field.key]
-    else if (props.item.fields && field.key in props.item.fields) raw = props.item.fields[field.key]
-    else if (field.key === props.groupFieldKey) raw = props.item.groupValues
-    else raw = null
-
-    const display = props.cardConnections?.[field.key]
-    const progress = props.item.progress?.[field.key]
-    if (field.kind === 'connection' && progress && (display === 'count' || display === 'progress')) {
-      if (progress.total === 0) continue
-      if (display === 'count') out.push({ key, label: field.label, text: String(progress.total) })
-      else out.push({ key, label: field.label, text: `${progress.done}/${progress.total}`, progress })
-      continue
-    }
-
-    if (field.kind === 'user_select') {
-      const userIds = userIdsOf(raw)
-      if (userIds.length > 0) out.push({ key, label: field.label, text: '', userIds })
-      continue
-    }
-    const text = formatRecordsValue(raw, field, { userName })
-    if (text && text !== '—') out.push({ key, label: field.label, text })
-  }
-  return out
-})
+const values = useViewsCardValues(() => props)
 
 function onDragStart(event: DragEvent) {
   emit('dragstart', event)

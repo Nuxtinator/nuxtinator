@@ -26,6 +26,7 @@ interface ViewDetail {
   accessLevel: 'view' | 'edit' | 'owner'
   sharedWithMe: boolean
   definition: Record<string, unknown>
+  tabs: Array<{ id: string, name: string, layout: string, definition: Record<string, unknown> }>
 }
 
 async function createView(opts: Opts, body: Record<string, unknown> = {}): Promise<ViewDetail> {
@@ -34,8 +35,7 @@ async function createView(opts: Opts, body: Record<string, unknown> = {}): Promi
     body: {
       name: 'test-views board',
       recordTypeKey: 'contacts',
-      viewType: 'kanban',
-      definition: { groupField: 'status' },
+      tab: { layout: 'kanban', definition: { groupField: 'status' } },
       ...body
     },
     ...opts
@@ -111,19 +111,24 @@ describe('view access matrix', () => {
     })
     const seen = await $fetch<ViewDetail>(`/api/views/${view.id}`, inviteeOpts)
     expect(seen.accessLevel).toBe('view')
-    await expectStatus($fetch(`/api/views/${view.id}`, {
+    await expectStatus($fetch(`/api/views/${view.id}/tabs/${view.tabs[0]!.id}`, {
       method: 'PATCH',
       body: { definition: { groupField: 'gender' } },
       ...inviteeOpts
     }), 403)
+    await expectStatus($fetch(`/api/views/${view.id}/tabs`, {
+      method: 'POST',
+      body: { layout: 'list' },
+      ...inviteeOpts
+    }), 403)
 
-    // Re-share at edit: definition becomes editable, visibility stays owner-only.
+    // Re-share at edit: tabs become editable, visibility stays owner-only.
     await $fetch(`/api/views/${view.id}/shares`, {
       method: 'POST',
       body: { userId: invitee.user.id, level: 'edit' },
       ...owner
     })
-    const edited = await $fetch<ViewDetail>(`/api/views/${view.id}`, {
+    const edited = await $fetch<{ definition: Record<string, unknown> }>(`/api/views/${view.id}/tabs/${view.tabs[0]!.id}`, {
       method: 'PATCH',
       body: { definition: { groupField: 'gender' } },
       ...inviteeOpts

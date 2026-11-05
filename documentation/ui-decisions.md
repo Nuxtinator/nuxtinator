@@ -72,3 +72,13 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
 - **Group management is one component** (`GroupsManager`) behind `/admin/groups`, `/@<slug>/settings/groups` and the org's Groups panel on `/admin/orgs`, so the three stay alike. The org page carries the audiences/teams switch next to the list; switching to teams asks first, because members start seeing each other.
 - **An org's groups run as teams by default; host groups as audiences.** Orgs mostly want groups to organise people who already work together, and nothing is limited to a team until someone picks one. Host groups gate personal apps across the whole instance, where members needn't know about each other, and existing deployments already relied on audiences there.
 - **Adding a group opens a modal** with its name and its members, from an "Add group" button beside the page heading. A name field inline next to the button was rejected: it cluttered the page and left members to a second step.
+
+## Views
+
+- **A view holds tabs, shown in the header row next to its name and share status.** The view keeps the record type, sharing, a base filter and any hand-picked records; each tab picks its own layout (board, list or table), grouping, card fields, sort and an extra filter ANDed with the view's. "My tasks" is one view with "My open tasks", "By status" and so on as tabs, so one share covers all of them.
+  - A separate container object with its own name ("collection", "workspace", "tracker", "page") was rejected: none fit every record type and layout, and people already make views, so tabs inside a view add no new thing to learn.
+- **Filters are built in a modal behind a "Filter · N" button** in the tab's toolbar: rules and groups one level deep, each matching all or any. A tab's builder shows the view's base filter read-only above it, since the tab can only narrow it. Edits save to the tab for everyone; people who can only view see the builder read-only.
+  - Inline filter chips in the toolbar were rejected: they couldn't express OR, and they mixed personal and saved filters in one row.
+  - Readable chips under the tabs were considered and left out for now; the count on the button is the only on-page sign of a filter.
+- **The list layout is one row per record with a done checkbox** on types with exactly one closed status; unticking returns the record to its status field's default. Rows drag into a manual order per tab and, when grouped, between sections with the board's move-or-add rules.
+

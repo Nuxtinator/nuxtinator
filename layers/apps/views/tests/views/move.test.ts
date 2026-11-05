@@ -39,9 +39,8 @@ async function createView(opts: Opts, definition: Record<string, unknown>): Prom
     body: {
       name: 'test-views move board',
       recordTypeKey: 'contacts',
-      viewType: 'kanban',
       visibility: 'org',
-      definition
+      tab: { layout: 'kanban', definition }
     },
     ...opts
   })

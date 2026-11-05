@@ -66,7 +66,7 @@ Dev server: <http://localhost:2080>.
 | [apps/videos](layers/apps/videos/) | Optional | Video recording + playback app. | — |
 | [records](layers/records/) | Optional | Record kernel: record types (code manifests + admin-built ones), custom fields, sharing, comments, the list engine, the schema builder, built-in `item` and `task` types, MCP tools for data and schema. | — |
 | [apps/crm](layers/apps/crm/) | Optional | Contacts on top of `records`: communication channels, consent, suppression. Depends on `records`. | — |
-| [apps/views](layers/apps/views/) | Optional | User-created kanban boards and tables over any record type, shared privately or org-wide. Depends on `records`. | — |
+| [apps/views](layers/apps/views/) | Optional | User-created views over any record type, each with tabs (boards, lists, tables) and filters, shared privately or org-wide. Depends on `records`. | — |
 | [dev](layers/dev/) | Optional | UI sandbox at `/kitchen`. Useful in dev, comment out for prod. | — |
 
 ### Layer types

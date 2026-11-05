@@ -4,7 +4,7 @@
 import type { ColumnType, Generated } from 'kysely'
 
 // Code-owned vocabularies (mirrored by CHECK constraints in the migrations).
-export type ViewType = 'kanban' | 'table'
+export type ViewsLayout = 'kanban' | 'table' | 'list'
 export type ViewsVisibility = 'private' | 'shared' | 'org'
 export type ViewsShareLevel = 'view' | 'edit'
 
@@ -14,11 +14,10 @@ export interface ViewsViewsTable {
   icon: string | null
   // Key into CRM's type registry — types can be code manifests, so no FK.
   record_type_key: string
-  view_type: ViewType
   visibility: Generated<ViewsVisibility>
   owner_id: string
-  // Only explicit choices (grouping/columns, cardFields, filters, sort);
-  // shape validated by server/utils/views.ts, defaults live in code.
+  // Only explicit choices (base filter, hand-picked records); shape
+  // validated by server/utils/views.ts, defaults live in code.
   definition: Generated<Record<string, unknown>>
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>
@@ -33,11 +32,33 @@ export interface ViewSharesTable {
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
-export interface ViewCardsTable {
+export interface ViewTabsTable {
+  id: Generated<string>
+  view_id: string
+  name: string
+  layout: ViewsLayout
+  // Fractional index; tabs order by it.
+  position: string
+  // Only explicit choices (grouping/columns, card fields, filter, sort).
+  definition: Generated<Record<string, unknown>>
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
+// The records added by hand to a view whose tabs show only those.
+export interface ViewItemsTable {
   view_id: string
   record_id: string
-  // Custom column key on container boards; grouping-field option key on
-  // field boards ('' = the "No value" column).
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
+export interface ViewCardsTable {
+  view_id: string
+  tab_id: string
+  record_id: string
+  // Custom column key on boards with their own columns; grouping value on
+  // field-grouped boards and lists ('' = the "No value" column, and every
+  // row of an ungrouped list).
   column_key: Generated<string>
   // Fractional index; null = no manual position yet.
   rank: string | null
@@ -48,6 +69,8 @@ declare global {
   interface NuxtinatorDatabaseTables {
     views_definitions: ViewsViewsTable
     views_shares: ViewSharesTable
+    views_tabs: ViewTabsTable
+    views_items: ViewItemsTable
     views_cards: ViewCardsTable
   }
 }

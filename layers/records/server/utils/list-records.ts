@@ -28,6 +28,16 @@ import { getRecordType, getRecordTypeFields, type RecordsFieldSetting, type Reco
 import { resolveTypePermission } from './type-permissions'
 import type { RecordRow } from './record-storage'
 import {
+  isRecordsFilterGroup,
+  recordsFilterOps,
+  RECORDS_FILTER_INTRINSIC_KINDS,
+  RECORDS_FILTER_MAX_DEPTH,
+  RECORDS_FILTER_ME,
+  RECORDS_FILTER_VALUE_SHAPE,
+  type RecordsFilterGroup,
+  type RecordsFilterRule
+} from '../../client/filters'
+import {
   getRecordsStorageDriver,
   getRecordsStorageDrivers,
   getRecordsVisibilitySources,
@@ -43,6 +53,11 @@ export interface RecordsListOpts {
    * an object supports { in, contains, gte, lte }, ANDed when combined.
    */
   filters?: Record<string, unknown>
+  /**
+   * Filter trees, each one ANDed with the others and with `filters` (a view's
+   * base filter plus its tab's). Validated against the type's fields first.
+   */
+  where?: RecordsFilterGroup[]
   /**
    * Restrict to specific record ids. Visibility and filters still apply —
    * this is "list these records if I may see them", not raw hydration.
@@ -286,6 +301,201 @@ function filterPredicate(eb: Eb, def: RecordsFieldSetting, raw: unknown): Expres
   return conds.length === 1 ? conds[0]! : eb.and(conds)
 }
 
+// ---------------------------------------------------------------------------
+// Filter trees (RecordsListOpts.where)
+// ---------------------------------------------------------------------------
+
+const MAX_TREE_RULES = 50
+
+const filterRuleSchema = z.object({
+  field: z.string().min(1).max(80),
+  op: z.enum([
+    'is', 'is_not', 'any_of', 'none_of', 'all_of', 'contains', 'empty', 'not_empty',
+    'before', 'after', 'on', 'between', 'eq', 'lt', 'gt'
+  ]),
+  value: z.unknown().optional()
+}).strict()
+
+type GroupInput = { match: 'all' | 'any', rules: Array<z.infer<typeof filterRuleSchema> | GroupInput> }
+
+const filterGroupSchema: z.ZodType<GroupInput> = z.lazy(() => z.object({
+  match: z.enum(['all', 'any']),
+  rules: z.array(z.union([filterRuleSchema, filterGroupSchema])).max(MAX_TREE_RULES)
+}).strict())
+
+function badTree(message: string): never {
+  throw createError({ statusCode: 400, statusMessage: `Invalid filter: ${message}` })
+}
+
+const TIMESTAMP_KEYS = new Set(['created_at', 'updated_at'])
+
+function timestampDef(key: string): RecordsFieldSetting {
+  return { ...intrinsicColumnDef('name'), key, kind: 'datetime', column: undefined, label: key }
+}
+
+function resolveTreeDef(defsByKey: Map<string, RecordsFieldSetting>, key: string): RecordsFieldSetting | null {
+  if (TIMESTAMP_KEYS.has(key)) return timestampDef(key)
+  const def = resolveFieldDef(defsByKey, key)
+  if (def && !defsByKey.has(key)) {
+    return { ...def, kind: RECORDS_FILTER_INTRINSIC_KINDS[key] ?? def.kind }
+  }
+  return def
+}
+
+function ruleValues(rule: RecordsFilterRule): unknown[] {
+  if (!Array.isArray(rule.value)) badTree(`${rule.field}: '${rule.op}' needs a list of values`)
+  return rule.value
+}
+
+/**
+ * Checks a filter tree's shape and every rule against the type's fields:
+ * known field, an operator that field's kind offers, and a value of the
+ * right shape. Values themselves are coerced (and 400 on garbage) when the
+ * tree compiles.
+ */
+export function parseRecordsFilterGroup(
+  raw: unknown,
+  defs: RecordsFieldSetting[]
+): RecordsFilterGroup {
+  const parsed = filterGroupSchema.safeParse(raw)
+  if (!parsed.success) badTree(parsed.error.issues[0]?.message ?? 'malformed')
+  const defsByKey = new Map(defs.filter(d => !d.orphan).map(d => [d.key, d]))
+  let count = 0
+  const walk = (group: RecordsFilterGroup, depth: number) => {
+    for (const node of group.rules) {
+      if (isRecordsFilterGroup(node)) {
+        if (depth >= RECORDS_FILTER_MAX_DEPTH) badTree('groups nest one level deep')
+        walk(node, depth + 1)
+        continue
+      }
+      if (++count > MAX_TREE_RULES) badTree(`at most ${MAX_TREE_RULES} rules`)
+      const def = resolveTreeDef(defsByKey, node.field)
+      if (!def) badTree(`unknown field "${node.field}"`)
+      if (!recordsFilterOps(def.kind).includes(node.op)) {
+        badTree(`${node.field}: '${node.op}' is not available for ${def.kind} fields`)
+      }
+      const shape = RECORDS_FILTER_VALUE_SHAPE[node.op]
+      if (shape === 'none' && node.value !== undefined) badTree(`${node.field}: '${node.op}' takes no value`)
+      if (shape === 'single' && (node.value === undefined || node.value === null || Array.isArray(node.value))) {
+        badTree(`${node.field}: '${node.op}' needs one value`)
+      }
+      if (shape === 'list' && (!Array.isArray(node.value) || node.value.length === 0)) {
+        badTree(`${node.field}: '${node.op}' needs at least one value`)
+      }
+      if (shape === 'range' && (!Array.isArray(node.value) || node.value.length !== 2)) {
+        badTree(`${node.field}: '${node.op}' needs a from and a to value`)
+      }
+    }
+  }
+  const group = parsed.data as RecordsFilterGroup
+  walk(group, 0)
+  return group
+}
+
+// The left-hand side a scalar rule compares: a record column, a timestamp, or
+// a kind-cast jsonb value.
+function treeScalarLhs(def: RecordsFieldSetting): RawBuilder<unknown> {
+  if (TIMESTAMP_KEYS.has(def.key) && def.storage === 'promoted' && !def.column) {
+    return sql.ref(`records_entries.${def.key}`)
+  }
+  return scalarExpr(def)
+}
+
+const DATE_KINDS = new Set(['date', 'datetime'])
+
+function scalarRule(eb: Eb, def: RecordsFieldSetting, rule: RecordsFilterRule): Expression<SqlBool> {
+  const lhs = treeScalarLhs(def)
+  const textLike = def.kind === 'text' || def.kind === 'textarea'
+  const empty = (): Expression<SqlBool> => textLike
+    ? eb.or([eb(lhs, 'is', null), eb(lhs, '=', '')])
+    : eb(lhs, 'is', null)
+  // Dates compare by calendar day, so "on 2026-11-05" matches any time that day.
+  const day = (v: unknown) => sql`(${coerceComparable(def, v)})::date`
+  const dayLhs = sql`(${lhs})::date`
+  switch (rule.op) {
+    case 'empty': return empty()
+    case 'not_empty': return eb.not(empty())
+    case 'is':
+    case 'eq':
+      return eb(lhs, '=', coerceComparable(def, rule.value))
+    case 'is_not':
+      return eb.or([eb(lhs, 'is', null), eb(lhs, '<>', coerceComparable(def, rule.value))])
+    case 'any_of':
+      return eb(lhs, 'in', ruleValues(rule).map(v => coerceComparable(def, v)))
+    case 'none_of':
+      return eb.or([eb(lhs, 'is', null), eb(lhs, 'not in', ruleValues(rule).map(v => coerceComparable(def, v)))])
+    case 'contains':
+      return eb(def.storage === 'promoted' ? lhs : jsonbText(def.key), 'ilike', likePattern(String(rule.value)))
+    case 'on': return eb(dayLhs, '=', day(rule.value))
+    case 'before': return eb(dayLhs, '<', day(rule.value))
+    case 'after': return eb(dayLhs, '>', day(rule.value))
+    case 'lt': return eb(lhs, '<', coerceComparable(def, rule.value))
+    case 'gt': return eb(lhs, '>', coerceComparable(def, rule.value))
+    case 'between': {
+      const [from, to] = ruleValues(rule)
+      if (DATE_KINDS.has(def.kind)) return eb.and([eb(dayLhs, '>=', day(from)), eb(dayLhs, '<=', day(to))])
+      return eb.and([eb(lhs, '>=', coerceComparable(def, from)), eb(lhs, '<=', coerceComparable(def, to))])
+    }
+    default:
+      return badTree(`${def.key}: '${rule.op}' is not available for ${def.kind} fields`)
+  }
+}
+
+// Multi-value storages: each op is an EXISTS over the field's rows, built from
+// the per-storage single conditions.
+function multiRule(
+  eb: Eb,
+  def: RecordsFieldSetting,
+  rule: RecordsFilterRule,
+  cond: (c: FilterCond) => Expression<SqlBool>,
+  resolve: (v: unknown) => unknown = v => v
+): Expression<SqlBool> {
+  const list = () => ruleValues(rule).map(v => resolve(v) as string)
+  switch (rule.op) {
+    case 'empty': return cond({ op: 'eq', value: null })
+    case 'not_empty': return eb.not(cond({ op: 'eq', value: null }))
+    case 'is': return cond({ op: 'eq', value: resolve(rule.value) })
+    case 'any_of': return cond({ op: 'in', values: list() })
+    case 'none_of': return eb.not(cond({ op: 'in', values: list() }))
+    case 'all_of': return eb.and(list().map(value => cond({ op: 'eq', value })))
+    case 'contains': return cond({ op: 'contains', value: String(rule.value) })
+    default:
+      return badTree(`${def.key}: '${rule.op}' is not available for ${def.kind} fields`)
+  }
+}
+
+function compileRule(eb: Eb, def: RecordsFieldSetting, rule: RecordsFilterRule, userId: string): Expression<SqlBool> {
+  switch (def.storage) {
+    case 'promoted':
+    case 'jsonb':
+      return scalarRule(eb, def, rule)
+    case 'entries':
+      return multiRule(eb, def, rule, c => entriesCond(eb, def, c))
+    case 'user_refs':
+      return multiRule(eb, def, rule, c => userRefsCond(eb, def, c), v => v === RECORDS_FILTER_ME ? userId : v)
+    case 'connections':
+      return multiRule(eb, def, rule, c => connectionsCond(eb, def, c))
+    case 'channels':
+      return multiRule(eb, def, rule, c => driverCond(eb, def, c))
+  }
+}
+
+function compileFilterGroup(
+  eb: Eb,
+  group: RecordsFilterGroup,
+  defsByKey: Map<string, RecordsFieldSetting>,
+  userId: string
+): Expression<SqlBool> {
+  const parts = group.rules.map((node) => {
+    if (isRecordsFilterGroup(node)) return compileFilterGroup(eb, node, defsByKey, userId)
+    const def = resolveTreeDef(defsByKey, node.field)
+    if (!def) badTree(`unknown field "${node.field}"`)
+    return compileRule(eb, def, node, userId)
+  })
+  if (parts.length === 0) return sql<SqlBool>`true`
+  return group.match === 'all' ? eb.and(parts) : eb.or(parts)
+}
+
 // Free-text search: record name plus whatever driver-backed values each
 // registered storage driver searches (raw or normalized addresses), so "555"
 // or "jane@" find the contact.
@@ -371,6 +581,10 @@ export async function listRecords(
     const def = resolveFieldDef(defsByKey, key)
     if (!def) throw createError({ statusCode: 400, statusMessage: `Unknown filter field: ${key}` })
     preds.push(eb => filterPredicate(eb, def, raw))
+  }
+  for (const raw of opts.where ?? []) {
+    const group = parseRecordsFilterGroup(raw, defs)
+    preds.push(eb => compileFilterGroup(eb, group, defsByKey, ctx.userId))
   }
   if (opts.ids) {
     if (opts.ids.length === 0) return { items: [], total: 0 }

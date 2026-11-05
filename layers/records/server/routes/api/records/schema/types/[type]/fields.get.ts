@@ -35,7 +35,8 @@ export default defineEventHandler(async (event) => {
         channelType: f.channelType ?? null,
         target: f.target ?? null,
         multiple: f.multiple ?? false,
-        column: f.column ?? null
+        column: f.column ?? null,
+        default: f.default ?? null
       }))
     return {
       sections: type.sections,

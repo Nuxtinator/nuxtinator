@@ -14,6 +14,17 @@ import type { Component } from 'vue'
 // The records permission set, for layers that register MCP tools under
 // records scopes and must make sure those scopes exist first.
 export { RECORDS_PERMISSIONS, RECORDS_PERMISSION_META } from './permissions'
+// The filter tree's runtime helpers, importable from '#records' in client code.
+export {
+  isRecordsFilterGroup,
+  recordsFilterOps,
+  recordsFilterRuleCount,
+  RECORDS_FILTER_INTRINSIC_KINDS,
+  RECORDS_FILTER_MAX_DEPTH,
+  RECORDS_FILTER_ME,
+  RECORDS_FILTER_OP_LABELS,
+  RECORDS_FILTER_VALUE_SHAPE
+} from '../../client/filters'
 
 export type RecordsFieldKind =
   | 'text'

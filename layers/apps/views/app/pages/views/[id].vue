@@ -1,26 +1,43 @@
 <script setup lang="ts">
-// One open view: header (name, visibility, view menu), the renderer for its
-// type, and the interaction plumbing — optimistic moves with the poll loop
-// suspended while a drag settles, quick-add through the records create
-// route, and definition updates for custom-board columns.
+// One open view: header (name, visibility, its tabs, view menu), the active
+// tab's toolbar and renderer, and the interaction plumbing — optimistic moves
+// with the poll loop suspended while a drag settles, quick-add through the
+// records create route, the list's done checkbox, and tab and definition
+// updates. The active tab rides in ?tab= so a tab can be linked to.
 import { generateNKeysBetween } from 'fractional-indexing'
-import type { RecordsFieldSetting } from '#records/client'
-import type { ViewsColumnDef, ViewsConnectionDisplay, ViewsVisibility } from '../../utils/views-types'
-import { viewsDragMode } from '../../utils/views-types'
+import { recordsFilterRuleCount } from '#records'
+import type { RecordsFieldSetting, RecordsFilterGroup } from '#records/client'
+import type {
+  ViewsColumnDef,
+  ViewsConnectionDisplay,
+  ViewsDefinition,
+  ViewsTab,
+  ViewsTabView,
+  ViewsVisibility
+} from '../../utils/views-types'
+import { VIEWS_LAYOUT_META, viewsDragMode } from '../../utils/views-types'
 import type { ViewsMovePayload } from '../../composables/useViewsDetail'
+import type { ViewsTabChoice } from '../../components/views/TabModal.vue'
 
 definePageMeta({ middleware: 'auth' })
 
 const route = useRoute()
+const router = useRouter()
 const toast = useToast()
+const confirmAction = useConfirm()
 const viewsPath = useViewsPath()
 const viewId = computed(() => String(route.params.id ?? ''))
+const requestedTab = computed(() => typeof route.query.tab === 'string' ? route.query.tab : null)
 
 const {
-  view, records, pending, error,
-  q, sort, dir, page, pageSize, personalFilters,
+  view, tab, records, pending, error,
+  q, sort, dir, page, pageSize,
   refresh, refreshRecords, beginDrag, endDrag, move
-} = useViewsDetail(viewId)
+} = useViewsDetail(viewId, requestedTab)
+
+function selectTab(id: string) {
+  router.replace({ query: { ...route.query, tab: id } })
+}
 
 // --- record type fields (renderers + filter vocabulary) ---------------------
 
@@ -48,7 +65,7 @@ watch([records, fields], ([recs, defs]) => {
   const ids = viewsReferencedUserIds(
     recs.items,
     defs,
-    view.value?.definition.groupField ?? null
+    tab.value?.definition.groupField ?? null
   )
   if (ids.length > 0) {
     ensureUserIds(ids).catch(() => {
@@ -63,7 +80,28 @@ const canCreate = computed(() => typeInfo.value?.canCreate ?? false)
 const canEditDefinition = computed(() =>
   view.value?.accessLevel === 'edit' || view.value?.accessLevel === 'owner')
 const isOwner = computed(() => view.value?.accessLevel === 'owner')
-const isCustom = computed(() => !!view.value?.definition.columns)
+const picked = computed(() => !!view.value?.definition.picked)
+
+/** The active tab in the shape the renderers take. */
+const tabView = computed<ViewsTabView | null>(() => {
+  const v = view.value
+  const t = tab.value
+  if (!v || !t) return null
+  return {
+    id: v.id,
+    tabId: t.id,
+    recordTypeKey: v.recordTypeKey,
+    viewType: t.layout,
+    definition: t.definition,
+    picked: !!v.definition.picked
+  }
+})
+const layout = computed(() => tab.value?.layout ?? null)
+const isCustom = computed(() => !!tab.value?.definition.columns)
+// The feed belongs to the tab on screen; a poll for the previous tab can't
+// render under the new one.
+const tabRecords = computed(() =>
+  records.value && records.value.tabId === tab.value?.id ? records.value : null)
 
 // --- slideover --------------------------------------------------------------
 
@@ -72,15 +110,15 @@ const openRecordId = ref<string | null>(null)
 // --- moves ------------------------------------------------------------------
 
 const groupFieldDef = computed(() =>
-  view.value?.definition.groupField
-    ? fields.value.find(f => f.key === view.value!.definition.groupField) ?? null
+  tab.value?.definition.groupField
+    ? fields.value.find(f => f.key === tab.value!.definition.groupField) ?? null
     : null)
 
 // Mirrors the server's drag rules (move for single-value and user fields,
-// add for multi-selects, tags and connections) so the board lands where the
-// card was dropped before the API round-trip confirms it.
+// add for multi-selects, tags and connections) so the tab shows the card
+// where it was dropped before the API round-trip confirms it.
 function applyOptimisticMove(payload: ViewsMovePayload) {
-  const recs = records.value
+  const recs = tabRecords.value
   if (!recs) return
   const { recordId, fromColumn, toColumn, columnOrder } = payload
 
@@ -91,8 +129,8 @@ function applyOptimisticMove(payload: ViewsMovePayload) {
   const placements = recs.placements.filter((p) => {
     if (p.columnKey === toColumn && inOrder.has(p.recordId)) return false
     if (p.recordId !== recordId) return true
-    // The moved card sheds its source placement (custom boards shed all);
-    // an add-mode drag keeps it in the column it came from.
+    // The moved card sheds its source placement (own-column boards shed
+    // all); an add-mode drag keeps it in the column it came from.
     if (isCustom.value) return false
     return !leavesSource || p.columnKey !== fromColumn
   })
@@ -136,27 +174,70 @@ async function onMove(payload: ViewsMovePayload) {
 
 async function onQuickAdd({ columnKey, name }: { columnKey: string, name: string }) {
   const v = view.value
-  if (!v) return
+  const t = tab.value
+  if (!v || !t) return
   try {
     const recordFields: Record<string, unknown> = { name }
     const field = groupFieldDef.value
-    if (!isCustom.value && field && columnKey !== '') {
+    if (!isCustom.value && field) {
       const single = field.kind === 'key_select' || (field.kind === 'user_select' && !field.multiple)
-      recordFields[field.key] = single ? columnKey : [columnKey]
+      // "No value" is a value: an explicit null keeps the type's default
+      // (a task's "open") from putting the new record in another column.
+      if (columnKey !== '') recordFields[field.key] = single ? columnKey : [columnKey]
+      else if (single) recordFields[field.key] = null
     }
     const created = await $fetch<{ id: string }>(`/api/records/entries/${v.recordTypeKey}`, {
       method: 'POST',
       body: { fields: recordFields }
     })
-    if (isCustom.value) {
+    if (picked.value) {
       await $fetch(`/api/views/${v.id}/cards`, {
         method: 'POST',
-        body: { recordId: created.id, columnKey }
+        body: { recordId: created.id, tabId: t.id, columnKey: isCustom.value ? columnKey : undefined }
       })
     }
     await refreshRecords()
   } catch (err) {
     toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to create the record') })
+  }
+}
+
+// --- list checkbox ----------------------------------------------------------
+
+// Types with exactly one closed status get a done checkbox; unticking goes
+// back to the status field's default, else its first open option.
+const doneStatus = computed(() => {
+  const status = fields.value.find(f => f.column === 'status')
+  if (!status?.options) return null
+  const options = Object.entries(status.options).filter(([, o]) => !o.deleted)
+  const closed = options.filter(([, o]) => o.closed)
+  if (closed.length !== 1) return null
+  const open = options.filter(([, o]) => !o.closed)
+  const fallback = typeof status.default === 'string' && open.some(([k]) => k === status.default)
+    ? status.default
+    : open[0]?.[0]
+  if (!fallback) return null
+  return { done: closed[0]![0], reopen: fallback }
+})
+
+async function onToggleDone({ recordId, done }: { recordId: string, done: boolean }) {
+  const v = view.value
+  const statuses = doneStatus.value
+  if (!v || !statuses) return
+  const value = done ? statuses.done : statuses.reopen
+  const item = tabRecords.value?.items.find(i => i.id === recordId)
+  const previous = item?.status ?? null
+  if (item) item.status = value
+  try {
+    await $fetch(`/api/records/entries/${v.recordTypeKey}/${recordId}`, {
+      method: 'PATCH',
+      body: { fields: { status: value } }
+    })
+  } catch (err) {
+    if (item) item.status = previous
+    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to update the record') })
+  } finally {
+    refreshRecords()
   }
 }
 
@@ -176,7 +257,7 @@ async function onAddTargetColumn(label: string) {
   }
 }
 
-// --- custom board membership ------------------------------------------------
+// --- hand-picked records ----------------------------------------------------
 
 const addCardColumn = ref<string | null>(null)
 
@@ -187,15 +268,18 @@ async function onRemoveCard(recordId: string) {
     await $fetch(`/api/views/${v.id}/cards/${recordId}`, { method: 'DELETE' })
     await refreshRecords()
   } catch (err) {
-    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to remove the card') })
+    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to remove the record') })
   }
 }
 
-// --- definition + meta updates ----------------------------------------------
+// --- view + tab updates -----------------------------------------------------
+
+const saving = ref(false)
 
 async function patchView(body: Record<string, unknown>, failure: string): Promise<boolean> {
   const v = view.value
   if (!v) return false
+  saving.value = true
   try {
     await $fetch(`/api/views/${v.id}`, { method: 'PATCH', body })
     await refresh()
@@ -203,54 +287,203 @@ async function patchView(body: Record<string, unknown>, failure: string): Promis
   } catch (err) {
     toast.add({ color: 'error', title: recordsErrorMessage(err, failure) })
     return false
+  } finally {
+    saving.value = false
   }
 }
 
-function onColumnsChange(columns: ViewsColumnDef[]) {
+async function patchTab(body: Record<string, unknown>, failure: string, tabId = tab.value?.id): Promise<boolean> {
   const v = view.value
-  if (!v) return
-  patchView(
-    { definition: { ...v.definition, columns } },
-    'Failed to update columns'
-  )
+  if (!v || !tabId) return false
+  saving.value = true
+  try {
+    await $fetch(`/api/views/${v.id}/tabs/${tabId}`, { method: 'PATCH', body })
+    await refresh()
+    return true
+  } catch (err) {
+    toast.add({ color: 'error', title: recordsErrorMessage(err, failure) })
+    return false
+  } finally {
+    saving.value = false
+  }
+}
+
+function patchTabDefinition(change: (definition: ViewsDefinition) => void, failure: string) {
+  const t = tab.value
+  if (!t) return
+  const definition: ViewsDefinition = structuredClone(toRaw(t.definition))
+  change(definition)
+  patchTab({ definition }, failure)
+}
+
+function onColumnsChange(columns: ViewsColumnDef[]) {
+  patchTabDefinition((d) => {
+    d.columns = columns
+  }, 'Failed to update columns')
 }
 
 const cardFieldsOpen = ref(false)
 
 function onCardFieldsChange(layout: { cardFields: string[], cardConnections: Record<string, ViewsConnectionDisplay> } | null) {
-  const v = view.value
-  if (!v) return
-  const definition = { ...v.definition }
-  delete definition.cardFields
-  delete definition.cardConnections
-  if (layout) {
-    definition.cardFields = layout.cardFields
-    if (Object.keys(layout.cardConnections).length > 0) definition.cardConnections = layout.cardConnections
-  }
-  patchView({ definition }, 'Failed to update the fields')
+  patchTabDefinition((d) => {
+    delete d.cardFields
+    delete d.cardConnections
+    if (layout) {
+      d.cardFields = layout.cardFields
+      if (Object.keys(layout.cardConnections).length > 0) d.cardConnections = layout.cardConnections
+    }
+  }, 'Failed to update the fields')
 }
 
-function onDefinitionSort(sort: { field: string, dir: 'asc' | 'desc' } | null) {
-  const v = view.value
-  if (!v) return
-  const definition = { ...v.definition }
-  if (sort) definition.sort = sort
-  else delete definition.sort
-  patchView({ definition }, 'Failed to save the sort order')
+function onTabSort(next: { field: string, dir: 'asc' | 'desc' } | null) {
+  patchTabDefinition((d) => {
+    if (next) d.sort = next
+    else delete d.sort
+  }, 'Failed to save the sort order')
+}
+
+function onTabFilter(filter: RecordsFilterGroup | null) {
+  patchTabDefinition((d) => {
+    if (filter) d.filter = filter
+    else delete d.filter
+  }, 'Failed to save the filter')
+}
+
+const viewFilterOpen = ref(false)
+async function onViewFilter(filter: RecordsFilterGroup | null) {
+  const saved = await patchView({ definition: { filter: filter ?? undefined } }, 'Failed to save the view filter')
+  if (saved) viewFilterOpen.value = false
 }
 
 const groupFieldOpen = ref(false)
-// A field-grouped board — the only kind that has a grouping field to change.
+// Tabs whose grouping is a field — the only ones with a grouping field to repair.
 const isFieldGrouped = computed(() =>
-  view.value?.viewType === 'kanban' && !isCustom.value)
+  (layout.value === 'kanban' && !isCustom.value) || (layout.value === 'list' && !!tab.value?.definition.groupField))
 
 function onGroupFieldChange(groupField: string) {
-  const v = view.value
-  if (!v) return
+  const t = tab.value
+  if (!t) return
   // Keys of a deleted field can still sit in the rest of the definition and
   // would fail validation, taking the repair down with them.
-  const definition = viewsPruneDefinition({ ...v.definition, groupField }, fields.value)
-  patchView({ definition }, 'Failed to change the grouping field')
+  const definition = viewsPruneDefinition({ ...t.definition, groupField }, fields.value)
+  patchTab({ definition }, 'Failed to change the grouping field')
+}
+
+// --- tabs -------------------------------------------------------------------
+
+const tabModalOpen = ref(false)
+const tabModalTab = ref<ViewsTab | null>(null)
+
+function openNewTab() {
+  tabModalTab.value = null
+  tabModalOpen.value = true
+}
+
+function openTabSettings(t: ViewsTab) {
+  tabModalTab.value = t
+  tabModalOpen.value = true
+}
+
+// Fresh own-column boards start with the classic three lanes.
+const DEFAULT_COLUMNS: ViewsColumnDef[] = [
+  { key: 'todo', label: 'To do' },
+  { key: 'doing', label: 'Doing' },
+  { key: 'done', label: 'Done' }
+]
+
+function definitionFor(choice: ViewsTabChoice, base: ViewsDefinition): ViewsDefinition {
+  const definition: ViewsDefinition = structuredClone(toRaw(base))
+  delete definition.groupField
+  if (!choice.ownColumns) delete definition.columns
+  if (choice.ownColumns && !definition.columns) definition.columns = DEFAULT_COLUMNS
+  if (choice.groupField) definition.groupField = choice.groupField
+  return definition
+}
+
+async function onTabSave(choice: ViewsTabChoice) {
+  const v = view.value
+  if (!v) return
+  const existing = tabModalTab.value
+  if (existing) {
+    const saved = await patchTab({
+      name: choice.name,
+      layout: choice.layout,
+      definition: definitionFor(choice, existing.definition)
+    }, 'Failed to save the tab', existing.id)
+    if (saved) tabModalOpen.value = false
+    return
+  }
+  saving.value = true
+  try {
+    const created = await $fetch<ViewsTab>(`/api/views/${v.id}/tabs`, {
+      method: 'POST',
+      body: { name: choice.name, layout: choice.layout, definition: definitionFor(choice, {}) }
+    })
+    await refresh()
+    tabModalOpen.value = false
+    selectTab(created.id)
+  } catch (err) {
+    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to add the tab') })
+  } finally {
+    saving.value = false
+  }
+}
+
+async function deleteTab(t: ViewsTab) {
+  const v = view.value
+  if (!v) return
+  if (!await confirmAction({ title: `Delete the "${t.name}" tab?`, confirmLabel: 'Delete', color: 'error' })) return
+  try {
+    await $fetch(`/api/views/${v.id}/tabs/${t.id}`, { method: 'DELETE' })
+    if (tab.value?.id === t.id) {
+      const rest = v.tabs.filter(x => x.id !== t.id)
+      if (rest[0]) selectTab(rest[0].id)
+    }
+    await refresh()
+  } catch (err) {
+    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to delete the tab') })
+  }
+}
+
+async function shiftTab(t: ViewsTab, by: -1 | 1) {
+  const v = view.value
+  if (!v) return
+  const ids = v.tabs.map(x => x.id)
+  const from = ids.indexOf(t.id)
+  const to = from + by
+  if (from < 0 || to < 0 || to >= ids.length) return
+  ids.splice(from, 1)
+  ids.splice(to, 0, t.id)
+  try {
+    await $fetch(`/api/views/${v.id}/tab-order`, { method: 'PUT', body: { tabIds: ids } })
+    await refresh()
+  } catch (err) {
+    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to move the tab') })
+  }
+}
+
+function tabMenu(t: ViewsTab) {
+  const tabs = view.value?.tabs ?? []
+  const index = tabs.findIndex(x => x.id === t.id)
+  const items: Array<Array<Record<string, unknown>>> = [[
+    { label: 'Tab settings', icon: 'i-lucide-settings-2', onSelect: () => openTabSettings(t) },
+    {
+      label: t.layout === 'table' ? 'Table columns' : t.layout === 'list' ? 'Row fields' : 'Card fields',
+      icon: 'i-lucide-list-checks',
+      onSelect: () => {
+        selectTab(t.id)
+        cardFieldsOpen.value = true
+      }
+    }
+  ]]
+  const moves: Array<Record<string, unknown>> = []
+  if (index > 0) moves.push({ label: 'Move left', icon: 'i-lucide-arrow-left', onSelect: () => shiftTab(t, -1) })
+  if (index < tabs.length - 1) moves.push({ label: 'Move right', icon: 'i-lucide-arrow-right', onSelect: () => shiftTab(t, 1) })
+  if (moves.length > 0) items.push(moves)
+  if (tabs.length > 1) {
+    items.push([{ label: 'Delete tab', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => deleteTab(t) }])
+  }
+  return items
 }
 
 // --- header menu ------------------------------------------------------------
@@ -320,29 +553,31 @@ const VISIBILITY_META: Record<ViewsVisibility, { label: string, icon: string }> 
   org: { label: 'Organization', icon: 'i-lucide-building-2' }
 }
 
+const viewFilterCount = computed(() => recordsFilterRuleCount(view.value?.definition.filter))
+
 const menuItems = computed(() => {
   const items: Array<Array<Record<string, unknown>>> = []
+  const main: Array<Record<string, unknown>> = []
   if (canEditDefinition.value) {
-    items.push([
-      { label: 'Rename & icon', icon: 'i-lucide-pencil', onSelect: openRename },
-      {
-        label: view.value?.viewType === 'table' ? 'Table columns' : 'Card fields',
-        icon: 'i-lucide-list-checks',
-        onSelect: () => {
-          cardFieldsOpen.value = true
-        }
-      }
-    ])
-    if (isFieldGrouped.value) {
-      items[items.length - 1]!.push({
-        label: 'Change grouping',
-        icon: 'i-lucide-columns-3',
-        onSelect: () => {
-          groupFieldOpen.value = true
-        }
-      })
-    }
+    main.push({ label: 'Rename & icon', icon: 'i-lucide-pencil', onSelect: openRename })
   }
+  main.push({
+    label: viewFilterCount.value > 0 ? `View filter · ${viewFilterCount.value}` : 'View filter',
+    icon: 'i-lucide-list-filter',
+    onSelect: () => {
+      viewFilterOpen.value = true
+    }
+  })
+  if (canEditDefinition.value && isFieldGrouped.value) {
+    main.push({
+      label: 'Change grouping',
+      icon: 'i-lucide-columns-3',
+      onSelect: () => {
+        groupFieldOpen.value = true
+      }
+    })
+  }
+  items.push(main)
   if (isOwner.value) {
     items.push([
       {
@@ -381,7 +616,7 @@ const menuItems = computed(() => {
 
 <template>
   <div class="flex flex-col h-[calc(100vh-57px)] -mx-4 sm:-mx-6 lg:-mx-8 -my-6 lg:-my-8 overflow-hidden">
-    <header class="flex items-center gap-2 px-4 py-3 border-b border-(--ui-border) bg-(--ui-bg)">
+    <header class="flex items-center gap-2 px-4 py-2 border-b border-(--ui-border) bg-(--ui-bg)">
       <UButton
         icon="i-lucide-arrow-left"
         variant="ghost"
@@ -391,10 +626,10 @@ const menuItems = computed(() => {
         :to="viewsPath('')"
       />
       <UIcon
-        :name="view?.icon || (view?.viewType === 'kanban' ? 'i-lucide-kanban' : 'i-lucide-table')"
-        class="size-5 text-(--ui-text-muted)"
+        :name="view?.icon || VIEWS_LAYOUT_META[view?.tabs[0]?.layout ?? 'list'].icon"
+        class="size-5 text-(--ui-text-muted) shrink-0"
       />
-      <h1 class="text-lg font-semibold truncate">
+      <h1 class="text-lg font-semibold truncate shrink-0 max-w-[30%]">
         {{ view?.name ?? '…' }}
       </h1>
       <UBadge
@@ -402,10 +637,56 @@ const menuItems = computed(() => {
         variant="subtle"
         color="neutral"
         :icon="VISIBILITY_META[view.visibility].icon"
-        class="hidden sm:inline-flex"
+        class="hidden sm:inline-flex shrink-0"
       >
         {{ VISIBILITY_META[view.visibility].label }}
       </UBadge>
+
+      <nav
+        v-if="view"
+        class="flex items-center gap-1 ml-2 min-w-0 overflow-x-auto"
+        aria-label="Tabs"
+      >
+        <div
+          v-for="t in view.tabs"
+          :key="t.id"
+          class="flex items-center shrink-0 rounded-md"
+          :class="t.id === tab?.id ? 'bg-(--ui-bg-elevated)' : ''"
+        >
+          <UButton
+            :icon="VIEWS_LAYOUT_META[t.layout].icon"
+            variant="ghost"
+            :color="t.id === tab?.id ? 'primary' : 'neutral'"
+            size="sm"
+            :aria-current="t.id === tab?.id ? 'page' : undefined"
+            @click="selectTab(t.id)"
+          >
+            {{ t.name }}
+          </UButton>
+          <UDropdownMenu
+            v-if="canEditDefinition && t.id === tab?.id"
+            :items="tabMenu(t)"
+          >
+            <UButton
+              icon="i-lucide-chevron-down"
+              variant="ghost"
+              color="neutral"
+              size="xs"
+              :aria-label="`${t.name} tab options`"
+            />
+          </UDropdownMenu>
+        </div>
+        <UButton
+          v-if="canEditDefinition"
+          icon="i-lucide-plus"
+          variant="ghost"
+          color="neutral"
+          size="sm"
+          aria-label="Add tab"
+          @click="openNewTab"
+        />
+      </nav>
+
       <span class="flex-1" />
       <ViewsShareMenu
         v-if="view && canEditDefinition"
@@ -427,14 +708,15 @@ const menuItems = computed(() => {
     </header>
 
     <ViewsFilterBar
-      v-if="view"
+      v-if="view && tabView"
       v-model:q="q"
-      v-model:personal-filters="personalFilters"
-      :view="view"
+      :view="tabView"
+      :view-definition="view.definition"
       :fields="fields"
       :can-edit-definition="canEditDefinition"
-      @definition-filters="patchView({ definition: { ...view!.definition, filters: $event } }, 'Failed to save filters')"
-      @definition-sort="onDefinitionSort"
+      :saving="saving"
+      @definition-filter="onTabFilter"
+      @definition-sort="onTabSort"
     />
 
     <UAlert
@@ -445,7 +727,7 @@ const menuItems = computed(() => {
     />
 
     <div
-      v-else-if="records?.groupFieldMissing"
+      v-else-if="tabRecords?.groupFieldMissing"
       class="grid place-items-center flex-1 text-(--ui-text-muted)"
     >
       <div class="text-center max-w-sm space-y-3">
@@ -454,7 +736,7 @@ const menuItems = computed(() => {
           class="size-10 opacity-50"
         />
         <p class="text-sm">
-          This board's grouping field no longer exists on the record type.
+          This tab's grouping field no longer exists on the record type.
           <template v-if="canEditDefinition">
             Pick a new grouping field to bring it back.
           </template>
@@ -474,18 +756,18 @@ const menuItems = computed(() => {
       class="flex-1 min-h-0 p-4"
     >
       <UAlert
-        v-if="records?.truncated"
+        v-if="tabRecords?.truncated"
         color="warning"
         variant="subtle"
         icon="i-lucide-triangle-alert"
-        :title="`Showing ${records.items.length} of ${records.total} records — add filters to narrow the view.`"
+        :title="`Showing ${tabRecords.items.length} of ${tabRecords.total} records — add filters to narrow the view.`"
         class="mb-3"
       />
 
       <ViewsKanbanBoard
-        v-if="view?.viewType === 'kanban' && records"
-        :view="view"
-        :records="records"
+        v-if="layout === 'kanban' && tabView && tabRecords"
+        :view="tabView"
+        :records="tabRecords"
         :fields="fields"
         :can-edit-definition="canEditDefinition"
         :can-create="canCreate"
@@ -500,11 +782,46 @@ const menuItems = computed(() => {
         @dragend="endDrag"
       />
 
+      <div
+        v-else-if="layout === 'list' && tabView && tabRecords"
+        class="h-full flex flex-col gap-2"
+      >
+        <div
+          v-if="picked"
+          class="flex justify-end"
+        >
+          <UButton
+            icon="i-lucide-plus"
+            variant="outline"
+            color="neutral"
+            size="sm"
+            @click="addCardColumn = ''"
+          >
+            Add existing
+          </UButton>
+        </div>
+        <ViewsListView
+          class="flex-1 min-h-0"
+          :view="tabView"
+          :records="tabRecords"
+          :fields="fields"
+          :can-create="canCreate"
+          :done-status="doneStatus"
+          @move="onMove"
+          @open="openRecordId = $event"
+          @quick-add="onQuickAdd"
+          @toggle-done="onToggleDone"
+          @remove-card="onRemoveCard"
+          @dragstart="beginDrag"
+          @dragend="endDrag"
+        />
+      </div>
+
       <ViewsTableView
-        v-else-if="view?.viewType === 'table' && records"
+        v-else-if="layout === 'table' && tabView && tabRecords"
         v-model:page="page"
-        :view="view"
-        :records="records"
+        :view="tabView"
+        :records="tabRecords"
         :fields="fields"
         :sort="sort"
         :dir="dir"
@@ -528,28 +845,49 @@ const menuItems = computed(() => {
     />
 
     <ViewsAddCardModal
-      v-if="view"
+      v-if="tabView"
       v-model:column-key="addCardColumn"
-      :view="view"
-      :on-board="records ? records.placements.map(p => p.recordId) : []"
+      :view="tabView"
+      :on-board="tabRecords ? tabRecords.items.map(i => i.id) : []"
       @added="refreshRecords"
     />
 
     <ViewsCardFieldsModal
-      v-if="view && records"
+      v-if="tabView && tabRecords"
       v-model:open="cardFieldsOpen"
-      :view="view"
+      :view="tabView"
       :fields="fields"
-      :layout="records.card"
+      :layout="tabRecords.card"
       @save="onCardFieldsChange"
     />
 
     <ViewsGroupFieldModal
-      v-if="view && isFieldGrouped"
+      v-if="tabView && isFieldGrouped"
       v-model:open="groupFieldOpen"
-      :view="view"
+      :view="tabView"
       :fields="fields"
       @save="onGroupFieldChange"
+    />
+
+    <ViewsTabModal
+      v-if="view"
+      v-model:open="tabModalOpen"
+      :tab="tabModalTab"
+      :fields="fields"
+      :picked="picked"
+      :saving="saving"
+      @save="onTabSave"
+    />
+
+    <ViewsFilterModal
+      v-if="view"
+      v-model:open="viewFilterOpen"
+      :title="canEditDefinition ? 'Filter for every tab' : 'This view\'s filter'"
+      :fields="fields"
+      :filter="view.definition.filter ?? null"
+      :readonly="!canEditDefinition"
+      :saving="saving"
+      @save="onViewFilter"
     />
 
     <UModal v-model:open="renameOpen">
@@ -632,8 +970,8 @@ const menuItems = computed(() => {
             Delete this view?
           </h2>
           <p class="text-sm text-(--ui-text-muted)">
-            "{{ view?.name }}" and its sharing settings will be removed. The
-            records it shows are not touched.
+            "{{ view?.name }}", its tabs and its sharing settings will be
+            removed. The records it shows are not touched.
           </p>
           <div class="flex gap-2 justify-end">
             <UButton

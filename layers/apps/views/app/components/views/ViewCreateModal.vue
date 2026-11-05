@@ -1,10 +1,11 @@
 <script setup lang="ts">
-// Create-view modal: name, record type, kanban/table, and — for kanbans —
-// the grouping choice: a groupable field (columns = its options) or custom
-// columns owned by the view (a Trello-style board, cards added explicitly).
-// On success it navigates straight to the new view.
+// Create-view modal: name, record type, and the first tab's layout — a
+// board, a list or a table. A board groups by a field (columns = its values)
+// or has its own columns (a Trello-style board; the view then holds only
+// records added to it). A list may group into sections by a field. On success
+// it navigates straight to the new view.
 import type { RecordsFieldSetting } from '#records/client'
-import type { ViewType, ViewsVisibility } from '../../utils/views-types'
+import type { ViewsLayout, ViewsVisibility } from '../../utils/views-types'
 
 const open = defineModel<boolean>('open', { default: false })
 
@@ -23,7 +24,7 @@ const DEFAULT_COLUMNS = [
 const name = ref('')
 const icon = ref<string | null>(null)
 const typeKey = ref<string | undefined>(undefined)
-const viewType = ref<ViewType>('kanban')
+const viewType = ref<ViewsLayout>('kanban')
 const kanbanMode = ref<'field' | 'custom'>('field')
 const groupField = ref<string | undefined>(undefined)
 const visibility = ref<ViewsVisibility>('private')
@@ -71,7 +72,8 @@ const groupFieldItems = computed(() =>
   viewsGroupableFields(fields.value).map(f => ({ label: f.label, value: f.key })))
 
 const VIEW_TYPE_ITEMS = [
-  { label: 'Kanban board', value: 'kanban' },
+  { label: 'Board', value: 'kanban' },
+  { label: 'List', value: 'list' },
   { label: 'Table', value: 'table' }
 ]
 const KANBAN_MODE_ITEMS = [
@@ -95,18 +97,25 @@ async function submit() {
   creating.value = true
   createError.value = null
   try {
+    const tabDefinition: Record<string, unknown> = {}
     const definition: Record<string, unknown> = {}
     if (viewType.value === 'kanban') {
-      if (kanbanMode.value === 'field') definition.groupField = groupField.value
-      else definition.columns = DEFAULT_COLUMNS
+      if (kanbanMode.value === 'field') {
+        tabDefinition.groupField = groupField.value
+      } else {
+        tabDefinition.columns = DEFAULT_COLUMNS
+        definition.picked = true
+      }
+    } else if (viewType.value === 'list' && groupField.value) {
+      tabDefinition.groupField = groupField.value
     }
     const created = await create({
       name: name.value.trim(),
       icon: icon.value ?? undefined,
       recordTypeKey: typeKey.value!,
-      viewType: viewType.value,
       visibility: visibility.value,
-      definition
+      definition,
+      tab: { layout: viewType.value, definition: tabDefinition }
     })
     open.value = false
     await navigateTo(viewsPath(`/${created.id}`))
@@ -165,7 +174,7 @@ async function submit() {
           />
         </UFormField>
 
-        <UFormField label="View type">
+        <UFormField label="Layout">
           <URadioGroup
             v-model="viewType"
             :items="VIEW_TYPE_ITEMS"
@@ -214,6 +223,31 @@ async function submit() {
             shape its columns afterwards.
           </p>
         </template>
+
+        <UFormField
+          v-else-if="viewType === 'list'"
+          label="Sections"
+        >
+          <div class="flex gap-2">
+            <USelectMenu
+              v-model="groupField"
+              :items="groupFieldItems"
+              value-key="value"
+              label-key="label"
+              :placeholder="fieldsPending ? 'Loading fields...' : 'No sections'"
+              class="flex-1"
+              :disabled="creating || !typeKey"
+            />
+            <UButton
+              v-if="groupField"
+              icon="i-lucide-x"
+              variant="ghost"
+              color="neutral"
+              aria-label="No sections"
+              @click="groupField = undefined"
+            />
+          </div>
+        </UFormField>
 
         <UFormField label="Visibility">
           <USelectMenu

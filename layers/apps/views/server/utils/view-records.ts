@@ -1,11 +1,10 @@
-// The view data feed: what a board or table shows. Everything flows through
-// the records kernel's listRecords, so record visibility and filter/sort
-// validation are the kernel's — this file only merges the view's saved
-// filters with the caller's personal overlay, pages past the kernel's
-// per-call limit, and attaches the bits a kanban needs on top (grouping-field
-// values per record, the columns a connection-grouped board shows, values
-// and progress for card fields the list rows don't carry, placement/rank
-// rows).
+// The tab data feed: what a board, table or list shows. Everything flows
+// through the records kernel's listRecords, so record visibility and
+// filter/sort validation are the kernel's — this file only combines the
+// view's base filter with the tab's, pages past the kernel's per-call limit,
+// and attaches the bits boards and lists need on top (grouping-field values
+// per record, the columns a connection-grouped board shows, values and
+// progress for card fields the list rows don't carry, placement/rank rows).
 
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
@@ -18,8 +17,8 @@ import {
   hydrateRecords,
   listRecords
 } from '#records/server'
-import type { RecordsFieldSetting, RecordListItem } from '#records/server'
-import type { ViewDefinition, ViewRow } from './views'
+import type { RecordsFieldSetting, RecordListItem, RecordsListOpts } from '#records/server'
+import type { ViewDefinition, ViewRow, ViewTabDefinition, ViewTabRow } from './views'
 
 type Tx = Transaction<Database>
 
@@ -30,7 +29,6 @@ export const VIEWS_BOARD_CAP = 500
 const PAGE_SIZE = 100
 
 export interface ViewsRecordsOverlay {
-  filters?: Record<string, unknown>
   q?: string
   sort?: string
   dir?: 'asc' | 'desc'
@@ -46,6 +44,8 @@ export interface ViewsPlacement {
 }
 
 export interface ViewsBoardItem extends RecordListItem {
+  createdAt: Date
+  updatedAt: Date
   /** Current values of the grouping field (field-grouped boards only). */
   groupValues?: string[]
   /**
@@ -66,20 +66,21 @@ export interface ViewsCardLayout {
   custom: boolean
 }
 
-// What a view shows when neither it nor its type names card fields.
-const DEFAULT_CARD_FIELDS: Record<'kanban' | 'table', string[]> = {
+// What a tab shows when neither it nor its type names card fields.
+const DEFAULT_CARD_FIELDS: Record<ViewTabRow['layout'], string[]> = {
   kanban: ['status'],
-  table: ['status', 'updated_at']
+  table: ['status', 'updated_at'],
+  list: ['status']
 }
 
-export async function effectiveCardLayout(tx: Tx, view: ViewRow): Promise<ViewsCardLayout> {
-  const def = view.definition as ViewDefinition
+export async function effectiveCardLayout(tx: Tx, view: ViewRow, tab: ViewTabRow): Promise<ViewsCardLayout> {
+  const def = tab.definition as ViewTabDefinition
   if (def.cardFields) {
     return { fields: def.cardFields, connections: def.cardConnections ?? {}, custom: true }
   }
   const type = await getRecordType(tx, view.record_type_key)
   return {
-    fields: type?.card?.fields ?? DEFAULT_CARD_FIELDS[view.view_type],
+    fields: type?.card?.fields ?? DEFAULT_CARD_FIELDS[tab.layout],
     connections: type?.card?.connections ?? {},
     custom: false
   }
@@ -158,17 +159,33 @@ async function attachConnectionProgress(
   }
 }
 
-function mergedListOpts(view: ViewRow, overlay: ViewsRecordsOverlay) {
-  const def = view.definition as ViewDefinition
-  // Personal overlay wins per key — a personal filter narrows or replaces
-  // the shared one, never widens visibility (that's CRM's layer).
-  const filters = { ...(def.filters ?? {}), ...(overlay.filters ?? {}) }
+// The tab narrows the view: both filters apply. The caller's sort overrides
+// the tab's saved one for this request only.
+function mergedListOpts(view: ViewRow, tab: ViewTabRow, overlay: ViewsRecordsOverlay) {
+  const viewDef = view.definition as ViewDefinition
+  const tabDef = tab.definition as ViewTabDefinition
   return {
-    filters,
+    where: [viewDef.filter, tabDef.filter].filter(f => !!f && f.rules.length > 0) as NonNullable<ViewDefinition['filter']>[],
     q: overlay.q,
-    sort: overlay.sort ?? def.sort?.field,
-    dir: overlay.dir ?? def.sort?.dir
+    sort: overlay.sort ?? tabDef.sort?.field,
+    dir: overlay.dir ?? tabDef.sort?.dir
   }
+}
+
+// List rows carry the record's snake_case columns; the feed serves the same
+// camelCase timestamps as the records list route.
+function withTimestamps(items: RecordListItem[]): ViewsBoardItem[] {
+  return items.map(item => ({ ...item, createdAt: item.created_at, updatedAt: item.updated_at }))
+}
+
+/** The records added to a hand-picked view. */
+export async function viewItemIds(tx: Tx, viewId: string): Promise<string[]> {
+  const rows = await tx
+    .selectFrom('views_items')
+    .select('record_id')
+    .where('view_id', '=', viewId)
+    .execute()
+  return rows.map(r => r.record_id)
 }
 
 /** Reads the grouping field's current value(s) per record, storage-aware. */
@@ -262,7 +279,7 @@ async function pageThroughRecords(
   tx: Tx,
   ctx: TenantContext,
   typeKey: string,
-  opts: { filters: Record<string, unknown>, q?: string, sort?: string, dir?: 'asc' | 'desc', ids?: string[] }
+  opts: RecordsListOpts
 ): Promise<{ items: RecordListItem[], total: number }> {
   const items: RecordListItem[] = []
   let total = 0
@@ -282,13 +299,13 @@ async function pageThroughRecords(
 export interface ViewRecords {
   items: ViewsBoardItem[]
   total: number
-  /** True when a board hit VIEWS_BOARD_CAP — some records are not shown. */
+  /** True when a board or list hit VIEWS_BOARD_CAP — some records are not shown. */
   truncated: boolean
-  /** All placement/rank rows for the view (kanban only; [] for tables). */
+  /** The tab's placement/rank rows (boards and lists; [] for tables). */
   placements: ViewsPlacement[]
-  /** Connection-grouped boards: the target records that make the columns. */
+  /** Connection-grouped tabs: the target records that make the columns. */
   groupColumns?: ViewsGroupColumn[]
-  /** The card layout the cards and table columns render. */
+  /** The card layout the cards, list rows and table columns render. */
   card: ViewsCardLayout
 }
 
@@ -296,27 +313,33 @@ export async function getViewRecords(
   tx: Tx,
   ctx: TenantContext,
   view: ViewRow,
+  tab: ViewTabRow,
   groupFieldDef: RecordsFieldSetting | null,
   overlay: ViewsRecordsOverlay
 ): Promise<ViewRecords> {
-  const def = view.definition as ViewDefinition
-  const opts = mergedListOpts(view, overlay)
-  const card = await effectiveCardLayout(tx, view)
+  const viewDef = view.definition as ViewDefinition
+  const opts: RecordsListOpts = mergedListOpts(view, tab, overlay)
+  const card = await effectiveCardLayout(tx, view, tab)
+  if (viewDef.picked) {
+    opts.ids = await viewItemIds(tx, view.id)
+    if (opts.ids.length === 0) return { items: [], total: 0, truncated: false, placements: [], card }
+  }
 
-  if (view.view_type === 'table') {
+  if (tab.layout === 'table') {
     const page = await listRecords(tx, ctx, view.record_type_key, {
       ...opts,
       limit: overlay.limit,
       offset: overlay.offset
     })
-    await attachCardFieldValues(tx, view, card, page.items)
-    return { items: page.items, total: page.total, truncated: false, placements: [], card }
+    const items = withTimestamps(page.items)
+    await attachCardFieldValues(tx, view, card, items)
+    return { items, total: page.total, truncated: false, placements: [], card }
   }
 
   const placementRows = await tx
     .selectFrom('views_cards')
     .select(['record_id', 'column_key', 'rank'])
-    .where('view_id', '=', view.id)
+    .where('tab_id', '=', tab.id)
     .execute()
   const placements: ViewsPlacement[] = placementRows.map(row => ({
     recordId: row.record_id,
@@ -324,29 +347,16 @@ export async function getViewRecords(
     rank: row.rank
   }))
 
-  // Custom board: the membership rows decide what loads; visibility and the
-  // (shared + personal) filters still narrow what the caller sees.
-  if (def.columns) {
-    const memberIds = [...new Set(placements.map(p => p.recordId))]
-    if (memberIds.length === 0) return { items: [], total: 0, truncated: false, placements, card }
-    const { items, total } = await pageThroughRecords(tx, ctx, view.record_type_key, {
-      ...opts,
-      ids: memberIds
-    })
-    await attachCardFieldValues(tx, view, card, items)
-    return { items, total, truncated: items.length < total, placements, card }
-  }
-
-  const { items, total } = await pageThroughRecords(tx, ctx, view.record_type_key, opts)
-  const board: ViewsBoardItem[] = items
+  const { items: rows, total } = await pageThroughRecords(tx, ctx, view.record_type_key, opts)
+  const items = withTimestamps(rows)
 
   let groupColumns: ViewsGroupColumn[] | undefined
   if (groupFieldDef) {
-    const values = await getViewsGroupValues(tx, groupFieldDef, items)
-    for (const item of board) item.groupValues = values.get(item.id) ?? []
+    const values = await getViewsGroupValues(tx, groupFieldDef, rows)
+    for (const item of items) item.groupValues = values.get(item.id) ?? []
     if (groupFieldDef.kind === 'connection') groupColumns = await connectionColumns(tx, ctx, groupFieldDef)
   }
-  await attachCardFieldValues(tx, view, card, board)
+  await attachCardFieldValues(tx, view, card, items)
 
-  return { items: board, total, truncated: items.length < total, placements, groupColumns, card }
+  return { items, total, truncated: items.length < total, placements, groupColumns, card }
 }

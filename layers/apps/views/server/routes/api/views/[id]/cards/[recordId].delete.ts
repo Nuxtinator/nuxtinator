@@ -1,5 +1,6 @@
-// DELETE /api/views/:id/cards/:recordId — take a record off a
-// custom board. View state only; the record itself is untouched.
+// DELETE /api/views/:id/cards/:recordId — take a record out of a
+// hand-picked view, off every tab. View state only; the record itself is
+// untouched.
 import { withOrgPermission } from '#tenant/server'
 import { requireView } from '../../../../../utils/views'
 import { removeViewsCard } from '../../../../../utils/placements'

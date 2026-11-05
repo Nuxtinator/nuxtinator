@@ -24,10 +24,19 @@ interface Feed {
   card: { fields: string[], connections: Record<string, string>, custom: boolean }
 }
 
-async function createView(opts: Opts, body: Record<string, unknown>): Promise<{ id: string }> {
-  return await $fetch<{ id: string }>('/api/views', {
+// A view with one board tab; a board with its own columns makes it a view of
+// hand-picked records.
+async function createView(opts: Opts, body: { recordTypeKey: string, visibility?: string, definition: Record<string, unknown> }): Promise<{ id: string, tabs: Array<{ id: string }> }> {
+  const { definition, ...rest } = body
+  return await $fetch<{ id: string, tabs: Array<{ id: string }> }>('/api/views', {
     method: 'POST',
-    body: { name: 'test-views platform', viewType: 'kanban', visibility: 'private', ...body },
+    body: {
+      name: 'test-views platform',
+      visibility: 'private',
+      ...rest,
+      definition: definition.columns ? { picked: true } : {},
+      tab: { layout: 'kanban', definition }
+    },
     ...opts
   })
 }
@@ -170,7 +179,7 @@ describe('card layouts', () => {
     let res = await feed(opts, view.id)
     expect(res.card).toEqual({ fields: ['status', 'assignee', 'due_date'], connections: {}, custom: false })
 
-    await $fetch(`/api/views/${view.id}`, {
+    await $fetch(`/api/views/${view.id}/tabs/${view.tabs[0]!.id}`, {
       method: 'PATCH',
       body: { definition: { groupField: 'status', cardFields: ['due_date'] } },
       ...opts

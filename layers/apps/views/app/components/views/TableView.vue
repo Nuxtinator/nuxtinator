@@ -5,10 +5,10 @@
 // attaches for the chosen keys, so any field of the type can be a column.
 // Headers toggle the sort for the fields the list engine can order on.
 import type { RecordsFieldSetting } from '#records/client'
-import type { ViewsBoardItem, ViewDetail, ViewRecords } from '../../utils/views-types'
+import type { ViewsBoardItem, ViewsTabView, ViewRecords } from '../../utils/views-types'
 
 const props = defineProps<{
-  view: ViewDetail
+  view: ViewsTabView
   records: ViewRecords
   fields: RecordsFieldSetting[]
   sort: string | null

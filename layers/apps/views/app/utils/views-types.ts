@@ -1,7 +1,8 @@
 // Client-side shapes of the views API responses. Dates arrive as ISO
 // strings over JSON; the server DTOs are the source of truth for meaning.
+import type { RecordsFilterGroup } from '#records/client'
 
-export type ViewType = 'kanban' | 'table'
+export type ViewsLayout = 'kanban' | 'table' | 'list'
 export type ViewsVisibility = 'private' | 'shared' | 'org'
 export type ViewsAccessLevel = 'view' | 'edit' | 'owner'
 
@@ -21,21 +22,38 @@ export interface ViewsColumnDef {
   color?: string
 }
 
+/** What a view decides for all its tabs. */
+export interface ViewsViewDefinition {
+  /** Base filter every tab narrows further. */
+  filter?: RecordsFilterGroup
+  /** Tabs show only the records added to the view by hand. */
+  picked?: true
+}
+
+/** What one tab decides. */
 export interface ViewsDefinition {
-  /** Field-grouped kanban: the grouping field's key. XOR with `columns`. */
+  /** Board: the grouping field (XOR with `columns`). List: optional sections. */
   groupField?: string
-  /** Custom-column kanban: the board's own columns. XOR with `groupField`. */
+  /** Board of a hand-picked view: its own columns. XOR with `groupField`. */
   columns?: ViewsColumnDef[]
   /**
-   * Field keys shown on cards / as table columns (name is always shown).
-   * Absent = the record type's default card layout.
+   * Field keys shown on cards, list rows and as table columns (name is always
+   * shown). Absent = the record type's default card layout.
    */
   cardFields?: string[]
   /** Per connection card field: names, a count, or done-progress. Only with cardFields. */
   cardConnections?: Record<string, ViewsConnectionDisplay>
-  /** Saved shared filters, in the records list engine's filter shape. */
-  filters?: Record<string, unknown>
+  /** This tab's filter, ANDed with the view's base filter. */
+  filter?: RecordsFilterGroup
   sort?: { field: string, dir: 'asc' | 'desc' }
+}
+
+export interface ViewsTab {
+  id: string
+  name: string
+  layout: ViewsLayout
+  position: string
+  definition: ViewsDefinition
 }
 
 export interface ViewSummary {
@@ -43,7 +61,9 @@ export interface ViewSummary {
   name: string
   icon: string | null
   recordTypeKey: string
-  viewType: ViewType
+  /** The first tab's layout — what opening the view shows. */
+  layout: ViewsLayout
+  tabCount: number
   visibility: ViewsVisibility
   ownerId: string
   ownerName: string
@@ -52,10 +72,24 @@ export interface ViewSummary {
   updatedAt: string
 }
 
-export interface ViewDetail extends ViewSummary {
-  definition: ViewsDefinition
+export interface ViewDetail extends Omit<ViewSummary, 'layout' | 'tabCount'> {
+  definition: ViewsViewDefinition
+  tabs: ViewsTab[]
   /** The view reached the caller through a share row of their own. */
   sharedWithMe: boolean
+}
+
+/**
+ * One tab as the renderers see it: the view's identity with the tab's layout
+ * and definition.
+ */
+export interface ViewsTabView {
+  id: string
+  tabId: string
+  recordTypeKey: string
+  viewType: ViewsLayout
+  definition: ViewsDefinition
+  picked: boolean
 }
 
 export interface ViewsPlacement {
@@ -87,6 +121,7 @@ export interface ViewsBoardItem {
 }
 
 export interface ViewRecords {
+  tabId: string
   items: ViewsBoardItem[]
   total: number
   truncated: boolean
@@ -115,5 +150,11 @@ export function viewsDragMode(field: { kind: string }): ViewsDragMode {
   return field.kind === 'key_select' || field.kind === 'user_select' ? 'move' : 'add'
 }
 
-/** Kinds a kanban can group by (mirrors the server's VIEWS_GROUPABLE_KINDS). */
+export const VIEWS_LAYOUT_META: Record<ViewsLayout, { label: string, icon: string }> = {
+  kanban: { label: 'Board', icon: 'i-lucide-kanban' },
+  list: { label: 'List', icon: 'i-lucide-list-checks' },
+  table: { label: 'Table', icon: 'i-lucide-table' }
+}
+
+/** Kinds a board or list can group by (mirrors the server's VIEWS_GROUPABLE_KINDS). */
 export const VIEWS_GROUPABLE_KINDS = new Set(['key_select', 'multi_select', 'user_select', 'tags', 'connection'])

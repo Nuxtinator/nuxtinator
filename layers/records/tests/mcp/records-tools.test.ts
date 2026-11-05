@@ -294,7 +294,7 @@ describe('schema and views tools', () => {
     }))
 
     const board = data(await callMcpTool(token, 'views_create', {
-      org: org.slug, name: 'Events board', recordType: 'test_records_events', viewType: 'kanban', groupField: 'stage'
+      org: org.slug, name: 'Events board', recordType: 'test_records_events', layout: 'kanban', groupField: 'stage'
     }))
     const viewId = (board.view as { id: string }).id
 
@@ -310,6 +310,32 @@ describe('schema and views tools', () => {
     const columns = read.columns as Array<{ key: string, cards: Array<{ id: string }> }>
     expect(columns.find(c => c.key === 'held')?.cards.map(c => c.id)).toEqual([eventId])
     expect(columns.map(c => c.key)).toEqual(expect.arrayContaining(['planned', 'held', 'cancelled']))
+
+    // A second tab: the planned events, as a list.
+    const other = data(await callMcpTool(token, 'records_create', {
+      org: org.slug, type: 'test_records_events', fields: { name: 'test-records Autumn retreat', stage: 'planned', venue: 'Barn' }
+    }))
+    const otherId = (other.record as { id: string }).id
+    const added = data(await callMcpTool(token, 'views_add_tab', {
+      org: org.slug,
+      view: viewId,
+      name: 'Planned',
+      layout: 'list',
+      filter: { match: 'all', rules: [{ field: 'stage', op: 'is', value: 'planned' }] }
+    }))
+    const tabId = (added.tab as { id: string }).id
+    let planned = data(await callMcpTool(token, 'views_get_board', { org: org.slug, view: viewId, tab: tabId }))
+    expect((planned.columns as Array<{ cards: Array<{ id: string }> }>)[0]!.cards.map(c => c.id)).toEqual([otherId])
+
+    // The view's own filter narrows every tab: no barns.
+    ok(await callMcpTool(token, 'views_set_filter', {
+      org: org.slug, view: viewId, filter: { match: 'all', rules: [{ field: 'venue', op: 'is', value: 'Hall' }] }
+    }))
+    planned = data(await callMcpTool(token, 'views_get_board', { org: org.slug, view: viewId, tab: tabId }))
+    expect((planned.columns as Array<{ cards: unknown[] }>)[0]!.cards).toEqual([])
+    const listed = data(await callMcpTool(token, 'views_list', { org: org.slug }))
+    const mine = (listed.views as Array<{ id: string, tabs: Array<{ name: string, layout: string }> }>).find(v => v.id === viewId)
+    expect(mine?.tabs).toEqual([{ id: expect.any(String), name: 'Board', layout: 'kanban' }, { id: tabId, name: 'Planned', layout: 'list' }])
   })
 
   it('refuses schema changes to a token without records.schema.manage', async () => {

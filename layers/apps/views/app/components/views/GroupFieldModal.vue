@@ -3,10 +3,10 @@
 // that field's options (or the users present, for a user field). Also the way
 // back from a board whose grouping field was deleted from the record type.
 import type { RecordsFieldSetting } from '#records/client'
-import type { ViewDetail } from '../../utils/views-types'
+import type { ViewsTabView } from '../../utils/views-types'
 
 const props = defineProps<{
-  view: ViewDetail
+  view: ViewsTabView
   fields: RecordsFieldSetting[]
 }>()
 

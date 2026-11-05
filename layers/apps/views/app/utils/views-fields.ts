@@ -2,20 +2,21 @@
 // storage class; renderers need it to know which values the list feed can
 // actually show. Derived through the kernel's own storageOf so the routing
 // table lives in one place.
-import { storageOf } from '#records'
+import { isRecordsFilterGroup, storageOf } from '#records'
 import type { RecordsStorage } from '#records'
-import type { RecordsFieldSetting } from '#records/client'
+import type { RecordsFieldSetting, RecordsFilterGroup } from '#records/client'
 import { VIEWS_GROUPABLE_KINDS } from './views-types'
-import type { ViewsDefinition, ViewType } from './views-types'
+import type { ViewsDefinition, ViewsLayout } from './views-types'
 
 export function viewsFieldStorage(field: Pick<RecordsFieldSetting, 'kind' | 'column'>): RecordsStorage {
   return storageOf({ kind: field.kind, column: field.column ?? undefined })
 }
 
-/** What a view shows when neither it nor its type names card fields. */
-export const VIEWS_DEFAULT_CARD_FIELDS: Record<ViewType, string[]> = {
+/** What a tab shows when neither it nor its type names card fields. */
+export const VIEWS_DEFAULT_CARD_FIELDS: Record<ViewsLayout, string[]> = {
   kanban: ['status'],
-  table: ['status', 'updated_at']
+  table: ['status', 'updated_at'],
+  list: ['status']
 }
 
 /** How records order when a view saves no sort — the list engine's own fallback. */
@@ -55,12 +56,23 @@ export function viewsPruneDefinition(
     next.cardConnections = Object.fromEntries(
       Object.entries(next.cardConnections).filter(([key]) => fields.some(f => f.key === key && f.kind === 'connection')))
   }
-  if (next.filters) {
-    next.filters = Object.fromEntries(
-      Object.entries(next.filters).filter(([key]) => known(key)))
-  }
+  if (next.filter) next.filter = viewsPruneFilter(next.filter, known)
   if (next.sort && !known(next.sort.field)) delete next.sort
   return next
+}
+
+/** Drops filter rules (and emptied groups) that name fields the type no longer has. */
+export function viewsPruneFilter(group: RecordsFilterGroup, known: (key: string) => boolean): RecordsFilterGroup {
+  const rules: RecordsFilterGroup['rules'] = []
+  for (const node of group.rules) {
+    if (isRecordsFilterGroup(node)) {
+      const inner = viewsPruneFilter(node, known)
+      if (inner.rules.length > 0) rules.push(inner)
+    } else if (known(node.field)) {
+      rules.push(node)
+    }
+  }
+  return { match: group.match, rules }
 }
 
 // Intrinsic record values any view can show. `name` is left out — it always

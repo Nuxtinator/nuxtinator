@@ -2,10 +2,10 @@
 // Custom-board "add existing record": name search over the view's record
 // type, records already on the board disabled. Opens when a column key is
 // set (the column whose footer/menu asked for it).
-import type { ViewDetail } from '../../utils/views-types'
+import type { ViewsTabView } from '../../utils/views-types'
 
 const props = defineProps<{
-  view: ViewDetail
+  view: ViewsTabView
   /** Record ids already placed on the board. */
   onBoard: string[]
 }>()
@@ -74,7 +74,7 @@ async function add(recordId: string) {
   try {
     await $fetch(`/api/views/${props.view.id}/cards`, {
       method: 'POST',
-      body: { recordId, columnKey: columnKey.value }
+      body: { recordId, tabId: props.view.tabId, columnKey: columnKey.value || undefined }
     })
     emit('added')
     open.value = false

@@ -7,10 +7,10 @@
 // it to the type's. Connection fields choose how they show: names, a count,
 // or done-progress.
 import type { RecordsFieldSetting } from '#records/client'
-import type { ViewDetail, ViewsCardLayout, ViewsConnectionDisplay } from '../../utils/views-types'
+import type { ViewsTabView, ViewsCardLayout, ViewsConnectionDisplay } from '../../utils/views-types'
 
 const props = defineProps<{
-  view: ViewDetail
+  view: ViewsTabView
   fields: RecordsFieldSetting[]
   /** The layout the view renders now (its own, or its type's default). */
   layout: ViewsCardLayout
@@ -99,12 +99,14 @@ function resetToDefault() {
       >
         <div>
           <h2 class="text-lg font-semibold">
-            {{ isTable ? 'Table columns' : 'Card fields' }}
+            {{ isTable ? 'Table columns' : view.viewType === 'list' ? 'Row fields' : 'Card fields' }}
           </h2>
           <p class="text-sm text-(--ui-text-muted)">
             {{ isTable
               ? 'Columns shown after the name, in this order.'
-              : 'Values shown on each card, in this order.' }}
+              : view.viewType === 'list'
+                ? 'Values shown on each row, in this order.'
+                : 'Values shown on each card, in this order.' }}
           </p>
         </div>
 

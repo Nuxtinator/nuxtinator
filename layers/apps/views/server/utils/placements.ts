@@ -1,15 +1,20 @@
-// Card movement + custom-board membership. The two board modes write
-// different things on a drag:
+// Card movement and hand-picked records. Positions and manual order belong
+// to a tab; which records a hand-picked view holds belongs to the view
+// (views_items). A drag writes different things by tab:
 //
-// - Field-grouped: the drag is a *record edit* — the grouping field changes
-//   through the records kernel's permission check and patch pipeline. What
+// - Field-grouped boards and grouped lists: the drag is a *record edit* — the
+//   grouping field changes through the records kernel's permission check and
+//   patch pipeline. What
 //   the edit is depends on the field (see dragMode): single-value fields and
 //   user fields *move* — the source column's value is swapped for the
 //   target's, other values survive, so a card in two user columns leaves the
 //   one it was dragged from and stays in the other; multi-selects, tags and
 //   connections *add* — the target value joins and the source value stays,
 //   so carrying a deliverable into next quarter keeps this quarter too.
-// - Custom board: the drag is pure view state — the placement row moves.
+// - A board with its own columns: the drag is pure view state — the
+//   placement row moves. Records of the view with no placement on the tab
+//   sit in its first column.
+// - An ungrouped list: the drag only reorders.
 //
 // Ranks are fractional indexes (lexicographic, via the fractional-indexing
 // package). The client sends the target column's record ids in visual order
@@ -25,7 +30,7 @@ import type { TenantContext } from '#tenant/server'
 import { applyFieldPatch, assertRecordVisible, getRecordTypeFields, requireRecordUpdate } from '#records/server'
 import type { RecordsFieldSetting } from '#records/server'
 import { getViewsGroupValues } from './view-records'
-import type { ViewDefinition, ViewRow } from './views'
+import type { ViewDefinition, ViewRow, ViewTabDefinition, ViewTabRow } from './views'
 
 type Tx = Transaction<Database>
 
@@ -100,13 +105,12 @@ function isValidColumn(field: RecordsFieldSetting, key: string): boolean {
 
 async function writeRank(
   tx: Tx,
-  viewId: string,
+  view: ViewRow,
+  tab: ViewTabRow,
   input: ViewsMoveInput,
-  // Custom boards must not mint placement rows for cards the client lists
-  // but that live in other columns (one row per card is the invariant);
-  // field boards derive membership from the field, so a stray rank row is
-  // inert and gets swept later.
-  restrictToPlaced: boolean
+  // Boards with their own columns hold only the view's records: cards the
+  // client lists that aren't in the view never get a placement row.
+  eligibleIds: Set<string> | null
 ): Promise<void> {
   const { recordId, toColumn, columnOrder } = input
   if (!columnOrder.includes(recordId)) badMove('columnOrder must include the moved record')
@@ -114,7 +118,7 @@ async function writeRank(
   const existing = await tx
     .selectFrom('views_cards')
     .select(['record_id', 'rank'])
-    .where('view_id', '=', viewId)
+    .where('tab_id', '=', tab.id)
     .where('column_key', '=', toColumn)
     .execute()
   const rankOf = new Map(existing.map(r => [r.record_id, r.rank]))
@@ -133,8 +137,8 @@ async function writeRank(
   if (edgeOk && (prevRank === null || nextRank === null || prevRank < nextRank)) {
     upserts.push({ record_id: recordId, rank: generateKeyBetween(prevRank, nextRank) })
   } else {
-    const eligible = restrictToPlaced
-      ? columnOrder.filter(id => id === recordId || rankOf.has(id))
+    const eligible = eligibleIds
+      ? columnOrder.filter(id => id === recordId || eligibleIds.has(id))
       : columnOrder
     const keys = generateNKeysBetween(null, null, eligible.length)
     eligible.forEach((id, i) => upserts.push({ record_id: id, rank: keys[i]! }))
@@ -143,9 +147,31 @@ async function writeRank(
   for (const { record_id, rank } of upserts) {
     await tx
       .insertInto('views_cards')
-      .values({ view_id: viewId, record_id, column_key: toColumn, rank })
-      .onConflict(oc => oc.columns(['view_id', 'record_id', 'column_key']).doUpdateSet({ rank }))
+      .values({ view_id: view.id, tab_id: tab.id, record_id, column_key: toColumn, rank })
+      .onConflict(oc => oc.columns(['tab_id', 'record_id', 'column_key']).doUpdateSet({ rank }))
       .execute()
+  }
+}
+
+async function viewItemSet(tx: Tx, viewId: string): Promise<Set<string>> {
+  const rows = await tx
+    .selectFrom('views_items')
+    .select('record_id')
+    .where('view_id', '=', viewId)
+    .execute()
+  return new Set(rows.map(r => r.record_id))
+}
+
+async function assertInView(tx: Tx, ctx: TenantContext, view: ViewRow, recordId: string): Promise<void> {
+  await assertRecordVisible(tx, ctx, view.record_type_key, recordId)
+  if ((view.definition as ViewDefinition).picked) {
+    const item = await tx
+      .selectFrom('views_items')
+      .select('record_id')
+      .where('view_id', '=', view.id)
+      .where('record_id', '=', recordId)
+      .executeTakeFirst()
+    if (!item) badMove('Record is not in this view')
   }
 }
 
@@ -153,39 +179,43 @@ export async function moveViewsCard(
   tx: Tx,
   ctx: TenantContext,
   view: ViewRow,
+  tab: ViewTabRow,
   input: ViewsMoveInput
 ): Promise<void> {
-  const def = view.definition as ViewDefinition
-  if (view.view_type !== 'kanban') badMove('Only kanban views move cards')
+  const def = tab.definition as ViewTabDefinition
+  if (tab.layout === 'table') badMove('Tables are sorted, not ordered by hand')
   if (input.columnOrder.length > VIEWS_MOVE_ORDER_MAX) badMove('columnOrder too large')
 
   if (def.columns) {
     if (!def.columns.some(c => c.key === input.toColumn)) badMove(`Unknown column "${input.toColumn}"`)
-    await assertRecordVisible(tx, ctx, view.record_type_key, input.recordId)
-    const onBoard = await tx
-      .selectFrom('views_cards')
-      .select('record_id')
-      .where('view_id', '=', view.id)
-      .where('record_id', '=', input.recordId)
-      .executeTakeFirst()
-    if (!onBoard) badMove('Record is not on this board')
-    // One column per card on a custom board: clear other placements first.
+    await assertInView(tx, ctx, view, input.recordId)
+    // One column per card on a board with its own columns.
     await tx
       .deleteFrom('views_cards')
-      .where('view_id', '=', view.id)
+      .where('tab_id', '=', tab.id)
       .where('record_id', '=', input.recordId)
       .where('column_key', '!=', input.toColumn)
       .execute()
-    await writeRank(tx, view.id, input, true)
+    await writeRank(tx, view, tab, input, await viewItemSet(tx, view.id))
     return
   }
 
-  if (!def.groupField) badMove('View has no grouping')
+  if (!def.groupField) {
+    if (tab.layout !== 'list') badMove('View has no grouping')
+    if (input.toColumn !== '' || (input.fromColumn !== null && input.fromColumn !== '')) {
+      badMove('An ungrouped list has no sections')
+    }
+    await assertInView(tx, ctx, view, input.recordId)
+    await writeRank(tx, view, tab, input, null)
+    return
+  }
+
   const field = await resolveGroupField(tx, view, def.groupField)
   if (!isValidColumn(field, input.toColumn)) badMove(`Unknown column "${input.toColumn}"`)
 
   if (input.fromColumn !== input.toColumn) {
     await requireRecordUpdate(tx, ctx, view.record_type_key, input.recordId)
+    await assertInView(tx, ctx, view, input.recordId)
     const row = await tx
       .selectFrom('records_entries')
       .selectAll()
@@ -201,48 +231,66 @@ export async function moveViewsCard(
       [field.key]: nextGroupValues(field, values, input.fromColumn, input.toColumn)
     })
   } else {
-    await assertRecordVisible(tx, ctx, view.record_type_key, input.recordId)
+    await assertInView(tx, ctx, view, input.recordId)
   }
 
-  await writeRank(tx, view.id, input, false)
+  await writeRank(tx, view, tab, input, null)
 
   // Sweep the stale source-column rank row when the card left that column.
   const leftSource = dragMode(field) === 'move' || input.toColumn === ''
   if (leftSource && input.fromColumn !== null && input.fromColumn !== input.toColumn) {
     await tx
       .deleteFrom('views_cards')
-      .where('view_id', '=', view.id)
+      .where('tab_id', '=', tab.id)
       .where('record_id', '=', input.recordId)
       .where('column_key', '=', input.fromColumn)
       .execute()
   }
 }
 
+/**
+ * Adds an existing record to a hand-picked view. With a tab and a column, it
+ * also lands at the end of that column (a board with its own columns) or of
+ * that tab's list.
+ */
 export async function addViewsCard(
   tx: Tx,
   ctx: TenantContext,
   view: ViewRow,
   recordId: string,
-  columnKey: string
+  placement: { tab: ViewTabRow, columnKey?: string } | null
 ): Promise<void> {
-  const def = view.definition as ViewDefinition
-  if (!def.columns) badMove('Only custom boards add cards — field boards derive membership')
-  if (!def.columns.some(c => c.key === columnKey)) badMove(`Unknown column "${columnKey}"`)
+  if (!(view.definition as ViewDefinition).picked) {
+    badMove('This view shows every matching record — there is nothing to add')
+  }
   await assertRecordVisible(tx, ctx, view.record_type_key, recordId)
 
-  const existing = await tx
-    .selectFrom('views_cards')
-    .select('record_id')
-    .where('view_id', '=', view.id)
-    .where('record_id', '=', recordId)
+  const added = await tx
+    .insertInto('views_items')
+    .values({ view_id: view.id, record_id: recordId })
+    .onConflict(oc => oc.columns(['view_id', 'record_id']).doNothing())
+    .returning('record_id')
     .executeTakeFirst()
-  if (existing) badMove('Record is already on this board')
+  if (!added) badMove('Record is already in this view')
 
-  // Append at the end of the column.
+  if (!placement) return
+  const { tab } = placement
+  const def = tab.definition as ViewTabDefinition
+  let columnKey: string
+  if (def.columns) {
+    columnKey = placement.columnKey ?? def.columns[0]!.key
+    if (!def.columns.some(c => c.key === columnKey)) badMove(`Unknown column "${columnKey}"`)
+  } else if (tab.layout === 'list' && !def.groupField) {
+    columnKey = ''
+  } else {
+    // Grouped tabs place records by their field values.
+    return
+  }
+
   const last = await tx
     .selectFrom('views_cards')
     .select('rank')
-    .where('view_id', '=', view.id)
+    .where('tab_id', '=', tab.id)
     .where('column_key', '=', columnKey)
     .where('rank', 'is not', null)
     .orderBy('rank', 'desc')
@@ -252,6 +300,7 @@ export async function addViewsCard(
     .insertInto('views_cards')
     .values({
       view_id: view.id,
+      tab_id: tab.id,
       record_id: recordId,
       column_key: columnKey,
       rank: generateKeyBetween(last?.rank ?? null, null)
@@ -259,13 +308,18 @@ export async function addViewsCard(
     .execute()
 }
 
+/** Takes a record out of a hand-picked view, and off every one of its tabs. */
 export async function removeViewsCard(
   tx: Tx,
   view: ViewRow,
   recordId: string
 ): Promise<void> {
-  const def = view.definition as ViewDefinition
-  if (!def.columns) badMove('Only custom boards remove cards')
+  if (!(view.definition as ViewDefinition).picked) badMove('Only views of hand-picked records remove records')
+  await tx
+    .deleteFrom('views_items')
+    .where('view_id', '=', view.id)
+    .where('record_id', '=', recordId)
+    .execute()
   await tx
     .deleteFrom('views_cards')
     .where('view_id', '=', view.id)

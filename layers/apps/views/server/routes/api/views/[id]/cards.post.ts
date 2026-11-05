@@ -1,15 +1,17 @@
-// POST /api/views/:id/cards — put an existing record on a custom
-// board ({ recordId, columnKey }), appended at the column's end. Quick-add
-// creates the record through CRM's normal create route first, then lands
-// here. Field-grouped boards have no membership to manage — 400.
+// POST /api/views/:id/cards — add an existing record to a hand-picked view
+// ({ recordId, tabId?, columnKey? }). With a tab it also lands at the end of
+// that tab's column (a board with its own columns) or list. Quick-add creates
+// the record through the records create route first, then lands here. Views
+// that show every matching record have nothing to add — 400.
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
-import { requireView } from '../../../../utils/views'
+import { requireTab, requireView } from '../../../../utils/views'
 import { addViewsCard } from '../../../../utils/placements'
 
 const Body = z.object({
   recordId: z.string().uuid(),
-  columnKey: z.string().min(1).max(80)
+  tabId: z.string().uuid().optional(),
+  columnKey: z.string().min(1).max(80).optional()
 }).strict()
 
 export default defineEventHandler(async (event) => {
@@ -20,7 +22,11 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 400, statusMessage: 'Invalid body', data: parsed.error.flatten() })
     }
     const { view } = await requireView(tx, ctx, viewId, 'view')
-    await addViewsCard(tx, ctx, view, parsed.data.recordId, parsed.data.columnKey)
+    const { recordId, tabId, columnKey } = parsed.data
+    const placement = tabId || columnKey
+      ? { tab: await requireTab(tx, view, tabId), columnKey }
+      : null
+    await addViewsCard(tx, ctx, view, recordId, placement)
     return { ok: true }
   })
 })

@@ -1,7 +1,7 @@
-// The records feed's filter layering: the view's saved filters apply for
-// every caller, a personal overlay narrows or replaces per key for this
-// request only, and the grouping-field-missing marker fires when the
-// definition points at a deleted field.
+// The records feed's filter layering: the view's base filter applies on
+// every tab, each tab's own filter narrows it, a text search narrows for this
+// request only, and the grouping-field-missing marker fires when a tab points
+// at a deleted field.
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import {
@@ -31,37 +31,53 @@ async function createContact(opts: Opts, fields: Record<string, unknown>): Promi
 }
 
 describe('records feed', () => {
-  it('layers personal filters over the view definition per key', async () => {
+  it('a tab narrows its view\'s filter; tabs of one view show different slices', async () => {
     const { org, auth } = await createViewsOrgWith(sql, ['admin'])
     const opts = withOrgHeader(auth, org.slug)
     const active = await createContact(opts, { name: 'test-views Active EN', status: 'active', languages: ['en'] })
     const activeFr = await createContact(opts, { name: 'test-views Active FR', status: 'active', languages: ['fr'] })
     await createContact(opts, { name: 'test-views Paused', status: 'paused', languages: ['en'] })
 
-    const view = await $fetch<{ id: string }>('/api/views', {
+    const view = await $fetch<{ id: string, tabs: Array<{ id: string }> }>('/api/views', {
       method: 'POST',
       body: {
         name: 'test-views filtered',
         recordTypeKey: 'contacts',
-        viewType: 'kanban',
-        definition: { groupField: 'languages', filters: { status: 'active' } }
+        definition: { filter: { match: 'all', rules: [{ field: 'status', op: 'is', value: 'active' }] } },
+        tab: { layout: 'kanban', definition: { groupField: 'languages' } }
+      },
+      ...opts
+    })
+    const french = await $fetch<{ id: string }>(`/api/views/${view.id}/tabs`, {
+      method: 'POST',
+      body: {
+        name: 'French',
+        layout: 'list',
+        definition: { filter: { match: 'all', rules: [{ field: 'languages', op: 'any_of', value: ['fr'] }] } }
       },
       ...opts
     })
 
-    // Saved filter alone: both active records, the paused one never shows.
+    // The base filter alone: both active records, the paused one never shows.
     let res = await $fetch<Feed>(`/api/views/${view.id}/records`, opts)
     expect(res.items.map(i => i.id).sort()).toEqual([active.id, activeFr.id].sort())
 
-    // Personal overlay narrows further without touching the saved filter.
-    const personal = encodeURIComponent(JSON.stringify({ languages: 'fr' }))
-    res = await $fetch<Feed>(`/api/views/${view.id}/records?filters=${personal}`, opts)
+    // The second tab narrows the base filter, never widens it.
+    res = await $fetch<Feed>(`/api/views/${view.id}/records?tab=${french.id}`, opts)
     expect(res.items.map(i => i.id)).toEqual([activeFr.id])
 
-    // Overlay on the same key replaces the saved value for this caller.
-    const override = encodeURIComponent(JSON.stringify({ status: 'paused' }))
-    res = await $fetch<Feed>(`/api/views/${view.id}/records?filters=${override}`, opts)
-    expect(res.items.map(i => i.name)).toEqual(['test-views Paused'])
+    // A search narrows for this request without touching either filter.
+    res = await $fetch<Feed>(`/api/views/${view.id}/records?tab=${view.tabs[0]!.id}&q=EN`, opts)
+    expect(res.items.map(i => i.id)).toEqual([active.id])
+
+    // A tab of another view is not this view's tab.
+    const other = await $fetch<{ tabs: Array<{ id: string }> }>('/api/views', {
+      method: 'POST',
+      body: { name: 'test-views other', recordTypeKey: 'contacts', tab: { layout: 'table' } },
+      ...opts
+    })
+    await expect($fetch(`/api/views/${view.id}/records?tab=${other.tabs[0]!.id}`, opts))
+      .rejects.toMatchObject({ statusCode: 404 })
   })
 
   it('flags a deleted grouping field instead of erroring', async () => {
@@ -90,8 +106,7 @@ describe('records feed', () => {
       body: {
         name: 'test-views deals board',
         recordTypeKey: 'test_views_deals',
-        viewType: 'kanban',
-        definition: { groupField: 'stage' }
+        tab: { layout: 'kanban', definition: { groupField: 'stage' } }
       },
       ...opts
     })

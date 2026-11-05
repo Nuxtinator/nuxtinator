@@ -1,17 +1,18 @@
-// PATCH /api/views/:id — partial update. name/icon/definition
-// need 'edit'; visibility is the owner's call (it decides who can reach the
-// view at all). view_type and record_type_key are immutable — converting a
-// view is a create-new operation.
+// PATCH /api/views/:id — partial update. name/icon/definition need 'edit';
+// visibility is the owner's call (it decides who can reach the view at all).
+// The definition carries the base filter; whether a view holds hand-picked
+// records and its record type are fixed at creation — converting a view is
+// a create-new operation.
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
 import { sql } from 'kysely'
-import { requireView, sanitizeViewsDefinition, toViewDetail } from '../../../utils/views'
+import { loadViewDetail, requireView, sanitizeViewDefinition, type ViewDefinition } from '../../../utils/views'
 
 const Body = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   icon: z.string().max(64).nullable().optional(),
   visibility: z.enum(['private', 'shared', 'org']).optional(),
-  definition: z.unknown().optional()
+  definition: z.object({ filter: z.unknown().optional() }).strict().optional()
 }).strict()
 
 export default defineEventHandler(async (event) => {
@@ -31,9 +32,12 @@ export default defineEventHandler(async (event) => {
     if (body.icon !== undefined) patch.icon = body.icon
     if (body.visibility !== undefined) patch.visibility = body.visibility
     if (body.definition !== undefined) {
-      const definition = await sanitizeViewsDefinition(tx, view.record_type_key, view.view_type, body.definition)
-      // jsonb params bind reliably only through the text cast (same pattern
-      // as CRM's record storage).
+      const current = view.definition as ViewDefinition
+      const definition = await sanitizeViewDefinition(tx, view.record_type_key, {
+        ...body.definition,
+        ...(current.picked ? { picked: true } : {})
+      })
+      // jsonb params bind reliably only through the text cast.
       patch.definition = sql`${JSON.stringify(definition)}::text::jsonb`
     }
     if (Object.keys(patch).length === 0) {
@@ -48,12 +52,6 @@ export default defineEventHandler(async (event) => {
       .returningAll()
       .executeTakeFirstOrThrow()
 
-    const owner = await tx
-      .selectFrom('users')
-      .select('display_name')
-      .where('id', '=', updated.owner_id)
-      .executeTakeFirstOrThrow()
-
-    return toViewDetail(updated, access, owner.display_name, viaShare)
+    return await loadViewDetail(tx, updated, access, viaShare)
   })
 })

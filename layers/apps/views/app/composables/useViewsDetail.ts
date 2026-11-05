@@ -1,5 +1,5 @@
-// One open view: its detail row, its record feed, and the poll loop that
-// keeps the feed fresh. Polling refetches every 15s while the tab is
+// One open view: its detail row with its tabs, the active tab's record feed,
+// and the poll loop that keeps the feed fresh. Polling refetches every 15s while the tab is
 // visible, pauses while it's hidden, refetches immediately on focus, and
 // suspends while a drag is unsettled so a poll result can't flash-revert a
 // card mid-drop (the drag interaction brackets itself with beginDrag /
@@ -7,7 +7,8 @@
 
 import type {
   ViewDetail,
-  ViewRecords
+  ViewRecords,
+  ViewsTab
 } from '../utils/views-types'
 
 const POLL_INTERVAL_MS = 15_000
@@ -19,14 +20,19 @@ export interface ViewsMovePayload {
   columnOrder: string[]
 }
 
-export function useViewsDetail(viewId: MaybeRefOrGetter<string>) {
+export function useViewsDetail(viewId: MaybeRefOrGetter<string>, tabId: MaybeRefOrGetter<string | null>) {
   const view = ref<ViewDetail | null>(null)
   const records = ref<ViewRecords | null>(null)
   const pending = ref(false)
   const error = ref<string | null>(null)
 
-  // Personal overlay — session-only by design; nothing here is persisted.
-  const personalFilters = ref<Record<string, unknown>>({})
+  /** The tab on screen: the requested one, else the view's first. */
+  const tab = computed<ViewsTab | null>(() => {
+    const tabs = view.value?.tabs ?? []
+    return tabs.find(t => t.id === toValue(tabId)) ?? tabs[0] ?? null
+  })
+
+  // Session-only text search and table sort; nothing here is persisted.
   const q = ref('')
   const sort = ref<string | null>(null)
   const dir = ref<'asc' | 'desc' | null>(null)
@@ -49,17 +55,15 @@ export function useViewsDetail(viewId: MaybeRefOrGetter<string>) {
     const reqId = ++requestId
     pending.value = true
     try {
-      const isTable = view.value?.viewType === 'table'
+      const isTable = tab.value?.layout === 'table'
       const res = await $fetch<ViewRecords>(`/api/views/${id}/records`, {
         query: {
+          tab: tab.value?.id,
           q: q.value || undefined,
-          sort: sort.value || undefined,
-          dir: dir.value || undefined,
+          sort: isTable ? sort.value || undefined : undefined,
+          dir: isTable ? dir.value || undefined : undefined,
           limit: isTable ? pageSize : undefined,
-          offset: isTable ? (page.value - 1) * pageSize : undefined,
-          filters: Object.keys(personalFilters.value).length > 0
-            ? JSON.stringify(personalFilters.value)
-            : undefined
+          offset: isTable ? (page.value - 1) * pageSize : undefined
         }
       })
       if (reqId !== requestId) return
@@ -120,7 +124,7 @@ export function useViewsDetail(viewId: MaybeRefOrGetter<string>) {
 
   async function move(payload: ViewsMovePayload): Promise<void> {
     const id = toValue(viewId)
-    await $fetch(`/api/views/${id}/move`, { method: 'POST', body: payload })
+    await $fetch(`/api/views/${id}/move`, { method: 'POST', body: { ...payload, tabId: tab.value?.id } })
   }
 
   watch(() => toValue(viewId), () => {
@@ -129,12 +133,23 @@ export function useViewsDetail(viewId: MaybeRefOrGetter<string>) {
     refresh()
   }, { immediate: true })
 
-  watch([q, sort, dir, page, personalFilters], () => {
+  watch([q, sort, dir, page], () => {
     refreshRecords()
-  }, { deep: true })
+  })
+
+  // A different tab starts from its own saved sort, page one and no stale feed.
+  watch(() => tab.value?.id, (next, prev) => {
+    if (!next || next === prev || prev === undefined) return
+    records.value = null
+    sort.value = null
+    dir.value = null
+    page.value = 1
+    refreshRecords()
+  })
 
   return {
     view,
+    tab,
     records,
     pending,
     error,
@@ -143,7 +158,6 @@ export function useViewsDetail(viewId: MaybeRefOrGetter<string>) {
     dir,
     page,
     pageSize,
-    personalFilters,
     refresh,
     refreshRecords,
     beginDrag,

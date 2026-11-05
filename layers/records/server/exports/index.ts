@@ -68,8 +68,10 @@ export type {
 export { requireGrantTarget, assertRecordsPermissionSlug, listRecordsUserGrants } from '../utils/user-grants'
 export type { RecordsUserGrantEntry } from '../utils/user-grants'
 
-export { listRecords, requireRecordType, assertRecordVisible } from '../utils/list-records'
+export { listRecords, requireRecordType, assertRecordVisible, parseRecordsFilterGroup } from '../utils/list-records'
 export type { RecordsListOpts, RecordListItem, RecordsListResult } from '../utils/list-records'
+export { RECORDS_FILTER_ME, recordsFilterRuleCount } from '../../client/filters'
+export type { RecordsFilterGroup, RecordsFilterNode, RecordsFilterRule, RecordsFilterOp } from '../../client/filters'
 
 export { closingRulesOf, isClosedStatus } from '../utils/closing'
 export type { RecordsClosingRules } from '../utils/closing'

@@ -4,5 +4,6 @@
 // twice.
 
 export * from '../app/utils/field-kinds'
+export * from './filters'
 export type { RecordsTypeSummary, RecordsTypeFields } from '../app/composables/useRecordsTypes'
 export type { RecordDetail, RecordCapabilities } from '../app/composables/useRecordsRecord'

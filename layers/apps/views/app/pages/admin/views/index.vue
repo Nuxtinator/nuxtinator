@@ -10,7 +10,7 @@ interface AdminViewRow {
   id: string
   name: string
   recordTypeKey: string
-  viewType: string
+  layout: string
   visibility: string
   ownerId: string
   ownerName: string
@@ -171,7 +171,7 @@ function formatDate(iso: string): string {
               {{ row.name }}
             </td>
             <td class="px-3 py-2 text-(--ui-text-muted)">
-              {{ row.recordTypeKey }} · {{ row.viewType }}
+              {{ row.recordTypeKey }} · {{ row.layout }}
             </td>
             <td class="px-3 py-2 text-(--ui-text-muted)">
               {{ row.visibility }}

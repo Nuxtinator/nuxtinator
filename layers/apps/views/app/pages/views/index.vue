@@ -23,7 +23,7 @@ const showEmpty = computed(() => !pending.value && !error.value && items.value.l
 
 function viewIcon(view: ViewSummary): string {
   if (view.icon) return view.icon
-  return view.viewType === 'kanban' ? 'i-lucide-kanban' : 'i-lucide-table'
+  return VIEWS_LAYOUT_META[view.layout].icon
 }
 
 const VISIBILITY_BADGES: Record<string, { label: string, icon: string }> = {
@@ -101,7 +101,7 @@ const VISIBILITY_BADGES: Record<string, { label: string, icon: string }> = {
                 {{ view.name }}
               </p>
               <p class="text-xs text-(--ui-text-muted) truncate">
-                {{ view.recordTypeKey }} · {{ view.viewType }}
+                {{ view.recordTypeKey }} · {{ view.tabCount === 1 ? VIEWS_LAYOUT_META[view.layout].label : `${view.tabCount} tabs` }}
                 <template v-if="group.key !== 'mine'">
                   · by {{ view.ownerName }}
                 </template>

@@ -1,6 +1,7 @@
-// Custom-column boards: explicit membership (the feed shows only placed
-// records), the one-column-per-card invariant across moves, membership
-// add/remove guards, and drag writing view state only — never the record.
+// Boards with their own columns in a hand-picked view: explicit membership
+// (the feed shows only records added to the view), the one-column-per-card
+// invariant across moves, add/remove guards, and drag writing view state
+// only — never the record.
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import {
@@ -32,9 +33,9 @@ async function createBoard(opts: Opts): Promise<{ id: string }> {
     body: {
       name: 'test-views custom board',
       recordTypeKey: 'contacts',
-      viewType: 'kanban',
       visibility: 'org',
-      definition: { columns: COLUMNS }
+      definition: { picked: true },
+      tab: { layout: 'kanban', definition: { columns: COLUMNS } }
     },
     ...opts
   })

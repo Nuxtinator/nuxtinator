@@ -5,7 +5,7 @@
 import type {
   ViewDetail,
   ViewSummary,
-  ViewType,
+  ViewsLayout,
   ViewsVisibility
 } from '../utils/views-types'
 
@@ -13,9 +13,11 @@ export interface ViewsCreateInput {
   name: string
   icon?: string
   recordTypeKey: string
-  viewType: ViewType
   visibility?: ViewsVisibility
+  /** View-level: base filter, hand-picked records. */
   definition?: Record<string, unknown>
+  /** The view's first tab. */
+  tab: { name?: string, layout: ViewsLayout, definition?: Record<string, unknown> }
 }
 
 export function useViewsList() {
