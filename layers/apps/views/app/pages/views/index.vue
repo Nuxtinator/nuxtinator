@@ -120,6 +120,6 @@ const VISIBILITY_BADGES: Record<string, { label: string, icon: string }> = {
       </ul>
     </section>
 
-    <ViewCreateModal v-model:open="createOpen" />
+    <ViewsViewCreateModal v-model:open="createOpen" />
   </div>
 </template>

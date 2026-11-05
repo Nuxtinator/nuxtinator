@@ -9,7 +9,7 @@
 //
 // Status rides inside each filters object as a bare equality on the
 // intrinsic `status` key; the computed adapters below split it out for
-// RecordFilters' separate status model.
+// RecordsFilters' separate status model.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewDetail } from '../../utils/views-types'
 
@@ -131,7 +131,7 @@ const savedOpen = ref(false)
   <div class="border-b border-(--ui-border) bg-(--ui-bg) px-4 py-2 space-y-2">
     <div class="flex items-center gap-2 flex-wrap">
       <div class="flex-1 min-w-64">
-        <RecordFilters
+        <RecordsFilters
           v-model:q="q"
           v-model:status="personal.status.value"
           v-model:filters="personal.rest.value"
@@ -213,10 +213,10 @@ const savedOpen = ref(false)
         </UButton>
       </div>
       <!-- Text search is session state, not part of the saved definition —
-           the wrapper hides RecordFilters' search input (its first row's
+           the wrapper hides RecordsFilters' search input (its first row's
            first element) since the component has no prop for that. -->
       <div class="[&>div>div:first-child>*:first-child]:hidden">
-        <RecordFilters
+        <RecordsFilters
           v-model:status="shared.status.value"
           v-model:filters="shared.rest.value"
           :status-field="statusField"
