@@ -21,8 +21,9 @@ export default defineNuxtModule({
     for (const layer of nuxt.options._layers) {
       const dir = path.join(layer.cwd, 'migrations')
       if (!existsSync(dir)) continue
-      // Tenancy migrations from app layers (e.g. mail_T010_enable_tenancy.ts).
-      const tFiles = readdirSync(dir).filter(f => /_T\d+_/.test(f))
+      // Tenancy migrations from app layers (e.g. mail_T010_enable_tenancy.ts),
+      // including late tenancy ones (`*_TL<NNN>_*`).
+      const tFiles = readdirSync(dir).filter(f => /_TL?\d+_/.test(f))
       if (tFiles.length > 0) tenancyMigrationPaths.push(dir)
     }
 

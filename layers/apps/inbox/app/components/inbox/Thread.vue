@@ -46,7 +46,7 @@ const emit = defineEmits<{
 // the parent so its save handler can write back the new id after creating one.
 const currentDraftId = defineModel<string | null>('draftId', { default: null })
 
-const crmPath = useCrmPath()
+const recordsPath = useRecordsPath()
 
 // Composer body — parent-owned (v-model:reply-body) so an AI draft can be pushed
 // in from the AI modal and land in the editor.
@@ -368,7 +368,7 @@ const viewTabs = [
         <ULink
           v-for="contact in thread.contacts"
           :key="contact.id"
-          :to="crmPath(`/contacts/${contact.id}`)"
+          :to="recordsPath(`/contacts/${contact.id}`)"
           class="flex items-center gap-1 text-sm text-(--ui-primary) hover:underline"
         >
           <UIcon name="i-lucide-contact" class="size-3.5 shrink-0" />

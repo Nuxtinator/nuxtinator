@@ -108,7 +108,7 @@ function threadHasPendingOutbound(t: InboxThread | null): boolean {
 }
 
 export function useInboxThread(conversationId: MaybeRefOrGetter<string | null>) {
-  const orgKey = useCrmOrgKey()
+  const orgKey = useRecordsOrgKey()
   const thread = ref<InboxThread | null>(null)
   const pending = ref(false)
   const error = ref<string | null>(null)
@@ -316,7 +316,7 @@ export interface InboxAssignee {
 }
 
 export function useInboxAssignees() {
-  const orgKey = useCrmOrgKey()
+  const orgKey = useRecordsOrgKey()
   const users = ref<InboxAssignee[]>([])
   async function refresh() {
     try {

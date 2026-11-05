@@ -1,5 +1,5 @@
 // Org-prefix-preserving link builder for inbox routes. Takes the full app
-// path ('/inbox/…') — unlike useCrmPath, which prepends its own '/crm'.
+// path ('/inbox/…') — unlike useRecordsPath, which prepends its own '/crm'.
 export function useInboxPath() {
   const route = useRoute()
   return (path: string): string => {

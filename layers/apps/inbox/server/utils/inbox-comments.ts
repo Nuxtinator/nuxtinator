@@ -1,5 +1,5 @@
 // Internal notes on a conversation — plain text, keyset-paginated newest-first.
-// Mirrors the crm_record_comments service (same cursor grammar, author-label-
+// Mirrors the records_comments service (same cursor grammar, author-label-
 // wins, own-or-moderate moderation, edited_at marker). Every function takes the
 // caller's org tx so RLS scopes rows. System notes (author_id null) are never
 // editable.

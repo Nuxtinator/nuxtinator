@@ -6,8 +6,7 @@
 
 import { z } from 'zod'
 import { withOrgContext } from '#tenant/server'
-import { requireRecordUpdate } from '../../../../../../../utils/type-permissions'
-import { assertRecordVisible, requireRecordType } from '../../../../../../../utils/list-records'
+import { assertRecordVisible, requireRecordType, requireRecordUpdate } from '#records/server'
 import { unlinkChannel } from '../../../../../../../utils/channels'
 import { assertNotAccountOwned } from '../../../../../../../utils/account-link'
 

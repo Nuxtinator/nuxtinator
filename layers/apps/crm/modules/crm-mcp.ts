@@ -1,7 +1,7 @@
 import { addServerPlugin, defineNuxtModule } from '@nuxt/kit'
 import { fileURLToPath } from 'node:url'
 
-// Registers the CRM MCP tools when the MCP layer is loaded too. They live
+// Registers the crm MCP tools when the MCP layer is loaded too. They live
 // outside `server/` so deploys without MCP never compile or typecheck their
 // `#mcp-layer` import; with MCP they join the server tsconfig.
 export default defineNuxtModule({

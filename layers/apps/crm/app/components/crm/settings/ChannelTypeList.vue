@@ -4,16 +4,16 @@
 // org-global — a new one is immediately available to communication_channel
 // fields and the channel widget. The value format is one of the five
 // code-owned normalization formats and is locked after create.
-import type { CrmChannelValueFormat } from '../../../composables/useCrmSchemaAdmin'
+import type { CrmChannelValueFormat } from '../../../composables/useCrmChannelTypes'
 
-const { channelTypes, loadChannelTypes, createChannelType, deleteChannelType } = useCrmSchemaAdmin()
+const { channelTypes, loadChannelTypes, createChannelType, deleteChannelType } = useCrmChannelTypes()
 
 const loadError = ref<string | null>(null)
 onMounted(async () => {
   try {
     await loadChannelTypes()
   } catch (err) {
-    loadError.value = crmErrorMessage(err, 'Failed to load channel types')
+    loadError.value = recordsErrorMessage(err, 'Failed to load channel types')
   }
 })
 
@@ -39,7 +39,7 @@ const saving = ref(false)
 const saveError = ref<string | null>(null)
 
 watch(newLabel, (v) => {
-  if (!keyTouched.value) newKey.value = crmSlugify(v)
+  if (!keyTouched.value) newKey.value = recordsSlugify(v)
 })
 
 function startAdd() {
@@ -52,7 +52,7 @@ function startAdd() {
   saveError.value = null
 }
 
-const keyValid = computed(() => CRM_SLUG_CLIENT_RE.test(newKey.value))
+const keyValid = computed(() => RECORDS_SLUG_CLIENT_RE.test(newKey.value))
 const canAdd = computed(() => newLabel.value.trim().length > 0 && keyValid.value)
 
 async function submit() {
@@ -68,7 +68,7 @@ async function submit() {
     })
     adding.value = false
   } catch (err) {
-    saveError.value = crmErrorMessage(err, 'Failed to create channel type')
+    saveError.value = recordsErrorMessage(err, 'Failed to create channel type')
   } finally {
     saving.value = false
   }
@@ -91,7 +91,7 @@ async function removeType(key: string) {
   try {
     await deleteChannelType(key)
   } catch (err) {
-    deleteError.value = crmErrorMessage(err, 'Failed to delete channel type')
+    deleteError.value = recordsErrorMessage(err, 'Failed to delete channel type')
   } finally {
     deletingKey.value = null
     confirmingDeleteKey.value = null

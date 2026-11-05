@@ -13,7 +13,7 @@ import {
   type TestOrg
 } from '../helpers'
 import { canSend } from '../../server/utils/consent'
-import { channelFingerprint } from '../../server/utils/normalize'
+import { channelFingerprint } from '@nuxtinator/records/normalize'
 import { createKyselyDb } from '../../../../core/server/utils/db-connection'
 
 const sql = getHostAdminDb()
@@ -42,7 +42,7 @@ async function setupContactWithEmail(email: string): Promise<{
 }> {
   const { org, auth }: { org: TestOrg, auth: AuthHeaders } = await createCrmOrgWith(sql, ['admin'])
   const opts = withOrgHeader(auth, org.slug)
-  const rec = await $fetch<{ id: string }>('/api/crm/records/contacts', {
+  const rec = await $fetch<{ id: string }>('/api/records/entries/contacts', {
     method: 'POST',
     body: { fields: { name: `test-crm ${email}` } },
     ...opts

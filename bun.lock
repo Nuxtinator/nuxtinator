@@ -25,10 +25,11 @@
         "@nuxtinator/mcp": "workspace:*",
         "@nuxtinator/messages": "workspace:*",
         "@nuxtinator/oauth": "workspace:*",
+        "@nuxtinator/records": "workspace:*",
         "@nuxtinator/social-auth": "workspace:*",
         "@nuxtinator/tenancy": "workspace:*",
         "@nuxtinator/videos": "workspace:*",
-        "@nuxtinator/workflows": "workspace:*",
+        "@nuxtinator/views": "workspace:*",
         "kysely": "^0.28.17",
         "kysely-postgres-js": "^2.0.0",
         "nuxt": "^4.6.1",
@@ -98,9 +99,10 @@
     },
     "layers/apps/crm": {
       "name": "@nuxtinator/crm",
-      "version": "0.4.1",
+      "version": "0.5.0",
       "optionalDependencies": {
         "@nuxtinator/core": "*",
+        "@nuxtinator/records": "*",
       },
       "peerDependencies": {
         "@nuxt/kit": "^4.0.0",
@@ -259,22 +261,22 @@
         "vue": "^3.0.0",
       },
     },
-    "layers/apps/workflows": {
-      "name": "@nuxtinator/workflows",
+    "layers/apps/views": {
+      "name": "@nuxtinator/views",
       "version": "0.1.0",
       "dependencies": {
         "fractional-indexing": "^3.2.0",
       },
       "optionalDependencies": {
         "@nuxtinator/core": "*",
-        "@nuxtinator/crm": "*",
+        "@nuxtinator/records": "*",
       },
       "peerDependencies": {
         "h3": "^1.0.0",
         "kysely": "^0.28.0",
         "nuxt": "^4.0.0",
         "vue": "^3.0.0",
-        "zod": "^3.23.0",
+        "zod": "^4.1.8",
       },
     },
     "layers/core": {
@@ -369,6 +371,21 @@
         "kysely": "^0.28.0",
         "nuxt": "^4.0.0",
         "vue": "^3.0.0",
+      },
+    },
+    "layers/records": {
+      "name": "@nuxtinator/records",
+      "version": "0.1.0",
+      "optionalDependencies": {
+        "@nuxtinator/core": "*",
+      },
+      "peerDependencies": {
+        "@nuxt/kit": "^4.0.0",
+        "h3": "^1.0.0",
+        "kysely": "^0.28.0",
+        "nuxt": "^4.0.0",
+        "vue": "^3.0.0",
+        "zod": "^4.1.8",
       },
     },
     "layers/social-auth": {
@@ -788,13 +805,15 @@
 
     "@nuxtinator/oauth": ["@nuxtinator/oauth@workspace:layers/oauth"],
 
+    "@nuxtinator/records": ["@nuxtinator/records@workspace:layers/records"],
+
     "@nuxtinator/social-auth": ["@nuxtinator/social-auth@workspace:layers/social-auth"],
 
     "@nuxtinator/tenancy": ["@nuxtinator/tenancy@workspace:layers/tenancy"],
 
     "@nuxtinator/videos": ["@nuxtinator/videos@workspace:layers/apps/videos"],
 
-    "@nuxtinator/workflows": ["@nuxtinator/workflows@workspace:layers/apps/workflows"],
+    "@nuxtinator/views": ["@nuxtinator/views@workspace:layers/apps/views"],
 
     "@nuxtjs/color-mode": ["@nuxtjs/color-mode@4.0.1", "", { "dependencies": { "@nuxt/kit": "^4.4.6", "exsolve": "^1.0.8", "pathe": "^2.0.3", "pkg-types": "^2.3.1", "semver": "^7.8.1" } }, "sha512-eiA7hWXi5zNHaYKyJFCGF6i0wFZtuvR7KDXZ6jiSvwxjCpRFwphrw0MOSmNfArTSSsT1wpW+/2H92cejeVfUlg=="],
 

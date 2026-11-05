@@ -10,11 +10,9 @@
 
 import { z } from 'zod'
 import { withOrgContext } from '#tenant/server'
+import { assertRecordVisible, getRecord, requireRecordType, requireRecordUpdate } from '#records/server'
 import type { CrmChannelEntry } from '#crm'
-import { requireRecordUpdate } from '../../../../../../../utils/type-permissions'
-import { assertRecordVisible, requireRecordType } from '../../../../../../../utils/list-records'
 import { claimChannel, linkChannel, setPrimary, unlinkChannel } from '../../../../../../../utils/channels'
-import { getRecord } from '../../../../../../../utils/record-storage'
 import { assertNotAccountOwned } from '../../../../../../../utils/account-link'
 
 const Body = z.object({

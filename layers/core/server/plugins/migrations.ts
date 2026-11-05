@@ -4,6 +4,7 @@ import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createKyselyDb } from '#core/server/utils/db-connection'
 import { setHeldBackMigrations } from '#core/server/utils/migration-status'
+import { classifyMigration } from '#core/server/utils/migration-names'
 
 // Migration runner. Builds its own Kysely client connecting via DATABASE_URL.
 // In single-tenant mode that's just the database. In multi-tenant mode it's
@@ -96,16 +97,13 @@ class LayeredMigrationProvider implements MigrationProvider {
 
       for (const entry of entries) {
         if (!entry.endsWith('.ts') && !entry.endsWith('.js') && !entry.endsWith('.mjs')) continue
-        const isTenancy = /_T\d+_/.test(entry)
-        if (isTenancy && !includeTenancy) continue
-        if (!isTenancy && includeTenancy) continue  // when scanning tenancy folders, ignore regulars (already collected)
-        const baseName = entry.replace(/\.(ts|js|mjs)$/, '')
         // Per-app tenancy migrations (`*_T<NNN>_*`) depend on the tenancy
-        // layer's own schema (orgs table, `current_org_id()` function). They
-        // must run AFTER every other layer's regular migrations and after
-        // `tenancy_*` core migrations. Kysely sorts migrations by name, so
-        // we suffix-prefix the key with `zzz_` to push them to the back.
-        const name = isTenancy ? `zzz_${baseName}` : baseName
+        // layer's own schema (orgs table, `current_org_id()` function), so
+        // their keys sort after every regular migration. Late migrations
+        // (`*_L<NNN>_*`, `*_TL<NNN>_*`) sort after those. See migration-names.ts.
+        const { baseName, key: name, tenancyOnly } = classifyMigration(entry)
+        if (tenancyOnly && !includeTenancy) continue
+        if (!tenancyOnly && includeTenancy) continue  // when scanning tenancy folders, ignore regulars (already collected)
         const heldBack = this.opts.heldBackPrefixes.some(p => baseName.startsWith(`${p}_`))
         if (heldBack && !this.opts.executedNames.includes(name)) continue
         if (migrations[name]) {

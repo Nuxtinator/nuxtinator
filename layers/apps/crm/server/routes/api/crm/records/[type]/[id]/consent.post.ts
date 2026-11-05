@@ -10,11 +10,9 @@
 
 import { z } from 'zod'
 import { withOrgContext } from '#tenant/server'
-import { requireRecordUpdate } from '../../../../../../utils/type-permissions'
-import { assertRecordVisible, requireRecordType } from '../../../../../../utils/list-records'
+import { assertRecordVisible, recordRecordsActivity, requireRecordType, requireRecordUpdate } from '#records/server'
 import { grantConsent, revokeConsent, getConsentState } from '../../../../../../utils/consent'
 import { isSuppressed } from '../../../../../../utils/suppression'
-import { recordCrmActivity } from '../../../../../../utils/crm-activity'
 import { getClientIp } from '#core/server/utils/client-ip'
 
 const Body = z.object({
@@ -74,7 +72,7 @@ export default defineEventHandler(async (event) => {
         .select(['channel_type', 'value'])
         .where('id', '=', body.channelId)
         .executeTakeFirst()
-      await recordCrmActivity(tx, ctx, id, 'consent_changed', {
+      await recordRecordsActivity(tx, ctx, id, 'consent_changed', {
         note: body.note,
         old: prior ? { purpose: prior.purpose, status: prior.status } : null,
         new: {

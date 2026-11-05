@@ -21,10 +21,11 @@
     "layers/apps/list-of-100",
     "layers/apps/files",
     "layers/apps/context",
+    "layers/records",
     "layers/apps/crm",
     "layers/apps/inbox",
     "layers/apps/helpinator",
-    "layers/apps/workflows"
+    "layers/apps/views"
   ],
   "//overrides": "Minimum patched versions for transitive dependencies carrying published advisories. Every pin stays inside the major its dependents declare, so it only lifts the floor. Drop an entry once every dependent resolves at or above it on its own.",
   "overrides": {

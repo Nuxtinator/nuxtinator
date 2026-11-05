@@ -8,13 +8,13 @@ import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import { generate } from '#ai/server'
 import type { AiTextPart } from '#ai/server'
-import { resolveTypePermission } from '#crm/server'
+import { resolveTypePermission } from '#records/server'
 import { inboxGetConversation } from './inbox-conversations'
 import { inboxListMessages, inboxAiContextMessages, type InboxMessageRow } from './inbox-messages'
 import { getInboxStaticPack, getInboxKnowledgeBlock, formatInboxContactRecord } from './inbox-ai-grounding'
 
 type Tx = Transaction<Database>
-type CrmCtx = Parameters<typeof resolveTypePermission>[1]
+type RecordsCtx = Parameters<typeof resolveTypePermission>[1]
 
 // The `#ai/server` feature key — the admin AI page shows a model picker for it.
 export const INBOX_AI_DRAFT_FEATURE = 'inbox.draft'
@@ -102,7 +102,7 @@ async function withTransientRetry<T>(fn: () => Promise<T>): Promise<T> {
 
 export async function generateInboxDraft(
   tx: Tx,
-  ctx: CrmCtx,
+  ctx: RecordsCtx,
   conversationId: string,
   opts: { direction?: string, baseDraft?: string } = {}
 ): Promise<InboxDraftResult> {

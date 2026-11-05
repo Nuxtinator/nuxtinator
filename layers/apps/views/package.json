@@ -1,0 +1,30 @@
+{
+  "name": "@nuxtinator/views",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./nuxt.config.ts",
+    "./test-helpers": "./tests/helpers/index.ts"
+  },
+  "dependencies": {
+    "fractional-indexing": "^3.2.0"
+  },
+  "optionalDependencies": {
+    "@nuxtinator/core": "*",
+    "@nuxtinator/records": "*"
+  },
+  "peerDependencies": {
+    "h3": "^1.0.0",
+    "kysely": "^0.28.0",
+    "nuxt": "^4.0.0",
+    "vue": "^3.0.0",
+    "zod": "^4.1.8"
+  },
+  "nuxtinator": {
+    "requires": {
+      "@nuxtinator/core": ">=3.1.0",
+      "@nuxtinator/records": ">=0.1.0"
+    }
+  }
+}

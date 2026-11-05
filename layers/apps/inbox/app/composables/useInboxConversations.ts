@@ -35,7 +35,7 @@ export type InboxScope = 'all' | 'unassigned' | 'mine' | 'held'
 export function useInboxConversations() {
   const route = useRoute()
   const router = useRouter()
-  const orgKey = useCrmOrgKey()
+  const orgKey = useRecordsOrgKey()
 
   const items = ref<InboxConversationListRow[]>([])
   const total = ref(0)

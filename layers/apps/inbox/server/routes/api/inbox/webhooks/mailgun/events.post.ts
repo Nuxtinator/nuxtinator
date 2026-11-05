@@ -21,7 +21,8 @@
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
-import { claimChannel, findChannel, recordDeliverySuppression, revokeConsent, recordCrmActivity } from '#crm/server'
+import { recordRecordsActivity } from '#records/server'
+import { claimChannel, findChannel, recordDeliverySuppression, revokeConsent } from '#crm/server'
 
 // Map a Mailgun event to a deliverability-suppression reason, or null when it
 // must not suppress. A `failed` event suppresses only on an explicit
@@ -217,9 +218,9 @@ async function recordChannelTimeline(
       .where('channel_id', '=', channelId)
       .execute()
     for (const link of links) {
-      // recordCrmActivity only reads ctx.userId; the webhook has no session,
+      // recordRecordsActivity only reads ctx.userId; the webhook has no session,
       // so the actor is null with a provider label.
-      await recordCrmActivity(tx, { userId: null } as unknown as TenantContext, link.record_id, action, {
+      await recordRecordsActivity(tx, { userId: null } as unknown as TenantContext, link.record_id, action, {
         note,
         actorLabel: 'Mailgun'
       })

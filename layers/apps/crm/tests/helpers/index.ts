@@ -4,7 +4,7 @@
 // All seeded data is prefixed `test-crm-` (users, org slugs) so
 // `cleanupCrmTestData` can scope deletes by ownership of the rows. crm_*
 // content cascades off orgs (org_id, multi-tenant retrofit) and off
-// crm_records; crm_records.created_by is ON DELETE RESTRICT, so record rows
+// records_entries; records_entries.created_by is ON DELETE RESTRICT, so record rows
 // are wiped explicitly before users.
 import type postgres from 'postgres'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
@@ -89,7 +89,7 @@ export async function createTestContact(
   const id = randomUUID()
   const name = opts.name ?? `test-crm-contact-${randomUUID().slice(0, 8)}`
   await sql`
-    INSERT INTO crm_records (id, record_type, name, status, data, created_by, org_id)
+    INSERT INTO records_entries (id, record_type, name, status, data, created_by, org_id)
     VALUES (${id}, ${opts.record_type ?? 'contacts'}, ${name}, ${opts.status ?? null},
             ${JSON.stringify(opts.data ?? {})}::text::jsonb, ${opts.created_by}, ${opts.org_id})
   `
@@ -167,16 +167,16 @@ export async function listMcpTools(token: string): Promise<Array<{ name: string,
 
 // Wipe every crm_* row owned by data this layer's tests created.
 //
-// Order matters: crm_records rows must go before users (created_by is ON
+// Order matters: records_entries rows must go before users (created_by is ON
 // DELETE RESTRICT); the record delete cascades entries, user refs,
 // connections, shares, channel links, activity, and comments. Channels (and
 // through them consents, suppressions, events) plus the definition tables
-// are org-scoped and go by org. We over-delete intentionally: any crm_records
+// are org-scoped and go by org. We over-delete intentionally: any records_entries
 // row created by a test-prefixed user of any layer is fair game.
 export async function cleanupCrmTestData(sql: ReturnType<typeof postgres>): Promise<void> {
   await sql`
-    DELETE FROM crm_records
-    WHERE created_by IN (SELECT id FROM users WHERE email LIKE 'test-%@example.com')
+    DELETE FROM records_entries
+    WHERE created_by IN (SELECT id FROM users WHERE email LIKE 'test-crm-%@example.com')
   `
   await sql`
     DELETE FROM crm_consent_events
@@ -191,11 +191,11 @@ export async function cleanupCrmTestData(sql: ReturnType<typeof postgres>): Prom
     WHERE org_id IN (SELECT id FROM orgs WHERE slug LIKE 'test-crm-%')
   `
   await sql`
-    DELETE FROM crm_record_fields
+    DELETE FROM records_fields
     WHERE org_id IN (SELECT id FROM orgs WHERE slug LIKE 'test-crm-%')
   `
   await sql`
-    DELETE FROM crm_record_types
+    DELETE FROM records_types
     WHERE org_id IN (SELECT id FROM orgs WHERE slug LIKE 'test-crm-%')
   `
   // Orgs created by this layer's tests (cascades into memberships, org_apps,

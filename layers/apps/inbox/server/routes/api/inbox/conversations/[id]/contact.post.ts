@@ -6,7 +6,7 @@
 
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
-import { requireTypePermission, applyFieldPatch } from '#crm/server'
+import { requireTypePermission, applyFieldPatch } from '#records/server'
 
 const Body = z.object({
   name: z.string().min(1).max(300)

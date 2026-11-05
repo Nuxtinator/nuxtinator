@@ -1,5 +1,5 @@
-import { defineRecordType } from '../crm-manifest'
-import type { InferRecordShape } from '../crm-manifest'
+import { defineRecordType } from '#records'
+import type { InferRecordShape } from '#records'
 
 // The contacts record type — the code-shipped flagship type. Field set drawn
 // from the Disciple.Tools contact base fields, trimmed to the v1 kinds.
@@ -8,6 +8,11 @@ export const contactsManifest = defineRecordType({
   label: 'Contacts',
   labelSingular: 'Contact',
   icon: 'i-lucide-contact',
+  permissionPrefix: 'crm.contacts',
+  app: 'crm',
+  // A contact is a person's personal data; a shared board never widens who
+  // may see one.
+  boardsGrantVisibility: false,
   statusField: 'status',
   closedReasonField: 'reason_closed',
   sections: {
@@ -87,8 +92,8 @@ export const contactsManifest = defineRecordType({
   }
 })
 
-declare module '#crm' {
-  interface CrmRecordTypeRegistry {
+declare module '#records' {
+  interface RecordTypeRegistry {
     contacts: InferRecordShape<typeof contactsManifest>
   }
 }

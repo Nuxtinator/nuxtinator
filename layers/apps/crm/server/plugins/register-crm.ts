@@ -2,9 +2,13 @@ import { registerPermissions } from '#core/server/utils/permissions-registry'
 import { registerDefaultGrants } from '#core/server/utils/default-grants-registry'
 import { registerApp } from '#core/server/utils/app-registry'
 import { registerNavItem } from '#core/server/utils/nav-registry'
+import { registerRecordType, registerRecordsClosingHook, registerRecordsPatchGuard, registerRecordsStorageDriver } from '#records/server'
 import { CRM_PERMISSIONS, CRM_PERMISSION_META, CRM_DEFAULT_GRANTS } from '../../app/utils/permissions'
 import { contactsManifest } from '../../app/utils/manifests/contacts'
-import { registerCrmRecordType, registerCrmChannelType, registerCrmConsentPurpose } from '../utils/crm-registry'
+import { registerCrmChannelType, registerCrmConsentPurpose } from '../utils/crm-registry'
+import { channelStorageDriver } from '../utils/channel-storage'
+import { revokeConsentClosingHook } from '../utils/consent-on-close'
+import { accountLinkPatchGuard } from '../utils/account-link'
 
 export default defineNitroPlugin(() => {
   registerPermissions(CRM_PERMISSIONS, CRM_PERMISSION_META)
@@ -29,12 +33,17 @@ export default defineNitroPlugin(() => {
   registerNavItem({
     appId: 'crm',
     title: 'Settings',
-    path: '/crm/settings',
+    path: '/records/settings',
     icon: 'i-lucide-settings',
-    requiredPermission: 'crm.schema.manage',
+    requiredPermission: 'records.schema.manage',
     order: 90
   })
-  registerCrmRecordType(contactsManifest)
+
+  registerRecordType(contactsManifest)
+  registerRecordsStorageDriver(channelStorageDriver)
+  registerRecordsClosingHook(revokeConsentClosingHook)
+  registerRecordsPatchGuard(accountLinkPatchGuard)
+
   registerCrmChannelType({ typeKey: 'email', label: 'Email', icon: 'i-lucide-mail', valueFormat: 'email' })
   registerCrmChannelType({ typeKey: 'phone', label: 'Phone', icon: 'i-lucide-phone', valueFormat: 'phone' })
   registerCrmConsentPurpose('marketing', {

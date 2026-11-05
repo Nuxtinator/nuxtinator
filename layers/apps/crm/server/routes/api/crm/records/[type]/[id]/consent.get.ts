@@ -7,8 +7,7 @@
 // read answer plus the record-visibility rule.
 
 import { withOrgContext } from '#tenant/server'
-import { requireTypePermission } from '../../../../../../utils/type-permissions'
-import { assertRecordVisible, requireRecordType } from '../../../../../../utils/list-records'
+import { assertRecordVisible, requireRecordType, requireTypePermission } from '#records/server'
 import { getRegisteredConsentPurposes } from '../../../../../../utils/crm-registry'
 import { getConsentEvents, getConsentState, type ConsentEventEntry } from '../../../../../../utils/consent'
 import { getActiveSuppressions } from '../../../../../../utils/suppression'

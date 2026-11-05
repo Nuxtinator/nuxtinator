@@ -93,7 +93,7 @@ describe('admin communication_channel fields', () => {
 
     await createChannelType(opts, { typeKey: 'whatsapp', label: 'WhatsApp', valueFormat: 'phone' })
     const field = await $fetch<{ field: { key: string, kind: string, channelType: string | null, custom: boolean } }>(
-      '/api/crm/schema/types/contacts/fields',
+      '/api/records/schema/types/contacts/fields',
       {
         method: 'POST',
         body: { fieldKey: 'whatsapp', kind: 'communication_channel', label: 'WhatsApp', channelType: 'whatsapp' },
@@ -102,7 +102,7 @@ describe('admin communication_channel fields', () => {
     )
     expect(field.field).toMatchObject({ kind: 'communication_channel', channelType: 'whatsapp', custom: true })
 
-    const rec = await $fetch<{ id: string }>('/api/crm/records/contacts', {
+    const rec = await $fetch<{ id: string }>('/api/records/entries/contacts', {
       method: 'POST',
       body: { fields: { name: 'test-crm WhatsApper' } },
       ...opts
@@ -120,7 +120,7 @@ describe('admin communication_channel fields', () => {
 
     // Hydration surfaces the custom channel field like a manifest one.
     const detail = await $fetch<{ fields: Record<string, unknown> }>(
-      `/api/crm/records/contacts/${rec.id}`, opts
+      `/api/records/entries/contacts/${rec.id}`, opts
     )
     expect(detail.fields.whatsapp).toEqual([
       expect.objectContaining({ channelType: 'whatsapp', value: '+1 (555) 010-9999' })
@@ -140,21 +140,21 @@ describe('admin communication_channel fields', () => {
     const { org, auth } = await createCrmOrgWith(sql, ['admin'])
     const opts = withOrgHeader(auth, org.slug)
 
-    const missing = await $fetch('/api/crm/schema/types/contacts/fields', {
+    const missing = await $fetch('/api/records/schema/types/contacts/fields', {
       method: 'POST',
       body: { fieldKey: 'chan_a', kind: 'communication_channel', label: 'Chan A' },
       ...opts
     }).catch(e => e)
     expect(missing.statusCode).toBe(400)
 
-    const unknown = await $fetch('/api/crm/schema/types/contacts/fields', {
+    const unknown = await $fetch('/api/records/schema/types/contacts/fields', {
       method: 'POST',
       body: { fieldKey: 'chan_b', kind: 'communication_channel', label: 'Chan B', channelType: 'nonsense' },
       ...opts
     }).catch(e => e)
     expect(unknown.statusCode).toBe(400)
 
-    const wrongKind = await $fetch('/api/crm/schema/types/contacts/fields', {
+    const wrongKind = await $fetch('/api/records/schema/types/contacts/fields', {
       method: 'POST',
       body: { fieldKey: 'chan_c', kind: 'text', label: 'Chan C', channelType: 'email' },
       ...opts

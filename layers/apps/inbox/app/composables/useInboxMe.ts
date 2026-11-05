@@ -18,7 +18,7 @@ export interface InboxMe {
 }
 
 export function useInboxMe() {
-  const orgKey = useCrmOrgKey()
+  const orgKey = useRecordsOrgKey()
   const me = ref<InboxMe | null>(null)
 
   async function refresh(): Promise<void> {
