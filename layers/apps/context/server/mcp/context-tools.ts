@@ -35,8 +35,10 @@ import type { Database as CoreDatabase } from '#core/server/database/schema'
 import { withOrgPermission } from '#tenant/server'
 import { getPortfolioSections } from '../utils/section-settings'
 import { loadSection, saveSectionContent, isKnownSectionKey, addSection, deleteSection } from '../utils/section-helpers'
-import { createPortfolio, getPortfolioById, listPortfolios } from '../utils/portfolio-helpers'
+import { createPortfolio, getContextTeamScope, getPortfolioByIdOr404, listPortfolios, withContextPortfolioTeams } from '../utils/portfolio-helpers'
+import { assertTeamAccess, resolveTeamNames, setContainerTeams } from '#core/server/utils/team-access'
 import {
+  assertSuggestionSetVisible,
   createSuggestionSet,
   getSuggestionSetOr404,
   listOwnSuggestions,
@@ -87,15 +89,15 @@ function textResult(text: string, structured?: Record<string, unknown>) {
 export const listPortfoliosTool = defineMcpTool({
   name: 'list_portfolios',
   title: 'List Portfolios',
-  description: 'List portfolios in the active organization. Returns portfolio id, slug, name, color, icon_url, template (null = the default template), created_at, updated_at.',
+  description: 'List portfolios in the active organization. Returns portfolio id, slug, name, color, icon_url, template (null = the default template), visibility, teams (names; empty when everyone in the org sees it), created_at, updated_at.',
   appId: 'context',
   scope: 'context.read',
   input: z.object({ org: orgInput }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx) => {
-        const rows = await listPortfolios(tx)
-        return textResult(`${rows.length} portfolio(s).`, { portfolios: rows })
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx, org) => {
+        const rows = await withContextPortfolioTeams(tx, await listPortfolios(tx, await getContextTeamScope(ctx.event, tx, org)))
+        return textResult(`${rows.length} portfolio(s).`, { portfolios: rows.map(r => ({ ...r, teams: r.teams.map(t => t.name) })) })
       })
     } catch (err) { return mcpError(err) }
   }
@@ -110,13 +112,8 @@ export const listSectionsTool = defineMcpTool({
   input: z.object({ org: orgInput, portfolio_id: z.string().uuid() }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx) => {
-        const exists = await tx
-          .selectFrom('context_portfolios')
-          .select(['id', 'template'])
-          .where('id', '=', input.portfolio_id)
-          .executeTakeFirst()
-        if (!exists) throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx, org) => {
+        const exists = await getPortfolioByIdOr404(tx, input.portfolio_id, await getContextTeamScope(ctx.event, tx, org))
 
         const defs = await getPortfolioSections(tx, exists)
         const rows = await tx
@@ -157,13 +154,8 @@ export const readSectionTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx) => {
-        const exists = await tx
-          .selectFrom('context_portfolios')
-          .select(['id', 'template'])
-          .where('id', '=', input.portfolio_id)
-          .executeTakeFirst()
-        if (!exists) throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx, org) => {
+        const exists = await getPortfolioByIdOr404(tx, input.portfolio_id, await getContextTeamScope(ctx.event, tx, org))
 
         const known = await isKnownSectionKey(tx, input.portfolio_id, input.section_key)
         if (!known) throw createError({ statusCode: 404, statusMessage: `Unknown section key: ${input.section_key}` })
@@ -199,13 +191,8 @@ export const bulkReadSectionsTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx) => {
-        const exists = await tx
-          .selectFrom('context_portfolios')
-          .select(['id', 'template'])
-          .where('id', '=', input.portfolio_id)
-          .executeTakeFirst()
-        if (!exists) throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx, org) => {
+        const exists = await getPortfolioByIdOr404(tx, input.portfolio_id, await getContextTeamScope(ctx.event, tx, org))
 
         const defs = await getPortfolioSections(tx, exists)
         const knownKeys = new Set(defs.map(d => d.key))
@@ -247,13 +234,8 @@ export const readOrganizationTool = defineMcpTool({
   input: z.object({ org: orgInput, portfolio_id: z.string().uuid() }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx) => {
-        const p = await tx
-          .selectFrom('context_portfolios')
-          .select(['id', 'slug', 'name', 'template'])
-          .where('id', '=', input.portfolio_id)
-          .executeTakeFirst()
-        if (!p) throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx, org) => {
+        const p = await getPortfolioByIdOr404(tx, input.portfolio_id, await getContextTeamScope(ctx.event, tx, org))
 
         const defs = await getPortfolioSections(tx, p)
         const rows = await tx
@@ -301,13 +283,8 @@ export const updateSectionTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.write', async (tx) => {
-        const exists = await tx
-          .selectFrom('context_portfolios')
-          .select('id')
-          .where('id', '=', input.portfolio_id)
-          .executeTakeFirst()
-        if (!exists) throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.write', async (tx, org) => {
+        await getPortfolioByIdOr404(tx, input.portfolio_id, await getContextTeamScope(ctx.event, tx, org))
 
         const known = await isKnownSectionKey(tx, input.portfolio_id, input.section_key)
         if (!known) throw createError({ statusCode: 404, statusMessage: `Unknown section key: ${input.section_key}` })
@@ -393,13 +370,8 @@ export const bulkUpdateSectionsTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.write', async (tx) => {
-        const exists = await tx
-          .selectFrom('context_portfolios')
-          .select('id')
-          .where('id', '=', input.portfolio_id)
-          .executeTakeFirst()
-        if (!exists) throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.write', async (tx, org) => {
+        await getPortfolioByIdOr404(tx, input.portfolio_id, await getContextTeamScope(ctx.event, tx, org))
 
         const results: Array<Record<string, unknown>> = []
         const toSuggest: Array<NewSuggestion & { result: Record<string, unknown> }> = []
@@ -483,7 +455,7 @@ export const bulkUpdateSectionsTool = defineMcpTool({
 export const createPortfolioTool = defineMcpTool({
   name: 'create_portfolio',
   title: 'Create Portfolio',
-  description: `Create a portfolio in the active organization. The slug is derived from the name unless one is given, and a colliding slug is auto-suffixed (-2, -3) — read the returned slug and id rather than assuming them. \`template\` picks a registered portfolio template (omit for the default template; an unknown id is rejected with the registered ids). \`builtin_sections\` picks which of the template's sections the portfolio starts with (omit for all, [] for none; default template keys: ${BUILTIN_KEY_LIST}). Sections start with no content; write content with update_section.`,
+  description: `Create a portfolio in the active organization. The slug is derived from the name unless one is given, and a colliding slug is auto-suffixed (-2, -3) — read the returned slug and id rather than assuming them. \`template\` picks a registered portfolio template (omit for the default template; an unknown id is rejected with the registered ids). \`builtin_sections\` picks which of the template's sections the portfolio starts with (omit for all, [] for none; default template keys: ${BUILTIN_KEY_LIST}). Sections start with no content; write content with update_section. \`teams\` (team names, as list_portfolios shows them) limits the portfolio to those teams; omit it for a portfolio everyone in the org sees.`,
   appId: 'context',
   scope: 'context.portfolio.create',
   input: z.object({
@@ -492,16 +464,27 @@ export const createPortfolioTool = defineMcpTool({
     color: z.string().trim().max(20).nullable().optional(),
     slug: z.string().trim().regex(/^[a-z][a-z0-9-]{1,39}$/).optional(),
     template: z.string().min(1).max(64).optional(),
-    builtin_sections: z.array(z.string().min(1).max(64)).max(50).optional()
+    builtin_sections: z.array(z.string().min(1).max(64)).max(50).optional(),
+    teams: z.array(z.string().trim().min(1).max(80)).min(1).max(20).optional()
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.portfolio.create', async (tx) => {
-        const portfolio = await createPortfolio(tx, input, ctx.auth.userId)
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.portfolio.create', async (tx, org) => {
+        const { teams: teamNames, ...fields } = input
+        let created = await createPortfolio(tx, fields, ctx.auth.userId)
+        if (teamNames) {
+          const scope = await getContextTeamScope(ctx.event, tx, org)
+          const teamIds = await resolveTeamNames(tx, scope, teamNames)
+          await setContainerTeams(tx, scope, 'context_portfolios', created.id, { visibility: 'teams', teamIds })
+          created = { ...created, visibility: 'teams' }
+        }
+        const [withTeams] = await withContextPortfolioTeams(tx, [created])
+        const portfolio = { ...withTeams!, teams: withTeams!.teams.map(t => t.name) }
 
         await mcpLog('CREATE', 'context_portfolios', portfolio.id, ctx, {
           slug: portfolio.slug,
-          name: portfolio.name
+          name: portfolio.name,
+          teams: portfolio.teams
         }, asAuditExecutor(tx))
 
         return textResult(`Created portfolio "${portfolio.name}" (${portfolio.slug}).`, { portfolio })
@@ -528,9 +511,8 @@ export const createSectionTool = defineMcpTool({
   }),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.section.custom', async (tx) => {
-        const portfolio = await getPortfolioById(tx, input.portfolio_id)
-        if (!portfolio) throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.section.custom', async (tx, org) => {
+        const portfolio = await getPortfolioByIdOr404(tx, input.portfolio_id, await getContextTeamScope(ctx.event, tx, org))
 
         const section = await addSection(
           tx,
@@ -588,9 +570,8 @@ export const bulkCreateSectionsTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.section.custom', async (tx) => {
-        const portfolio = await getPortfolioById(tx, input.portfolio_id)
-        if (!portfolio) throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.section.custom', async (tx, org) => {
+        const portfolio = await getPortfolioByIdOr404(tx, input.portfolio_id, await getContextTeamScope(ctx.event, tx, org))
 
         const results: Array<Record<string, unknown>> = []
         let created = 0
@@ -650,9 +631,8 @@ export const deleteSectionTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.section.custom', async (tx) => {
-        const portfolio = await getPortfolioById(tx, input.portfolio_id)
-        if (!portfolio) throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.section.custom', async (tx, org) => {
+        await getPortfolioByIdOr404(tx, input.portfolio_id, await getContextTeamScope(ctx.event, tx, org))
 
         const deleted = await deleteSection(tx, input.portfolio_id, input.section_key)
 
@@ -690,12 +670,14 @@ export const listSuggestionsTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx, org) => {
+        const scope = await getContextTeamScope(ctx.event, tx, org)
+        if (input.portfolio_id) await getPortfolioByIdOr404(tx, input.portfolio_id, scope)
         const rows = await listOwnSuggestions(tx, ctx.auth.userId, {
           portfolioId: input.portfolio_id,
           status: input.status,
           limit: input.limit ?? 50
-        })
+        }, scope)
         const suggestions = rows.map(r => ({
           ...r,
           created_at: new Date(r.created_at).toISOString(),
@@ -719,13 +701,14 @@ export const withdrawSuggestionTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.write', async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.write', async (tx, org) => {
         const row = await tx
           .selectFrom('context_suggestions')
           .select('set_id')
           .where('id', '=', input.suggestion_id)
           .executeTakeFirst()
         if (!row) throw createError({ statusCode: 404, statusMessage: 'Suggestion not found.' })
+        await assertSuggestionSetVisible(tx, row.set_id, await getContextTeamScope(ctx.event, tx, org))
 
         await withdrawSuggestions(tx, row.set_id, [input.suggestion_id], ctx.auth.userId)
 
@@ -751,8 +734,8 @@ export const readSuggestionTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx) => {
-        const set = await getSuggestionSetOr404(tx, input.suggestion_set_id, { userId: ctx.auth.userId, isReviewer: false })
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.read', async (tx, org) => {
+        const set = await getSuggestionSetOr404(tx, input.suggestion_set_id, { userId: ctx.auth.userId, isReviewer: false }, await getContextTeamScope(ctx.event, tx, org))
         return textResult(`Suggestion on ${set.portfolio_name} with ${set.suggestions.length} section(s).`, {
           suggestion_set_id: set.id,
           portfolio_id: set.portfolio_id,
@@ -791,7 +774,7 @@ export const updateSuggestionTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     try {
-      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.write', async (tx) => {
+      return await withOrgPermission(ctx.event, { appId: 'context', org: input.org }, 'context.write', async (tx, org) => {
         if (!input.updates && input.note === undefined) {
           throw createError({ statusCode: 400, statusMessage: 'Provide updates, note, or both.' })
         }
@@ -802,6 +785,7 @@ export const updateSuggestionTool = defineMcpTool({
           .where('author_id', '=', ctx.auth.userId)
           .executeTakeFirst()
         if (!set) throw createError({ statusCode: 404, statusMessage: 'Suggestion not found.' })
+        await assertTeamAccess(tx, await getContextTeamScope(ctx.event, tx, org), 'context_portfolios', set.portfolio_id, 'Suggestion not found.')
 
         const items: NewSuggestion[] = []
         for (const u of input.updates ?? []) {

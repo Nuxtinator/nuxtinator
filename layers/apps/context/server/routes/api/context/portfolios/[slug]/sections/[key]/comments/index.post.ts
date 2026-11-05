@@ -3,7 +3,7 @@
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
 import { logCreate } from '#core/server/utils/activity-logger'
-import { getPortfolioBySlugOr404 } from '../../../../../../../../utils/portfolio-helpers'
+import { getContextTeamScope, getPortfolioBySlugOr404 } from '../../../../../../../../utils/portfolio-helpers'
 import { loadSection, saveSectionContent, requireKnownSection } from '../../../../../../../../utils/section-helpers'
 import { sha256 } from '../../../../../../../../utils/comments'
 
@@ -18,7 +18,7 @@ export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, { appId: 'context' }, 'context.write', async (tx, ctx) => {
     const slug = getRouterParam(event, 'slug') ?? ''
     const key = getRouterParam(event, 'key') ?? ''
-    const p = await getPortfolioBySlugOr404(tx, slug)
+    const p = await getPortfolioBySlugOr404(tx, slug, await getContextTeamScope(event, tx, ctx))
 
     const parsed = Body.safeParse(await readBody(event))
     if (!parsed.success) {

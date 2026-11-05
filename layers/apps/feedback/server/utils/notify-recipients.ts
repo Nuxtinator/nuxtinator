@@ -15,6 +15,7 @@ import { sql } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import { createNotification } from '#core/server/utils/notifications'
 import { getSetting, setSetting, clearSetting } from '#core/server/utils/settings-store'
+import { filterRecipients } from '#core/server/utils/team-access'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -66,6 +67,7 @@ export async function markCardNotificationsRead(
 
 export interface NewFeedbackNotice {
   cardId: string
+  projectId: string
   cardTitle: string
   projectName: string | null
   subType: 'bug' | 'idea'
@@ -88,6 +90,8 @@ export async function notifyNewFeedbackCard(
   if (recipientIds.length === 0) {
     recipientIds = await existingUserIds(tx, await getSetting<string[]>(tx, FEEDBACK_SETTINGS_NAMESPACE, DEFAULT_NOTIFY_SETTING_KEY))
   }
+  // A team-limited project's cards only reach people who could see the project.
+  recipientIds = await filterRecipients(tx, 'projects', notice.projectId, recipientIds)
   if (recipientIds.length === 0) return
 
   const label = notice.subType === 'idea' ? 'idea' : 'bug'

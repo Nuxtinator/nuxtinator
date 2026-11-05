@@ -23,7 +23,7 @@ import {
   touchConversation,
   type ConversationRow
 } from '../../../../../../utils/assistant-conversations'
-import { getPortfolioById } from '../../../../../../utils/portfolio-helpers'
+import { getContextTeamScope, getPortfolioById } from '../../../../../../utils/portfolio-helpers'
 import {
   CONTEXT_ASSISTANT_FEATURE,
   buildAssistantContext,
@@ -83,7 +83,8 @@ async function runTurn(tx: Tx, args: TurnArgs, hooks?: TurnHooks) {
     role: 'assistant',
     content: stripUpdateBlocks(result.text),
     proposals,
-    contextLoaded: assistant.contextLoaded
+    contextLoaded: assistant.contextLoaded,
+    portfolioIds: [...assistant.portfoliosUsed]
   })
   await touchConversation(tx, conversation.id, history.length === 0 ? message : undefined)
 
@@ -123,7 +124,8 @@ export default defineEventHandler(async (event) => {
   try {
     const payload = await withOrgPermission(event, { appId: 'context' }, 'context.assistant.chat', async (tx, ctx) => {
       const id = getRouterParam(event, 'id') ?? ''
-      const conversation = await getOwnedConversationOr404(tx, id, ctx.userId)
+      const teamScope = await getContextTeamScope(event, tx, ctx)
+      const conversation = await getOwnedConversationOr404(tx, id, ctx.userId, teamScope)
 
       const parsed = Body.safeParse(await readBody(event))
       if (!parsed.success) {
@@ -133,7 +135,7 @@ export default defineEventHandler(async (event) => {
         throw createError({ statusCode: 503, statusMessage: 'The assistant is not configured.' })
       }
 
-      const portfolio = conversation.portfolio_id ? await getPortfolioById(tx, conversation.portfolio_id) : null
+      const portfolio = conversation.portfolio_id ? await getPortfolioById(tx, conversation.portfolio_id, teamScope) : null
       if (conversation.portfolio_id && !portfolio) {
         throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
       }
@@ -141,7 +143,7 @@ export default defineEventHandler(async (event) => {
       const canApply = ctx.perms.has('context.write') && ctx.perms.has('context.assistant.apply')
 
       const history = historyToMessages(await listMessages(tx, conversation.id))
-      const assistant = await buildAssistantContext(tx, scope, canApply, { userMessage: parsed.data.message })
+      const assistant = await buildAssistantContext(tx, scope, canApply, teamScope, { userMessage: parsed.data.message })
       const args: TurnArgs = { conversation, message: parsed.data.message, canApply, history, assistant }
 
       if (!wantsStream) return await runTurn(tx, args)

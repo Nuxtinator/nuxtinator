@@ -2,6 +2,7 @@
 import { withOrgPermission } from '#tenant/server'
 import { HelpinatorLibraryInput, helpinatorAssertContextRead, helpinatorCreateLibrary } from '../../../../utils/helpinator-libraries'
 import { helpinatorAdminLibrary } from '../../../../utils/helpinator-admin'
+import { getTeamScope } from '#core/server/utils/team-access'
 
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, { appId: 'helpinator' }, 'helpinator.manage', async (tx, ctx) => {
@@ -9,6 +10,6 @@ export default defineEventHandler(async (event) => {
     if (!parsed.success) throw createError({ statusCode: 400, statusMessage: 'Invalid library', data: parsed.error.flatten() })
     if (parsed.data.kind === 'portfolio') helpinatorAssertContextRead(ctx)
     setResponseStatus(event, 201)
-    return helpinatorAdminLibrary(await helpinatorCreateLibrary(tx, parsed.data, ctx.userId))
+    return helpinatorAdminLibrary(await helpinatorCreateLibrary(tx, parsed.data, ctx.userId, await getTeamScope(event, tx, ctx, 'context')))
   })
 })

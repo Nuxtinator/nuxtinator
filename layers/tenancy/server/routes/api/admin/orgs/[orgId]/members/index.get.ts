@@ -18,6 +18,7 @@ export default defineEventHandler(async (event) => {
       'memberships.created_at as joined_at',
       'users.email as email',
       'users.display_name as display_name',
+      'users.avatar as avatar',
       'users.verified as verified'
     ])
     .where('memberships.org_id', '=', orgId)

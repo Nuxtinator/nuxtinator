@@ -274,6 +274,7 @@ export default defineEventHandler(async (event) => {
       // core's daily digest sweep turns these into one email per recipient.
       await afterCommit(tx, scope => scope(notifyTx => notifyNewFeedbackCard(notifyTx, {
         cardId: card.id,
+        projectId,
         cardTitle: notificationTitle,
         projectName: project?.name ?? null,
         subType: sub,

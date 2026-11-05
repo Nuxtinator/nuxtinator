@@ -231,6 +231,13 @@ const onToggleUser = async (user: AppUser, granted: boolean) => {
 }
 
 const removeApp = ref<AdminApp | null>(null)
+
+// Single mode: the host groups an org app is limited to (the team gate).
+const teamsApp = ref<AdminApp | null>(null)
+const teamsOpen = computed({
+  get: () => teamsApp.value !== null,
+  set: (v: boolean) => { if (!v) teamsApp.value = null }
+})
 const removeOpen = computed({
   get: () => removeApp.value !== null,
   set: (v: boolean) => { if (!v) removeApp.value = null }
@@ -395,6 +402,15 @@ const onRemove = async () => {
           v-else-if="!tenancyEnabled"
           class="flex items-center gap-2 shrink-0"
         >
+          <UButton
+            variant="outline"
+            color="neutral"
+            size="sm"
+            icon="i-lucide-users"
+            @click="teamsApp = app"
+          >
+            Teams
+          </UButton>
           <span class="text-sm text-(--ui-text-muted)">
             {{ app.status === 'disabled' || app.status === 'host_controlled' ? 'Disabled' : 'Enabled' }}
           </span>
@@ -660,5 +676,11 @@ const onRemove = async () => {
         </div>
       </template>
     </UModal>
+
+    <AppGroupsModal
+      v-model:open="teamsOpen"
+      :endpoint="teamsApp ? `/api/admin/apps/${teamsApp.id}/groups` : null"
+      :title="teamsApp ? `Who can open ${teamsApp.title}` : ''"
+    />
   </div>
 </template>

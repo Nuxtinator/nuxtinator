@@ -3,6 +3,7 @@
 // Reviewers see every set in the org, everyone else only their own.
 import { withOrgPermission } from '#tenant/server'
 import { listSuggestionSets, REVIEW_PERMISSION } from '../../../../utils/suggestions'
+import { getContextTeamScope } from '../../../../utils/portfolio-helpers'
 
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, { appId: 'context' }, 'context.read', async (tx, ctx) => {
@@ -10,7 +11,8 @@ export default defineEventHandler(async (event) => {
     const sets = await listSuggestionSets(
       tx,
       { userId: ctx.userId, isReviewer: ctx.perms.has(REVIEW_PERMISSION) },
-      { state }
+      { state },
+      await getContextTeamScope(event, tx, ctx)
     )
     return { sets }
   })

@@ -12,7 +12,7 @@ import {
   clearMailhog
 } from './helpers'
 
-const HOST_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../host')
+const HOST_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../dev')
 
 const hooks = createTest({
   rootDir: HOST_DIR,

@@ -2,6 +2,8 @@ import { getRouterParam, readBody } from 'h3'
 import { sql } from 'kysely'
 import { withOrgPermission } from '#tenant/server'
 import { logUpdate } from '#core/server/utils/activity-logger'
+import { readContainerTeamsInput, setContainerTeams } from '#core/server/utils/team-access'
+import { assertFeedbackProjectAccess, getFeedbackTeamScope, withFeedbackProjectTeams } from '../../../../utils/project-teams'
 import { originOf } from '../../../../utils/widget-origins'
 
 // Normalize an incoming allowed_origins list to deduped, valid origins
@@ -27,8 +29,12 @@ export default defineEventHandler(async (event) => {
   if (!id) throw createError({ statusCode: 400, statusMessage: 'id required' })
 
   const body = await readBody(event) ?? {}
+  const teamsInput = readContainerTeamsInput('projects', body)
 
   return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
+    const scope = await getFeedbackTeamScope(event, tx, ctx)
+    await assertFeedbackProjectAccess(tx, scope, id)
+
     const updates: Record<string, any> = {}
     if (typeof body.name === 'string') updates.name = body.name
     if ('description' in body) updates.description = body.description
@@ -36,7 +42,7 @@ export default defineEventHandler(async (event) => {
     if ('allowed_origins' in body) updates.allowed_origins = normalizeAllowedOrigins(body.allowed_origins)
     if (body.post_meta && typeof body.post_meta === 'object') updates.post_meta = body.post_meta
 
-    if (Object.keys(updates).length === 0) {
+    if (Object.keys(updates).length === 0 && !teamsInput) {
       throw createError({ statusCode: 400, statusMessage: 'No fields to update' })
     }
 
@@ -51,7 +57,14 @@ export default defineEventHandler(async (event) => {
 
     if (!row) throw createError({ statusCode: 404, statusMessage: 'Project not found' })
 
-    logUpdate('projects', id, ctx.userId, { fields: Object.keys(updates) })
-    return row
+    const fields = Object.keys(updates)
+    if (teamsInput) {
+      await setContainerTeams(tx, scope, 'projects', id, teamsInput)
+      row.visibility = teamsInput.visibility as typeof row.visibility
+      fields.push('visibility', 'teams')
+    }
+
+    logUpdate('projects', id, ctx.userId, { fields })
+    return (await withFeedbackProjectTeams(tx, [row]))[0]
   })
 })

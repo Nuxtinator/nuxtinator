@@ -1,5 +1,6 @@
 import { getQuery } from 'h3'
 import { withOrgPermission } from '#tenant/server'
+import { assertFeedbackProjectAccess, getFeedbackTeamScope } from '../../../../utils/project-teams'
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event)
@@ -15,7 +16,10 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.read', async (tx) => {
+  return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.read', async (tx, ctx) => {
+    const scope = await getFeedbackTeamScope(event, tx, ctx)
+    await assertFeedbackProjectAccess(tx, scope, projectId)
+
     let q = tx.selectFrom('cards').selectAll()
 
     q = q.where('project_id', '=', projectId)

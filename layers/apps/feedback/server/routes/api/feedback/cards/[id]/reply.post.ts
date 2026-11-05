@@ -13,6 +13,7 @@ import { withOrgPermission } from '#tenant/server'
 import { sendEmail } from '#email'
 import { logUpdate } from '#core/server/utils/activity-logger'
 import { buildFeedbackReplyEmail } from '../../../../../utils/reply-email'
+import { assertFeedbackCardAccess, getFeedbackTeamScope } from '../../../../../utils/project-teams'
 
 const MESSAGE_CAP = 10_000
 const SUBJECT_CAP = 200
@@ -36,6 +37,8 @@ export default defineEventHandler(async (event) => {
   }
 
   return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
+    await assertFeedbackCardAccess(tx, await getFeedbackTeamScope(event, tx, ctx), id)
+
     const card = await tx
       .selectFrom('cards')
       .select(['id', 'post_type', 'post_meta'])

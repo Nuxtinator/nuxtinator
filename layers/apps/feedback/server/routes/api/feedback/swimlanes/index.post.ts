@@ -1,6 +1,7 @@
 import { readBody } from 'h3'
 import { withOrgPermission } from '#tenant/server'
 import { logCreate } from '#core/server/utils/activity-logger'
+import { assertFeedbackProjectAccess, getFeedbackTeamScope } from '../../../../utils/project-teams'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event) ?? {}
@@ -12,6 +13,9 @@ export default defineEventHandler(async (event) => {
   if (!name) throw createError({ statusCode: 400, statusMessage: 'name is required' })
 
   return await withOrgPermission(event, { appId: 'feedback' }, 'feedback.write', async (tx, ctx) => {
+    const scope = await getFeedbackTeamScope(event, tx, ctx)
+    await assertFeedbackProjectAccess(tx, scope, projectId)
+
     const row = await tx
       .insertInto('swimlanes')
       .values({

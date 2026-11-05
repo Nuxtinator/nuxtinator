@@ -93,7 +93,9 @@ watch(() => form.library_ids, (ids) => {
 })
 watch(defaultPortfolio, (p) => {
   if (!p) {
-    form.default_section_key = ''
+    // A saved default portfolio hidden from the caller's teams keeps its section.
+    const keep = defaultLibrary.value?.kind === 'portfolio' && form.default_library_id === saved.value?.default_library_id
+    form.default_section_key = keep ? saved.value?.default_section_key ?? '' : ''
   } else if (!p.sections.some((s: HelpinatorPortfolioOption['sections'][number]) => s.key === form.default_section_key)) {
     form.default_section_key = p.sections[0]?.key ?? ''
   }
@@ -135,7 +137,7 @@ async function save() {
       name: form.name,
       library_ids: form.library_ids,
       default_library_id: form.default_library_id,
-      default_section_key: defaultPortfolio.value ? form.default_section_key || null : null,
+      default_section_key: defaultLibrary.value?.kind === 'portfolio' ? form.default_section_key || null : null,
       allowed_origins: form.originsText.split('\n').map(s => s.trim()).filter(Boolean),
       daily_message_cap: Number(form.daily_message_cap),
       enabled: form.enabled,

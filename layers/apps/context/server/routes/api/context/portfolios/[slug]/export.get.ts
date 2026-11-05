@@ -1,13 +1,13 @@
 // GET /api/context/portfolios/:slug/export — full-portfolio zip download.
 import archiver from 'archiver'
 import { withOrgPermission } from '#tenant/server'
-import { getPortfolioBySlugOr404 } from '../../../../../utils/portfolio-helpers'
+import { getContextTeamScope, getPortfolioBySlugOr404 } from '../../../../../utils/portfolio-helpers'
 import { buildPortfolioExport } from '../../../../../utils/export'
 
 export default defineEventHandler(async (event) => {
-  return await withOrgPermission(event, { appId: 'context' }, 'context.read', async (tx) => {
+  return await withOrgPermission(event, { appId: 'context' }, 'context.read', async (tx, ctx) => {
     const slug = getRouterParam(event, 'slug') ?? ''
-    const p = await getPortfolioBySlugOr404(tx, slug)
+    const p = await getPortfolioBySlugOr404(tx, slug, await getContextTeamScope(event, tx, ctx))
     const { files, readme, safeFilename } = await buildPortfolioExport(tx, p)
 
     setHeader(event, 'Content-Type', 'application/zip')

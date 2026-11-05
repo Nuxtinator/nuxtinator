@@ -6,7 +6,11 @@
 // SELECT — no extra `org_id` filter needed.
 
 import type { Transaction } from 'kysely'
+import type { H3Event } from 'h3'
 import type { Database } from '#core/server/database/schema'
+import type { Permission } from '#core/app/utils/permissions'
+import { getContainerTeams, getTeamScope, teamVisible, type ContainerTeam, type TeamScope } from '#core/server/utils/team-access'
+import type { ContextPortfolioVisibility } from '../database/schema'
 import {
   DEFAULT_PORTFOLIO_TEMPLATE_ID,
   getRegisteredPortfolioTemplate,
@@ -21,53 +25,101 @@ export interface PortfolioRow {
   icon_url: string | null
   // Registered template id; null = the default template.
   template: string | null
+  visibility: ContextPortfolioVisibility
   created_at: Date
   updated_at: Date
 }
 
+export const PORTFOLIO_COLUMNS = ['id', 'slug', 'name', 'color', 'icon_url', 'template', 'visibility', 'created_at', 'updated_at'] as const
+
+const PORTFOLIOS = 'context_portfolios'
+
+// The caller's team scope for Context: pass it to every lookup a
+// member-facing route or MCP tool makes. Once per request.
+export async function getContextTeamScope(
+  event: H3Event,
+  tx: Transaction<Database>,
+  ctx: { userId: string, orgId: string | null, perms: Set<Permission> }
+): Promise<TeamScope> {
+  return await getTeamScope(event, tx, ctx, 'context')
+}
+
+// Every lookup below takes the caller's team scope and leaves out portfolios
+// limited to teams the caller isn't on. `null` reads every portfolio in the
+// org: only for paths with no user (jobs, Helpinator's public bot).
 export async function getPortfolioBySlug(
   tx: Transaction<Database>,
-  slug: string
+  slug: string,
+  scope: TeamScope | null
 ): Promise<PortfolioRow | null> {
   const row = await tx
-    .selectFrom('context_portfolios')
-    .select(['id', 'slug', 'name', 'color', 'icon_url', 'template', 'created_at', 'updated_at'])
+    .selectFrom(PORTFOLIOS)
+    .select(PORTFOLIO_COLUMNS)
     .where('slug', '=', slug)
+    .$if(scope !== null, qb => qb.where(teamVisible(scope!, PORTFOLIOS)))
     .executeTakeFirst()
   return (row as PortfolioRow | undefined) ?? null
 }
 
 export async function getPortfolioById(
   tx: Transaction<Database>,
-  id: string
+  id: string,
+  scope: TeamScope | null
 ): Promise<PortfolioRow | null> {
   const row = await tx
-    .selectFrom('context_portfolios')
-    .select(['id', 'slug', 'name', 'color', 'icon_url', 'template', 'created_at', 'updated_at'])
+    .selectFrom(PORTFOLIOS)
+    .select(PORTFOLIO_COLUMNS)
     .where('id', '=', id)
+    .$if(scope !== null, qb => qb.where(teamVisible(scope!, PORTFOLIOS)))
     .executeTakeFirst()
   return (row as PortfolioRow | undefined) ?? null
 }
 
+export async function getPortfolioByIdOr404(
+  tx: Transaction<Database>,
+  id: string,
+  scope: TeamScope | null
+): Promise<PortfolioRow> {
+  const p = await getPortfolioById(tx, id, scope)
+  if (!p) {
+    throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
+  }
+  return p
+}
+
 // The org's portfolios in display order: placed ones by their stored
 // position, then any never placed, by name.
-export async function listPortfolios(tx: Transaction<Database>): Promise<PortfolioRow[]> {
+export async function listPortfolios(tx: Transaction<Database>, scope: TeamScope | null): Promise<PortfolioRow[]> {
   const rows = await tx
-    .selectFrom('context_portfolios')
-    .select(['id', 'slug', 'name', 'color', 'icon_url', 'template', 'created_at', 'updated_at'])
+    .selectFrom(PORTFOLIOS)
+    .select(PORTFOLIO_COLUMNS)
+    .$if(scope !== null, qb => qb.where(teamVisible(scope!, PORTFOLIOS)))
     .orderBy('order', ob => ob.asc().nullsLast())
     .orderBy('name', 'asc')
     .execute()
   return rows as PortfolioRow[]
 }
 
-// Store a full ordering of the org's portfolios. `ids` must list every
-// portfolio exactly once.
+export type PortfolioWithTeams<T extends { id: string }> = T & { teams: ContainerTeam[] }
+
+// Adds the teams each portfolio is limited to, for display.
+export async function withContextPortfolioTeams<T extends { id: string }>(
+  tx: Transaction<Database>,
+  rows: T[]
+): Promise<PortfolioWithTeams<T>[]> {
+  const teams = await getContainerTeams(tx, PORTFOLIOS, rows.map(r => r.id))
+  return rows.map(r => ({ ...r, teams: teams.get(r.id) ?? [] }))
+}
+
+// Store the order of the portfolios the caller can see. `ids` must list each
+// of them exactly once; they take the positions they held among every
+// portfolio in the org, so the ones hidden from the caller keep their place.
 export async function reorderPortfolios(
   tx: Transaction<Database>,
-  ids: string[]
+  ids: string[],
+  scope: TeamScope | null
 ): Promise<PortfolioRow[]> {
-  const current = await listPortfolios(tx)
+  const current = await listPortfolios(tx, scope)
   const currentIds = new Set(current.map(p => p.id))
   const given = new Set(ids)
 
@@ -83,7 +135,10 @@ export async function reorderPortfolios(
     })
   }
 
-  for (const [index, id] of ids.entries()) {
+  const all = scope === null ? current : await listPortfolios(tx, null)
+  const next = [...ids]
+  const merged = all.map(p => (currentIds.has(p.id) ? next.shift()! : p.id))
+  for (const [index, id] of merged.entries()) {
     await tx
       .updateTable('context_portfolios')
       .set({ order: index + 1 })
@@ -91,14 +146,15 @@ export async function reorderPortfolios(
       .execute()
   }
 
-  return await listPortfolios(tx)
+  return await listPortfolios(tx, scope)
 }
 
 export async function getPortfolioBySlugOr404(
   tx: Transaction<Database>,
-  slug: string
+  slug: string,
+  scope: TeamScope | null
 ): Promise<PortfolioRow> {
-  const p = await getPortfolioBySlug(tx, slug)
+  const p = await getPortfolioBySlug(tx, slug, scope)
   if (!p) {
     throw createError({ statusCode: 404, statusMessage: 'Portfolio not found.' })
   }
@@ -164,7 +220,7 @@ export async function createPortfolio(
       color: input.color ?? null,
       template: template.id === DEFAULT_PORTFOLIO_TEMPLATE_ID ? null : template.id
     })
-    .returning(['id', 'slug', 'name', 'color', 'icon_url', 'template', 'created_at', 'updated_at'])
+    .returning(PORTFOLIO_COLUMNS)
     .executeTakeFirstOrThrow()
 
   if (keys.length > 0) {

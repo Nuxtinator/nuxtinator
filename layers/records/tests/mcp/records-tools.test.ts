@@ -108,7 +108,7 @@ describe('records MCP permission paths', () => {
     })
     await $fetch(`/api/records/entries/${typeKey}`, { method: 'POST', body: { fields: { name: 'test-records Project' } }, ...adminOpts })
 
-    // Contacts access but none of the crm.records.* slugs custom types share.
+    // Contacts access but none of the records.entries.* slugs custom types share.
     const role = await createRole(sql, org.id, ['crm.access', 'records.read', 'records.write', 'crm.contacts.read', 'crm.contacts.create'])
     const member = await addRecordsMember(sql, org.id, [role])
     const { token } = await issueMcpBearer(sql, member.user.id, ALL_SCOPES)

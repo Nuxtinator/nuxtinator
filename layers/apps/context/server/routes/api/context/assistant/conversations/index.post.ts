@@ -2,7 +2,7 @@
 // Start a conversation in a scope: `{ portfolio?: slug, section?: key }`.
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
-import { getPortfolioBySlugOr404 } from '../../../../../utils/portfolio-helpers'
+import { getContextTeamScope, getPortfolioBySlugOr404 } from '../../../../../utils/portfolio-helpers'
 import { isKnownSectionKey } from '../../../../../utils/section-helpers'
 import { createConversation } from '../../../../../utils/assistant-conversations'
 
@@ -21,7 +21,7 @@ export default defineEventHandler(async (event) => {
     if (section && !slug) {
       throw createError({ statusCode: 400, statusMessage: 'A section scope needs a portfolio.' })
     }
-    const portfolio = slug ? await getPortfolioBySlugOr404(tx, slug) : null
+    const portfolio = slug ? await getPortfolioBySlugOr404(tx, slug, await getContextTeamScope(event, tx, ctx)) : null
     if (portfolio && section && !(await isKnownSectionKey(tx, portfolio.id, section))) {
       throw createError({ statusCode: 404, statusMessage: `Unknown section key: ${section}` })
     }

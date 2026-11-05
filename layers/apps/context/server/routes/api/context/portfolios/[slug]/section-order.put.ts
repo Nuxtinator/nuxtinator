@@ -4,7 +4,7 @@
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
 import { logUpdate } from '#core/server/utils/activity-logger'
-import { getPortfolioBySlugOr404 } from '../../../../../utils/portfolio-helpers'
+import { getContextTeamScope, getPortfolioBySlugOr404 } from '../../../../../utils/portfolio-helpers'
 import { reorderSections } from '../../../../../utils/section-helpers'
 
 const Body = z.object({
@@ -14,7 +14,7 @@ const Body = z.object({
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, { appId: 'context' }, 'context.section.custom', async (tx, ctx) => {
     const slug = getRouterParam(event, 'slug') ?? ''
-    const p = await getPortfolioBySlugOr404(tx, slug)
+    const p = await getPortfolioBySlugOr404(tx, slug, await getContextTeamScope(event, tx, ctx))
 
     const parsed = Body.safeParse(await readBody(event))
     if (!parsed.success) {

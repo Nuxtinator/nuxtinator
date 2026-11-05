@@ -11,13 +11,21 @@ interface PortfolioRow {
   name: string
   color: string | null
   icon_url: string | null
+  visibility: 'org' | 'teams'
+  teams: { id: string, name: string, archived: boolean }[]
 }
 
 const { data } = await useAsyncData(
   () => `context-portfolio-settings-${slug.value}`,
   () => $fetch<PortfolioRow>(`/api/context/portfolios/${slug.value}`)
 )
-const form = reactive({ name: data.value?.name ?? '', color: data.value?.color ?? '#7c3aed' })
+const form = reactive({
+  name: data.value?.name ?? '',
+  color: data.value?.color ?? '#7c3aed',
+  visibility: (data.value?.visibility ?? 'org') as string,
+  teamIds: data.value?.teams.map(t => t.id) ?? []
+})
+const toast = useToast()
 const saving = ref(false)
 const deleteOpen = ref(false)
 const deleting = ref(false)
@@ -27,17 +35,26 @@ watch(data, (next) => {
   if (next) {
     form.name = next.name
     form.color = next.color ?? '#7c3aed'
+    form.visibility = next.visibility
+    form.teamIds = next.teams.map(t => t.id)
   }
 })
 
 async function save() {
   saving.value = true
   try {
-    await $fetch(`/api/context/portfolios/${slug.value}`, {
+    data.value = await $fetch<PortfolioRow>(`/api/context/portfolios/${slug.value}`, {
       method: 'PATCH',
-      body: { name: form.name, color: form.color || null }
+      body: {
+        name: form.name,
+        color: form.color || null,
+        visibility: form.visibility,
+        teamIds: form.visibility === 'teams' ? form.teamIds : []
+      }
     })
     await refreshNuxtData('context-sidebar-portfolios')
+  } catch (e) {
+    toast.add({ title: (e as { statusMessage?: string }).statusMessage ?? 'Could not save.', color: 'error' })
   } finally {
     saving.value = false
   }
@@ -92,6 +109,12 @@ async function deletePortfolio() {
             <UFormField label="Icon">
               <ContextIconUpload :slug="slug" :icon-url="data?.icon_url ?? null" />
             </UFormField>
+            <TeamAccessField
+              v-model:visibility="form.visibility"
+              v-model:team-ids="form.teamIds"
+              app-id="context"
+              :current-teams="data?.teams"
+            />
             <UButton color="primary" :loading="saving" @click="save">
               Save
             </UButton>

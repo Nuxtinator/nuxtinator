@@ -3,14 +3,14 @@
 // `context_sections` and resurfaces if the section is added again.
 import { withOrgPermission } from '#tenant/server'
 import { logDelete } from '#core/server/utils/activity-logger'
-import { getPortfolioBySlugOr404 } from '../../../../../../utils/portfolio-helpers'
+import { getContextTeamScope, getPortfolioBySlugOr404 } from '../../../../../../utils/portfolio-helpers'
 import { deleteSection } from '../../../../../../utils/section-helpers'
 
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, { appId: 'context' }, 'context.section.custom', async (tx, ctx) => {
     const slug = getRouterParam(event, 'slug') ?? ''
     const key = getRouterParam(event, 'key') ?? ''
-    const p = await getPortfolioBySlugOr404(tx, slug)
+    const p = await getPortfolioBySlugOr404(tx, slug, await getContextTeamScope(event, tx, ctx))
 
     const deleted = await deleteSection(tx, p.id, key)
 

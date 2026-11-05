@@ -62,6 +62,13 @@ function countFor(id: string): number {
         class="size-5 shrink-0"
       />
       <span class="flex-1 truncate">{{ p.name }}</span>
+      <UIcon
+        v-if="p.visibility === 'teams'"
+        name="i-lucide-users"
+        class="size-4 shrink-0 text-(--ui-text-dimmed)"
+        :aria-label="`Only ${p.teams.map(t => t.name).join(', ')}`"
+        :title="`Only ${p.teams.map(t => t.name).join(', ')}`"
+      />
       <UBadge
         v-if="countFor(p.id) > 0"
         color="primary"
