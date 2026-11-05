@@ -363,6 +363,7 @@ describe('team-limited portfolios', () => {
   it('refuses to limit a portfolio to teams in an audiences org', async () => {
     const { org, auth } = await createContextOrgWith(sql, ['admin'])
     const h = withOrgHeader(auth, org.slug)
+    await $fetch(`/api/o/${org.slug}/groups/mode`, { method: 'PUT', body: { mode: 'audiences' }, ...h })
     const group = await $fetch<{ id: string }>(`/api/o/${org.slug}/groups`, { method: 'POST', body: { name: `test-context-aud-${randomUUID().slice(0, 6)}` }, ...h })
     expect(await status($fetch('/api/context/portfolios', {
       method: 'POST', body: { name: 'Nope', visibility: 'teams', teamIds: [group.id] }, ...h

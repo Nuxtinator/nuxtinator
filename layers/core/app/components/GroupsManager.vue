@@ -9,12 +9,13 @@
 //   PUT    {apiBase}/:id/members/:userId
 //   DELETE {apiBase}/:id/members/:userId
 //   PUT    {apiBase}/mode                    { mode }   (with `modeEditable`)
-// `searchUsers` finds people who may be added.
+// `searchUsers` finds people who may be added; an empty query lists them.
 
 export interface GroupsManagerUser {
   id: string
   display_name: string
   email: string | null
+  avatar?: string | null
 }
 
 type GroupMode = 'audiences' | 'teams'
@@ -30,6 +31,7 @@ interface GroupMember {
   user_id: string
   display_name: string
   email: string | null
+  avatar: string | null
 }
 
 const props = defineProps<{
@@ -81,15 +83,35 @@ const onSetMode = async (next: GroupMode) => {
   }
 }
 
+const createOpen = ref(false)
 const newName = ref('')
+const newMembers = ref<GroupsManagerUser[]>([])
 const creating = ref(false)
+
+const openCreate = () => {
+  newName.value = ''
+  newMembers.value = []
+  createOpen.value = true
+}
+
+const toggleNewMember = (user: GroupsManagerUser, on: boolean) => {
+  newMembers.value = on
+    ? [...newMembers.value.filter(u => u.id !== user.id), user]
+    : newMembers.value.filter(u => u.id !== user.id)
+}
 
 const onCreate = async () => {
   if (!newName.value.trim()) return
   creating.value = true
   try {
-    await $fetch(props.apiBase, { method: 'POST', body: { name: newName.value } })
-    newName.value = ''
+    const group = await $fetch<{ id: string }>(props.apiBase, { method: 'POST', body: { name: newName.value } })
+    const added = await Promise.allSettled(newMembers.value.map(u =>
+      $fetch(`${props.apiBase}/${group.id}/members/${u.id}`, { method: 'PUT' })))
+    const failed = added.filter(r => r.status === 'rejected').length
+    if (failed > 0) {
+      toast.add({ title: 'Group created', description: `${failed} ${failed === 1 ? 'member' : 'members'} couldn't be added.`, color: 'warning' })
+    }
+    createOpen.value = false
     await refresh()
   } catch (err: unknown) {
     toast.add({ title: 'Create failed', description: errorMessage(err), color: 'error' })
@@ -146,9 +168,9 @@ const membersOpen = computed({
 })
 const members = ref<GroupMember[]>([])
 const membersLoading = ref(false)
-const search = ref('')
-const hits = ref<GroupsManagerUser[]>([])
 const busyUserId = ref<string | null>(null)
+const memberUsers = computed<GroupsManagerUser[]>(() =>
+  members.value.map(m => ({ id: m.user_id, display_name: m.display_name, email: m.email, avatar: m.avatar })))
 
 const loadMembers = async () => {
   if (!membersGroup.value) return
@@ -164,46 +186,17 @@ const loadMembers = async () => {
 const openMembers = async (group: ScopeGroup) => {
   membersGroup.value = group
   members.value = []
-  search.value = ''
-  hits.value = []
   await loadMembers()
 }
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-watch(search, (q) => {
-  if (searchTimer) clearTimeout(searchTimer)
-  if (!q.trim()) {
-    hits.value = []
-    return
-  }
-  searchTimer = setTimeout(async () => {
-    hits.value = await props.searchUsers(q.trim())
-  }, 250)
-})
-
-const memberIds = computed(() => new Set(members.value.map(m => m.user_id)))
-
-const onAdd = async (user: GroupsManagerUser) => {
+const onToggleMember = async (user: GroupsManagerUser, on: boolean) => {
   if (!membersGroup.value) return
   busyUserId.value = user.id
   try {
-    await $fetch(`${props.apiBase}/${membersGroup.value.id}/members/${user.id}`, { method: 'PUT' })
+    await $fetch(`${props.apiBase}/${membersGroup.value.id}/members/${user.id}`, { method: on ? 'PUT' : 'DELETE' })
     await Promise.all([loadMembers(), refresh()])
   } catch (err: unknown) {
-    toast.add({ title: 'Add failed', description: errorMessage(err), color: 'error' })
-  } finally {
-    busyUserId.value = null
-  }
-}
-
-const onRemove = async (member: GroupMember) => {
-  if (!membersGroup.value) return
-  busyUserId.value = member.user_id
-  try {
-    await $fetch(`${props.apiBase}/${membersGroup.value.id}/members/${member.user_id}`, { method: 'DELETE' })
-    await Promise.all([loadMembers(), refresh()])
-  } catch (err: unknown) {
-    toast.add({ title: 'Remove failed', description: errorMessage(err), color: 'error' })
+    toast.add({ title: on ? 'Add failed' : 'Remove failed', description: errorMessage(err), color: 'error' })
   } finally {
     busyUserId.value = null
   }
@@ -212,10 +205,19 @@ const onRemove = async (member: GroupMember) => {
 
 <template>
   <div class="space-y-4">
-    <slot
-      name="header"
-      :mode="mode"
-    />
+    <div class="flex items-center justify-between gap-2">
+      <slot
+        name="header"
+        :mode="mode"
+      />
+      <UButton
+        icon="i-lucide-plus"
+        class="ml-auto"
+        @click="openCreate"
+      >
+        Add group
+      </UButton>
+    </div>
 
     <div
       v-if="modeEditable"
@@ -236,24 +238,52 @@ const onRemove = async (member: GroupMember) => {
       />
     </div>
 
-    <form
-      class="flex gap-2"
-      @submit.prevent="onCreate"
+    <UModal
+      v-model:open="createOpen"
+      title="New group"
     >
-      <UInput
-        v-model="newName"
-        placeholder="New group name"
-        class="w-64"
-      />
-      <UButton
-        type="submit"
-        icon="i-lucide-plus"
-        :loading="creating"
-        :disabled="!newName.trim()"
-      >
-        Add group
-      </UButton>
-    </form>
+      <template #body>
+        <form
+          id="groups-manager-create"
+          class="space-y-4"
+          @submit.prevent="onCreate"
+        >
+          <UFormField label="Name">
+            <UInput
+              v-model="newName"
+              autofocus
+              class="w-full"
+            />
+          </UFormField>
+          <UFormField label="Members">
+            <GroupMemberPicker
+              :search-users="searchUsers"
+              :selected="newMembers"
+              @toggle="toggleNewMember"
+            />
+          </UFormField>
+        </form>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2 w-full">
+          <UButton
+            variant="ghost"
+            color="neutral"
+            @click="createOpen = false"
+          >
+            Cancel
+          </UButton>
+          <UButton
+            type="submit"
+            form="groups-manager-create"
+            :loading="creating"
+            :disabled="!newName.trim()"
+          >
+            Create group
+          </UButton>
+        </div>
+      </template>
+    </UModal>
 
     <div
       v-if="pending && groups.length === 0"
@@ -356,86 +386,19 @@ const onRemove = async (member: GroupMember) => {
       :title="membersGroup ? `${membersGroup.name} — members` : ''"
     >
       <template #body>
-        <div class="space-y-3">
-          <UInput
-            v-model="search"
-            icon="i-lucide-search"
-            placeholder="Add someone by name or email"
-            class="w-full"
-          />
-          <ul
-            v-if="hits.length > 0"
-            class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md"
-          >
-            <li
-              v-for="u in hits"
-              :key="u.id"
-              class="flex items-center justify-between gap-3 p-3"
-            >
-              <div class="min-w-0">
-                <div class="font-medium truncate">
-                  {{ u.display_name || u.email }}
-                </div>
-                <div class="text-xs text-(--ui-text-muted) truncate">
-                  {{ u.email }}
-                </div>
-              </div>
-              <UButton
-                size="sm"
-                variant="outline"
-                color="neutral"
-                :icon="memberIds.has(u.id) ? 'i-lucide-check' : 'i-lucide-plus'"
-                :disabled="memberIds.has(u.id) || busyUserId === u.id"
-                @click="onAdd(u)"
-              >
-                {{ memberIds.has(u.id) ? 'Member' : 'Add' }}
-              </UButton>
-            </li>
-          </ul>
-
-          <USeparator label="Members" />
-
-          <div
-            v-if="membersLoading && members.length === 0"
-            class="text-sm text-(--ui-text-muted)"
-          >
-            Loading...
-          </div>
-          <div
-            v-else-if="members.length === 0"
-            class="text-sm text-(--ui-text-muted)"
-          >
-            No members yet.
-          </div>
-          <ul
-            v-else
-            class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md"
-          >
-            <li
-              v-for="m in members"
-              :key="m.user_id"
-              class="flex items-center justify-between gap-3 p-3"
-            >
-              <div class="min-w-0">
-                <div class="font-medium truncate">
-                  {{ m.display_name || m.email }}
-                </div>
-                <div class="text-xs text-(--ui-text-muted) truncate">
-                  {{ m.email }}
-                </div>
-              </div>
-              <UButton
-                size="sm"
-                variant="ghost"
-                color="error"
-                icon="i-lucide-x"
-                aria-label="Remove from group"
-                :disabled="busyUserId === m.user_id"
-                @click="onRemove(m)"
-              />
-            </li>
-          </ul>
+        <div
+          v-if="membersLoading && members.length === 0"
+          class="text-sm text-(--ui-text-muted)"
+        >
+          Loading...
         </div>
+        <GroupMemberPicker
+          v-else
+          :search-users="searchUsers"
+          :selected="memberUsers"
+          :busy-id="busyUserId"
+          @toggle="onToggleMember"
+        />
       </template>
     </USlideover>
   </div>

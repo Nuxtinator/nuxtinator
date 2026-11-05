@@ -40,14 +40,14 @@ const groupsOpen = computed({
 // The org's members, filtered here: the host-admin member list isn't searchable.
 const searchOrgMembers = async (q: string): Promise<GroupsManagerUser[]> => {
   if (!groupsOrg.value) return []
-  const res = await $fetch<{ members: { user_id: string, display_name: string, email: string | null }[] }, string>(
+  const res = await $fetch<{ members: { user_id: string, display_name: string, email: string | null, avatar: string | null }[] }, string>(
     `/api/admin/orgs/${groupsOrg.value.id}/members`
   )
   const needle = q.toLowerCase()
   return res.members
     .filter(m => m.display_name?.toLowerCase().includes(needle) || m.email?.toLowerCase().includes(needle))
-    .slice(0, 10)
-    .map(m => ({ id: m.user_id, display_name: m.display_name, email: m.email }))
+    .slice(0, 50)
+    .map(m => ({ id: m.user_id, display_name: m.display_name, email: m.email, avatar: m.avatar }))
 }
 
 const openDelete = (o: AdminOrg) => {

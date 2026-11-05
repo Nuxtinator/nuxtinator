@@ -9,7 +9,7 @@ definePageMeta({
 const tenancyOn = !!useRuntimeConfig().public.tenancy
 
 const searchUsers = async (q: string): Promise<GroupsManagerUser[]> => {
-  const res = await $fetch<{ rows: GroupsManagerUser[] }>('/api/admin/users', { query: { q, pageSize: 10, sort: 'display_name', dir: 'asc' } })
+  const res = await $fetch<{ rows: GroupsManagerUser[] }>('/api/admin/users', { query: { q, pageSize: 50, sort: 'display_name', dir: 'asc' } })
   return res.rows
 }
 </script>

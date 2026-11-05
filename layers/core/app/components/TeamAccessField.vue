@@ -2,8 +2,8 @@
 // Who can see a container (a project, a portfolio): everyone in the org, or
 // only certain teams. Offers the caller's teams (every team for holders of
 // the app's `all_teams` permission). Teams already on the container stay
-// listed even when the caller can't pick them. Renders nothing while the
-// org's groups don't run as teams and the container isn't limited.
+// listed even when the caller can't pick them. Renders nothing unless the
+// container is limited or the org runs teams and the caller has one to pick.
 const props = defineProps<{
   appId: string
   // Teams the container is limited to now, for display.
@@ -16,7 +16,7 @@ const teamIds = defineModel<string[]>('teamIds', { required: true })
 
 const { mode, teams } = useTeams(props.appId)
 
-const shown = computed(() => mode.value === 'teams' || visibility.value === 'teams')
+const shown = computed(() => (mode.value === 'teams' && teams.value.length > 0) || visibility.value === 'teams')
 
 const options = [
   { label: 'Everyone in the org', value: 'org' },

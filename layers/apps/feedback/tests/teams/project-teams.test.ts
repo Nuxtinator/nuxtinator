@@ -303,6 +303,7 @@ describe('feedback team-limited projects', () => {
   it('refuses to limit a project to teams in an audiences org', async () => {
     const { org, user, auth } = await createFeedbackOrgWith(sql, ['admin'])
     const h = withOrgHeader(auth, org.slug)
+    await $fetch(`/api/o/${org.slug}/groups/mode`, { method: 'PUT', body: { mode: 'audiences' }, ...h })
     const group = await createGroup(org.slug, h, 'test-feedback-audience', [user.id])
     const project = await createTestProject(sql, { org_id: org.id })
     const err = await $fetch(`/api/feedback/projects/${project.id}`, {

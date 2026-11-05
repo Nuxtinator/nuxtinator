@@ -60,6 +60,7 @@ export default defineEventHandler(async (event) => {
       'users.id',
       'users.display_name',
       'users.email',
+      'users.avatar',
       'users.verified',
       'users.created',
       'users.is_admin',

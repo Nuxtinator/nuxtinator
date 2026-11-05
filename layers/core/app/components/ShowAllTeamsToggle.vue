@@ -4,7 +4,7 @@
 const props = defineProps<{ appId: string }>()
 const emit = defineEmits<{ change: [on: boolean] }>()
 
-const { mode } = useTeams(props.appId)
+const { mode, teams } = useTeams(props.appId)
 const showAll = useShowAllTeams(props.appId)
 
 // `useCookie` writes the cookie on the next tick; emit after it so a reload
@@ -18,7 +18,7 @@ const onUpdate = async (on: boolean) => {
 
 <template>
   <USwitch
-    v-if="mode === 'teams' || showAll"
+    v-if="(mode === 'teams' && teams.length > 0) || showAll"
     :model-value="showAll"
     label="Show all teams"
     size="sm"

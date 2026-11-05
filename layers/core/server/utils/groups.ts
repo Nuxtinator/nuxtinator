@@ -4,11 +4,13 @@
 // teams mode a group can also limit content (see team-access.ts).
 //
 // What a group means comes from the group mode, never from the row:
-//   'audiences' (default) — groups only gate apps; members don't see the group
-//                           or each other.
-//   'teams'               — members see the group and its members.
-// The host's own groups take the instance-wide mode (a host setting); an
-// org's groups take the org's mode (an org setting).
+//   'audiences' — groups only gate apps; members don't see the group or each
+//                 other.
+//   'teams'     — members see the group and its members, and content can be
+//                 limited to it.
+// The host's own groups take the instance-wide mode (a host setting, default
+// audiences); an org's groups take the org's mode (an org setting, default
+// teams).
 //
 // None of the group tables has RLS. Who may see a group or its members is
 // decided here and in the handlers, the same way the users table is.
@@ -22,6 +24,7 @@ export type GroupMode = 'audiences' | 'teams'
 
 export const GROUPS_SETTINGS_NAMESPACE = 'core'
 export const SETTING_GROUP_MODE = 'group_mode'
+export const SETTING_ORG_GROUP_MODE = 'org_group_mode'
 
 export function parseGroupMode(value: unknown): GroupMode {
   return value === 'teams' ? 'teams' : 'audiences'
@@ -36,7 +39,7 @@ export async function getHostGroupMode(tx: DbClient): Promise<GroupMode> {
 // org's mode is an org setting, so `tx` must run in that org (its GUC set).
 export async function getGroupMode(tx: DbClient, orgId: string | null): Promise<GroupMode> {
   if (orgId === null) return await getHostGroupMode(tx)
-  return parseGroupMode(await getSetting(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_GROUP_MODE))
+  return parseGroupMode(await getSetting(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_ORG_GROUP_MODE))
 }
 
 // Changes the mode of the host's own groups. See `setGroupMode`.
@@ -46,8 +49,8 @@ export async function setHostGroupMode(tx: DbClient, mode: GroupMode): Promise<v
 
 // Changes the mode of one scope's groups. Switching to audiences is refused
 // (409) while content is limited to any of the scope's groups, since audience
-// groups can't be picked to limit content. Audiences is the default, so
-// choosing it drops the override. For an org, `tx` must run in that org.
+// groups can't be picked to limit content. Choosing the scope's default
+// drops the override. For an org, `tx` must run in that org.
 export async function setGroupMode(tx: DbClient, orgId: string | null, mode: GroupMode): Promise<void> {
   const current = await getGroupMode(tx, orgId)
   if (current === mode) return
@@ -67,11 +70,11 @@ export async function setGroupMode(tx: DbClient, orgId: string | null, mode: Gro
       })
     }
     if (orgId === null) await clearHostSetting(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_GROUP_MODE)
-    else await clearSetting(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_GROUP_MODE)
+    else await setSetting(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_ORG_GROUP_MODE, mode)
   } else if (orgId === null) {
     await setHostSetting(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_GROUP_MODE, mode)
   } else {
-    await setSetting(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_GROUP_MODE, mode)
+    await clearSetting(tx, GROUPS_SETTINGS_NAMESPACE, SETTING_ORG_GROUP_MODE)
   }
 }
 

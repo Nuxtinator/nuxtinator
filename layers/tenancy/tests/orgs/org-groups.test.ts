@@ -54,7 +54,7 @@ describe('org groups', () => {
     expect(members.map(m => m.user_id)).toEqual([member.id])
 
     const listed = await $fetch<{ mode: string, groups: { id: string, member_count: number }[] }>(`/api/o/${org.slug}/groups`, adminH)
-    expect(listed.mode).toBe('audiences')
+    expect(listed.mode).toBe('teams')
     expect(listed.groups.find(g => g.id === group.id)?.member_count).toBe(1)
   })
 
@@ -89,17 +89,22 @@ describe('org groups', () => {
     expect(await status($fetch(`/api/o/${b.org.slug}/groups/${group.id}`, { method: 'DELETE', ...b.adminH }))).toBe(404)
   })
 
-  it('lists the caller\'s teams only while the org runs groups as teams', async () => {
+  it('runs an org\'s groups as teams by default, and lists the caller\'s teams only then', async () => {
     const { org, adminH, member, memberH } = await setup()
     const group = await createGroup(org.slug, adminH)
     await $fetch(`/api/o/${org.slug}/groups/${group.id}/members/${member.id}`, { method: 'PUT', ...adminH })
 
-    expect((await $fetch<{ mode: string, teams: unknown[] }>('/api/teams', memberH))).toEqual({ mode: 'audiences', teams: [] })
-
-    await $fetch(`/api/o/${org.slug}/groups/mode`, { method: 'PUT', body: { mode: 'teams' }, ...adminH })
     const res = await $fetch<{ mode: string, teams: { id: string }[] }>('/api/teams', memberH)
     expect(res.mode).toBe('teams')
     expect(res.teams.map(t => t.id)).toEqual([group.id])
+
+    await $fetch(`/api/o/${org.slug}/groups/mode`, { method: 'PUT', body: { mode: 'audiences' }, ...adminH })
+    expect((await $fetch<{ mode: string, teams: unknown[] }>('/api/teams', memberH))).toEqual({ mode: 'audiences', teams: [] })
+    const [row] = await sql`SELECT value FROM core_settings WHERE org_id = ${org.id} AND namespace = 'core' AND key = 'org_group_mode'`
+    expect(row?.value).toBe('audiences')
+
+    await $fetch(`/api/o/${org.slug}/groups/mode`, { method: 'PUT', body: { mode: 'teams' }, ...adminH })
+    expect(await sql`SELECT 1 FROM core_settings WHERE org_id = ${org.id} AND namespace = 'core' AND key = 'org_group_mode'`).toHaveLength(0)
   })
 
   it('takes someone out of the org\'s groups when they leave the org', async () => {

@@ -48,6 +48,7 @@ Either way, destructive actions open behind an outlined error button and confirm
 
 ## Dialogs and feedback
 
+- Creating something starts from an "Add …" button that opens a modal with its fields. No input field sitting next to the create button on the page.
 - Never use `alert()`, `confirm()` or `prompt()`. Confirm with `useConfirm()` / `ConfirmModal`; report success and errors with `useToast()`.
 
 ## Colors and surfaces
