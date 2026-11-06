@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { AvatarProps } from '@nuxt/ui'
+
 definePageMeta({
   middleware: 'auth'
 })
@@ -10,7 +12,7 @@ interface Video {
   thumbnailUrl: string | null
   shareToken: string
   visibility: 'private' | 'team' | 'org'
-  team: { id: string, name: string, archived: boolean } | null
+  team: { id: string, name: string, icon: string | null, image: string | null, archived: boolean } | null
   linkEnabled: boolean
   viewCount: number
   playCount: number
@@ -107,13 +109,13 @@ const canEdit = (video: Video) => isOwner(video) || hasPermission('videos.modera
 // are the caller's own, plus the video's current team when it isn't one.
 const audienceValue = (video: Video) => video.visibility === 'team' && video.team ? `team:${video.team.id}` : video.visibility
 const audienceItems = (video: Video) => {
-  const items: { label: string, value: string, icon: string, disabled?: boolean }[] = [
+  const items: { label: string, value: string, icon?: string, avatar?: AvatarProps, disabled?: boolean }[] = [
     { label: 'Only me', value: 'private', icon: 'i-lucide-lock', disabled: !isOwner(video) }
   ]
   const mine = teamsMode.value === 'teams' ? teams.value.filter(t => t.mine && !t.archived) : []
-  for (const t of mine) items.push({ label: t.name, value: `team:${t.id}`, icon: 'i-lucide-users-round' })
+  for (const t of mine) items.push({ label: t.name, value: `team:${t.id}`, avatar: groupAvatarProps(t) })
   if (video.team && !mine.some(t => t.id === video.team!.id)) {
-    items.push({ label: video.team.name, value: `team:${video.team.id}`, icon: 'i-lucide-users-round', disabled: true })
+    items.push({ label: video.team.name, value: `team:${video.team.id}`, avatar: groupAvatarProps(video.team), disabled: true })
   }
   items.push({ label: 'Organization', value: 'org', icon: 'i-lucide-users' })
   return items

@@ -10,7 +10,7 @@
 const props = defineProps<{
   appId: string
   // Teams the container is limited to now, for display.
-  currentTeams?: { id: string, name: string, archived?: boolean }[]
+  currentTeams?: { id: string, name: string, icon?: string | null, image?: string | null, archived?: boolean }[]
   disabled?: boolean
 }>()
 
@@ -30,10 +30,10 @@ watch(shown, (on) => {
 }, { immediate: true })
 
 const teamItems = computed(() => {
-  const items = teams.value.filter(t => !t.archived).map(t => ({ id: t.id, name: t.name }))
+  const items = teams.value.filter(t => !t.archived).map(t => ({ id: t.id, name: t.name, icon: t.icon, image: t.image }))
   const known = new Set(items.map(t => t.id))
   for (const t of props.currentTeams ?? []) {
-    if (!known.has(t.id)) items.push({ id: t.id, name: t.archived ? `${t.name} (archived)` : t.name })
+    if (!known.has(t.id)) items.push({ id: t.id, name: t.archived ? `${t.name} (archived)` : t.name, icon: t.icon ?? null, image: t.image ?? null })
   }
   return items
 })
@@ -78,9 +78,9 @@ const onTeam = (id: string, on: boolean) => {
         :disabled="disabled"
         @toggle="onEveryone"
       >
-        <UIcon
-          name="i-lucide-users"
-          class="size-4 text-(--ui-text-muted)"
+        <UAvatar
+          icon="i-lucide-users"
+          size="2xs"
         />
         <span class="text-sm font-medium">Everyone</span>
       </CheckboxRow>
@@ -91,7 +91,15 @@ const onTeam = (id: string, on: boolean) => {
         :label="t.name"
         :disabled="disabled"
         @toggle="onTeam(t.id, $event)"
-      />
+      >
+        <GroupAvatar
+          :name="t.name"
+          :icon="t.icon"
+          :image="t.image"
+          size="2xs"
+        />
+        <span class="text-sm">{{ t.name }}</span>
+      </CheckboxRow>
     </ul>
   </UFormField>
 </template>

@@ -12,6 +12,8 @@ export default defineEventHandler(async (event) => {
     groups: await Promise.all(groups.map(async g => ({
       id: g.id,
       name: g.name,
+      icon: g.icon,
+      image: g.image,
       archived: !!g.archived_at,
       members: mode === 'teams'
         ? (await listGroupMembers(db, g.id)).map(m => ({ id: m.user_id, display_name: m.display_name, avatar: m.avatar }))

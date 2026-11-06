@@ -184,6 +184,8 @@ export function teamVisible(scope: TeamScope, table: string, alias?: string): Ex
 export interface PickableTeam {
   id: string
   name: string
+  icon: string | null
+  image: string | null
   archived: boolean
   mine: boolean
 }
@@ -200,7 +202,7 @@ export async function listPickableTeams(
   const mine = await getUserGroups(tx, scope.userId, scope.orgId)
   const mineIds = new Set(mine.map(t => t.id))
   const teams = scope.canShowAll ? await listGroups(tx, scope.orgId) : mine
-  return teams.map(t => ({ id: t.id, name: t.name, archived: !!t.archived_at, mine: mineIds.has(t.id) }))
+  return teams.map(t => ({ id: t.id, name: t.name, icon: t.icon, image: t.image, archived: !!t.archived_at, mine: mineIds.has(t.id) }))
 }
 
 // Team ids for team names (case-insensitive) among the caller's pickable
@@ -252,6 +254,8 @@ export async function canSeeContainer(tx: DbClient, scope: TeamScope, table: str
 export interface ContainerTeam {
   id: string
   name: string
+  icon: string | null
+  image: string | null
   archived: boolean
 }
 
@@ -261,20 +265,20 @@ export async function getContainerTeams(tx: DbClient, table: string, ids: string
   const out = new Map<string, ContainerTeam[]>()
   if (ids.length === 0) return out
   const rows = c.teamsTable
-    ? await sql<{ container_id: string, id: string, name: string, archived_at: Date | null }>`
-        select tt.container_id::text as container_id, g.id::text as id, g.name, g.archived_at
+    ? await sql<{ container_id: string, id: string, name: string, icon: string | null, image: string | null, archived_at: Date | null }>`
+        select tt.container_id::text as container_id, g.id::text as id, g.name, g.icon, g.image, g.archived_at
         from ${sql.table(c.teamsTable)} tt join groups g on g.id = tt.group_id
         where tt.container_id in (${sql.join(ids)})
         order by lower(g.name)
       `.execute(tx)
-    : await sql<{ container_id: string, id: string, name: string, archived_at: Date | null }>`
-        select t.${sql.ref(c.idColumn)}::text as container_id, g.id::text as id, g.name, g.archived_at
+    : await sql<{ container_id: string, id: string, name: string, icon: string | null, image: string | null, archived_at: Date | null }>`
+        select t.${sql.ref(c.idColumn)}::text as container_id, g.id::text as id, g.name, g.icon, g.image, g.archived_at
         from ${sql.table(c.table)} t join groups g on g.id = t.${sql.ref(c.teamColumn!)}
         where t.${sql.ref(c.idColumn)} in (${sql.join(ids)})
       `.execute(tx)
   for (const r of rows.rows) {
     const list = out.get(r.container_id) ?? []
-    list.push({ id: r.id, name: r.name, archived: !!r.archived_at })
+    list.push({ id: r.id, name: r.name, icon: r.icon, image: r.image, archived: !!r.archived_at })
     out.set(r.container_id, list)
   }
   return out

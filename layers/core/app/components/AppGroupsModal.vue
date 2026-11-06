@@ -1,11 +1,13 @@
 <script setup lang="ts">
 // Picks the groups an app is limited to. `endpoint` answers GET with
-// `{ groups: [{ id, name, member_count, archived, selected }] }` and takes
+// `{ groups: [{ id, name, icon, image, member_count, archived, selected }] }` and takes
 // PUT `{ groupIds }`. No group picked leaves the app open to everyone who
 // could open it before.
 interface AppGroupOption {
   id: string
   name: string
+  icon: string | null
+  image: string | null
   member_count: number
   archived: boolean
   selected: boolean
@@ -88,7 +90,19 @@ const onSave = async () => {
               :label="g.archived ? `${g.name} (archived)` : g.name"
               :disabled="g.archived && !picked.includes(g.id)"
               @update:model-value="toggle(g.id, $event === true)"
-            />
+            >
+              <template #label="{ label }">
+                <span class="flex items-center gap-2">
+                  <GroupAvatar
+                    :name="g.name"
+                    :icon="g.icon"
+                    :image="g.image"
+                    size="2xs"
+                  />
+                  {{ label }}
+                </span>
+              </template>
+            </UCheckbox>
             <span class="text-xs text-(--ui-text-muted) shrink-0">
               {{ g.member_count }} {{ g.member_count === 1 ? 'member' : 'members' }}
             </span>

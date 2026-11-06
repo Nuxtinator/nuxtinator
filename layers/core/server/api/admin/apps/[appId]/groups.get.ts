@@ -24,6 +24,6 @@ export default defineEventHandler(async (event) => {
   return {
     groups: groups
       .filter(g => !g.archived_at || selectedIds.has(g.id))
-      .map(g => ({ id: g.id, name: g.name, member_count: g.member_count, archived: !!g.archived_at, selected: selectedIds.has(g.id) }))
+      .map(g => ({ id: g.id, name: g.name, icon: g.icon, image: g.image, member_count: g.member_count, archived: !!g.archived_at, selected: selectedIds.has(g.id) }))
   }
 })

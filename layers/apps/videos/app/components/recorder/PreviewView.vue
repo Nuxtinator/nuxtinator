@@ -67,7 +67,7 @@ const uploadOptions = computed(() => [
     ? teams.value.filter(t => t.mine && !t.archived).map(t => ({
         label: t.name,
         description: 'Your team can see it',
-        icon: 'i-lucide-users-round',
+        avatar: groupAvatarProps(t),
         onSelect: () => emit('upload', { visibility: 'team', teamId: t.id })
       }))
     : []),
