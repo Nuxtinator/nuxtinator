@@ -41,8 +41,8 @@ watch(open, (v) => {
 
 const LAYOUT_ITEMS = (['kanban', 'list', 'table'] as const).map(value => ({ value, ...VIEWS_LAYOUT_META[value] }))
 const BOARD_MODE_ITEMS = [
-  { label: 'Group by a field', value: 'field' },
-  { label: 'Custom columns', value: 'custom' }
+  { value: 'field' as const, label: 'Group by a field', icon: 'i-lucide-tag' },
+  { value: 'custom' as const, label: 'Custom columns', icon: 'i-lucide-columns-3' }
 ]
 
 const groupFieldItems = computed(() =>
@@ -67,16 +67,18 @@ function submit() {
 </script>
 
 <template>
-  <UModal v-model:open="open">
-    <template #content>
+  <UModal
+    v-model:open="open"
+    :title="tab ? 'Tab settings' : 'New tab'"
+    :dismissible="!saving"
+    :ui="{ content: 'sm:max-w-xl' }"
+  >
+    <template #body>
       <form
-        class="p-6 space-y-4"
+        id="views-tab-form"
+        class="space-y-5"
         @submit.prevent="submit"
       >
-        <h2 class="text-lg font-semibold">
-          {{ tab ? 'Tab settings' : 'New tab' }}
-        </h2>
-
         <UFormField label="Name">
           <UInput
             v-model="name"
@@ -87,21 +89,10 @@ function submit() {
         </UFormField>
 
         <UFormField label="Layout">
-          <URadioGroup
+          <ViewsChoiceCards
             v-model="layout"
             :items="LAYOUT_ITEMS"
-            orientation="horizontal"
-          >
-            <template #label="{ item }">
-              <span class="inline-flex items-center gap-1.5">
-                <UIcon
-                  :name="item.icon"
-                  class="size-4 text-(--ui-text-muted)"
-                />
-                {{ item.label }}
-              </span>
-            </template>
-          </URadioGroup>
+          />
         </UFormField>
 
         <template v-if="layout === 'kanban'">
@@ -110,10 +101,9 @@ function submit() {
               Columns
               <InfoTip text="Moving a card between custom columns only changes where it sits on this board, never the record." />
             </template>
-            <URadioGroup
+            <ViewsChoiceCards
               v-model="boardMode"
               :items="BOARD_MODE_ITEMS"
-              orientation="horizontal"
             />
           </UFormField>
           <UFormField
@@ -155,24 +145,28 @@ function submit() {
             />
           </div>
         </UFormField>
-
-        <div class="flex gap-2 justify-end">
-          <UButton
-            variant="ghost"
-            :disabled="saving"
-            @click="open = false"
-          >
-            Cancel
-          </UButton>
-          <UButton
-            type="submit"
-            :loading="saving"
-            :disabled="!canSave"
-          >
-            {{ tab ? 'Save' : 'Add tab' }}
-          </UButton>
-        </div>
       </form>
+    </template>
+
+    <template #footer>
+      <div class="flex gap-2 justify-end w-full">
+        <UButton
+          variant="ghost"
+          color="neutral"
+          :disabled="saving"
+          @click="open = false"
+        >
+          Cancel
+        </UButton>
+        <UButton
+          type="submit"
+          form="views-tab-form"
+          :loading="saving"
+          :disabled="!canSave"
+        >
+          {{ tab ? 'Save' : 'Add tab' }}
+        </UButton>
+      </div>
     </template>
   </UModal>
 </template>

@@ -89,8 +89,8 @@ watch(viewType, (type) => {
 
 const VIEW_TYPE_ITEMS = (['kanban', 'list', 'table'] as const).map(value => ({ value, ...VIEWS_LAYOUT_META[value] }))
 const KANBAN_MODE_ITEMS = [
-  { label: 'Group by a field', value: 'field' },
-  { label: 'Custom columns', value: 'custom' }
+  { value: 'field' as const, label: 'Group by a field', icon: 'i-lucide-tag' },
+  { value: 'custom' as const, label: 'Custom columns', icon: 'i-lucide-columns-3' }
 ]
 
 const canSubmit = computed(() => {
@@ -136,16 +136,18 @@ async function submit() {
 </script>
 
 <template>
-  <UModal v-model:open="open">
-    <template #content>
+  <UModal
+    v-model:open="open"
+    title="New view"
+    :dismissible="!creating"
+    :ui="{ content: 'sm:max-w-xl' }"
+  >
+    <template #body>
       <form
-        class="p-6 space-y-4"
+        id="views-create-form"
+        class="space-y-5"
         @submit.prevent="submit"
       >
-        <h2 class="text-lg font-semibold">
-          New view
-        </h2>
-
         <UFormField
           label="Name"
           required
@@ -184,30 +186,18 @@ async function submit() {
         </UFormField>
 
         <UFormField label="Layout">
-          <URadioGroup
+          <ViewsChoiceCards
             v-model="viewType"
             :items="VIEW_TYPE_ITEMS"
-            orientation="horizontal"
             :disabled="creating"
-          >
-            <template #label="{ item }">
-              <span class="inline-flex items-center gap-1.5">
-                <UIcon
-                  :name="item.icon"
-                  class="size-4 text-(--ui-text-muted)"
-                />
-                {{ item.label }}
-              </span>
-            </template>
-          </URadioGroup>
+          />
         </UFormField>
 
         <template v-if="viewType === 'kanban'">
           <UFormField label="Columns">
-            <URadioGroup
+            <ViewsChoiceCards
               v-model="kanbanMode"
               :items="KANBAN_MODE_ITEMS"
-              orientation="horizontal"
               :disabled="creating"
             />
           </UFormField>
@@ -233,14 +223,6 @@ async function submit() {
               This type has no groupable field — use custom columns instead.
             </template>
           </UFormField>
-
-          <p
-            v-else
-            class="text-xs text-(--ui-text-muted)"
-          >
-            Starts with To do / Doing / Done. You add cards to the board and
-            shape its columns afterwards.
-          </p>
         </template>
 
         <UFormField
@@ -268,6 +250,8 @@ async function submit() {
           </div>
         </UFormField>
 
+        <USeparator />
+
         <TeamAccessField
           v-model:visibility="visibility"
           v-model:team-ids="teamIds"
@@ -281,24 +265,28 @@ async function submit() {
           color="error"
           :title="createError"
         />
-
-        <div class="flex gap-2 justify-end">
-          <UButton
-            variant="ghost"
-            :disabled="creating"
-            @click="open = false"
-          >
-            Cancel
-          </UButton>
-          <UButton
-            type="submit"
-            :loading="creating"
-            :disabled="!canSubmit"
-          >
-            Create
-          </UButton>
-        </div>
       </form>
+    </template>
+
+    <template #footer>
+      <div class="flex gap-2 justify-end w-full">
+        <UButton
+          variant="ghost"
+          color="neutral"
+          :disabled="creating"
+          @click="open = false"
+        >
+          Cancel
+        </UButton>
+        <UButton
+          type="submit"
+          form="views-create-form"
+          :loading="creating"
+          :disabled="!canSubmit"
+        >
+          Create view
+        </UButton>
+      </div>
     </template>
   </UModal>
 </template>
