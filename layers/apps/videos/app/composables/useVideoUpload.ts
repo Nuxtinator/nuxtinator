@@ -476,7 +476,7 @@ export const useVideoUpload = () => {
     recordedVideoUrl: string,
     recordingTime: number,
     format?: { mimeType: string; isMP4: boolean } | null,
-    visibility: 'public' | 'private' | 'org' = 'private'
+    audience: VideoAudience = { visibility: 'private' }
   ) => {
     if (!recordedVideoUrl || recordedChunks.length === 0) {
       throw new Error('No recording to upload')
@@ -643,7 +643,9 @@ export const useVideoUpload = () => {
           duration: recordingTime,
           fileSize,
           source: 'recording',
-          visibility
+          visibility: audience.visibility,
+          teamId: audience.teamId ?? null,
+          linkEnabled: audience.linkEnabled ?? false
         },
       })
 

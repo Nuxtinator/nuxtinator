@@ -150,6 +150,18 @@ export async function getTeamScope(event: H3Event, tx: DbClient, ctx: ScopeConte
   }
 }
 
+// `getTeamScope` for a caller reached outside a tenant handler (a share
+// link), with their permissions in the transaction's org.
+export async function getMemberTeamScope(
+  event: H3Event,
+  tx: Transaction<Database>,
+  userId: string,
+  orgId: string | null,
+  appId: string
+): Promise<TeamScope> {
+  return getTeamScope(event, tx, { userId, orgId, perms: await memberPermissions(tx, userId) }, appId)
+}
+
 // A `where` expression for list queries, search and pickers over `table`
 // (or its `alias` in the query). A row passes when its visibility isn't the
 // team value, when one of its teams is the caller's, when the caller owns it,
