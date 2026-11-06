@@ -59,6 +59,18 @@ export async function setUploadedAvatar(userId: string, uploaded: { url: string,
   }
 }
 
+// Uploads the request's image and passes its URL to `apply`, deleting the
+// upload again if `apply` throws.
+export async function applyUploadedImage<T>(event: H3Event, apply: (url: string) => Promise<T>): Promise<T> {
+  const uploaded = await uploadAvatarFromRequest(event)
+  try {
+    return await apply(uploaded.url)
+  } catch (err) {
+    await deleteFromS3(uploaded.key, 'public').catch(() => {})
+    throw err
+  }
+}
+
 const DOWNLOAD_TIMEOUT_MS = 5000
 const DOWNLOAD_MAX_REDIRECTS = 3
 

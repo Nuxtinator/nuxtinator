@@ -130,6 +130,8 @@ interface AppUser {
 interface AppGroup {
   id: string
   name: string
+  icon: string | null
+  image: string | null
   member_count: number
   archived: boolean
   selected: boolean
@@ -570,20 +572,28 @@ const onRemove = async () => {
               :key="g.id"
               class="flex items-center justify-between gap-3 p-3"
             >
-              <div class="min-w-0">
-                <div class="font-medium truncate flex items-center gap-2">
-                  {{ g.name }}
-                  <UBadge
-                    v-if="g.archived"
-                    color="neutral"
-                    variant="subtle"
-                    size="sm"
-                  >
-                    Archived
-                  </UBadge>
-                </div>
-                <div class="text-xs text-(--ui-text-muted)">
-                  {{ g.member_count }} {{ g.member_count === 1 ? 'member' : 'members' }}
+              <div class="min-w-0 flex items-center gap-3">
+                <GroupAvatar
+                  :name="g.name"
+                  :icon="g.icon"
+                  :image="g.image"
+                  size="sm"
+                />
+                <div class="min-w-0">
+                  <div class="font-medium truncate flex items-center gap-2">
+                    {{ g.name }}
+                    <UBadge
+                      v-if="g.archived"
+                      color="neutral"
+                      variant="subtle"
+                      size="sm"
+                    >
+                      Archived
+                    </UBadge>
+                  </div>
+                  <div class="text-xs text-(--ui-text-muted)">
+                    {{ g.member_count }} {{ g.member_count === 1 ? 'member' : 'members' }}
+                  </div>
                 </div>
               </div>
               <USwitch

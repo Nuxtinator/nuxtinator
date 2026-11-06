@@ -3,6 +3,8 @@ import { useMaybeActiveOrg } from '#tenant'
 export interface PickableTeam {
   id: string
   name: string
+  icon: string | null
+  image: string | null
   archived: boolean
   mine: boolean
 }

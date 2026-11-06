@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { AvatarProps } from '@nuxt/ui'
+
 definePageMeta({
   middleware: 'auth'
 })
@@ -9,15 +11,21 @@ interface Video {
   duration: number
   thumbnailUrl: string | null
   shareToken: string
-  visibility: 'private' | 'org' | 'public'
+  visibility: 'private' | 'team' | 'org'
+  team: { id: string, name: string, icon: string | null, image: string | null, archived: boolean } | null
+  linkEnabled: boolean
   viewCount: number
   playCount: number
-  userId: string
+  // Null once the uploader's account is deleted.
+  userId: string | null
   createdAt: string
   updatedAt: string
 }
 
 const toast = useToast()
+const { user } = useAuth()
+const { hasPermission } = usePermissions()
+const { mode: teamsMode, teams } = useTeams('videos')
 const scope = ref<'mine' | 'team'>('mine')
 const videos = ref<Video[]>([])
 const loading = ref(true)
@@ -28,7 +36,7 @@ const editingTitle = ref('')
 
 const tabs = [
   { label: 'My videos', value: 'mine', icon: 'i-lucide-user' },
-  { label: 'Team library', value: 'team', icon: 'i-lucide-users' }
+  { label: 'Shared', value: 'team', icon: 'i-lucide-users' }
 ]
 
 const loadVideos = async () => {
@@ -94,19 +102,49 @@ const copyLink = async (video: Video) => {
   }
 }
 
-const setVisibility = async (video: Video, visibility: Video['visibility']) => {
+const isOwner = (video: Video) => !!video.userId && video.userId === user.value?.id
+const canEdit = (video: Video) => isOwner(video) || hasPermission('videos.moderate')
+
+// Audience choices as select values: `private`, `org` or `team:<id>`. Teams
+// are the caller's own, plus the video's current team when it isn't one.
+const audienceValue = (video: Video) => video.visibility === 'team' && video.team ? `team:${video.team.id}` : video.visibility
+const audienceItems = (video: Video) => {
+  const items: { label: string, value: string, icon?: string, avatar?: AvatarProps, disabled?: boolean }[] = [
+    { label: 'Only me', value: 'private', icon: 'i-lucide-lock', disabled: !isOwner(video) }
+  ]
+  const mine = teamsMode.value === 'teams' ? teams.value.filter(t => t.mine && !t.archived) : []
+  for (const t of mine) items.push({ label: t.name, value: `team:${t.id}`, avatar: groupAvatarProps(t) })
+  if (video.team && !mine.some(t => t.id === video.team!.id)) {
+    items.push({ label: video.team.name, value: `team:${video.team.id}`, avatar: groupAvatarProps(video.team), disabled: true })
+  }
+  items.push({ label: 'Organization', value: 'org', icon: 'i-lucide-users' })
+  return items
+}
+
+const patchVideo = async (video: Video, body: Record<string, unknown>, failTitle: string) => {
   try {
-    await $fetch(`/api/videos/${video.id}`, {
+    const res = await $fetch<{ video: Pick<Video, 'visibility' | 'team' | 'linkEnabled'> }>(`/api/videos/${video.id}`, {
       method: 'PATCH',
       credentials: 'include',
-      body: { visibility }
+      body
     })
-    video.visibility = visibility
+    video.visibility = res.video.visibility
+    video.team = res.video.team
+    video.linkEnabled = res.video.linkEnabled
   } catch (err: any) {
-    console.error('Error updating visibility:', err)
-    toast.add({ title: 'Failed to update visibility', description: err.data?.message, color: 'error' })
+    console.error(failTitle, err)
+    toast.add({ title: failTitle, description: err.data?.message, color: 'error' })
   }
 }
+
+const setAudience = (video: Video, value: string) => {
+  const body = value.startsWith('team:')
+    ? { visibility: 'team', teamId: value.slice('team:'.length) }
+    : { visibility: value }
+  return patchVideo(video, body, 'Failed to update who can see it')
+}
+
+const setLink = (video: Video, on: boolean) => patchVideo(video, { linkEnabled: on }, 'Failed to update the public link')
 
 const formatDate = (dateString: string) => {
   const date = new Date(dateString)
@@ -172,6 +210,11 @@ useHead({ title: 'Video Library' })
       <div class="library-header">
         <UTabs v-model="scope" :items="tabs" :content="false" class="flex-1" />
         <div class="header-actions">
+          <ShowAllTeamsToggle
+            v-if="scope === 'team' && hasPermission('videos.all_teams')"
+            app-id="videos"
+            @change="loadVideos"
+          />
           <UButton to="/videos/upload" variant="outline" icon="i-lucide-upload">Upload</UButton>
           <UButton to="/videos/record" icon="i-lucide-circle">New Recording</UButton>
         </div>
@@ -186,7 +229,7 @@ useHead({ title: 'Video Library' })
         <UIcon :name="scope === 'mine' ? 'i-lucide-video-off' : 'i-lucide-users'" class="empty-icon" />
         <h2>{{ scope === 'mine' ? 'No Recordings Yet' : 'Nothing shared with the team' }}</h2>
         <p v-if="scope === 'mine'">Create your first screen recording to get started.</p>
-        <p v-else>When teammates set a video to <strong>org</strong>, it shows up here.</p>
+        <p v-else>Videos shared with your teams or the whole org show up here.</p>
         <UButton v-if="scope === 'mine'" to="/videos/record" size="lg" icon="i-lucide-circle">Start Recording</UButton>
       </div>
 
@@ -223,15 +266,21 @@ useHead({ title: 'Video Library' })
 
             <div class="video-visibility">
               <USelect
-                :model-value="video.visibility"
-                :items="[
-                  { label: 'Private', value: 'private', icon: 'i-lucide-lock' },
-                  { label: 'Org', value: 'org', icon: 'i-lucide-users' },
-                  { label: 'Public link', value: 'public', icon: 'i-lucide-globe' }
-                ]"
+                :model-value="audienceValue(video)"
+                :items="audienceItems(video)"
+                :disabled="!canEdit(video)"
                 size="xs"
-                @update:model-value="(v: string) => setVisibility(video, v as Video['visibility'])"
+                class="flex-1"
+                @update:model-value="(v: string) => setAudience(video, v)"
               />
+              <USwitch
+                :model-value="video.linkEnabled"
+                :disabled="!canEdit(video)"
+                label="Public link"
+                size="xs"
+                @update:model-value="(on: boolean) => setLink(video, on)"
+              />
+              <InfoTip text="Only me: just you, and it's deleted with your account. A team or the organization: they can see it, and it stays after you leave. Public link: anyone with the link can watch, whoever it's for." />
             </div>
 
             <div class="video-actions">
@@ -500,6 +549,9 @@ useHead({ title: 'Video Library' })
 }
 
 .video-visibility {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   margin-bottom: 0.75rem;
 }
 

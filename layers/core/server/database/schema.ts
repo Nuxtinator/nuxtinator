@@ -200,6 +200,9 @@ export interface GroupsTable {
   id: Generated<string>
   org_id: string | null
   name: string
+  // Avatar: an icon name or short text, and an uploaded image's URL, which wins.
+  icon: ColumnType<string | null, string | null | undefined, string | null>
+  image: ColumnType<string | null, string | null | undefined, string | null>
   archived_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
 }

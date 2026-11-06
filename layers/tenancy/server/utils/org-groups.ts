@@ -22,8 +22,11 @@ import {
   renameGroup,
   setAppGroups,
   setGroupArchived,
+  setGroupIcon,
+  setGroupImage,
   setGroupMode
 } from '#core/server/utils/groups'
+import { applyUploadedImage } from '#core/server/utils/avatar'
 import { getApp } from '#core/server/utils/app-settings'
 import { adminDb } from './database-admin'
 import { withOrgScope } from './tenant'
@@ -58,8 +61,8 @@ export async function listOrgGroups(tx: Tx, orgId: string) {
 
 export async function createOrgGroup(event: H3Event, tx: Tx, orgId: string, actorId: string) {
   const body = await readBody(event)
-  const group = await createGroup(tx, { orgId, name: body?.name })
-  logEvent({ eventType: 'org_group_created', tableName: 'groups', recordId: group.id, userId: actorId, metadata: { orgId, name: body?.name } }, tx).catch(() => {})
+  const group = await createGroup(tx, { orgId, name: body?.name, icon: body?.icon })
+  logEvent({ eventType: 'org_group_created', tableName: 'groups', recordId: group.id, userId: actorId, metadata: { orgId, name: body?.name, icon: body?.icon } }, tx).catch(() => {})
   return group
 }
 
@@ -67,9 +70,33 @@ export async function updateOrgGroup(event: H3Event, tx: Tx, orgId: string, acto
   const group = await requireOrgGroup(tx, orgId, getRouterParam(event, 'id'))
   const body = await readBody(event)
   if (body?.name !== undefined) await renameGroup(tx, group.id, body.name)
+  if (body?.icon !== undefined) await setGroupIcon(tx, group.id, body.icon)
   if (typeof body?.archived === 'boolean') await setGroupArchived(tx, group.id, body.archived)
-  logEvent({ eventType: 'org_group_updated', tableName: 'groups', recordId: group.id, userId: actorId, metadata: { orgId, name: body?.name, archived: body?.archived } }, tx).catch(() => {})
+  logEvent({ eventType: 'org_group_updated', tableName: 'groups', recordId: group.id, userId: actorId, metadata: { orgId, name: body?.name, icon: body?.icon, archived: body?.archived } }, tx).catch(() => {})
   return { id: group.id }
+}
+
+// Runs `fn` in a transaction scoped to the org, as the acting user.
+export type OrgGroupRunner = <T>(fn: (tx: Tx, orgId: string, actorId: string) => Promise<T>) => Promise<T>
+
+// Uploads an org group's image (multipart field `file`). The group is checked
+// before the upload, which runs outside any transaction.
+export async function uploadOrgGroupImage(event: H3Event, inOrg: OrgGroupRunner) {
+  const id = getRouterParam(event, 'id')
+  await inOrg((tx, orgId) => requireOrgGroup(tx, orgId, id))
+  return await applyUploadedImage(event, url => inOrg(async (tx, orgId, actorId) => {
+    const group = await requireOrgGroup(tx, orgId, id)
+    await setGroupImage(tx, group.id, url)
+    logEvent({ eventType: 'org_group_updated', tableName: 'groups', recordId: group.id, userId: actorId, metadata: { orgId, image: url } }, tx).catch(() => {})
+    return { image: url }
+  }))
+}
+
+export async function removeOrgGroupImage(event: H3Event, tx: Tx, orgId: string, actorId: string) {
+  const group = await requireOrgGroup(tx, orgId, getRouterParam(event, 'id'))
+  await setGroupImage(tx, group.id, null)
+  logEvent({ eventType: 'org_group_updated', tableName: 'groups', recordId: group.id, userId: actorId, metadata: { orgId, image: null } }, tx).catch(() => {})
+  return { image: null }
 }
 
 export async function deleteOrgGroup(event: H3Event, tx: Tx, orgId: string, actorId: string) {
@@ -153,7 +180,7 @@ export async function listOrgAppGroups(event: H3Event, tx: Tx, orgId: string) {
   return {
     groups: groups
       .filter(g => !g.archived_at || selectedIds.has(g.id))
-      .map(g => ({ id: g.id, name: g.name, member_count: g.member_count, archived: !!g.archived_at, selected: selectedIds.has(g.id) }))
+      .map(g => ({ id: g.id, name: g.name, icon: g.icon, image: g.image, member_count: g.member_count, archived: !!g.archived_at, selected: selectedIds.has(g.id) }))
   }
 }
 

@@ -1,10 +1,12 @@
 <script setup lang="ts">
-// Create, rename, archive and delete one scope's groups and manage their
-// members. The scope's routes live under `apiBase`:
+// Create, edit (name, icon, image), archive and delete one scope's groups and
+// manage their members. The scope's routes live under `apiBase`:
 //   GET    {apiBase}                         → { mode, groups }
-//   POST   {apiBase}                         { name }
-//   PATCH  {apiBase}/:id                     { name } | { archived }
+//   POST   {apiBase}                         { name, icon }
+//   PATCH  {apiBase}/:id                     { name, icon } | { archived }
 //   DELETE {apiBase}/:id
+//   POST   {apiBase}/:id/image               multipart `file`
+//   DELETE {apiBase}/:id/image
 //   GET    {apiBase}/:id/members             → { members }
 //   PUT    {apiBase}/:id/members/:userId
 //   DELETE {apiBase}/:id/members/:userId
@@ -23,6 +25,8 @@ type GroupMode = 'audiences' | 'teams'
 interface ScopeGroup {
   id: string
   name: string
+  icon: string | null
+  image: string | null
   archived_at: string | null
   member_count: number
 }
@@ -83,15 +87,84 @@ const onSetMode = async (next: GroupMode) => {
   }
 }
 
-const createOpen = ref(false)
-const newName = ref('')
+const { data: imageInfo } = useLazyFetch<{ can_upload: boolean, max_mb: number, types: string[], types_text: string }>('/api/profile/avatar', {
+  key: 'profile-avatar',
+  default: () => ({ can_upload: false, max_mb: 0, types: [], types_text: '' })
+})
+
+// One modal creates a group (with its first members) or edits one.
+const formOpen = ref(false)
+const editing = ref<ScopeGroup | null>(null)
+const formName = ref('')
+const formIcon = ref<string | null>(null)
 const newMembers = ref<GroupsManagerUser[]>([])
-const creating = ref(false)
+const saving = ref(false)
+
+// The picked image file is uploaded on save; `imagePreview` is what the
+// avatar shows meanwhile (the picked file, or the group's current image).
+const imageInput = ref<HTMLInputElement | null>(null)
+const imageFile = ref<File | null>(null)
+const imagePreview = ref<string | null>(null)
+const removeImage = ref(false)
+
+const resetImage = (current: string | null) => {
+  if (imageFile.value && imagePreview.value) URL.revokeObjectURL(imagePreview.value)
+  imageFile.value = null
+  imagePreview.value = current
+  removeImage.value = false
+}
 
 const openCreate = () => {
-  newName.value = ''
+  editing.value = null
+  formName.value = ''
+  formIcon.value = null
+  resetImage(null)
   newMembers.value = []
-  createOpen.value = true
+  formOpen.value = true
+}
+
+const openEdit = (group: ScopeGroup) => {
+  editing.value = group
+  formName.value = group.name
+  formIcon.value = group.icon
+  resetImage(group.image)
+  formOpen.value = true
+}
+
+watch(formOpen, (open) => {
+  if (!open) resetImage(null)
+})
+
+const onPickImage = (event: Event) => {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (imageInput.value) imageInput.value.value = ''
+  if (!file) return
+  if (!imageInfo.value.types.includes(file.type)) {
+    toast.add({ title: `Use a ${imageInfo.value.types_text} image`, color: 'error' })
+    return
+  }
+  if (file.size > imageInfo.value.max_mb * 1024 * 1024) {
+    toast.add({ title: `Image too large (max ${imageInfo.value.max_mb} MB)`, color: 'error' })
+    return
+  }
+  resetImage(URL.createObjectURL(file))
+  imageFile.value = file
+}
+
+const onRemoveImage = () => {
+  const hadImage = !!editing.value?.image
+  resetImage(null)
+  removeImage.value = hadImage
+}
+
+const saveImage = async (id: string) => {
+  if (imageFile.value) {
+    const body = new FormData()
+    body.append('file', imageFile.value)
+    await $fetch(`${props.apiBase}/${id}/image`, { method: 'POST', body })
+  } else if (removeImage.value) {
+    await $fetch(`${props.apiBase}/${id}/image`, { method: 'DELETE' })
+  }
 }
 
 const toggleNewMember = (user: GroupsManagerUser, on: boolean) => {
@@ -101,40 +174,38 @@ const toggleNewMember = (user: GroupsManagerUser, on: boolean) => {
 }
 
 const onCreate = async () => {
-  if (!newName.value.trim()) return
-  creating.value = true
-  try {
-    const group = await $fetch<{ id: string }>(props.apiBase, { method: 'POST', body: { name: newName.value } })
-    const added = await Promise.allSettled(newMembers.value.map(u =>
-      $fetch(`${props.apiBase}/${group.id}/members/${u.id}`, { method: 'PUT' })))
-    const failed = added.filter(r => r.status === 'rejected').length
-    if (failed > 0) {
-      toast.add({ title: 'Group created', description: `${failed} ${failed === 1 ? 'member' : 'members'} couldn't be added.`, color: 'warning' })
-    }
-    createOpen.value = false
-    await refresh()
-  } catch (err: unknown) {
-    toast.add({ title: 'Create failed', description: errorMessage(err), color: 'error' })
-  } finally {
-    creating.value = false
+  const group = await $fetch<{ id: string }>(props.apiBase, { method: 'POST', body: { name: formName.value, icon: formIcon.value } })
+  const problems: string[] = []
+  if (!await saveImage(group.id).then(() => true, () => false)) problems.push('The image couldn\'t be uploaded.')
+  const added = await Promise.allSettled(newMembers.value.map(u =>
+    $fetch(`${props.apiBase}/${group.id}/members/${u.id}`, { method: 'PUT' })))
+  const failed = added.filter(r => r.status === 'rejected').length
+  if (failed > 0) problems.push(`${failed} ${failed === 1 ? 'member' : 'members'} couldn't be added.`)
+  if (problems.length > 0) {
+    toast.add({ title: 'Group created', description: problems.join(' '), color: 'warning' })
   }
 }
 
-const renamingId = ref<string | null>(null)
-const renameValue = ref('')
-
-const startRename = (group: ScopeGroup) => {
-  renamingId.value = group.id
-  renameValue.value = group.name
+const onEdit = async (group: ScopeGroup) => {
+  const body: { name?: string, icon?: string | null } = {}
+  if (formName.value !== group.name) body.name = formName.value
+  if (formIcon.value !== group.icon) body.icon = formIcon.value
+  if (Object.keys(body).length > 0) await $fetch(`${props.apiBase}/${group.id}`, { method: 'PATCH', body })
+  await saveImage(group.id)
 }
 
-const onRename = async (group: ScopeGroup) => {
+const onSave = async () => {
+  if (!formName.value.trim()) return
+  saving.value = true
   try {
-    await $fetch(`${props.apiBase}/${group.id}`, { method: 'PATCH', body: { name: renameValue.value } })
-    renamingId.value = null
-    await refresh()
+    if (editing.value) await onEdit(editing.value)
+    else await onCreate()
+    formOpen.value = false
   } catch (err: unknown) {
-    toast.add({ title: 'Rename failed', description: errorMessage(err), color: 'error' })
+    toast.add({ title: 'Save failed', description: errorMessage(err), color: 'error' })
+  } finally {
+    saving.value = false
+    await refresh()
   }
 }
 
@@ -239,23 +310,70 @@ const onToggleMember = async (user: GroupsManagerUser, on: boolean) => {
     </div>
 
     <UModal
-      v-model:open="createOpen"
-      title="New group"
+      v-model:open="formOpen"
+      :title="editing ? 'Edit group' : 'New group'"
     >
       <template #body>
         <form
-          id="groups-manager-create"
+          id="groups-manager-form"
           class="space-y-4"
-          @submit.prevent="onCreate"
+          @submit.prevent="onSave"
         >
           <UFormField label="Name">
-            <UInput
-              v-model="newName"
-              autofocus
-              class="w-full"
-            />
+            <div class="flex items-center gap-3">
+              <GroupAvatar
+                :name="formName"
+                :icon="formIcon"
+                :image="imagePreview"
+                size="lg"
+              />
+              <UInput
+                v-model="formName"
+                autofocus
+                class="flex-1"
+              />
+            </div>
           </UFormField>
-          <UFormField label="Members">
+          <UFormField label="Icon">
+            <IconPicker v-model="formIcon" />
+          </UFormField>
+          <UFormField v-if="imageInfo.can_upload || imagePreview">
+            <template #label>
+              Image
+              <InfoTip text="An image shows instead of the icon." />
+            </template>
+            <div class="flex items-center gap-2">
+              <input
+                ref="imageInput"
+                type="file"
+                :accept="imageInfo.types.join(',')"
+                class="hidden"
+                @change="onPickImage"
+              >
+              <UButton
+                v-if="imageInfo.can_upload"
+                color="neutral"
+                variant="outline"
+                icon="i-lucide-upload"
+                @click="imageInput?.click()"
+              >
+                {{ imagePreview ? 'Replace' : 'Upload' }}
+              </UButton>
+              <UButton
+                v-if="imagePreview"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-trash-2"
+                @click="onRemoveImage"
+              >
+                Remove
+              </UButton>
+            </div>
+          </UFormField>
+          <UFormField
+            v-if="!editing"
+            label="Members"
+          >
             <GroupMemberPicker
               :search-users="searchUsers"
               :selected="newMembers"
@@ -269,17 +387,17 @@ const onToggleMember = async (user: GroupsManagerUser, on: boolean) => {
           <UButton
             variant="ghost"
             color="neutral"
-            @click="createOpen = false"
+            @click="formOpen = false"
           >
             Cancel
           </UButton>
           <UButton
             type="submit"
-            form="groups-manager-create"
-            :loading="creating"
-            :disabled="!newName.trim()"
+            form="groups-manager-form"
+            :loading="saving"
+            :disabled="!formName.trim()"
           >
-            Create group
+            {{ editing ? 'Save' : 'Create group' }}
           </UButton>
         </div>
       </template>
@@ -307,33 +425,14 @@ const onToggleMember = async (user: GroupsManagerUser, on: boolean) => {
         :key="group.id"
         class="flex items-center justify-between gap-3 p-4"
       >
-        <div class="min-w-0">
-          <form
-            v-if="renamingId === group.id"
-            class="flex gap-2"
-            @submit.prevent="onRename(group)"
-          >
-            <UInput
-              v-model="renameValue"
-              size="sm"
-              autofocus
-            />
-            <UButton
-              type="submit"
-              size="sm"
-            >
-              Save
-            </UButton>
-            <UButton
-              size="sm"
-              variant="ghost"
-              color="neutral"
-              @click="renamingId = null"
-            >
-              Cancel
-            </UButton>
-          </form>
-          <template v-else>
+        <div class="min-w-0 flex items-center gap-3">
+          <GroupAvatar
+            :name="group.name"
+            :icon="group.icon"
+            :image="group.image"
+            size="md"
+          />
+          <div class="min-w-0">
             <div class="font-medium flex items-center gap-2">
               {{ group.name }}
               <UBadge
@@ -348,7 +447,7 @@ const onToggleMember = async (user: GroupsManagerUser, on: boolean) => {
             <div class="text-xs text-(--ui-text-muted)">
               {{ group.member_count }} {{ group.member_count === 1 ? 'member' : 'members' }}
             </div>
-          </template>
+          </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <UButton
@@ -362,7 +461,7 @@ const onToggleMember = async (user: GroupsManagerUser, on: boolean) => {
           </UButton>
           <UDropdownMenu
             :items="[
-              { label: 'Rename', icon: 'i-lucide-pencil', onSelect: () => startRename(group) },
+              { label: 'Edit', icon: 'i-lucide-pencil', onSelect: () => openEdit(group) },
               group.archived_at
                 ? { label: 'Restore', icon: 'i-lucide-archive-restore', onSelect: () => onSetArchived(group, false) }
                 : { label: 'Archive', icon: 'i-lucide-archive', onSelect: () => onSetArchived(group, true) },

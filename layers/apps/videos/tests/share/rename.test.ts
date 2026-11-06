@@ -52,7 +52,7 @@ describe('PATCH /api/videos/share/:token', () => {
   it('403 when an authenticated non-owner tries to rename', async () => {
     const { org, user: owner } = await createVideosOrgWith(sql, ['admin'])
     const other = await addVideosMember(sql, org.id, ['member'])
-    const video = await createTestVideo(sql, { org_id: org.id, user_id: owner.id })
+    const video = await createTestVideo(sql, { org_id: org.id, user_id: owner.id, visibility: 'org' })
 
     const err = await $fetch(`/api/videos/share/${video.share_token}`, {
       method: 'PATCH', body: { title: 'hijack' }, ...other.auth

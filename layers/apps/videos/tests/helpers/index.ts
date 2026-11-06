@@ -82,7 +82,8 @@ export interface TestVideo {
   user_id: string
   title: string
   share_token: string
-  visibility: 'private' | 'org' | 'public'
+  visibility: 'private' | 'team' | 'org'
+  link_enabled: boolean
   s3_key: string
 }
 
@@ -92,7 +93,10 @@ export async function createTestVideo(
     org_id: string
     user_id: string
     title?: string
-    visibility?: 'private' | 'org' | 'public'
+    // `public` seeds an org video with its link on.
+    visibility?: 'private' | 'team' | 'org' | 'public'
+    team_id?: string
+    link_enabled?: boolean
     duration?: number
     file_size?: number
     width?: number
@@ -103,7 +107,9 @@ export async function createTestVideo(
 ): Promise<TestVideo> {
   const id = randomUUID()
   const title = opts.title ?? `test-videos-title-${randomUUID().slice(0, 8)}`
-  const visibility = opts.visibility ?? 'private'
+  const visibility = opts.visibility === 'public' ? 'org' : (opts.visibility ?? 'private')
+  const link_enabled = opts.link_enabled ?? opts.visibility === 'public'
+  const team_id = opts.team_id ?? null
   const share_token = `test-videos-${randomBytes(12).toString('hex')}`
   const s3_key = `videos/${id}.webm`
   const duration = opts.duration ?? 30
@@ -116,11 +122,11 @@ export async function createTestVideo(
   await sql`
     INSERT INTO videos
       (id, user_id, org_id, title, s3_key, duration, file_size, width, height,
-       share_token, visibility, view_count, play_count, source)
+       share_token, visibility, team_id, link_enabled, view_count, play_count, source)
     VALUES
       (${id}, ${opts.user_id}, ${opts.org_id}, ${title}, ${s3_key},
        ${duration}, ${file_size}, ${width}, ${height},
-       ${share_token}, ${visibility}, ${view_count}, ${play_count}, 'recording')
+       ${share_token}, ${visibility}, ${team_id}, ${link_enabled}, ${view_count}, ${play_count}, 'recording')
   `
   return {
     id,
@@ -129,6 +135,7 @@ export async function createTestVideo(
     title,
     share_token,
     visibility,
+    link_enabled,
     s3_key
   }
 }
@@ -150,6 +157,7 @@ export async function cleanupVideosTestData(sql: ReturnType<typeof postgres>): P
     WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'test-%@example.com')
        OR share_token LIKE 'test-videos-%'
   `
+  await sql`DELETE FROM videos_blob_deletes WHERE s3_key LIKE 'videos/%'`
 
   // Orgs cascade-wipe memberships + org_apps + remaining videos. Tenancy
   // cleanup handles its own slug prefix; we add videos- here so each test

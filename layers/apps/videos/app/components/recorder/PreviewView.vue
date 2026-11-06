@@ -49,31 +49,41 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  upload: [visibility: 'public' | 'private' | 'org']
+  upload: [audience: VideoAudience]
   download: []
   reset: []
 }>()
 
-const uploadOptions = [
+const { mode, teams } = useTeams('videos')
+
+const uploadOptions = computed(() => [
   {
     label: 'Private',
     description: 'Only you can see it',
     icon: 'i-lucide-lock',
-    onSelect: () => emit('upload', 'private')
+    onSelect: () => emit('upload', { visibility: 'private' })
   },
+  ...(mode.value === 'teams'
+    ? teams.value.filter(t => t.mine && !t.archived).map(t => ({
+        label: t.name,
+        description: 'Your team can see it',
+        avatar: groupAvatarProps(t),
+        onSelect: () => emit('upload', { visibility: 'team', teamId: t.id })
+      }))
+    : []),
   {
     label: 'Organization',
     description: 'Anyone signed in to your org can see it',
     icon: 'i-lucide-users',
-    onSelect: () => emit('upload', 'org')
+    onSelect: () => emit('upload', { visibility: 'org' })
   },
   {
     label: 'Public link',
-    description: 'Anyone with the link can see it',
+    description: 'Your org, and anyone with the link',
     icon: 'i-lucide-globe',
-    onSelect: () => emit('upload', 'public')
+    onSelect: () => emit('upload', { visibility: 'org', linkEnabled: true })
   }
-]
+])
 </script>
 
 <style scoped>

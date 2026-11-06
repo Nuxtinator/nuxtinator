@@ -1,20 +1,18 @@
 // DELETE /api/videos/:id
-// Removes the video row and best-effort deletes the S3 objects. Owner-only;
-// users with `videos.moderate` can delete any video in the org.
+// Removes the video row and best-effort deletes the S3 objects. The uploader
+// deletes their own; users with `videos.moderate` can delete any team or org
+// video they can see.
 
 import { withOrgContext } from '#tenant/server'
 import { deleteVideoObject } from '../../../utils/video-storage'
+import { getVideosTeamScope, loadVisibleVideo } from '../../../utils/video-access'
 
 export default defineEventHandler(async (event) => {
   return await withOrgContext(event, { appId: 'videos' }, async (tx, ctx) => {
     const id = getRouterParam(event, 'id')
     if (!id) throw createError({ statusCode: 400, message: 'Video id is required' })
 
-    const existing = await tx.selectFrom('videos')
-      .select(['id', 'user_id', 's3_key', 'thumbnail_url'])
-      .where('id', '=', id)
-      .executeTakeFirst()
-    if (!existing) throw createError({ statusCode: 404, message: 'Video not found' })
+    const existing = await loadVisibleVideo(tx, await getVideosTeamScope(event, tx, ctx), id)
 
     const isOwner = existing.user_id === ctx.userId
     if (!isOwner && !ctx.perms.has('videos.moderate')) {
