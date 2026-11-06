@@ -10,7 +10,7 @@ import { getAllPermissions, getPermissionMeta } from '#core/server/utils/permiss
 import { isRecordsPermissionSlug } from '../../../../utils/user-grants'
 
 export default defineEventHandler(async (event) => {
-  return await withOrgPermission(event, 'records.schema.manage', async () => {
+  return await withOrgPermission(event, { appId: 'records' }, 'records.schema.manage', async () => {
     const permissions = getAllPermissions()
       .filter(isRecordsPermissionSlug)
       .sort()

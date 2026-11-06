@@ -490,7 +490,7 @@ export interface CreateViewInput {
  */
 export async function createView(tx: Tx, ctx: TenantContext, input: CreateViewInput): Promise<ViewDetail> {
   await requireTypePermission(tx, ctx, input.recordTypeKey, 'read')
-  await requireRecordType(tx, input.recordTypeKey)
+  await requireRecordType(tx, input.recordTypeKey, ctx)
   const definition = await sanitizeViewDefinition(tx, input.recordTypeKey, input.definition)
   const view = await tx
     .insertInto('views_definitions')

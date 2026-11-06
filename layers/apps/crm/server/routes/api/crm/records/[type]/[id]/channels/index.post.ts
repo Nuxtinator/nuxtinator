@@ -29,7 +29,7 @@ export default defineEventHandler(async (event) => {
   const typeKey = getRouterParam(event, 'type')!
   const id = getRouterParam(event, 'id')!
   return await withOrgContext(event, { appId: 'crm' }, async (tx, ctx) => {
-    await requireRecordType(tx, typeKey)
+    await requireRecordType(tx, typeKey, ctx)
     await assertRecordVisible(tx, ctx, typeKey, id)
     await requireRecordUpdate(tx, ctx, typeKey, id)
 

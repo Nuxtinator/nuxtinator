@@ -76,8 +76,8 @@ function diffFields(defs: RecordsFieldSetting[], before: Record<string, unknown>
   return changes
 }
 
-async function typeContext(tx: Tx, typeKey: string) {
-  await requireRecordType(tx, typeKey)
+async function typeContext(tx: Tx, tenant: TenantContext, typeKey: string) {
+  await requireRecordType(tx, typeKey, tenant)
   const defs = (await getRecordTypeFields(tx, typeKey)).filter(d => !d.orphan)
   return { defs }
 }
@@ -131,7 +131,7 @@ export const getAddressesTool = defineMcpTool({
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.read', async (tx, tenant) => {
       await requireTypePermission(tx, tenant, input.type, 'read')
-      const { defs } = await typeContext(tx, input.type)
+      const { defs } = await typeContext(tx, tenant, input.type)
       await assertRecordVisible(tx, tenant, input.type, input.id)
       const record = await getRecord(tx, tenant, input.type, input.id)
 
@@ -189,7 +189,7 @@ export const linkChannelTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
-      const { defs } = await typeContext(tx, input.type)
+      const { defs } = await typeContext(tx, tenant, input.type)
       await assertRecordVisible(tx, tenant, input.type, input.id)
       await requireRecordUpdate(tx, tenant, input.type, input.id)
       const def = channelFieldFor(defs, input.field, input.channelType, input.value)
@@ -222,7 +222,7 @@ export const unlinkChannelTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
-      const { defs } = await typeContext(tx, input.type)
+      const { defs } = await typeContext(tx, tenant, input.type)
       await assertRecordVisible(tx, tenant, input.type, input.id)
       await requireRecordUpdate(tx, tenant, input.type, input.id)
       const before = await getRecord(tx, tenant, input.type, input.id)
@@ -257,7 +257,7 @@ export const setConsentTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
-      const { defs } = await typeContext(tx, input.type)
+      const { defs } = await typeContext(tx, tenant, input.type)
       await assertRecordVisible(tx, tenant, input.type, input.id)
       await requireRecordUpdate(tx, tenant, input.type, input.id)
       const record = await getRecord(tx, tenant, input.type, input.id)

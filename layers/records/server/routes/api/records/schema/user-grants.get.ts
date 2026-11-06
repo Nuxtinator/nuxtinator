@@ -14,7 +14,7 @@ const Query = z.object({
 })
 
 export default defineEventHandler(async (event) => {
-  return await withOrgPermission(event, 'records.schema.manage', async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'records' }, 'records.schema.manage', async (tx, ctx) => {
     const parsed = Query.safeParse(getQuery(event))
     if (!parsed.success) {
       throw createError({ statusCode: 400, statusMessage: 'Invalid query', data: parsed.error.flatten() })

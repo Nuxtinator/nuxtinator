@@ -8,7 +8,7 @@ import { deleteRecordType } from '#records/server'
 
 export default defineEventHandler(async (event) => {
   const typeKey = getRouterParam(event, 'type')!
-  return await withOrgPermission(event, 'records.schema.manage', async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'records' }, 'records.schema.manage', async (tx, ctx) => {
     await deleteRecordType(tx, ctx, typeKey)
     return { ok: true }
   })

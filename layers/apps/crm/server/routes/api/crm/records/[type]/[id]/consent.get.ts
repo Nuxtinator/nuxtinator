@@ -19,7 +19,7 @@ export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')!
   return await withOrgContext(event, { appId: 'crm' }, async (tx, ctx) => {
     await requireTypePermission(tx, ctx, typeKey, 'read')
-    await requireRecordType(tx, typeKey)
+    await requireRecordType(tx, typeKey, ctx)
     await assertRecordVisible(tx, ctx, typeKey, id)
 
     const links = await tx

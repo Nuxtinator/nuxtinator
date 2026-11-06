@@ -9,6 +9,7 @@ import {
   cleanupViewsTestData,
   createViewsOrgWith,
   addViewsMember,
+  createViewsRole,
   withOrgHeader
 } from '../helpers'
 
@@ -148,6 +149,27 @@ describe('shared custom boards grant visibility', () => {
     // Taking the card off the board takes the visibility with it.
     await $fetch(`/api/views/${board.id}/cards/${item.id}`, { method: 'DELETE', ...owner })
     await expect($fetch(`/api/records/entries/item/${item.id}`, friendOpts)).rejects.toMatchObject({ statusCode: 404 })
+  })
+
+  it('adding a card takes the share permission on types whose boards grant visibility', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['member'])
+    const owner = withOrgHeader(auth, org.slug)
+    const role = await createViewsRole(sql, org.id, ['views.use', 'records.access', 'records.entries.read', 'records.entries.create'])
+    const noShare = await addViewsMember(sql, org.id, [role])
+    const noShareOpts = withOrgHeader(noShare.auth, org.slug)
+
+    const board = await createView(owner, {
+      recordTypeKey: 'item',
+      visibility: 'org',
+      definition: { columns: [{ key: 'ideas', label: 'Ideas' }] }
+    })
+    const own = await createRecord(noShareOpts, 'item', { name: 'test-views Not for sharing' })
+    await expect($fetch(`/api/views/${board.id}/cards`, {
+      method: 'POST',
+      body: { recordId: own.id, columnKey: 'ideas' },
+      ...noShareOpts
+    })).rejects.toMatchObject({ statusCode: 403 })
+    expect((await feed(owner, board.id)).items).toEqual([])
   })
 
   it('never widens who sees a contact', async () => {

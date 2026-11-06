@@ -27,7 +27,7 @@ export default defineEventHandler(async (event) => {
   const typeKey = getRouterParam(event, 'type')!
   return await withOrgContext(event, async (tx, ctx) => {
     await requireTypePermission(tx, ctx, typeKey, 'read')
-    await requireRecordType(tx, typeKey)
+    await requireRecordType(tx, typeKey, ctx)
 
     const parsed = Query.safeParse(getQuery(event))
     if (!parsed.success) {

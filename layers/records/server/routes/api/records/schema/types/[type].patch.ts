@@ -29,7 +29,7 @@ const Body = z.object({
 
 export default defineEventHandler(async (event) => {
   const typeKey = getRouterParam(event, 'type')!
-  return await withOrgPermission(event, 'records.schema.manage', async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'records' }, 'records.schema.manage', async (tx, ctx) => {
     const parsed = Body.safeParse(await readBody(event))
     if (!parsed.success) {
       throw createError({ statusCode: 400, statusMessage: 'Invalid body', data: parsed.error.flatten() })

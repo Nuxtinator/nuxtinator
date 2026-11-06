@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')!
   return await withOrgContext(event, async (tx, ctx) => {
     await requireTypePermission(tx, ctx, typeKey, 'delete')
-    await requireRecordType(tx, typeKey)
+    await requireRecordType(tx, typeKey, ctx)
     await assertRecordVisible(tx, ctx, typeKey, id)
     await deleteRecord(tx, ctx, typeKey, id)
     return { ok: true }

@@ -13,7 +13,7 @@ export default defineEventHandler(async (event) => {
   const userId = getRouterParam(event, 'userId')!
   return await withOrgContext(event, async (tx, ctx) => {
     await requireTypePermission(tx, ctx, typeKey, 'share')
-    await requireRecordType(tx, typeKey)
+    await requireRecordType(tx, typeKey, ctx)
     await assertRecordVisible(tx, ctx, typeKey, id)
 
     await removeShare(tx, ctx, id, userId)

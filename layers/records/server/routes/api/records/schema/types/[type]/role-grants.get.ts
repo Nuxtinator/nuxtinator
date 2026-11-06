@@ -11,7 +11,7 @@ import { buildRoleGrantsView, getRecordType } from '#records/server'
 
 export default defineEventHandler(async (event) => {
   const typeKey = getRouterParam(event, 'type')!
-  return await withOrgPermission(event, 'records.schema.manage', async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'records' }, 'records.schema.manage', async (tx, ctx) => {
     const type = await getRecordType(tx, typeKey)
     // Orphan rows have no live routes to gate — nothing to grant against.
     if (!type || type.orphan) {

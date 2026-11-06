@@ -12,7 +12,7 @@ import { assertRecordsPermissionSlug, listRecordsUserGrants, requireGrantTarget 
 export default defineEventHandler(async (event) => {
   const userId = getRouterParam(event, 'userId')!
   const permission = getRouterParam(event, 'permission')!
-  return await withOrgPermission(event, 'records.schema.manage', async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'records' }, 'records.schema.manage', async (tx, ctx) => {
     assertRecordsPermissionSlug(permission)
     await requireGrantTarget(tx, ctx, userId)
     await revokeUserPermission(tx, ctx, userId, permission)

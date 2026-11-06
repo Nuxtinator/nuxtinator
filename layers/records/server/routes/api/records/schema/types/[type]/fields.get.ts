@@ -15,7 +15,7 @@ import { closingRulesOf, getRecordTypeFields, requireRecordType } from '#records
 export default defineEventHandler(async (event) => {
   const typeKey = getRouterParam(event, 'type')!
   return await withOrgContext(event, async (tx, ctx) => {
-    const type = await requireRecordType(tx, typeKey)
+    const type = await requireRecordType(tx, typeKey, ctx)
     const canManage = ctx.perms.has('records.schema.manage')
     const all = await getRecordTypeFields(tx, typeKey)
     const fields = all

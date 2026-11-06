@@ -10,7 +10,7 @@ import { deleteField } from '#records/server'
 export default defineEventHandler(async (event) => {
   const typeKey = getRouterParam(event, 'type')!
   const fieldKey = getRouterParam(event, 'key')!
-  return await withOrgPermission(event, 'records.schema.manage', async (tx, ctx) => {
+  return await withOrgPermission(event, { appId: 'records' }, 'records.schema.manage', async (tx, ctx) => {
     await deleteField(tx, ctx, typeKey, fieldKey)
     return { ok: true }
   })

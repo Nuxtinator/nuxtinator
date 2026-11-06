@@ -122,8 +122,8 @@ function recordOut(record: RecordsHydratedRecord, rules: ReturnType<typeof closi
   }
 }
 
-async function typeContext(tx: Tx, typeKey: string) {
-  const type = await requireRecordType(tx, typeKey)
+async function typeContext(tx: Tx, tenant: TenantContext, typeKey: string) {
+  const type = await requireRecordType(tx, typeKey, tenant)
   const defs = (await getRecordTypeFields(tx, typeKey)).filter(d => !d.orphan)
   return { type, defs, rules: closingRulesOf(type, defs) }
 }
@@ -231,7 +231,7 @@ export const searchRecordsTool = defineMcpTool({
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.read', async (tx, tenant) => {
       await requireTypePermission(tx, tenant, input.type, 'read')
-      const { defs, rules } = await typeContext(tx, input.type)
+      const { defs, rules } = await typeContext(tx, tenant, input.type)
       const limit = input.limit ?? 10
       const base = {
         q: input.query,
@@ -295,7 +295,7 @@ export const getRecordTool = defineMcpTool({
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.read', async (tx, tenant) => {
       await requireTypePermission(tx, tenant, input.type, 'read')
-      const { rules } = await typeContext(tx, input.type)
+      const { rules } = await typeContext(tx, tenant, input.type)
       await assertRecordVisible(tx, tenant, input.type, input.id)
       const record = await getRecord(tx, tenant, input.type, input.id)
 
@@ -326,7 +326,7 @@ export const listTimelineTool = defineMcpTool({
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.read', async (tx, tenant) => {
       await requireTypePermission(tx, tenant, input.type, 'read')
-      await requireRecordType(tx, input.type)
+      await requireRecordType(tx, input.type, tenant)
       await assertRecordVisible(tx, tenant, input.type, input.id)
       const limit = input.limit ?? 20
       const comments = await listComments(tx, input.id, { limit, before: input.commentsCursor })
@@ -374,7 +374,7 @@ export const createRecordTool = defineMcpTool({
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
       await requireTypePermission(tx, tenant, input.type, 'create')
-      const { defs, rules } = await typeContext(tx, input.type)
+      const { defs, rules } = await typeContext(tx, tenant, input.type)
       const record = await applyFieldPatch(tx, tenant, input.type, null, input.fields)
       const changes = diffFields(defs, null, record.fields)
       return text(`Created ${record.name} (${record.id}). ${changeSummary(changes)}`, {
@@ -394,7 +394,7 @@ export const updateRecordTool = defineMcpTool({
   input: z.object({ org: orgInput, type: typeInput, id: idInput, fields: fieldsInput }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
-      const { defs, rules } = await typeContext(tx, input.type)
+      const { defs, rules } = await typeContext(tx, tenant, input.type)
       await assertRecordVisible(tx, tenant, input.type, input.id)
       await requireRecordUpdate(tx, tenant, input.type, input.id)
       await runRecordsPatchGuards(tx, { typeKey: input.type, recordId: input.id, fields: input.fields })
@@ -424,7 +424,7 @@ export const closeRecordTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
-      const { defs, rules } = await typeContext(tx, input.type)
+      const { defs, rules } = await typeContext(tx, tenant, input.type)
       if (!rules.statusKey || rules.closedStatuses.length === 0) {
         throw createError({ statusCode: 400, statusMessage: `${input.type} records can't be closed: no status counts as closed.` })
       }
@@ -466,7 +466,7 @@ export const addCommentTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
-      await requireRecordType(tx, input.type)
+      await requireRecordType(tx, input.type, tenant)
       await assertRecordVisible(tx, tenant, input.type, input.id)
       await requireRecordUpdate(tx, tenant, input.type, input.id)
       const comment = await addComment(tx, tenant, input.id, { body: input.body })
@@ -551,7 +551,7 @@ export const addFieldTool = defineMcpTool({
   input: z.object({ org: orgInput, type: typeInput, field: fieldSpecInput }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.schema.manage', async (tx, tenant) => {
-      await requireRecordType(tx, input.type)
+      await requireRecordType(tx, input.type, tenant)
       const field = await addFieldTo(tx, tenant, input.type, input.field)
       return text(`Added ${field.label} to ${input.type}.`, {
         field: { key: field.key, label: field.label, kind: field.kind }

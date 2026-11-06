@@ -24,6 +24,7 @@ import type { Expression, ExpressionBuilder, RawBuilder, SqlBool, Transaction } 
 import { z } from 'zod'
 import type { Database } from '#core/server/database/schema'
 import { isAppEnabledForCurrentOrg, type TenantContext } from '#tenant/server'
+import { APP_TEAM_GATE_MESSAGE, isAppOpenToUser } from '#core/server/utils/groups'
 import { getRecordType, getRecordTypeFields, recordsStatusDefault, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
 import { resolveTypePermission } from './type-permissions'
 import type { RecordRow } from './record-storage'
@@ -666,16 +667,21 @@ export async function listRecords(
 }
 
 // 404s for unknown and stale (orphan) type keys. Hidden types stay reachable
-// by URL — hiding removes a type from navigation, not from its data. A type
-// owned by an app (contacts → crm) 410s while that app is off for the org.
-export async function requireRecordType(tx: Tx, typeKey: string): Promise<RecordTypeSetting> {
+// by URL — hiding removes a type from navigation, not from its data. The app
+// that owns the type (contacts → crm; the records app for types without one)
+// gates its records the way a route's `appId` would: 410 while the app is off
+// for the org, 403 when its access list names teams the caller is not on.
+export async function requireRecordType(tx: Tx, typeKey: string, ctx: TenantContext): Promise<RecordTypeSetting> {
   const type = await getRecordType(tx, typeKey)
   if (!type || type.orphan) {
     throw createError({ statusCode: 404, statusMessage: `Unknown record type: ${typeKey}` })
   }
-  const app = type.manifest?.app
-  if (app && !(await isAppEnabledForCurrentOrg(tx, app))) {
+  const app = type.manifest?.app ?? 'records'
+  if (!(await isAppEnabledForCurrentOrg(tx, app))) {
     throw createError({ statusCode: 410, statusMessage: `App "${app}" is not enabled for this organization.` })
+  }
+  if (!(await isAppOpenToUser(tx, { appId: app, orgId: ctx.orgId, userId: ctx.userId }))) {
+    throw createError({ statusCode: 403, statusMessage: APP_TEAM_GATE_MESSAGE })
   }
   return type
 }

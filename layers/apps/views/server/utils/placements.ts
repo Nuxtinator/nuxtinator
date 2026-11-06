@@ -28,7 +28,7 @@ import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
-import { applyFieldPatch, assertRecordVisible, getRecordTypeFields, requireRecordUpdate } from '#records/server'
+import { applyFieldPatch, assertRecordVisible, getRecordType, getRecordTypeFields, requireRecordUpdate, requireTypePermission } from '#records/server'
 import type { RecordsFieldSetting } from '#records/server'
 import { getViewsGroupValues } from './view-records'
 import type { ViewDefinition, ViewRow, ViewTabDefinition, ViewTabRow } from './views'
@@ -255,7 +255,9 @@ export async function moveViewsCard(
 /**
  * Adds an existing record to a hand-picked view. With a tab and a column, it
  * also lands at the end of that column (a board with its own columns) or of
- * that tab's list.
+ * that tab's list. On types whose boards grant visibility, adding shows the
+ * record to everyone who can open the view, so it takes the type's share
+ * permission.
  */
 export async function addViewsCard(
   tx: Tx,
@@ -268,6 +270,10 @@ export async function addViewsCard(
     badMove('This view shows every matching record — there is nothing to add')
   }
   await assertRecordVisible(tx, ctx, view.record_type_key, recordId)
+  const type = await getRecordType(tx, view.record_type_key)
+  if (type?.boardsGrantVisibility ?? true) {
+    await requireTypePermission(tx, ctx, view.record_type_key, 'share')
+  }
 
   const added = await tx
     .insertInto('views_items')
