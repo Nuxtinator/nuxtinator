@@ -78,7 +78,7 @@ export interface ViewDetail extends Omit<ViewSummary, 'layout' | 'tabCount'> {
   /** The view reached the caller through a share row of their own. */
   sharedWithMe: boolean
   /** The teams a view with visibility 'teams' opens to. */
-  teams: Array<{ id: string, name: string, archived: boolean }>
+  teams: Array<{ id: string, name: string, icon: string | null, image: string | null, archived: boolean }>
 }
 
 /**
