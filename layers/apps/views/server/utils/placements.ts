@@ -13,7 +13,8 @@
 //   so carrying a deliverable into next quarter keeps this quarter too.
 // - A board with its own columns: the drag is pure view state — the
 //   placement row moves. Records of the view with no placement on the tab
-//   sit in its first column.
+//   sit in its first column on a hand-picked view, and in a leading
+//   "No column" lane ('') on a view that shows every matching record.
 // - An ungrouped list: the drag only reorders.
 //
 // Ranks are fractional indexes (lexicographic, via the fractional-indexing
@@ -109,7 +110,7 @@ async function writeRank(
   view: ViewRow,
   tab: ViewTabRow,
   input: ViewsMoveInput,
-  // Boards with their own columns hold only the view's records: cards the
+  // A hand-picked view's boards hold only the view's records: cards the
   // client lists that aren't in the view never get a placement row.
   eligibleIds: Set<string> | null
 ): Promise<void> {
@@ -188,7 +189,9 @@ export async function moveViewsCard(
   if (input.columnOrder.length > VIEWS_MOVE_ORDER_MAX) badMove('columnOrder too large')
 
   if (def.columns) {
-    if (!def.columns.some(c => c.key === input.toColumn)) badMove(`Unknown column "${input.toColumn}"`)
+    const picked = !!(view.definition as ViewDefinition).picked
+    const noColumn = input.toColumn === '' && !picked
+    if (!noColumn && !def.columns.some(c => c.key === input.toColumn)) badMove(`Unknown column "${input.toColumn}"`)
     await assertInView(tx, ctx, view, input.recordId)
     // One column per card on a board with its own columns.
     await tx
@@ -197,7 +200,7 @@ export async function moveViewsCard(
       .where('record_id', '=', input.recordId)
       .where('column_key', '!=', input.toColumn)
       .execute()
-    await writeRank(tx, view, tab, input, await viewItemSet(tx, view.id))
+    await writeRank(tx, view, tab, input, picked ? await viewItemSet(tx, view.id) : null)
     return
   }
 

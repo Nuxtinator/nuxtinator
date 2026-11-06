@@ -96,9 +96,10 @@ interface BoardColumn {
 }
 
 // The tab's columns (board) or sections (list) with their cards, in the same
-// shape the UI shows: custom columns from the definition, one column per
-// grouping value with a leading "No value" column, or a single unnamed
-// section for an ungrouped list. Manual ranks order cards within a column.
+// shape the UI shows: custom columns from the definition (after a leading
+// "No column" lane when the view isn't hand-picked), one column per grouping
+// value with a leading "No value" column, or a single unnamed section for an
+// ungrouped list. Manual ranks order cards within a column.
 async function boardColumns(tx: Tx, view: ViewRow, tab: ViewTabRow, records: ViewRecords): Promise<BoardColumn[]> {
   const def = tab.definition as ViewTabDefinition
   const rank = new Map(records.placements.filter(p => p.rank).map(p => [`${p.recordId}:${p.columnKey}`, p.rank!]))
@@ -117,12 +118,14 @@ async function boardColumns(tx: Tx, view: ViewRow, tab: ViewTabRow, records: Vie
 
   if (def.columns) {
     const columnOf = new Map(records.placements.map(p => [p.recordId, p.columnKey]))
-    const first = def.columns[0]?.key
+    const picked = !!(view.definition as ViewDefinition).picked
+    const lanes = picked ? def.columns : [{ key: '', label: 'No column' }, ...def.columns]
+    const fallback = lanes[0]?.key
     const home = (id: string) => {
       const key = columnOf.get(id)
-      return key !== undefined && def.columns!.some(c => c.key === key) ? key : first
+      return key !== undefined && lanes.some(c => c.key === key) ? key : fallback
     }
-    return def.columns.map(c => ({
+    return lanes.map(c => ({
       key: c.key,
       label: c.label,
       cards: ordered(c.key, records.items.filter(i => home(i.id) === c.key).map(i => i.id))
@@ -251,7 +254,7 @@ export const addTabTool = defineMcpTool({
     name: z.string().trim().min(1).max(80),
     layout: layoutInput,
     groupField: z.string().max(80).optional().describe('Boards and lists: the field whose values make the columns or sections.'),
-    columns: z.array(z.string().trim().min(1).max(80)).min(1).max(50).optional().describe('Boards of a view of hand-picked records only: the board\'s own columns.'),
+    columns: z.array(z.string().trim().min(1).max(80)).max(50).optional().describe('Boards only, instead of groupField: the board\'s own columns. Moving a card between them never changes the record. In a view that shows every matching record, cards start in a "No column" lane (key ""), and [] gives a board with just that lane; a view of hand-picked records needs at least one column.'),
     cardFields: z.array(z.string().max(80)).max(20).optional(),
     sort: z.object({ field: z.string().max(80), dir: z.enum(['asc', 'desc']) }).strict().optional(),
     filter: filterInput.optional()
@@ -426,8 +429,8 @@ export const moveCardTool = defineMcpTool({
     view: viewIdInput,
     tab: tabIdInput,
     record: z.string().uuid(),
-    fromColumn: z.string().max(80).describe('The column the card is in now ("" for "No value").'),
-    toColumn: z.string().max(80).describe('The column to move it to ("" for "No value").')
+    fromColumn: z.string().max(80).describe('The column the card is in now ("" for "No value" or "No column").'),
+    toColumn: z.string().max(80).describe('The column to move it to ("" for "No value" or "No column").')
   }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, async (tx, tenant) => {

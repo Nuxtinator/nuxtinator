@@ -1,7 +1,8 @@
-// Boards with their own columns in a hand-picked view: explicit membership
+// Boards with their own columns. In a hand-picked view: explicit membership
 // (the feed shows only records added to the view), the one-column-per-card
 // invariant across moves, add/remove guards, and drag writing view state
-// only — never the record.
+// only — never the record. In a view of every matching record: a custom
+// column tab beside a status board, with unplaced cards in "No column".
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import {
@@ -128,6 +129,83 @@ describe('custom boards', () => {
     await expect($fetch(`/api/views/${board.id}/move`, {
       method: 'POST',
       body: { recordId: stranger.id, fromColumn: null, toColumn: 'todo', columnOrder: [stranger.id] },
+      ...opts
+    })).rejects.toMatchObject({ statusCode: 400 })
+
+    // A hand-picked board has no "No column" lane, so it keeps a column.
+    await expect($fetch(`/api/views/${board.id}/tabs`, {
+      method: 'POST',
+      body: { layout: 'kanban', definition: { columns: [] } },
+      ...opts
+    })).rejects.toMatchObject({ statusCode: 400 })
+    await expect($fetch(`/api/views/${board.id}/move`, {
+      method: 'POST',
+      body: { recordId: rec.id, fromColumn: 'doing', toColumn: '', columnOrder: [rec.id] },
+      ...opts
+    })).rejects.toMatchObject({ statusCode: 400 })
+  })
+
+  it('a status view can add a tab of custom columns; cards start in "No column"', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    const view = await $fetch<{ id: string }>('/api/views', {
+      method: 'POST',
+      body: {
+        name: 'test-views status view',
+        recordTypeKey: 'contacts',
+        tab: { layout: 'kanban', definition: { groupField: 'status' } }
+      },
+      ...opts
+    })
+    const tab = await $fetch<{ id: string, definition: Record<string, unknown> }>(`/api/views/${view.id}/tabs`, {
+      method: 'POST',
+      body: { name: 'Triage', layout: 'kanban', definition: { columns: COLUMNS } },
+      ...opts
+    })
+    expect(tab.definition.columns).toEqual(COLUMNS)
+
+    // A board of just the "No column" lane is fine here.
+    const bare = await $fetch<{ definition: Record<string, unknown> }>(`/api/views/${view.id}/tabs`, {
+      method: 'POST',
+      body: { layout: 'kanban', definition: { columns: [] } },
+      ...opts
+    })
+    expect(bare.definition.columns).toEqual([])
+
+    const sorted = await createContact(opts, 'test-views Sorted')
+    const unsorted = await createContact(opts, 'test-views Unsorted')
+    const tabFeed = () => $fetch<Feed>(`/api/views/${view.id}/records?tab=${tab.id}`, opts)
+
+    // Every matching record is on the tab, none placed yet.
+    let res = await tabFeed()
+    expect(res.items.map(i => i.id).sort()).toEqual([sorted.id, unsorted.id].sort())
+    expect(res.placements).toHaveLength(0)
+
+    const moveTo = (toColumn: string, fromColumn: string | null) => $fetch(`/api/views/${view.id}/move`, {
+      method: 'POST',
+      body: { tabId: tab.id, recordId: sorted.id, fromColumn, toColumn, columnOrder: [sorted.id] },
+      ...opts
+    })
+    await moveTo('doing', '')
+    res = await tabFeed()
+    expect(res.placements).toEqual([expect.objectContaining({ recordId: sorted.id, columnKey: 'doing' })])
+
+    // The record is untouched, and the status tab doesn't see the placement.
+    const detail = await $fetch<{ fields: Record<string, unknown> }>(`/api/records/entries/contacts/${sorted.id}`, opts)
+    expect(detail.fields.status).toBe('new')
+    const statusFeed = await feed(opts, view.id)
+    expect(statusFeed.placements.filter(p => p.columnKey === 'doing')).toHaveLength(0)
+
+    // Back to "No column", and unknown columns are refused.
+    await moveTo('', 'doing')
+    res = await tabFeed()
+    expect(res.placements).toEqual([expect.objectContaining({ recordId: sorted.id, columnKey: '' })])
+    await expect(moveTo('nope', '')).rejects.toMatchObject({ statusCode: 400 })
+
+    // Records are never added to or taken off a view of every matching record.
+    await expect($fetch(`/api/views/${view.id}/cards`, {
+      method: 'POST',
+      body: { recordId: unsorted.id, tabId: tab.id, columnKey: 'todo' },
       ...opts
     })).rejects.toMatchObject({ statusCode: 400 })
   })

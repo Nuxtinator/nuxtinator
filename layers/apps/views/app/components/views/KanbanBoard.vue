@@ -10,15 +10,19 @@
 //   column. A card with several values appears in each matching column.
 //   Adding a column mints a tag (local until a card lands in it) or creates a
 //   record of the connection's target type.
-// - Custom: columns come from the view definition; membership from
-//   placements. A placement pointing at a removed column renders in the
-//   first column so no card silently disappears.
+// - Custom: columns come from the tab definition; membership from
+//   placements. A card with no placement, or one pointing at a removed
+//   column, renders in the first column of a hand-picked view, or in a
+//   leading "No column" lane otherwise, so no card silently disappears.
+//   Only a hand-picked view adds existing records to the board or takes
+//   them off it.
 import type { RecordsFieldSetting } from '#records/client'
 import type {
   ViewsColumnDef,
   ViewsTabView,
   ViewRecords
 } from '../../utils/views-types'
+import { VIEWS_NO_VALUE_COLUMN } from '../../utils/views-types'
 
 const props = defineProps<{
   view: ViewsTabView
@@ -72,6 +76,7 @@ const canAddGroupColumn = computed(() =>
 
 const columns = useViewsColumns(() => ({
   definition: definition.value,
+  picked: props.view.picked,
   records: props.records,
   fields: props.fields,
   pendingTagColumns: pendingTagColumns.value
@@ -163,7 +168,9 @@ function submitColumnModal() {
 
 function removeColumn(key: string) {
   const existing = definition.value.columns ?? []
-  if (existing.length <= 1) return
+  // A hand-picked view's cards need a column to sit in; elsewhere they fall
+  // back to "No column".
+  if (props.view.picked && existing.length <= 1) return
   emit('columnsChange', existing.filter(c => c.key !== key))
 }
 
@@ -207,8 +214,9 @@ const columnModalOpen = computed({
       :card-connections="cardConnections"
       :group-field-key="groupField?.key ?? null"
       :can-quick-add="canCreate"
-      :can-manage="isCustom && canEditDefinition"
+      :can-manage="isCustom && canEditDefinition && column.key !== VIEWS_NO_VALUE_COLUMN"
       :is-custom="isCustom"
+      :picked="view.picked"
       :dragging-id="draggingId"
       :dragging-column-key="draggingColumnKey"
       @open="emit('open', $event)"

@@ -64,7 +64,11 @@ export interface ViewTabDefinition {
    * into sections.
    */
   groupField?: string
-  /** Board of a hand-picked view: its own columns. XOR with `groupField`. */
+  /**
+   * Board: its own columns (XOR with `groupField`). A card's column is its
+   * placement on the tab; in a view that isn't hand-picked, records without
+   * one sit in a leading "No column" lane.
+   */
   columns?: ViewsColumnDef[]
   /**
    * Field keys shown on cards, list rows and as table columns (name is always
@@ -102,7 +106,7 @@ const columnSchema = z.object({
 
 export const viewsTabDefinitionSchema = z.object({
   groupField: z.string().min(1).max(80).optional(),
-  columns: z.array(columnSchema).min(1).max(50).optional(),
+  columns: z.array(columnSchema).max(50).optional(),
   cardFields: z.array(z.string().min(1).max(80)).max(20).optional(),
   cardConnections: z.record(z.string(), z.enum(['names', 'count', 'progress'])).optional(),
   filter: z.unknown().optional(),
@@ -141,7 +145,7 @@ export async function sanitizeViewDefinition(tx: Tx, typeKey: string, raw: unkno
 }
 
 /**
- * Validates a tab definition against its layout, its view, and the record
+ * Validates a tab definition against its layout and the record
  * type's real fields, and returns it typed. Filter values are coerced later by
  * the list engine at read time; this guards the shape and the referenced keys.
  */
@@ -161,8 +165,10 @@ export async function sanitizeTabDefinition(
     if (!!def.groupField === !!def.columns) {
       badDefinition('a board needs exactly one of groupField or columns')
     }
-    if (def.columns && !opts.picked) {
-      badDefinition('a board with its own columns belongs to a view of hand-picked records')
+    // A hand-picked view's cards always sit in one of its columns; elsewhere
+    // the "No column" lane holds the rest.
+    if (opts.picked && def.columns?.length === 0) {
+      badDefinition('a board of hand-picked records needs at least one column')
     }
   } else if (def.columns) {
     badDefinition('only boards have their own columns')
@@ -309,9 +315,8 @@ export interface ViewTabInput {
 
 /** Adds a tab after the view's last one. */
 export async function insertTab(tx: Tx, view: ViewRow, input: ViewTabInput): Promise<ViewTabRow> {
-  const viewDef = view.definition as ViewDefinition
   const definition = await sanitizeTabDefinition(tx, view.record_type_key, input.layout, input.definition, {
-    picked: !!viewDef.picked
+    picked: !!(view.definition as ViewDefinition).picked
   })
   const last = await tx
     .selectFrom('views_tabs')

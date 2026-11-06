@@ -194,6 +194,14 @@ async function onQuickAdd({ columnKey, name }: { columnKey: string, name: string
         method: 'POST',
         body: { recordId: created.id, tabId: t.id, columnKey: isCustom.value ? columnKey : undefined }
       })
+    } else if (isCustom.value && columnKey !== '') {
+      // Own columns on a view of every matching record: the new card's
+      // column is its placement, at the end of the column it was added from.
+      const inColumn = (tabRecords.value?.placements ?? [])
+        .filter(p => p.columnKey === columnKey && p.recordId !== created.id)
+        .sort((a, b) => (a.rank ?? '') < (b.rank ?? '') ? -1 : (a.rank ?? '') > (b.rank ?? '') ? 1 : 0)
+        .map(p => p.recordId)
+      await move({ recordId: created.id, fromColumn: null, toColumn: columnKey, columnOrder: [...inColumn, created.id] })
     }
     await refreshRecords()
   } catch (err) {
@@ -383,7 +391,8 @@ function openTabSettings(t: ViewsTab) {
   tabModalOpen.value = true
 }
 
-// Fresh own-column boards start with the classic three lanes.
+// Fresh custom-column boards of a hand-picked view start with the classic
+// three columns; elsewhere they start with just the "No column" lane.
 const DEFAULT_COLUMNS: ViewsColumnDef[] = [
   { key: 'todo', label: 'To do' },
   { key: 'doing', label: 'Doing' },
@@ -394,7 +403,7 @@ function definitionFor(choice: ViewsTabChoice, base: ViewsDefinition): ViewsDefi
   const definition: ViewsDefinition = structuredClone(toRaw(base))
   delete definition.groupField
   if (!choice.ownColumns) delete definition.columns
-  if (choice.ownColumns && !definition.columns) definition.columns = DEFAULT_COLUMNS
+  if (choice.ownColumns && !definition.columns) definition.columns = picked.value ? DEFAULT_COLUMNS : []
   if (choice.groupField) definition.groupField = choice.groupField
   return definition
 }
@@ -841,7 +850,6 @@ const menuItems = computed(() => {
       v-model:open="tabModalOpen"
       :tab="tabModalTab"
       :fields="fields"
-      :picked="picked"
       :saving="saving"
       @save="onTabSave"
     />

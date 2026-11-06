@@ -1,7 +1,7 @@
 // Definition validation on create: a board's grouping XOR, key existence
 // against the type's real fields, groupable-kind gating, tables refusing
-// grouping, own columns only in hand-picked views, and filter trees checked
-// rule by rule.
+// grouping, own columns only on boards, and filter trees checked rule by
+// rule.
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import {
@@ -61,13 +61,11 @@ describe('definition validation', () => {
       .rejects.toMatchObject({ statusCode: 400 })
   })
 
-  it('rejects grouping on tables, own columns outside hand-picked views, and unknown card/sort keys', async () => {
+  it('rejects grouping on tables, own columns outside boards, and unknown card/sort keys', async () => {
     const { org, auth } = await createViewsOrgWith(sql, ['admin'])
     const opts = withOrgHeader(auth, org.slug)
 
     await expect(attempt(opts, { layout: 'table', definition: { groupField: 'status' } }))
-      .rejects.toMatchObject({ statusCode: 400 })
-    await expect(attempt(opts, { definition: { columns: [{ key: 'a', label: 'A' }] } }))
       .rejects.toMatchObject({ statusCode: 400 })
     await expect(attempt(opts, { layout: 'list', definition: { columns: [{ key: 'a', label: 'A' }] } }, { picked: true }))
       .rejects.toMatchObject({ statusCode: 400 })

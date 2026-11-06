@@ -1,9 +1,10 @@
 // The columns of a board, or the sections of a list, with their cards in
 // order: manual ranks first, feed order for the rest.
 //
-// - Own columns (a hand-picked view's board): columns from the definition,
-//   membership from placements. A record with no placement, or one pointing
-//   at a removed column, sits in the first column so nothing silently
+// - Own columns: columns from the definition, membership from placements. A
+//   record with no placement, or one pointing at a removed column, sits in
+//   the first column of a hand-picked view, or in a leading "No column" lane
+//   of a view that shows every matching record, so nothing silently
 //   disappears.
 // - Grouped by a field: the field's options (selects), the users or tags
 //   present on records (plus tag columns added this session), or the target
@@ -23,6 +24,8 @@ export interface ViewsColumn {
 
 export interface ViewsColumnsSource {
   definition: ViewsDefinition
+  /** The view holds hand-picked records (its own-column boards have no "No column" lane). */
+  picked?: boolean
   records: ViewRecords
   fields: RecordsFieldSetting[]
   /** Tag columns added this session, shown before any card carries them. */
@@ -58,7 +61,9 @@ export function useViewsColumns(source: () => ViewsColumnsSource) {
     const items = src.records.items
 
     if (src.definition.columns) {
-      const defs = src.definition.columns ?? []
+      const defs: Array<{ key: string, label: string, color?: string }> = src.picked
+        ? src.definition.columns
+        : [{ key: VIEWS_NO_VALUE_COLUMN, label: 'No column' }, ...src.definition.columns]
       const byColumn = new Map<string, ViewsBoardItem[]>(defs.map(d => [d.key, []]))
       const columnOf = new Map<string, string>()
       for (const p of src.records.placements) columnOf.set(p.recordId, p.columnKey)

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Add or change a tab: its name, layout, and how it groups. A board groups by
-// a field or — in a view of hand-picked records — has its own columns; a list
-// may group into sections; a table doesn't group.
+// a field or has its own columns; a list may group into sections; a table
+// doesn't group.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsLayout, ViewsTab } from '../../utils/views-types'
 
@@ -11,8 +11,6 @@ const props = defineProps<{
   /** The tab being changed; null adds a new one. */
   tab: ViewsTab | null
   fields: RecordsFieldSetting[]
-  /** The view holds hand-picked records, so boards may have their own columns. */
-  picked: boolean
   saving?: boolean
 }>()
 
@@ -28,7 +26,7 @@ const emit = defineEmits<{
 }>()
 
 const name = ref('')
-const layout = ref<ViewsLayout>('list')
+const layout = ref<ViewsLayout>('kanban')
 const boardMode = ref<'field' | 'custom'>('field')
 const groupField = ref<string | undefined>(undefined)
 
@@ -36,25 +34,25 @@ watch(open, (v) => {
   if (!v) return
   const tab = props.tab
   name.value = tab?.name ?? ''
-  layout.value = tab?.layout ?? 'list'
+  layout.value = tab?.layout ?? 'kanban'
   boardMode.value = tab?.definition.columns ? 'custom' : 'field'
   groupField.value = tab?.definition.groupField
 })
 
 const LAYOUT_ITEMS = [
-  { label: 'List', value: 'list' },
   { label: 'Board', value: 'kanban' },
+  { label: 'List', value: 'list' },
   { label: 'Table', value: 'table' }
 ]
 const BOARD_MODE_ITEMS = [
   { label: 'Group by a field', value: 'field' },
-  { label: 'Own columns', value: 'custom' }
+  { label: 'Custom columns', value: 'custom' }
 ]
 
 const groupFieldItems = computed(() =>
   viewsGroupableFields(props.fields).map(f => ({ label: f.label, value: f.key })))
 
-const ownColumns = computed(() => layout.value === 'kanban' && props.picked && boardMode.value === 'custom')
+const ownColumns = computed(() => layout.value === 'kanban' && boardMode.value === 'custom')
 
 const canSave = computed(() => {
   if (layout.value === 'kanban' && !ownColumns.value && !groupField.value) return false
@@ -101,10 +99,11 @@ function submit() {
         </UFormField>
 
         <template v-if="layout === 'kanban'">
-          <UFormField
-            v-if="picked"
-            label="Columns"
-          >
+          <UFormField>
+            <template #label>
+              Columns
+              <InfoTip text="Moving a card between custom columns only changes where it sits on this board, never the record." />
+            </template>
             <URadioGroup
               v-model="boardMode"
               :items="BOARD_MODE_ITEMS"

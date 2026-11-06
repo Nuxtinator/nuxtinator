@@ -31,6 +31,8 @@ const props = defineProps<{
   /** Custom board + edit access: rename/remove column, add existing cards. */
   canManage: boolean
   isCustom: boolean
+  /** The view holds hand-picked records: cards are added to it and taken off it. */
+  picked: boolean
   /** Record id currently being dragged anywhere on the board, if any. */
   draggingId: string | null
   /** Key of the column currently being dragged on the board, if any. */
@@ -258,7 +260,7 @@ const badgeColor = computed<RecordsBadgeColor>(() => {
 })
 
 const menuItems = computed(() => [[
-  { label: 'Add existing record', icon: 'i-lucide-search', onSelect: () => emit('addExisting') },
+  ...(props.picked ? [{ label: 'Add existing record', icon: 'i-lucide-search', onSelect: () => emit('addExisting') }] : []),
   { label: 'Rename column', icon: 'i-lucide-pencil', onSelect: () => emit('rename') },
   { label: 'Remove column', icon: 'i-lucide-trash-2', color: 'error' as const, onSelect: () => emit('remove') }
 ]])
@@ -346,7 +348,7 @@ const menuItems = computed(() => [[
               @dragend="onCardDragEnd"
             />
             <UButton
-              v-if="isCustom && canManage"
+              v-if="isCustom && canManage && picked"
               icon="i-lucide-x"
               variant="ghost"
               color="neutral"
