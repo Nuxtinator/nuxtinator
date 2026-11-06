@@ -224,6 +224,14 @@ describe('view access matrix', () => {
     // A team a view is open to can't be deleted.
     await expectStatus($fetch(`/api/o/${org.slug}/groups/${team.id}`, { method: 'DELETE', ...owner }), 409)
 
+    // A view can be created open to a team, and needs a team to be.
+    const born = await createView(owner, { visibility: 'teams', teamIds: [team.id] }) as ViewDetail & { teams: Array<{ id: string }> }
+    expect(born.visibility).toBe('teams')
+    expect(born.teams.map(t => t.id)).toEqual([team.id])
+    expect((await $fetch<ViewDetail>(`/api/views/${born.id}`, insiderOpts)).accessLevel).toBe('view')
+    await expectStatus($fetch(`/api/views/${born.id}`, outsiderOpts), 404)
+    await expectStatus(createView(owner, { visibility: 'teams', teamIds: [] }), 400)
+
     // Back to private: the team loses it.
     const back = await $fetch<ViewDetail & { teams: unknown[] }>(`/api/views/${view.id}`, {
       method: 'PATCH',

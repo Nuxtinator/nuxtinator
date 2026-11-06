@@ -14,6 +14,8 @@ export interface ViewsCreateInput {
   icon?: string
   recordTypeKey: string
   visibility?: ViewsVisibility
+  /** With visibility 'teams': the teams it opens to. */
+  teamIds?: string[]
   /** View-level: base filter, hand-picked records. */
   definition?: Record<string, unknown>
   /** The view's first tab. */

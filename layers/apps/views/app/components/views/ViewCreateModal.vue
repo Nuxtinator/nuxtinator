@@ -27,7 +27,8 @@ const typeKey = ref<string | undefined>(undefined)
 const viewType = ref<ViewsLayout>('kanban')
 const kanbanMode = ref<'field' | 'custom'>('field')
 const groupField = ref<string | undefined>(undefined)
-const visibility = ref<ViewsVisibility>('private')
+const visibility = ref<string>('private')
+const teamIds = ref<string[]>([])
 const creating = ref(false)
 const createError = ref<string | null>(null)
 
@@ -43,6 +44,7 @@ watch(open, (v) => {
   kanbanMode.value = 'field'
   groupField.value = undefined
   visibility.value = 'private'
+  teamIds.value = []
   createError.value = null
   ensureTypes().catch(() => {
     // The type select stays empty; submit stays disabled.
@@ -93,10 +95,6 @@ const KANBAN_MODE_ITEMS = [
   { label: 'Group by a field', value: 'field' },
   { label: 'Custom columns', value: 'custom' }
 ]
-const VISIBILITY_ITEMS = [
-  { label: 'Private — only me', value: 'private' },
-  { label: 'Organization — everyone', value: 'org' }
-]
 
 const canSubmit = computed(() => {
   if (!name.value.trim() || !typeKey.value) return false
@@ -125,7 +123,8 @@ async function submit() {
       name: name.value.trim(),
       icon: icon.value ?? undefined,
       recordTypeKey: typeKey.value!,
-      visibility: visibility.value,
+      visibility: visibility.value as ViewsVisibility,
+      teamIds: visibility.value === 'teams' ? teamIds.value : undefined,
       definition,
       tab: { layout: viewType.value, definition: tabDefinition }
     })
@@ -261,16 +260,13 @@ async function submit() {
           </div>
         </UFormField>
 
-        <UFormField label="Visibility">
-          <USelectMenu
-            v-model="visibility"
-            :items="VISIBILITY_ITEMS"
-            value-key="value"
-            label-key="label"
-            class="w-full"
-            :disabled="creating"
-          />
-        </UFormField>
+        <TeamAccessField
+          v-model:visibility="visibility"
+          v-model:team-ids="teamIds"
+          app-id="views"
+          none-value="private"
+          :disabled="creating"
+        />
 
         <UAlert
           v-if="createError"
