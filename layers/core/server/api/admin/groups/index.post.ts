@@ -7,7 +7,7 @@ import { createGroup } from '../../../utils/groups'
 export default defineEventHandler(async (event) => {
   const { userId } = await requireOperatorAdmin(event)
   const body = await readBody(event)
-  const group = await createGroup(db, { orgId: null, name: body?.name })
-  logCreate('groups', group.id, userId, { name: body?.name })
+  const group = await createGroup(db, { orgId: null, name: body?.name, icon: body?.icon })
+  logCreate('groups', group.id, userId, { name: body?.name, icon: body?.icon })
   return group
 })

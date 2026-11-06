@@ -48,6 +48,23 @@ describe('/api/admin/groups', () => {
     expect(await sql`SELECT 1 FROM groups WHERE id = ${id}`).toHaveLength(0)
   })
 
+  it('sets, validates and clears a host group\'s icon and image', async () => {
+    const { auth } = await createOperatorAdmin(sql)
+    const { id } = await $fetch<{ id: string }>('/api/admin/groups', { method: 'POST', body: { name: groupName(), icon: '🚀' }, ...auth })
+
+    const tooLong = await $fetch(`/api/admin/groups/${id}`, { method: 'PATCH', body: { icon: 'x'.repeat(65) }, ...auth }).catch(e => e)
+    expect(tooLong.statusCode).toBe(400)
+
+    await $fetch(`/api/admin/groups/${id}`, { method: 'PATCH', body: { icon: 'i-lucide-rocket' }, ...auth })
+    await sql`UPDATE groups SET image = 'https://example.com/group.png' WHERE id = ${id}`
+    const list = await $fetch<{ groups: (AdminGroup & { icon: string | null, image: string | null })[] }>('/api/admin/groups', auth)
+    expect(list.groups.find(g => g.id === id)).toMatchObject({ icon: 'i-lucide-rocket', image: 'https://example.com/group.png' })
+
+    await $fetch(`/api/admin/groups/${id}/image`, { method: 'DELETE', ...auth })
+    await $fetch(`/api/admin/groups/${id}`, { method: 'PATCH', body: { icon: '' }, ...auth })
+    expect(await sql`SELECT icon, image FROM groups WHERE id = ${id}`).toEqual([{ icon: null, image: null }])
+  })
+
   it('adds and removes members, and deleting the group drops its app access', async () => {
     const { auth } = await createOperatorAdmin(sql)
     const member = await createTestUser(sql)
@@ -114,7 +131,7 @@ describe('/api/groups', () => {
 
     const audiences = await $fetch<{ mode: string, groups: { id: string, name: string, members?: unknown[] }[] }>('/api/groups', auth)
     expect(audiences.mode).toBe('audiences')
-    expect(audiences.groups).toEqual([{ id, name, archived: false }])
+    expect(audiences.groups).toEqual([{ id, name, icon: null, image: null, archived: false }])
 
     await $fetch('/api/admin/settings', { method: 'PUT', body: { groupMode: 'teams' }, ...adminAuth })
     const teams = await $fetch<{ groups: { id: string, members: { id: string }[] }[] }>('/api/groups', auth)

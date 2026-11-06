@@ -58,6 +58,26 @@ describe('org groups', () => {
     expect(listed.groups.find(g => g.id === group.id)?.member_count).toBe(1)
   })
 
+  it('sets and clears a group\'s icon and image, and shows them to team pickers', async () => {
+    const { org, adminH, member, memberH } = await setup()
+    const { id } = await $fetch<{ id: string }>(`/api/o/${org.slug}/groups`, {
+      method: 'POST',
+      body: { name: `test-tenancy-${Math.random().toString(36).slice(2, 8)}`, icon: 'i-lucide-rocket' },
+      ...adminH
+    })
+    await $fetch(`/api/o/${org.slug}/groups/${id}/members/${member.id}`, { method: 'PUT', ...adminH })
+    await sql`UPDATE groups SET image = 'https://example.com/team.png' WHERE id = ${id}`
+
+    const { teams } = await $fetch<{ teams: { id: string, icon: string | null, image: string | null }[] }>('/api/teams', memberH)
+    expect(teams.find(t => t.id === id)).toMatchObject({ icon: 'i-lucide-rocket', image: 'https://example.com/team.png' })
+
+    expect(await status($fetch(`/api/o/${org.slug}/groups/${id}/image`, { method: 'DELETE', ...memberH }))).toBe(403)
+    await $fetch(`/api/o/${org.slug}/groups/${id}/image`, { method: 'DELETE', ...adminH })
+    await $fetch(`/api/o/${org.slug}/groups/${id}`, { method: 'PATCH', body: { icon: null }, ...adminH })
+    const [row] = await sql<{ icon: string | null, image: string | null }[]>`SELECT icon, image FROM groups WHERE id = ${id}`
+    expect(row).toEqual({ icon: null, image: null })
+  })
+
   it('lets a role with only org.groups.manage find members to add', async () => {
     const { org, adminH, member } = await setup()
     const role = await $fetch<{ name: string }>(`/api/o/${org.slug}/roles`, {

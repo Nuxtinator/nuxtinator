@@ -15,8 +15,11 @@
 // None of the group tables has RLS. Who may see a group or its members is
 // decided here and in the handlers, the same way the users table is.
 
-import { sql } from 'kysely'
+import { sql, type Transaction } from 'kysely'
+import type { Database } from '../database/schema'
 import type { DbClient } from './settings'
+import { afterCommit } from './after-commit'
+import { deleteStoredAvatar } from './avatar'
 import { clearHostSetting, clearSetting, getHostSetting, getSetting, setHostSetting, setSetting } from './settings-store'
 import { getRegisteredApp } from './app-registry'
 
@@ -114,6 +117,8 @@ export interface GroupRow {
   id: string
   org_id: string | null
   name: string
+  icon: string | null
+  image: string | null
   archived_at: Date | null
   created_at: Date
   member_count: number
@@ -123,7 +128,7 @@ export interface GroupRow {
 export async function listGroups(tx: DbClient, orgId: string | null): Promise<GroupRow[]> {
   const rows = await tx
     .selectFrom('groups')
-    .select(['groups.id', 'groups.org_id', 'groups.name', 'groups.archived_at', 'groups.created_at'])
+    .select(['groups.id', 'groups.org_id', 'groups.name', 'groups.icon', 'groups.image', 'groups.archived_at', 'groups.created_at'])
     .select(eb => eb.selectFrom('group_members')
       .whereRef('group_members.group_id', '=', 'groups.id')
       .select(eb2 => eb2.fn.countAll<string>().as('n'))
@@ -139,7 +144,7 @@ export async function listGroups(tx: DbClient, orgId: string | null): Promise<Gr
 export async function getGroup(tx: DbClient, id: string): Promise<Omit<GroupRow, 'member_count'> | null> {
   const row = await tx
     .selectFrom('groups')
-    .select(['id', 'org_id', 'name', 'archived_at', 'created_at'])
+    .select(['id', 'org_id', 'name', 'icon', 'image', 'archived_at', 'created_at'])
     .where('id', '=', id)
     .executeTakeFirst()
   return (row as Omit<GroupRow, 'member_count'> | undefined) ?? null
@@ -153,16 +158,28 @@ function cleanName(name: unknown): string {
   return n
 }
 
+// An icon name (`i-lucide-users`) or short text such as an emoji; empty
+// clears it.
+function cleanIcon(icon: unknown): string | null {
+  if (icon === null || icon === undefined) return null
+  const i = typeof icon === 'string' ? icon.trim() : null
+  if (i === null || i.length > 64) {
+    throw createError({ statusCode: 400, statusMessage: 'Icon must be an icon name or up to 64 characters of text' })
+  }
+  return i || null
+}
+
 function isUniqueViolation(err: unknown): boolean {
   return (err as { code?: string })?.code === '23505'
 }
 
-export async function createGroup(tx: DbClient, input: { orgId: string | null, name: unknown }): Promise<{ id: string }> {
+export async function createGroup(tx: DbClient, input: { orgId: string | null, name: unknown, icon?: unknown }): Promise<{ id: string }> {
   const name = cleanName(input.name)
+  const icon = cleanIcon(input.icon)
   try {
     return await tx
       .insertInto('groups')
-      .values({ org_id: input.orgId, name })
+      .values({ org_id: input.orgId, name, icon })
       .returning('id')
       .executeTakeFirstOrThrow()
   } catch (err) {
@@ -179,6 +196,23 @@ export async function renameGroup(tx: DbClient, id: string, name: unknown): Prom
     if (isUniqueViolation(err)) throw createError({ statusCode: 409, statusMessage: 'A group with that name already exists' })
     throw err
   }
+}
+
+export async function setGroupIcon(tx: DbClient, id: string, icon: unknown): Promise<void> {
+  await tx.updateTable('groups').set({ icon: cleanIcon(icon) }).where('id', '=', id).execute()
+}
+
+// Sets the group's uploaded image (null for none). The previous image's file
+// is deleted from storage once the change commits.
+export async function setGroupImage(tx: DbClient, id: string, image: string | null): Promise<void> {
+  const row = await tx.selectFrom('groups').select('image').where('id', '=', id).forUpdate().executeTakeFirst()
+  await tx.updateTable('groups').set({ image }).where('id', '=', id).execute()
+  if (row?.image && row.image !== image) await dropStoredImage(tx, row.image)
+}
+
+async function dropStoredImage(tx: DbClient, url: string): Promise<void> {
+  if (tx.isTransaction) await afterCommit(tx as Transaction<Database>, () => deleteStoredAvatar(url))
+  else await deleteStoredAvatar(url)
 }
 
 // An archived group keeps its members and whatever already uses it, but can't
@@ -214,7 +248,8 @@ export async function deleteGroup(tx: DbClient, id: string): Promise<void> {
       statusMessage: `This group opens ${gated.join(', ')}. Take it off those apps' access first, or archive the group instead.`
     })
   }
-  await tx.deleteFrom('groups').where('id', '=', id).execute()
+  const deleted = await tx.deleteFrom('groups').where('id', '=', id).returning('image').executeTakeFirst()
+  if (deleted?.image) await dropStoredImage(tx, deleted.image)
 }
 
 export interface GroupMemberRow {
@@ -252,16 +287,16 @@ export async function removeGroupMember(tx: DbClient, groupId: string, userId: s
 
 // The groups `userId` is in, in one scope. Archived groups count: they keep
 // working for whatever already uses them.
-export async function getUserGroups(tx: DbClient, userId: string, orgId: string | null): Promise<Array<{ id: string, name: string, archived_at: Date | null }>> {
+export async function getUserGroups(tx: DbClient, userId: string, orgId: string | null): Promise<Array<{ id: string, name: string, icon: string | null, image: string | null, archived_at: Date | null }>> {
   return await tx
     .selectFrom('group_members')
     .innerJoin('groups', 'groups.id', 'group_members.group_id')
-    .select(['groups.id', 'groups.name', 'groups.archived_at'])
+    .select(['groups.id', 'groups.name', 'groups.icon', 'groups.image', 'groups.archived_at'])
     .where('group_members.user_id', '=', userId)
     .$if(orgId === null, qb => qb.where('groups.org_id', 'is', null))
     .$if(orgId !== null, qb => qb.where('groups.org_id', '=', orgId!))
     .orderBy(sql`lower(groups.name)`)
-    .execute() as Array<{ id: string, name: string, archived_at: Date | null }>
+    .execute() as Array<{ id: string, name: string, icon: string | null, image: string | null, archived_at: Date | null }>
 }
 
 // The groups that can open `appId`.
