@@ -105,7 +105,8 @@ function sectionLabel(field: RecordsFieldSetting): string | null {
       >
         <USwitch
           :model-value="!field.hidden"
-          :disabled="busy"
+          :disabled="busy || field.column === 'status'"
+          :title="field.column === 'status' ? 'The status field is always shown' : undefined"
           :aria-label="`Toggle visibility of ${field.label}`"
           @update:model-value="emit('toggleHidden', field, !$event)"
         />

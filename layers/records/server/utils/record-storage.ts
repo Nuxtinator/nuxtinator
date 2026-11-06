@@ -29,7 +29,7 @@ import {
   type RecordsFieldPatch,
   type RecordsListPatch
 } from './records-registry'
-import { getRecordType, getRecordTypeFields, type RecordsFieldSetting } from './definition-settings'
+import { getRecordType, getRecordTypeFields, recordsStatusDefault, type RecordsFieldSetting } from './definition-settings'
 import { normalizeChannelValue } from './normalize'
 import { recordRecordsActivity } from './records-activity'
 import { closingRulesOf, enforceClosingRules } from './closing'
@@ -105,13 +105,16 @@ export async function hydrateRecords(
   const defsByKey = new Map(defs.map(d => [d.key, d]))
   const ids = rows.map(r => r.id)
 
+  // Records saved before their type had a status read as its default.
+  const statusDefault = recordsStatusDefault(defs)
   const out = new Map<string, RecordsHydratedRecord>()
   for (const row of rows) {
+    const status = row.status ?? statusDefault
     const fields: Record<string, unknown> = {}
     for (const def of defs) fields[def.key] = emptyValueFor(def)
     for (const def of defs) {
       if (def.storage === 'promoted') {
-        fields[def.key] = def.column === 'name' ? row.name : row.status
+        fields[def.key] = def.column === 'name' ? row.name : status
       } else if (def.storage === 'jsonb') {
         fields[def.key] = (row.data as Record<string, unknown>)[def.key] ?? null
       }
@@ -120,7 +123,7 @@ export async function hydrateRecords(
       id: row.id,
       recordType: row.record_type,
       name: row.name,
-      status: row.status,
+      status,
       createdBy: row.created_by,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

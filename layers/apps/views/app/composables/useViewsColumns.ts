@@ -7,8 +7,8 @@
 //   disappears.
 // - Grouped by a field: the field's options (selects), the users or tags
 //   present on records (plus tag columns added this session), or the target
-//   type's records (connections), after a leading "No value" column. A record
-//   with several values appears in each matching column.
+//   type's records (connections), after a leading "No value" column (status
+//   has none). A record with several values appears in each matching column.
 // - An ungrouped list: one unnamed section.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsBoardItem, ViewsDefinition, ViewRecords } from '../utils/views-types'
@@ -93,9 +93,10 @@ export function useViewsColumns(source: () => ViewsColumnsSource) {
       for (const value of values) add(value, item)
     }
 
-    const defs: Array<{ key: string, label: string, color?: string }> = [
-      { key: VIEWS_NO_VALUE_COLUMN, label: `No ${field.label.toLowerCase()}` }
-    ]
+    // Every record has a status, so a status board has no "No value" column.
+    const defs: Array<{ key: string, label: string, color?: string }> = field.column === 'status'
+      ? []
+      : [{ key: VIEWS_NO_VALUE_COLUMN, label: `No ${field.label.toLowerCase()}` }]
     if (field.kind === 'connection') {
       for (const col of src.records.groupColumns ?? []) defs.push({ key: col.key, label: col.label })
       // A card may point at a target the caller can't list (or past the cap).

@@ -81,4 +81,4 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
   - Inline filter chips in the toolbar were rejected: they couldn't express OR, and they mixed personal and saved filters in one row.
   - Readable chips under the tabs were considered and left out for now; the count on the button is the only on-page sign of a filter.
 - **The list layout is one row per record with a done checkbox** on types with exactly one closed status; unticking returns the record to its status field's default. Rows drag into a manual order per tab and, when grouped, between sections with the board's move-or-add rules.
-
+- **A board or list grouped by status has no "No status" column.** Every record type has a status and a record without a stored one reads as the default, so the column could only ever be empty; dropping a card there is refused. New boards start grouped by status.

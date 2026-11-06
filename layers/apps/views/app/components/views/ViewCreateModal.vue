@@ -56,7 +56,10 @@ watch(typeKey, async (key) => {
   fieldsPending.value = true
   try {
     const res = await getFields(key)
-    if (key === typeKey.value) fields.value = res.fields
+    if (key === typeKey.value) {
+      fields.value = res.fields
+      if (viewType.value === 'kanban') groupField.value = statusGroupKey()
+    }
   } catch {
     // No groupable fields — the field-mode select stays empty; custom
     // columns remain available.
@@ -70,6 +73,16 @@ const typeItems = computed(() =>
 
 const groupFieldItems = computed(() =>
   viewsGroupableFields(fields.value).map(f => ({ label: f.label, value: f.key })))
+
+// Boards start grouped by status; lists start ungrouped.
+function statusGroupKey(): string | undefined {
+  return viewsGroupableFields(fields.value).find(f => f.column === 'status')?.key
+}
+
+watch(viewType, (type) => {
+  if (type === 'kanban' && !groupField.value) groupField.value = statusGroupKey()
+  else if (type !== 'kanban' && groupField.value === statusGroupKey()) groupField.value = undefined
+})
 
 const VIEW_TYPE_ITEMS = [
   { label: 'Board', value: 'kanban' },

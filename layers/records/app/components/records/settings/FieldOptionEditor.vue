@@ -5,7 +5,8 @@
 // per-option overrides; brand-new keys become admin-added custom options).
 // Removal is soft: `deleted` keeps historical values renderable while the
 // option stops being offered. On a status field, options can be marked as
-// meaning the record is closed.
+// meaning the record is closed, and at least one open and one closed option
+// always remain.
 import type { RecordsFieldOption } from '#records'
 import type { RecordsBadgeColor } from '../../../utils/field-kinds'
 
@@ -29,6 +30,16 @@ const COLOR_ITEMS: Array<{ label: string, value: string }> = [
 ]
 
 const entries = computed(() => Object.entries(options.value))
+
+// A status keeps at least one open and one closed option, so records can
+// always be closed and reopened.
+const liveOpen = computed(() => entries.value.filter(([, o]) => !o.deleted && !o.closed).length)
+const liveClosed = computed(() => entries.value.filter(([, o]) => !o.deleted && o.closed).length)
+
+function isLastOfItsSide(option: RecordsFieldOption): boolean {
+  if (!props.closable || option.deleted) return false
+  return option.closed ? liveClosed.value <= 1 : liveOpen.value <= 1
+}
 
 function patchOption(key: string, patch: Partial<RecordsFieldOption>) {
   const current = options.value[key]
@@ -119,8 +130,10 @@ function badgeColor(option: RecordsFieldOption): RecordsBadgeColor {
           size="xs"
           :aria-label="`${option.label} counts as closed`"
           :aria-pressed="!!option.closed"
-          :title="option.closed ? 'Counts as closed' : 'Mark as closed'"
-          :disabled="disabled || option.deleted"
+          :title="isLastOfItsSide(option)
+            ? `A status needs at least one ${option.closed ? 'closed' : 'open'} option`
+            : option.closed ? 'Counts as closed' : 'Mark as closed'"
+          :disabled="disabled || option.deleted || isLastOfItsSide(option)"
           @click="patchOption(key, { closed: !option.closed })"
         />
         <UButton
@@ -129,8 +142,12 @@ function badgeColor(option: RecordsFieldOption): RecordsBadgeColor {
           color="neutral"
           size="xs"
           :aria-label="option.deleted ? `Restore ${option.label}` : `Remove ${option.label}`"
-          :title="option.deleted ? 'Restore option' : 'Remove option (kept for historical values)'"
-          :disabled="disabled"
+          :title="option.deleted
+            ? 'Restore option'
+            : isLastOfItsSide(option)
+              ? `A status needs at least one ${option.closed ? 'closed' : 'open'} option`
+              : 'Remove option (kept for historical values)'"
+          :disabled="disabled || isLastOfItsSide(option)"
           @click="patchOption(key, { deleted: !option.deleted })"
         />
       </li>

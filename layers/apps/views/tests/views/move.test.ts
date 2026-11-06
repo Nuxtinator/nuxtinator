@@ -68,7 +68,7 @@ async function recordFields(opts: Opts, id: string): Promise<Record<string, unkn
 }
 
 describe('field-grouped moves', () => {
-  it('serves grouping values and writes a single-value move (and No value)', async () => {
+  it('serves grouping values and writes a single-value move', async () => {
     const { org, auth } = await createViewsOrgWith(sql, ['admin'])
     const opts = withOrgHeader(auth, org.slug)
     const view = await createView(opts, { groupField: 'status' })
@@ -82,13 +82,14 @@ describe('field-grouped moves', () => {
     })
     expect((await recordFields(opts, rec.id)).status).toBe('active')
 
-    // To the No-value column: the field empties.
-    await move(opts, view.id, {
-      recordId: rec.id, fromColumn: 'active', toColumn: '', columnOrder: [rec.id]
-    })
-    expect((await recordFields(opts, rec.id)).status).toBeNull()
     res = await feed(opts, view.id)
-    expect(res.items.find(i => i.id === rec.id)?.groupValues).toEqual([])
+    expect(res.items.find(i => i.id === rec.id)?.groupValues).toEqual(['active'])
+
+    // A status board has no No-value column.
+    await expect(move(opts, view.id, {
+      recordId: rec.id, fromColumn: 'active', toColumn: '', columnOrder: [rec.id]
+    })).rejects.toMatchObject({ statusCode: 400 })
+    expect((await recordFields(opts, rec.id)).status).toBe('active')
   })
 
   it('a multi-select drag adds the target value and keeps the source', async () => {

@@ -10,9 +10,13 @@ A record can carry `user_id`, the user account of the person it describes (one r
 
 Where a field's values live is decided by its kind (`storageOf` in [app/utils/records-manifest.ts](app/utils/records-manifest.ts)): promoted column, jsonb key, entry rows, user refs, connection edges, or a registered storage driver (`channels`, provided by crm).
 
+## Status
+
+Every record type has a status field, so every record can be closed. A type whose code declares no status column (items, admin-created types) gets the default one, Open / Done with Done closed ([definition-settings.ts](server/utils/definition-settings.ts) → `RECORDS_DEFAULT_STATUS_FIELD`). Admins rename it and add, relabel, recolor or remove options in the schema builder; the field can't be hidden, and a status always keeps at least one open and one closed option. A record with no stored status reads, filters and sorts as the field's default.
+
 ## Built-in types
 
-`item` (name, notes, tags — a freeform card) and `task` (name, open/done status, assignee, due date, description; done is the closed status). Both are org-hideable from the schema builder. Members hold no `view_all`, so items and tasks are personal by default: a caller sees records they created, records shared with them, records referencing them through a user field, and records on custom boards they can open (see Visibility).
+`item` (name, notes, tags and the default status — a freeform card) and `task` (name, open/done status, assignee, due date, description; done is the closed status). Both are org-hideable from the schema builder. Members hold no `view_all`, so items and tasks are personal by default: a caller sees records they created, records shared with them, records referencing them through a user field, and records on custom boards they can open (see Visibility).
 
 ## Extension points
 

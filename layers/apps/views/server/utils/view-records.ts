@@ -198,7 +198,12 @@ export async function getViewsGroupValues(
   if (items.length === 0) return out
 
   if (field.storage === 'promoted') {
-    for (const item of items) out.set(item.id, item.status ? [item.status] : [])
+    // An unset status sits in the type's default column.
+    const fallback = typeof field.default === 'string' ? field.default : null
+    for (const item of items) {
+      const status = item.status ?? fallback
+      out.set(item.id, status ? [status] : [])
+    }
     return out
   }
   if (field.storage === 'jsonb') {

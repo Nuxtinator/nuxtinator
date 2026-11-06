@@ -27,7 +27,8 @@ import {
   getRecordType,
   getRecordTypes,
   getRecordTypeFields,
-  RECORDS_INTRINSIC_NAME_FIELD,
+  mergeOptions,
+  recordTypeCodeFields,
   type RecordTypeSetting,
   type RecordsFieldSetting
 } from './definition-settings'
@@ -637,6 +638,13 @@ function applyManifestOptionPatch(
   else delete config.options
 }
 
+// Every status keeps a way to close a record and a way to reopen it.
+function assertStatusOptions(options: Record<string, RecordsFieldOption>): void {
+  const live = Object.values(options).filter(o => !o.deleted)
+  if (!live.some(o => o.closed)) bad('A status needs at least one closed option')
+  if (!live.some(o => !o.closed)) bad('A status needs at least one open option')
+}
+
 function applyCustomOptionPatch(
   config: Record<string, unknown>,
   patch: Record<string, RecordsFieldOption | null>
@@ -684,11 +692,10 @@ export async function updateField(
   }
 
   const row = await getFieldRow(tx, typeKey, fieldKey)
-  // The intrinsic name field of a manifest-less type carries code-owned
-  // semantics too — it takes the same minimal-override treatment as a
-  // manifest field (see RECORDS_INTRINSIC_NAME_FIELD).
-  const def = getRegisteredRecordType(typeKey)?.fields[fieldKey]
-    ?? (fieldKey === 'name' && !type.manifest ? RECORDS_INTRINSIC_NAME_FIELD : undefined)
+  // Intrinsic fields (a manifest-less type's name, the default status) carry
+  // code-owned semantics too — they take the same minimal-override treatment
+  // as a manifest field.
+  const def = recordTypeCodeFields(getRegisteredRecordType(typeKey))[fieldKey]
 
   if (def) {
     // Manifest field — persist only actual overrides.
@@ -719,10 +726,14 @@ export async function updateField(
         ? null
         : patch.section
     }
-    if (patch.hidden !== undefined) hidden = patch.hidden
+    if (patch.hidden !== undefined) {
+      if (def.column === 'status' && patch.hidden) bad('The status field is always shown')
+      hidden = patch.hidden
+    }
     if (patch.options !== undefined) {
       if (!OPTION_KINDS.has(def.kind)) bad(`'${def.kind}' fields do not take options`)
       applyManifestOptionPatch(def, config, patch.options)
+      if (def.column === 'status') assertStatusOptions(mergeOptions(def.options, config) ?? {})
     }
 
     const hasOverrides = label !== null

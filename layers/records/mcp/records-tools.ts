@@ -513,7 +513,7 @@ async function addFieldTo(tx: Tx, tenant: TenantContext, typeKey: string, spec: 
 export const createRecordTypeTool = defineMcpTool({
   name: 'records_create_type',
   title: 'Create Record Type',
-  description: 'Create a new record type with its fields, for something the org wants to start tracking (events, venues, deliverables). Call records_list_types first: when an existing type fits, add fields to it with records_add_field instead of creating a near-duplicate. Every type gets a name field; list the other fields here.',
+  description: 'Create a new record type with its fields, for something the org wants to start tracking (events, venues, deliverables). Call records_list_types first: when an existing type fits, add fields to it with records_add_field instead of creating a near-duplicate. Every type gets a name field and a status field (open, done; done closes the record); list the other fields here, and change the status options with records_update_field.',
   appId: 'records',
   scope: 'records.schema.manage',
   input: z.object({

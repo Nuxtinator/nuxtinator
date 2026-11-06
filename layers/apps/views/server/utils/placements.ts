@@ -94,7 +94,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // any user for user fields (the kernel checks the user exists), any tag, and
 // any record id for connections (the kernel checks the target exists).
 function isValidColumn(field: RecordsFieldSetting, key: string): boolean {
-  if (key === '') return true
+  // Every record has a status, so there is no "No value" status column.
+  if (key === '') return field.column !== 'status'
   switch (field.kind) {
     case 'user_select': return UUID_RE.test(key)
     case 'connection': return UUID_RE.test(key)

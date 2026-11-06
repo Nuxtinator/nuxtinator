@@ -126,7 +126,7 @@ export const getRecordTypes = defineSettings<RecordTypeManifest, RecordTypeRow, 
         label: row?.label_override ?? manifest.label,
         labelSingular: row?.label_singular_override ?? manifest.labelSingular,
         icon: row?.icon_override ?? manifest.icon,
-        statusField: manifest.statusField,
+        statusField: manifest.statusField ?? statusFieldKeyOf(recordTypeCodeFields(manifest)),
         closedReasonField: closedReasonFieldOf(row?.config, manifest.closedReasonField),
         sections: manifest.sections ?? {},
         hidden: row?.hidden ?? false,
@@ -148,7 +148,8 @@ export const getRecordTypes = defineSettings<RecordTypeManifest, RecordTypeRow, 
       label: r.label_override ?? r.type_key,
       labelSingular: r.label_singular_override ?? r.label_override ?? r.type_key,
       icon: r.icon_override ?? undefined,
-      statusField: undefined,
+      statusField: r.is_custom ? statusFieldKeyOf(recordTypeCodeFields(undefined)) : undefined,
+      closedReasonField: r.is_custom ? closedReasonFieldOf(r.config, undefined) : undefined,
       sections: {},
       hidden: r.hidden,
       config: r.config,
@@ -200,7 +201,7 @@ export interface RecordsFieldSetting {
 //   { options?: Record<optionKey, Partial<RecordsFieldOption>> }
 // Keys matching a manifest option override just the given props; keys the
 // manifest doesn't declare are admin-added custom options.
-function mergeOptions(
+export function mergeOptions(
   base: Record<string, RecordsFieldOption> | undefined,
   config: Record<string, unknown> | undefined
 ): Record<string, RecordsFieldOption> | undefined {
@@ -214,7 +215,17 @@ function mergeOptions(
   return out
 }
 
+// A status whose default option was removed or made closed starts new
+// records (and reads unset ones) in its first open option instead.
+function statusDefaultOf(def: RecordsFieldDef, options: Record<string, RecordsFieldOption> | undefined): unknown {
+  if (def.column !== 'status' || !options) return def.default
+  const current = typeof def.default === 'string' ? options[def.default] : undefined
+  if (current && !current.deleted && !current.closed) return def.default
+  return Object.entries(options).find(([, o]) => !o.deleted && !o.closed)?.[0] ?? def.default
+}
+
 function mergeManifestField(key: string, def: RecordsFieldDef, row: RecordFieldRow | undefined): RecordsFieldSetting {
+  const options = mergeOptions(def.options, row?.config)
   return {
     key,
     kind: def.kind,
@@ -227,11 +238,11 @@ function mergeManifestField(key: string, def: RecordsFieldDef, row: RecordFieldR
     required: row?.required_override ?? def.required ?? false,
     // `hidden` is NOT NULL on the row, so it can't express "no override" —
     // when a row exists its value is authoritative (the schema builder
-    // writes the desired state).
-    hidden: row ? row.hidden : (def.hidden ?? false),
+    // writes the desired state). The status field is always shown.
+    hidden: def.column === 'status' ? false : row ? row.hidden : (def.hidden ?? false),
     order: row?.order_override ?? def.order ?? 0,
-    default: def.default,
-    options: mergeOptions(def.options, row?.config),
+    default: statusDefaultOf(def, options),
+    options,
     multiple: def.multiple,
     target: def.target,
     reverseKey: def.reverseKey,
@@ -286,13 +297,41 @@ export const RECORDS_INTRINSIC_NAME_FIELD: RecordsFieldDef = {
   order: 0
 }
 
+// Every record type has a status, so every record can be closed. A type
+// whose code declares no status column gets this one; like the name field it
+// is a code default, customized through records_fields override rows.
+export const RECORDS_DEFAULT_STATUS_FIELD: RecordsFieldDef = {
+  kind: 'key_select',
+  label: 'Status',
+  column: 'status',
+  order: 1,
+  default: 'open',
+  options: {
+    open: { label: 'Open', color: 'info' },
+    done: { label: 'Done', color: 'success', closed: true }
+  }
+}
+
+/**
+ * The code-owned field defs of a type: its manifest's fields (extensions
+ * included), or the intrinsic name field for a type without a manifest, plus
+ * the default status field when none of them is the status column.
+ */
+export function recordTypeCodeFields(manifest: RecordTypeManifest | undefined): Record<string, RecordsFieldDef> {
+  const fields: Record<string, RecordsFieldDef> = manifest ? { ...manifest.fields } : { name: RECORDS_INTRINSIC_NAME_FIELD }
+  const hasStatus = Object.values(fields).some(def => def.column === 'status')
+  if (!hasStatus && !('status' in fields)) fields.status = RECORDS_DEFAULT_STATUS_FIELD
+  return fields
+}
+
+function statusFieldKeyOf(fields: Record<string, RecordsFieldDef>): string | undefined {
+  return Object.entries(fields).find(([, def]) => def.column === 'status')?.[0]
+}
+
 export async function getRecordTypeFields(tx: DbClient, typeKey: string): Promise<RecordsFieldSetting[]> {
   const reader = defineSettings<{ key: string, def: RecordsFieldDef }, RecordFieldRow, RecordsFieldSetting>({
-    loadDefaults: () => {
-      const manifest = getRegisteredRecordType(typeKey)
-      if (manifest) return Object.entries(manifest.fields).map(([key, def]) => ({ key, def }))
-      return [{ key: 'name', def: RECORDS_INTRINSIC_NAME_FIELD }]
-    },
+    loadDefaults: () => Object.entries(recordTypeCodeFields(getRegisteredRecordType(typeKey)))
+      .map(([key, def]) => ({ key, def })),
     loadOverrides: async (tx) => {
       const rows = await tx
         .selectFrom('records_fields')
@@ -307,4 +346,10 @@ export async function getRecordTypeFields(tx: DbClient, typeKey: string): Promis
   })
   const fields = await reader(tx)
   return fields.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
+}
+
+/** The status an unset status column reads as: the status field's default. */
+export function recordsStatusDefault(defs: RecordsFieldSetting[]): string | null {
+  const value = defs.find(d => d.column === 'status')?.default
+  return typeof value === 'string' ? value : null
 }

@@ -233,13 +233,13 @@ describe('lists', () => {
     expect(detail.status).toBe('done')
   })
 
-  it('a task created as "No status" keeps no status instead of the type default', async () => {
+  it('a task created without a status reads as the type default', async () => {
     const { org, auth } = await createViewsOrgWith(sql, ['admin'])
     const opts = withOrgHeader(auth, org.slug)
     const plain = await createTask(opts, { name: 'test-views Defaulted' })
     const blank = await createTask(opts, { name: 'test-views Blank', status: null })
     expect((await $fetch<{ status: string | null }>(`/api/records/entries/task/${plain.id}`, opts)).status).toBe('open')
-    expect((await $fetch<{ status: string | null }>(`/api/records/entries/task/${blank.id}`, opts)).status).toBeNull()
+    expect((await $fetch<{ status: string | null }>(`/api/records/entries/task/${blank.id}`, opts)).status).toBe('open')
   })
 })
 

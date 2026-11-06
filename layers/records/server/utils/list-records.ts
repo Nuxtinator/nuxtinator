@@ -24,7 +24,7 @@ import type { Expression, ExpressionBuilder, RawBuilder, SqlBool, Transaction } 
 import { z } from 'zod'
 import type { Database } from '#core/server/database/schema'
 import { isAppEnabledForCurrentOrg, type TenantContext } from '#tenant/server'
-import { getRecordType, getRecordTypeFields, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
+import { getRecordType, getRecordTypeFields, recordsStatusDefault, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
 import { resolveTypePermission } from './type-permissions'
 import type { RecordRow } from './record-storage'
 import {
@@ -160,7 +160,11 @@ function jsonbText(key: string): RawBuilder<string | null> {
 // chronologically instead of lexically.
 function scalarExpr(def: RecordsFieldSetting): RawBuilder<unknown> {
   if (def.storage === 'promoted') {
-    return def.column === 'name' ? sql.ref('records_entries.name') : sql.ref('records_entries.status')
+    if (def.column === 'name') return sql.ref('records_entries.name')
+    // An unset status reads as the type's default, so filters and sorts match what's shown.
+    return typeof def.default === 'string'
+      ? sql`coalesce(records_entries.status, ${def.default})`
+      : sql.ref('records_entries.status')
   }
   const text = jsonbText(def.key)
   switch (def.kind) {
@@ -654,8 +658,9 @@ export async function listRecords(
     }
   }
 
+  const statusDefault = recordsStatusDefault(defs)
   return {
-    items: rows.map(row => ({ ...row, assignedTo: assigned.get(row.id) ?? [] })),
+    items: rows.map(row => ({ ...row, status: row.status ?? statusDefault, assignedTo: assigned.get(row.id) ?? [] })),
     total
   }
 }
