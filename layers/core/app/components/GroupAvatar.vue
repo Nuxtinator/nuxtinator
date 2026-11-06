@@ -14,16 +14,12 @@ const props = withDefaults(defineProps<{
   size: 'xs'
 })
 
-const iconName = computed(() => props.icon?.startsWith('i-') ? props.icon : undefined)
-const text = computed(() => props.icon && !props.icon.startsWith('i-') ? props.icon : undefined)
+const avatar = computed(() => groupAvatarProps(props))
 </script>
 
 <template>
   <UAvatar
-    :src="image || undefined"
-    :icon="iconName"
-    :text="text"
-    :alt="name"
+    v-bind="avatar"
     :size="size"
     class="shrink-0"
   />

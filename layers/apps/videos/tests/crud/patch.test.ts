@@ -93,7 +93,7 @@ describe('PATCH /api/videos/:id', () => {
     // Add a plain member — default grants for `member` include videos.write
     // (own-video CRUD) but NOT videos.moderate.
     const other = await addVideosMember(sql, org.id, ['member'])
-    const video = await createTestVideo(sql, { org_id: org.id, user_id: owner.id })
+    const video = await createTestVideo(sql, { org_id: org.id, user_id: owner.id, visibility: 'org' })
 
     const err = await $fetch(`/api/videos/${video.id}`, {
       method: 'PATCH', body: { title: 'hijack' }, ...withOrgHeader(other.auth, org.slug)
@@ -101,11 +101,11 @@ describe('PATCH /api/videos/:id', () => {
     expect(err.statusCode).toBe(403)
   })
 
-  it('non-owner admin (has videos.moderate) can update someone else\'s video', async () => {
+  it('non-owner admin (has videos.moderate) can update someone else\'s org video', async () => {
     const { org, user: owner } = await createVideosOrgWith(sql, ['admin'])
     // Add a second admin — admins get all permissions including videos.moderate.
     const moderator = await addVideosMember(sql, org.id, ['admin'])
-    const video = await createTestVideo(sql, { org_id: org.id, user_id: owner.id })
+    const video = await createTestVideo(sql, { org_id: org.id, user_id: owner.id, visibility: 'org' })
 
     await $fetch(`/api/videos/${video.id}`, {
       method: 'PATCH', body: { title: 'moderated' }, ...withOrgHeader(moderator.auth, org.slug)

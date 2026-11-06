@@ -8,8 +8,10 @@
 //     resolves the user's permission set from `users.roles[]` unioned with
 //     their direct grants (`user_permission_grants`), then calls the handler.
 //     There is no `app.current_org` GUC, no app-enable check, no per-org
-//     overlay. With `appId`, the team gate applies: an app whose access
-//     list names host groups opens only for their members (403 otherwise).
+//     overlay. The transaction sets `app.current_user` to the caller, which
+//     user-keyed RLS policies (private videos) read. With `appId`, the team
+//     gate applies: an app whose access list names host groups opens only
+//     for their members (403 otherwise).
 //   - An OAuth bearer token signs in in place of the session (see
 //     `bearer-auth.ts`): the route must name a permission the token carries,
 //     and `ctx.perms` is narrowed to the token's scopes.
@@ -20,7 +22,7 @@
 //     reach.
 
 import type { H3Event, EventHandler, EventHandlerRequest } from 'h3'
-import type { Transaction, Kysely } from 'kysely'
+import { sql, type Transaction, type Kysely } from 'kysely'
 import { db } from '#core/server/utils/database'
 // Tracks each request transaction so `afterCommit` work runs once it commits.
 import { runTransaction } from '#core/server/utils/after-commit'
@@ -98,6 +100,7 @@ async function runWithSingleContext<T>(
   const userId = bearer?.userId ?? requireAuth(event).userId
   const clientId = bearer?.clientId ?? null
   return await runAsOauthClient(clientId, () => runTransaction(db, async (tx) => {
+    await sql`select set_config('app.current_user', ${userId}, true)`.execute(tx)
     const { roles, perms } = await resolveSinglePerms(tx, userId)
     if (opts.appId && !(await isAppOpenToUser(tx, { appId: opts.appId, orgId: null, userId }))) {
       throw createError({ statusCode: 403, statusMessage: APP_TEAM_GATE_MESSAGE })
@@ -285,17 +288,18 @@ export function decodeFlowOrg<S>(state: S): { state: S, orgSlug: string | null }
 
 export type OrgTransactionFn<T> = (tx: Transaction<Database>) => Promise<T>
 
-// Caller-supplied org selection. Single mode has one tenant, so both fields
-// are accepted for API compatibility with the multi-mode kernel and ignored.
+// Caller-supplied org selection. Single mode has one tenant, so `org` is
+// accepted for API compatibility with the multi-mode kernel and ignored;
+// `userId` is the acting user, set as `app.current_user`.
 export interface OrgTransactionOpts {
   org?: string
   userId?: string
 }
 
-// Open a transaction and run `fn(tx)` inside it. In single mode, just opens
-// the transaction. In multi mode (overridden by the tenancy layer) this also
-// resolves the org (`opts.org`, else the request's header or cookie),
-// enforces the acting user's membership when `opts.userId` is given, and
+// Open a transaction and run `fn(tx)` inside it. In single mode, opens the
+// transaction and, given `opts.userId`, sets `app.current_user`. In multi
+// mode (overridden by the tenancy layer) this also resolves the org
+// (`opts.org`, else the request's header or cookie), enforces the acting user's membership when `opts.userId` is given, and
 // runs `SET LOCAL app.current_org` before yielding.
 //
 // Used by code paths that aren't routed through `defineTenantHandler` but
@@ -308,8 +312,12 @@ export async function runInOrgTransaction<T>(
   optsOrFn: OrgTransactionOpts | OrgTransactionFn<T>,
   maybeFn?: OrgTransactionFn<T>
 ): Promise<T> {
+  const opts: OrgTransactionOpts = typeof optsOrFn === 'function' ? {} : optsOrFn
   const fn = (typeof optsOrFn === 'function' ? optsOrFn : maybeFn) as OrgTransactionFn<T>
-  return await runTransaction(db, fn)
+  return await runTransaction(db, async (tx) => {
+    if (opts.userId) await sql`select set_config('app.current_user', ${opts.userId}, true)`.execute(tx)
+    return await fn(tx)
+  })
 }
 
 // Open a transaction scoped to the org that owns the given project. In single

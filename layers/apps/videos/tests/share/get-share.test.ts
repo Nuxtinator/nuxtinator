@@ -1,7 +1,7 @@
 // GET /api/videos/share/:token
-// Mostly public. Anyone (authed or not) can fetch a `visibility='public'`
-// video. Authenticated members of the video's org can fetch `visibility='org'`
-// videos, and owners can fetch their own videos at any visibility. Anonymous
+// Anyone (authed or not) can fetch a video with its public link on.
+// Authenticated members of the video's org can fetch org videos, team members
+// team videos, and owners their own videos at any visibility. Anonymous
 // requests get 401 for org videos (sign-in prompt) and 404 for private ones.
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
@@ -38,8 +38,7 @@ describe('GET /api/videos/share/:token', () => {
       org_id: org.id, user_id: user.id, visibility: 'public', view_count: 7, play_count: 2
     })
 
-    // No auth cookie, no X-Active-Org header — the RLS read policy lets
-    // `visibility='public'` rows through without a GUC set.
+    // No auth cookie, no X-Active-Org header: the link opens it.
     const res = await $fetch<ShareResp>(`/api/videos/share/${video.share_token}`, { method: 'GET' })
     expect(res.videoId).toBe(video.id)
     expect(res.isOwner).toBe(false)
@@ -61,7 +60,7 @@ describe('GET /api/videos/share/:token', () => {
     expect(res.isOwner).toBe(true)
   })
 
-  it('403 for an authed non-owner trying to read a private video in the same org', async () => {
+  it('404 for an authed non-owner trying to read a private video in the same org (RLS hides it)', async () => {
     const { org, user: owner } = await createVideosOrgWith(sql, ['admin'])
     const other = await addVideosMember(sql, org.id, ['member'])
     const video = await createTestVideo(sql, {
@@ -71,7 +70,7 @@ describe('GET /api/videos/share/:token', () => {
     const err = await $fetch(`/api/videos/share/${video.share_token}`, {
       method: 'GET', ...withOrgHeader(other.auth, org.slug)
     }).catch(e => e)
-    expect(err.statusCode).toBe(403)
+    expect(err.statusCode).toBe(404)
   })
 
   it('authed org member (non-owner) can fetch an org-visibility video', async () => {

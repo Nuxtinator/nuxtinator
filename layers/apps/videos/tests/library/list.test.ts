@@ -1,7 +1,7 @@
 // GET /api/videos?scope=mine|team
-// Returns videos owned by the caller (mine) or org-shared videos uploaded by
-// anyone in the active org (team). RLS scopes the underlying SELECT to the
-// active org; the `scope` param only toggles user_id / visibility filters.
+// Returns videos owned by the caller (mine) or the team and org videos the
+// caller may see in the active org (team). RLS scopes the underlying SELECT
+// to the active org and hides other people's private videos.
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import {
@@ -16,7 +16,8 @@ import {
 interface VideoResp {
   id: string
   title: string | null
-  visibility: 'private' | 'org' | 'public'
+  visibility: 'private' | 'team' | 'org'
+  linkEnabled: boolean
   userId: string
   shareToken: string
   viewCount: number
@@ -63,9 +64,9 @@ describe('GET /api/videos', () => {
     // Two org-shared videos from different uploaders.
     const a = await createTestVideo(sql, { org_id: org.id, user_id: user.id, visibility: 'org' })
     const b = await createTestVideo(sql, { org_id: org.id, user_id: other.user.id, visibility: 'org' })
-    // Private + public should not appear in team scope.
+    // Private videos, even with their link on, should not appear in team scope.
     await createTestVideo(sql, { org_id: org.id, user_id: user.id, visibility: 'private' })
-    await createTestVideo(sql, { org_id: org.id, user_id: other.user.id, visibility: 'public' })
+    await createTestVideo(sql, { org_id: org.id, user_id: other.user.id, visibility: 'private', link_enabled: true })
 
     const res = await $fetch<{ videos: VideoResp[] }>(
       '/api/videos',

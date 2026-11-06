@@ -6,6 +6,7 @@
 
 import { randomBytes } from 'crypto'
 import { withOrgContext } from '#tenant/server'
+import { assertPickableTeam, getVideosTeamScope, readVideoAudience } from '../../../utils/video-access'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm', 'avi']
@@ -25,7 +26,7 @@ export default defineEventHandler(async (event) => {
       originalFilename,
       originalFileSize,
       compressionRatio,
-      visibility
+      linkEnabled
     } = body
 
     if (!videoId || !videoKey) {
@@ -41,10 +42,16 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 400, message: 'thumbnailKey does not match videoId' })
     }
 
-    const resolvedVisibility: 'private' | 'org' | 'public' =
-      visibility === 'public' || visibility === 'org' || visibility === 'private'
-        ? visibility
-        : 'private'
+    // Private unless the body names a known audience; `public` is an org
+    // video with its link on.
+    const known = ['private', 'team', 'org', 'public'].includes(body.visibility)
+    const audience = (known ? readVideoAudience(body) : undefined) ?? { visibility: 'private' as const, teamId: null, linkOn: false }
+    if (audience.teamId) {
+      await assertPickableTeam(tx, await getVideosTeamScope(event, tx, ctx), audience.teamId)
+    }
+    if (linkEnabled !== undefined && typeof linkEnabled !== 'boolean') {
+      throw createError({ statusCode: 400, message: 'linkEnabled must be true or false' })
+    }
 
     const shareToken = randomBytes(16).toString('hex')
 
@@ -70,7 +77,9 @@ export default defineEventHandler(async (event) => {
         width: width ?? null,
         height: height ?? null,
         share_token: shareToken,
-        visibility: resolvedVisibility,
+        visibility: audience.visibility,
+        team_id: audience.teamId,
+        link_enabled: audience.linkOn || linkEnabled === true,
         source,
         original_filename: originalFilename ?? null,
         original_file_size: originalFileSize ?? null,

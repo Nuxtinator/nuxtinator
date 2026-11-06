@@ -20,7 +20,7 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 | Who can see a project, portfolio or other container | `<TeamAccessField app-id v-model:visibility v-model:team-ids>` in its create and settings forms |
 | Admin "show all teams" switch | `<ShowAllTeamsToggle app-id>` in the app's sidebar or toolbar, behind `<app>.all_teams` |
 | Manage one scope's groups / limit an app to groups | `<GroupsManager>` / `<AppGroupsModal>` |
-| Show a group in a list or picker | `<GroupAvatar :name :icon :image>` beside its name |
+| Show a group in a list or picker | `<GroupAvatar :name :icon :image>` beside its name; in a menu or select item, `avatar: groupAvatarProps(group)` |
 
 ## Keep pages uncluttered
 

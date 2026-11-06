@@ -2,6 +2,7 @@ import { registerPermissions } from '#core/server/utils/permissions-registry'
 import { registerDefaultGrants } from '#core/server/utils/default-grants-registry'
 import { registerApp } from '#core/server/utils/app-registry'
 import { registerNavItem } from '#core/server/utils/nav-registry'
+import { registerTeamContainer } from '#core/server/utils/team-access'
 import {
   VIDEOS_PERMISSIONS,
   VIDEOS_PERMISSION_META,
@@ -15,6 +16,18 @@ import type {} from '../database/schema.d'
 export default defineNitroPlugin(() => {
   registerPermissions(VIDEOS_PERMISSIONS, VIDEOS_PERMISSION_META)
   registerDefaultGrants('videos', VIDEOS_DEFAULT_GRANTS)
+
+  // `private` videos aren't the helper's: RLS already shows them to their uploader only.
+  registerTeamContainer({
+    appId: 'videos',
+    table: 'videos',
+    titleColumn: 'title',
+    visibilityColumn: 'visibility',
+    teamValue: 'team',
+    teamColumn: 'team_id',
+    ownerColumn: 'user_id',
+    allTeamsPermission: 'videos.all_teams'
+  })
 
   registerApp({
     id: 'videos',
