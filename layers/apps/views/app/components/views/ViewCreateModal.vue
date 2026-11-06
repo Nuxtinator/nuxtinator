@@ -71,7 +71,8 @@ watch(typeKey, async (key) => {
 })
 
 const typeItems = computed(() =>
-  visibleTypes.value.map(t => ({ label: t.label, value: t.key })))
+  visibleTypes.value.map(t => ({ label: t.label, value: t.key, icon: t.icon ?? undefined })))
+const typeIcon = computed(() => typeItems.value.find(t => t.value === typeKey.value)?.icon)
 
 const groupFieldItems = computed(() =>
   viewsGroupableFields(fields.value).map(f => ({ label: f.label, value: f.key })))
@@ -86,11 +87,7 @@ watch(viewType, (type) => {
   else if (type !== 'kanban' && groupField.value === statusGroupKey()) groupField.value = undefined
 })
 
-const VIEW_TYPE_ITEMS = [
-  { label: 'Board', value: 'kanban' },
-  { label: 'List', value: 'list' },
-  { label: 'Table', value: 'table' }
-]
+const VIEW_TYPE_ITEMS = (['kanban', 'list', 'table'] as const).map(value => ({ value, ...VIEWS_LAYOUT_META[value] }))
 const KANBAN_MODE_ITEMS = [
   { label: 'Group by a field', value: 'field' },
   { label: 'Custom columns', value: 'custom' }
@@ -177,6 +174,7 @@ async function submit() {
           <USelectMenu
             v-model="typeKey"
             :items="typeItems"
+            :icon="typeIcon"
             value-key="value"
             label-key="label"
             placeholder="Select a record type..."
@@ -191,7 +189,17 @@ async function submit() {
             :items="VIEW_TYPE_ITEMS"
             orientation="horizontal"
             :disabled="creating"
-          />
+          >
+            <template #label="{ item }">
+              <span class="inline-flex items-center gap-1.5">
+                <UIcon
+                  :name="item.icon"
+                  class="size-4 text-(--ui-text-muted)"
+                />
+                {{ item.label }}
+              </span>
+            </template>
+          </URadioGroup>
         </UFormField>
 
         <template v-if="viewType === 'kanban'">

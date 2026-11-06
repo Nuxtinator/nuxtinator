@@ -39,11 +39,7 @@ watch(open, (v) => {
   groupField.value = tab?.definition.groupField
 })
 
-const LAYOUT_ITEMS = [
-  { label: 'Board', value: 'kanban' },
-  { label: 'List', value: 'list' },
-  { label: 'Table', value: 'table' }
-]
+const LAYOUT_ITEMS = (['kanban', 'list', 'table'] as const).map(value => ({ value, ...VIEWS_LAYOUT_META[value] }))
 const BOARD_MODE_ITEMS = [
   { label: 'Group by a field', value: 'field' },
   { label: 'Custom columns', value: 'custom' }
@@ -95,7 +91,17 @@ function submit() {
             v-model="layout"
             :items="LAYOUT_ITEMS"
             orientation="horizontal"
-          />
+          >
+            <template #label="{ item }">
+              <span class="inline-flex items-center gap-1.5">
+                <UIcon
+                  :name="item.icon"
+                  class="size-4 text-(--ui-text-muted)"
+                />
+                {{ item.label }}
+              </span>
+            </template>
+          </URadioGroup>
         </UFormField>
 
         <template v-if="layout === 'kanban'">
