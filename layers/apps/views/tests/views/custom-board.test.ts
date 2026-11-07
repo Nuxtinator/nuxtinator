@@ -145,6 +145,31 @@ describe('custom boards', () => {
     })).rejects.toMatchObject({ statusCode: 400 })
   })
 
+  it('a new card lands after a card dragged to the top (ranks sort by byte value)', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    const board = await createBoard(opts)
+    const add = async (name: string) => {
+      const rec = await createContact(opts, name)
+      await $fetch(`/api/views/${board.id}/cards`, { method: 'POST', body: { recordId: rec.id, columnKey: 'todo' }, ...opts })
+      return rec
+    }
+    const a = await add('test-views Rank A')
+    const b = await add('test-views Rank B')
+    // Above every other card: an uppercase key ("Z…"), which sorts after
+    // lowercase ones under a locale collation.
+    await $fetch(`/api/views/${board.id}/move`, {
+      method: 'POST',
+      body: { recordId: b.id, fromColumn: 'todo', toColumn: 'todo', columnOrder: [b.id, a.id] },
+      ...opts
+    })
+    const c = await add('test-views Rank C')
+
+    const ranks = new Map((await feed(opts, board.id)).placements.map(p => [p.recordId, p.rank!]))
+    const order = [a.id, b.id, c.id].sort((x, y) => ranks.get(x)! < ranks.get(y)! ? -1 : 1)
+    expect(order).toEqual([b.id, a.id, c.id])
+  })
+
   it('a status view can add a tab of custom columns; cards start in "No column"', async () => {
     const { org, auth } = await createViewsOrgWith(sql, ['admin'])
     const opts = withOrgHeader(auth, org.slug)

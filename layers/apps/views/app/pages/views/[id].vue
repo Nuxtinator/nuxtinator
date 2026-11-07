@@ -162,6 +162,8 @@ function applyOptimisticMove(payload: ViewsMovePayload) {
 }
 
 async function onMove(payload: ViewsMovePayload) {
+  // Reordering within a column is view state, which view-only access can't change.
+  if (!canEditDefinition.value && payload.fromColumn === payload.toColumn) return
   beginDrag()
   try {
     applyOptimisticMove(payload)

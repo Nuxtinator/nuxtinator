@@ -321,7 +321,7 @@ export const updateTabTool = defineMcpTool({
 export const setFilterTool = defineMcpTool({
   name: 'views_set_filter',
   title: 'Set Filter',
-  description: 'Replace a filter: the view\'s base filter (no tab), which every tab narrows, or one tab\'s own filter. Needs edit access to the view.',
+  description: 'Replace a filter: the view\'s base filter (no tab), which every tab narrows, or one tab\'s own filter. The base filter needs owner access to the view; a tab\'s filter needs edit access.',
   appId: 'views',
   scope: 'views.use',
   input: z.object({
@@ -332,7 +332,7 @@ export const setFilterTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, async (tx, tenant) => {
-      const { view } = await requireView(tx, tenant, input.view, 'edit')
+      const { view } = await requireView(tx, tenant, input.view, input.tab ? 'edit' : 'owner')
       if (input.tab) {
         const tab = await requireTab(tx, view, input.tab)
         const definition = { ...(tab.definition as ViewTabDefinition), filter: input.filter }
@@ -437,7 +437,9 @@ export const moveCardTool = defineMcpTool({
       const { view } = await requireView(tx, tenant, input.view, 'view')
       const tab = await requireTab(tx, view, input.tab)
       const tabDef = tab.definition as ViewTabDefinition
-      if (tabDef.columns || !tabDef.groupField) await requireView(tx, tenant, input.view, 'edit')
+      if (tabDef.columns || !tabDef.groupField || input.fromColumn === input.toColumn) {
+        await requireView(tx, tenant, input.view, 'edit')
+      }
       const groupField = await groupFieldOf(tx, view, tab)
       const records = await getViewRecords(tx, tenant, view, tab, groupField, {})
       const columns = await boardColumns(tx, view, tab, records)

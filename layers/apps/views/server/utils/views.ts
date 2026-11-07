@@ -20,7 +20,7 @@ import { sql } from 'kysely'
 import type { RawBuilder, Selectable, SqlBool, Transaction } from 'kysely'
 import { generateKeyBetween } from 'fractional-indexing'
 import type { Database } from '#core/server/database/schema'
-import type { TenantContext } from '#tenant/server'
+import { isActiveOrgMember, type TenantContext } from '#tenant/server'
 import {
   getRecordType,
   getRecordTypeFields,
@@ -541,6 +541,33 @@ export function ownCardsQuery(tx: Tx, viewId: string) {
         .whereRef('o.record_id', '=', 'i.record_id')
         .where('o.view_id', '<>', viewId)
     )))
+}
+
+/**
+ * Deletes a view together with its own cards (records created on it that no
+ * other view holds). Shares, tabs and placements go via FK cascade.
+ */
+export async function deleteViewWithOwnCards(
+  tx: Tx,
+  view: Pick<ViewRow, 'id' | 'definition' | 'record_type_key'>
+): Promise<void> {
+  const own = await ownsItsCards(tx, view) ? await ownCardsQuery(tx, view.id).select('i.record_id').execute() : []
+  if (own.length > 0) {
+    await tx.deleteFrom('records_entries').where('id', 'in', own.map(r => r.record_id)).execute()
+  }
+  await tx.deleteFrom('views_definitions').where('id', '=', view.id).execute()
+}
+
+/** 404s unless `userId` is a user in the org bound to the transaction (any user in single mode). */
+export async function requireOrgUser(tx: Tx, userId: string): Promise<void> {
+  const user = await tx
+    .selectFrom('users')
+    .select('id')
+    .where('id', '=', userId)
+    .executeTakeFirst()
+  if (!user || !(await isActiveOrgMember(tx, userId))) {
+    throw createError({ statusCode: 404, statusMessage: 'User not found' })
+  }
 }
 
 async function countOwnCards(tx: Tx, viewId: string): Promise<number> {

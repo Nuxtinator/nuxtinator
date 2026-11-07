@@ -186,15 +186,15 @@ export async function removeShare(
 
 /**
  * The places other than direct shares that share a record (hand-picked views
- * holding it), for the record's share list. Empty on types whose boards don't
+ * holding it that the caller can open), for the record's share list. Empty on types whose boards don't
  * grant visibility.
  */
-export async function listShareVia(tx: Tx, typeKey: string, recordId: string): Promise<RecordsShareVia[]> {
+export async function listShareVia(tx: Tx, ctx: TenantContext, typeKey: string, recordId: string): Promise<RecordsShareVia[]> {
   const type = await getRecordType(tx, typeKey)
   if (type && !type.boardsGrantVisibility) return []
   const out: RecordsShareVia[] = []
   for (const source of getRecordsVisibilitySources()) {
-    if (source.describe) out.push(...await source.describe(tx, recordId))
+    if (source.describe) out.push(...await source.describe(tx, ctx, recordId))
   }
   return out
 }

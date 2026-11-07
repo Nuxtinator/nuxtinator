@@ -1,10 +1,10 @@
 // POST /api/views/:id/shares — add or re-level a share
 // ({ userId, level }). Only the owner manages shares. Sharing to the owner
-// is meaningless and rejected. A share applies whatever the view's
+// is meaningless and rejected; the target must belong to the org. A share applies whatever the view's
 // visibility.
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
-import { requireView } from '../../../../utils/views'
+import { requireOrgUser, requireView } from '../../../../utils/views'
 
 const Body = z.object({
   userId: z.string().uuid(),
@@ -24,12 +24,7 @@ export default defineEventHandler(async (event) => {
     if (userId === view.owner_id) {
       throw createError({ statusCode: 400, statusMessage: 'The owner already holds every level' })
     }
-    const target = await tx
-      .selectFrom('users')
-      .select('id')
-      .where('id', '=', userId)
-      .executeTakeFirst()
-    if (!target) throw createError({ statusCode: 404, statusMessage: 'User not found' })
+    await requireOrgUser(tx, userId)
 
     await tx
       .insertInto('views_shares')

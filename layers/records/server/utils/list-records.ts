@@ -567,17 +567,22 @@ function resolveFieldDef(defsByKey: Map<string, RecordsFieldSetting>, key: strin
   return null
 }
 
+/**
+ * `maxLimit` raises the page-size cap for server callers that load a whole
+ * board in one read; request-driven callers keep the default cap.
+ */
 export async function listRecords(
   tx: Tx,
   ctx: TenantContext,
   typeKey: string,
-  opts: RecordsListOpts = {}
+  opts: RecordsListOpts = {},
+  { maxLimit = MAX_LIMIT }: { maxLimit?: number } = {}
 ): Promise<RecordsListResult> {
   // Stale orphan rows describe nothing filterable; real fields only.
   const defs = (await getRecordTypeFields(tx, typeKey)).filter(d => !d.orphan)
   const defsByKey = new Map(defs.map(d => [d.key, d]))
 
-  const limit = Math.min(Math.max(opts.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT)
+  const limit = Math.min(Math.max(opts.limit ?? DEFAULT_LIMIT, 1), maxLimit)
   const offset = Math.max(opts.offset ?? 0, 0)
   const dir = opts.dir ?? 'desc'
 

@@ -34,14 +34,28 @@ export const boardVisibilitySource: RecordsVisibilitySource = {
       .whereRef('ei.record_id', '=', 'records_entries.id')
       .where(viewEditableByUser('ev', userId))
   ),
-  describe: async (tx, recordId) => {
-    const views = await tx
+  describe: async (tx, ctx, recordId) => {
+    const userId = ctx.userId
+    let query = tx
       .selectFrom('views_items as i')
       .innerJoin('views_definitions as v', 'v.id', 'i.view_id')
       .select(['v.id', 'v.name', 'v.visibility', 'v.org_level'])
       .where('i.record_id', '=', recordId)
-      .orderBy('v.name')
-      .execute()
+    // Lists only the views the caller can open (the getViewAccess rule), so
+    // private views' names and audiences stay private.
+    if (!ctx.roles.includes('admin')) {
+      query = query.where(eb => eb.or([
+        eb('v.owner_id', '=', userId),
+        eb.exists(
+          eb.selectFrom('views_shares as vs')
+            .select('vs.user_id')
+            .whereRef('vs.view_id', '=', 'v.id')
+            .where('vs.user_id', '=', userId)
+        ),
+        viewOpenToUser('v', userId)
+      ]))
+    }
+    const views = await query.orderBy('v.name').execute()
     const out: RecordsShareVia[] = []
     for (const v of views) {
       const audience: RecordsShareVia['audience'] = []

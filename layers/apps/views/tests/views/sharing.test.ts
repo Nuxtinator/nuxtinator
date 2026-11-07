@@ -10,6 +10,11 @@ import {
   createViewsOrgWith,
   addViewsMember,
   createViewsRole,
+  createViewsUser,
+  addTestMembership,
+  getAuthHeaders,
+  issueMcpBearer,
+  callMcpTool,
   withOrgHeader
 } from '../helpers'
 
@@ -127,6 +132,51 @@ describe('owner-only settings', () => {
     await expectStatus($fetch(`/api/views/${view.id}`, { method: 'PATCH', body: { definition: { filter: null } }, ...editorOpts }), 403)
     await expectStatus($fetch(`/api/views/${view.id}`, { method: 'PATCH', body: { visibility: 'org' }, ...editorOpts }), 403)
   })
+
+  it('over MCP, editors set a tab\'s filter but not the base filter', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['admin'])
+    const owner = withOrgHeader(auth, org.slug)
+    const editor = await addViewsMember(sql, org.id)
+    const view = await pickedView(owner)
+    await $fetch(`/api/views/${view.id}/shares`, { method: 'POST', body: { userId: editor.user.id, level: 'edit' }, ...owner })
+    const { token } = await issueMcpBearer(sql, editor.user.id, ['views.use'])
+    const filter = { match: 'all', rules: [] }
+
+    const tab = await callMcpTool(token, 'views_set_filter', { org: org.slug, view: view.id, tab: view.tabs[0]!.id, filter })
+    expect(tab.isError).toBeFalsy()
+    const base = await callMcpTool(token, 'views_set_filter', { org: org.slug, view: view.id, filter })
+    expect(base.isError).toBe(true)
+  })
+})
+
+describe('who a view is shared with', () => {
+  it('is limited to people in the org, for shares and for a new owner', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['admin'])
+    const owner = withOrgHeader(auth, org.slug)
+    const outsider = await createViewsOrgWith(sql, ['admin'])
+    const view = await pickedView(owner)
+
+    await expectStatus($fetch(`/api/views/${view.id}/shares`, { method: 'POST', body: { userId: outsider.user.id, level: 'view' }, ...owner }), 404)
+
+    const operator = await createViewsUser(sql, { is_admin: true })
+    await addTestMembership(sql, { user_id: operator.id, org_id: org.id, roles: ['member'] })
+    const operatorOpts = withOrgHeader(getAuthHeaders(operator), org.slug)
+    await expectStatus($fetch(`/api/views/admin/${view.id}/owner`, { method: 'PATCH', body: { userId: outsider.user.id }, ...operatorOpts }), 404)
+  })
+
+  it('shows on a record\'s share list only to callers who can open the view', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['admin'])
+    const owner = withOrgHeader(auth, org.slug)
+    const reader = await addViewsMember(sql, org.id)
+    const readerOpts = withOrgHeader(reader.auth, org.slug)
+    const view = await pickedView(owner, { name: 'test-views private board' })
+    const card = await newCard(owner, view.id, 'test-views Shared directly')
+    await $fetch(`/api/records/entries/item/${card.id}/shares`, { method: 'POST', body: { userId: reader.user.id }, ...owner })
+
+    type Shares = { via: Array<{ label: string }> }
+    expect((await $fetch<Shares>(`/api/records/entries/item/${card.id}/shares`, owner)).via.map(v => v.label)).toEqual(['test-views private board'])
+    expect((await $fetch<Shares>(`/api/records/entries/item/${card.id}/shares`, readerOpts)).via).toEqual([])
+  })
 })
 
 describe('a hand-picked view\'s own cards', () => {
@@ -176,6 +226,19 @@ describe('a hand-picked view\'s own cards', () => {
     await $fetch(`/api/views/${view.id}`, { method: 'DELETE', ...owner })
     await expectStatus($fetch(`/api/records/entries/item/${own.id}`, owner), 404)
     expect((await $fetch<{ id: string }>(`/api/records/entries/item/${kept.id}`, owner)).id).toBe(kept.id)
+  })
+
+  it('an operator admin\'s delete takes the view\'s own cards too', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['admin'])
+    const owner = withOrgHeader(auth, org.slug)
+    const operator = await createViewsUser(sql, { is_admin: true })
+    await addTestMembership(sql, { user_id: operator.id, org_id: org.id, roles: ['member'] })
+    const operatorOpts = withOrgHeader(getAuthHeaders(operator), org.slug)
+    const view = await pickedView(owner)
+    const own = await newCard(owner, view.id, 'test-views Goes with the view')
+
+    await $fetch(`/api/views/admin/${view.id}`, { method: 'DELETE', ...operatorOpts })
+    await expectStatus($fetch(`/api/records/entries/item/${own.id}`, owner), 404)
   })
 })
 

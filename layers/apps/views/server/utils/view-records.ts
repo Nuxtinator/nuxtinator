@@ -28,8 +28,6 @@ type Tx = Transaction<Database>
 // A board loads every card at once (columns need the full set); this is the
 // safety ceiling. Views past it truncate and say so — the fix is filters.
 export const VIEWS_BOARD_CAP = 500
-// listRecords clamps limit to its own maximum per call; page in steps.
-const PAGE_SIZE = 100
 
 export interface ViewsRecordsOverlay {
   q?: string
@@ -286,25 +284,13 @@ async function connectionColumns(tx: Tx, ctx: TenantContext, field: RecordsField
   return page.items.map(r => ({ key: r.id, label: r.name }))
 }
 
-async function pageThroughRecords(
+async function loadBoardRecords(
   tx: Tx,
   ctx: TenantContext,
   typeKey: string,
   opts: RecordsListOpts
 ): Promise<{ items: RecordListItem[], total: number }> {
-  const items: RecordListItem[] = []
-  let total = 0
-  for (let offset = 0; offset < VIEWS_BOARD_CAP; offset += PAGE_SIZE) {
-    const page = await listRecords(tx, ctx, typeKey, {
-      ...opts,
-      limit: PAGE_SIZE,
-      offset
-    })
-    items.push(...page.items)
-    total = page.total
-    if (items.length >= total || page.items.length === 0) break
-  }
-  return { items: items.slice(0, VIEWS_BOARD_CAP), total }
+  return await listRecords(tx, ctx, typeKey, { ...opts, limit: VIEWS_BOARD_CAP, offset: 0 }, { maxLimit: VIEWS_BOARD_CAP })
 }
 
 export interface ViewRecords {
@@ -363,7 +349,7 @@ export async function getViewRecords(
     rank: row.rank
   }))
 
-  const { items: rows, total } = await pageThroughRecords(tx, ctx, view.record_type_key, opts)
+  const { items: rows, total } = await loadBoardRecords(tx, ctx, view.record_type_key, opts)
   const items = withTimestamps(rows)
 
   let groupColumns: ViewsGroupColumn[] | undefined

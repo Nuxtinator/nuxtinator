@@ -162,6 +162,30 @@ describe('field-grouped moves', () => {
     expect(ranks.get(b.id)! < ranks.get(a.id)!).toBe(true)
   })
 
+  it('reordering within a column takes edit on the view, even for a caller who can edit the record', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['admin'])
+    const owner = withOrgHeader(auth, org.slug)
+    const view = await createView(owner, { groupField: 'status' })
+    const a = await createContact(owner, { name: 'test-views Order A', status: 'new' })
+    const b = await createContact(owner, { name: 'test-views Order B', status: 'new' })
+
+    const roleName = await createViewsRole(sql, org.id, ['views.use', 'crm.access', 'crm.contacts.read', 'crm.contacts.view_all', 'crm.contacts.update'])
+    const viewer = await createViewsUser(sql)
+    await addTestMembership(sql, { user_id: viewer.id, org_id: org.id, roles: [roleName] })
+    const viewerOpts = withOrgHeader(getAuthHeaders(viewer), org.slug)
+
+    await expect(move(viewerOpts, view.id, {
+      recordId: b.id, fromColumn: 'new', toColumn: 'new', columnOrder: [b.id, a.id]
+    })).rejects.toMatchObject({ statusCode: 403 })
+    expect((await feed(owner, view.id)).placements).toEqual([])
+
+    // A drag to another column is a record edit, which the record's permissions decide.
+    await move(viewerOpts, view.id, {
+      recordId: b.id, fromColumn: 'new', toColumn: 'active', columnOrder: [b.id]
+    })
+    expect((await recordFields(owner, b.id)).status).toBe('active')
+  })
+
   it('view access is not record access: a views-only caller cannot move', async () => {
     const { org, auth } = await createViewsOrgWith(sql, ['admin'])
     const owner = withOrgHeader(auth, org.slug)

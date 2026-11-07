@@ -231,7 +231,8 @@ export interface RecordsVisibilitySource {
   predicate: (eb: Eb, args: { userId: string, typeKey: string }) => Expression<SqlBool>
   /** Matches the records this source lets `userId` edit. */
   editPredicate?: (eb: Eb, args: { userId: string, typeKey: string }) => Expression<SqlBool>
-  describe?: (tx: Tx, recordId: string) => Promise<RecordsShareVia[]>
+  /** The places that share the record, limited to the ones `ctx`'s user can open. */
+  describe?: (tx: Tx, ctx: TenantContext, recordId: string) => Promise<RecordsShareVia[]>
 }
 
 const _visibilitySources = new Map<string, RecordsVisibilitySource>()

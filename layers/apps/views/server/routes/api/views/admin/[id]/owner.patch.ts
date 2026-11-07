@@ -1,9 +1,11 @@
 // PATCH /api/views/admin/:id/owner — reassign a view (typically
 // because its owner left). The new owner holds every level; the old owner
-// keeps nothing implicit (add a share if they should still see it).
+// keeps nothing implicit (add a share if they should still see it). The new
+// owner must belong to the org.
 import { z } from 'zod'
 import { sql } from 'kysely'
 import { requireOperatorAdmin, withOrgContext } from '#tenant/server'
+import { requireOrgUser } from '../../../../../utils/views'
 
 const Body = z.object({
   userId: z.string().uuid()
@@ -17,12 +19,7 @@ export default defineEventHandler(async (event) => {
     if (!parsed.success) {
       throw createError({ statusCode: 400, statusMessage: 'Invalid body', data: parsed.error.flatten() })
     }
-    const target = await tx
-      .selectFrom('users')
-      .select('id')
-      .where('id', '=', parsed.data.userId)
-      .executeTakeFirst()
-    if (!target) throw createError({ statusCode: 404, statusMessage: 'User not found' })
+    await requireOrgUser(tx, parsed.data.userId)
 
     const updated = await tx
       .updateTable('views_definitions')

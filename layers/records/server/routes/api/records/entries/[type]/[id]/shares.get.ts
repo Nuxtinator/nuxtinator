@@ -2,7 +2,8 @@
 // Everyone this record is shared with, joined with the user directory:
 // { items: [{ userId, name, email, avatarUrl, level, grantedBy, createdAt }],
 //   via: [{ sourceId, label, path, audience }] } — `via` lists the places
-// that share the record besides direct shares (hand-picked views).
+// that share the record besides direct shares (hand-picked views the caller
+// can open).
 // The caller's share capability lives on the record detail's capabilities
 // block; the write routes enforce the permission regardless. Permission: the
 // type evaluator's read answer plus the record-visibility rule.
@@ -18,6 +19,6 @@ export default defineEventHandler(async (event) => {
     await requireRecordType(tx, typeKey, ctx)
     await assertRecordVisible(tx, ctx, typeKey, id)
 
-    return { items: await listShares(tx, id), via: await listShareVia(tx, typeKey, id) }
+    return { items: await listShares(tx, id), via: await listShareVia(tx, ctx, typeKey, id) }
   })
 })
