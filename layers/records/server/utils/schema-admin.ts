@@ -606,6 +606,10 @@ export async function createField(
       order_override: maxOrder + 1,
       config: jsonb({
         ...(input.options ? { options: input.options } : {}),
+        // jsonb doesn't keep key order, so the options' order is stored apart.
+        ...(input.options && Object.keys(input.options).length > 1
+          ? { optionOrder: Object.keys(input.options) }
+          : {}),
         ...(input.channelType ? { channelType: input.channelType } : {}),
         ...(input.target ? { target: input.target } : {})
       }),
@@ -634,6 +638,11 @@ export interface UpdateFieldPatch {
    * only the props that differ from the manifest option are persisted.
    */
   options?: Record<string, RecordsFieldOption | null>
+  /**
+   * Option keys in display order; options left out follow in their current
+   * order. null reverts to the code order.
+   */
+  optionOrder?: string[] | null
 }
 
 /** Props of `desired` that differ from the manifest option — the persisted override. */
@@ -705,6 +714,31 @@ function applyCustomOptionPatch(
   else delete config.options
 }
 
+// Stores the full option order in config.optionOrder, or drops it when the
+// order is the manifest's own (custom options always need a stored order,
+// since jsonb doesn't keep key order).
+function applyOptionOrder(
+  base: Record<string, RecordsFieldOption> | undefined,
+  config: Record<string, unknown>,
+  order: string[] | null
+): void {
+  delete config.optionOrder
+  if (order === null) return
+  const current = Object.keys(mergeOptions(base, config) ?? {})
+  const full = [...new Set(order.filter(key => current.includes(key)))]
+  for (const key of current) if (!full.includes(key)) full.push(key)
+  const codeOrder = Object.keys(base ?? {})
+  const isCodeOrder = full.length === codeOrder.length && full.every((key, i) => key === codeOrder[i])
+  if (full.length > 1 && !isCodeOrder) config.optionOrder = full
+}
+
+// The order to apply: the patch's, else the stored one (re-applied so it
+// takes in options the patch added and drops removed ones).
+function nextOptionOrder(config: Record<string, unknown>, patch: UpdateFieldPatch): string[] | null {
+  if (patch.optionOrder !== undefined) return patch.optionOrder
+  return Array.isArray(config.optionOrder) ? config.optionOrder as string[] : null
+}
+
 async function getFieldRow(tx: Tx, typeKey: string, fieldKey: string): Promise<RecordFieldRow | undefined> {
   return await tx
     .selectFrom('records_fields')
@@ -774,6 +808,10 @@ export async function updateField(
       if (!OPTION_KINDS.has(def.kind)) bad(`'${def.kind}' fields do not take options`)
       applyManifestOptionPatch(def, config, patch.options)
       if (def.column === 'status') assertStatusOptions(mergeOptions(def.options, config) ?? {})
+    }
+    if (patch.options !== undefined || patch.optionOrder !== undefined) {
+      if (!OPTION_KINDS.has(def.kind)) bad(`'${def.kind}' fields do not take options`)
+      applyOptionOrder(def.options, config, nextOptionOrder(config, patch))
     }
 
     const hasOverrides = label !== null
@@ -850,6 +888,12 @@ export async function updateField(
         bad(`'${field.kind}' fields do not take options`)
       }
       applyCustomOptionPatch(config, patch.options)
+    }
+    if (patch.options !== undefined || patch.optionOrder !== undefined) {
+      if (!field.custom || !OPTION_KINDS.has(field.kind)) {
+        bad(`'${field.kind}' fields do not take options`)
+      }
+      applyOptionOrder(undefined, config, nextOptionOrder(config, patch))
     }
 
     await tx

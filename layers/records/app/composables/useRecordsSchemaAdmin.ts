@@ -52,6 +52,8 @@ export interface RecordsUpdateFieldPatch {
   section?: string | null
   /** Full desired state per option key; null removes the override/option. */
   options?: Record<string, RecordsFieldOption | null>
+  /** Option keys in display order; null reverts to the code order. */
+  optionOrder?: string[] | null
 }
 
 /** Kinds admins may create, with picker labels (mirrors the server whitelist). */

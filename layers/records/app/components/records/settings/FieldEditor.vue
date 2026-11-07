@@ -163,6 +163,7 @@ async function submit() {
         && JSON.stringify(optionsDraft.value) !== JSON.stringify(props.field.options ?? {})
       ) {
         patch.options = optionsDraft.value
+        patch.optionOrder = Object.keys(optionsDraft.value)
       }
       if (Object.keys(patch).length > 0) {
         await admin.updateField(props.typeKey, props.field.key, patch)

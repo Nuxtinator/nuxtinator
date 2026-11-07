@@ -6,7 +6,7 @@
 // Removal is soft: `deleted` keeps historical values renderable while the
 // option stops being offered. On a status field, options can be marked as
 // meaning the record is closed, and at least one open and one closed option
-// always remain.
+// always remain. Rows reorder by dragging the grip or with the arrow keys on it.
 import type { RecordsFieldOption } from '#records'
 import type { RecordsBadgeColor } from '../../../utils/field-kinds'
 
@@ -45,6 +45,48 @@ function patchOption(key: string, patch: Partial<RecordsFieldOption>) {
   const current = options.value[key]
   if (!current) return
   options.value = { ...options.value, [key]: { ...current, ...patch } }
+}
+
+const list = ref<HTMLElement | null>(null)
+const reorderable = computed(() => !props.disabled && entries.value.length > 1)
+const dragKey = ref<string | null>(null)
+const dragOverKey = ref<string | null>(null)
+
+function moveOption(from: number, to: number) {
+  const next = [...entries.value]
+  if (from === to || to < 0 || to >= next.length) return
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved!)
+  options.value = Object.fromEntries(next)
+}
+
+async function moveByKey(key: string, delta: number) {
+  if (!reorderable.value) return
+  const from = entries.value.findIndex(([k]) => k === key)
+  moveOption(from, from + delta)
+  await nextTick()
+  list.value?.querySelector<HTMLElement>(`[data-option-handle="${key}"]`)?.focus()
+}
+
+function onDragStart(key: string, event: DragEvent) {
+  dragKey.value = key
+  if (!event.dataTransfer) return
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', key)
+  const row = (event.target as HTMLElement).closest('li')
+  if (row) event.dataTransfer.setDragImage(row, 16, row.offsetHeight / 2)
+}
+
+function onDragEnd() {
+  dragKey.value = null
+  dragOverKey.value = null
+}
+
+function onDrop(overKey: string) {
+  const from = entries.value.findIndex(([k]) => k === dragKey.value)
+  const to = entries.value.findIndex(([k]) => k === overKey)
+  onDragEnd()
+  if (from >= 0 && to >= 0) moveOption(from, to)
 }
 
 function setColor(key: string, value: string) {
@@ -89,13 +131,40 @@ function badgeColor(option: RecordsFieldOption): RecordsBadgeColor {
 
 <template>
   <div class="space-y-2">
-    <ul class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md">
+    <ul
+      ref="list"
+      class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md"
+    >
       <li
         v-for="[key, option] in entries"
         :key="key"
-        class="flex items-center gap-2 px-2 py-1.5"
-        :class="option.deleted ? 'opacity-50' : ''"
+        class="flex items-center gap-2 px-2 py-1.5 transition-colors"
+        :class="{
+          'opacity-50': option.deleted,
+          'bg-(--ui-bg-elevated)': dragKey !== null && dragOverKey === key && dragKey !== key
+        }"
+        @dragover.prevent="dragKey !== null && (dragOverKey = key)"
+        @drop.prevent="onDrop(key)"
       >
+        <span
+          role="button"
+          :tabindex="reorderable ? 0 : -1"
+          class="shrink-0 -mx-1 p-0.5 rounded text-(--ui-text-dimmed) focus-visible:outline-2 focus-visible:outline-(--ui-primary)"
+          :class="reorderable ? 'cursor-grab' : 'opacity-50'"
+          :data-option-handle="key"
+          :draggable="reorderable"
+          :aria-disabled="!reorderable"
+          :aria-label="`Reorder ${option.label}`"
+          @dragstart="onDragStart(key, $event)"
+          @dragend="onDragEnd"
+          @keydown.up.prevent="moveByKey(key, -1)"
+          @keydown.down.prevent="moveByKey(key, 1)"
+        >
+          <UIcon
+            name="i-lucide-grip-vertical"
+            class="size-4 block"
+          />
+        </span>
         <UBadge
           :color="badgeColor(option)"
           variant="subtle"

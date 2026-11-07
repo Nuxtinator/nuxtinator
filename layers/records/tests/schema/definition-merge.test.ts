@@ -202,6 +202,59 @@ describe('admin custom fields (orphan rows with kind)', () => {
   })
 })
 
+describe('option order', () => {
+  it('stores a reordered manifest field and drops the order when it matches the code', async () => {
+    const { org, auth } = await createRecordsOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    const url = '/api/records/schema/types/contacts/fields/reason_closed'
+    const codeOrder = ['duplicate', 'not_interested', 'not_responding', 'moved', 'asked_to_be_removed', 'other']
+
+    const patched = await $fetch<{ field: FieldEntry }>(url, {
+      method: 'PATCH', body: { optionOrder: ['other', 'moved'] }, ...opts
+    })
+    const reordered = ['other', 'moved', 'duplicate', 'not_interested', 'not_responding', 'asked_to_be_removed']
+    expect(Object.keys(patched.field.options ?? {})).toEqual(reordered)
+
+    let rows = await sql`
+      SELECT config FROM records_fields
+      WHERE org_id = ${org.id} AND type_key = 'contacts' AND field_key = 'reason_closed'
+    `
+    expect(rows[0]!.config.optionOrder).toEqual(reordered)
+
+    await $fetch(url, { method: 'PATCH', body: { optionOrder: codeOrder }, ...opts })
+    rows = await sql`
+      SELECT id FROM records_fields
+      WHERE org_id = ${org.id} AND type_key = 'contacts' AND field_key = 'reason_closed'
+    `
+    expect(rows).toHaveLength(0)
+  })
+
+  it('keeps a custom field\'s options in the order they were given', async () => {
+    const { org, auth } = await createRecordsOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+
+    await $fetch('/api/records/schema/types/contacts/fields', {
+      method: 'POST',
+      body: {
+        fieldKey: 'tier',
+        kind: 'key_select',
+        label: 'Tier',
+        options: { silver: { label: 'Silver' }, gold: { label: 'Gold' }, bronze: { label: 'Bronze' } }
+      },
+      ...opts
+    })
+    let res = await $fetch<FieldsResponse>('/api/records/schema/types/contacts/fields', opts)
+    expect(Object.keys(res.fields.find(f => f.key === 'tier')!.options ?? {})).toEqual(['silver', 'gold', 'bronze'])
+
+    // An added option lands after the stored order.
+    await $fetch('/api/records/schema/types/contacts/fields/tier', {
+      method: 'PATCH', body: { options: { iron: { label: 'Iron' } } }, ...opts
+    })
+    res = await $fetch<FieldsResponse>('/api/records/schema/types/contacts/fields', opts)
+    expect(Object.keys(res.fields.find(f => f.key === 'tier')!.options ?? {})).toEqual(['silver', 'gold', 'bronze', 'iron'])
+  })
+})
+
 describe('stale orphan rows', () => {
   it('appear (flagged) for schema managers and are hidden from members', async () => {
     const { org, auth } = await createRecordsOrgWith(sql, ['admin'])

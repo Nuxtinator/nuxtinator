@@ -208,19 +208,28 @@ export interface RecordsFieldSetting {
 }
 
 // The slice of records_fields.config the merge understands:
-//   { options?: Record<optionKey, Partial<RecordsFieldOption>> }
+//   { options?: Record<optionKey, Partial<RecordsFieldOption>>, optionOrder?: string[] }
 // Keys matching a manifest option override just the given props; keys the
-// manifest doesn't declare are admin-added custom options.
+// manifest doesn't declare are admin-added custom options. optionOrder lists
+// option keys in display order; options it doesn't name follow in merge order.
 export function mergeOptions(
   base: Record<string, RecordsFieldOption> | undefined,
   config: Record<string, unknown> | undefined
 ): Record<string, RecordsFieldOption> | undefined {
   const overrides = config?.options as Record<string, Partial<RecordsFieldOption>> | undefined
   if (!base && !overrides) return undefined
-  const out: Record<string, RecordsFieldOption> = {}
-  for (const [key, option] of Object.entries(base ?? {})) out[key] = { ...option }
+  const merged: Record<string, RecordsFieldOption> = {}
+  for (const [key, option] of Object.entries(base ?? {})) merged[key] = { ...option }
   for (const [key, override] of Object.entries(overrides ?? {})) {
-    out[key] = { ...(out[key] ?? { label: key }), ...override }
+    merged[key] = { ...(merged[key] ?? { label: key }), ...override }
+  }
+  const order = Array.isArray(config?.optionOrder) ? config.optionOrder : []
+  const out: Record<string, RecordsFieldOption> = {}
+  for (const key of order) {
+    if (typeof key === 'string' && merged[key]) out[key] = merged[key]
+  }
+  for (const [key, option] of Object.entries(merged)) {
+    if (!out[key]) out[key] = option
   }
   return out
 }

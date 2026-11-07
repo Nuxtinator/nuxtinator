@@ -1,6 +1,7 @@
 // PATCH /api/records/schema/types/:type/fields/:key
 // Updates a field's presentation: label (null reverts a manifest field to
-// its code label), hidden, required, order, section, and options. Option
+// its code label), hidden, required, order, section, options and
+// optionOrder (option keys in display order; null reverts). Option
 // values carry the option's full desired state (null removes the override /
 // custom option). For manifest fields only actual overrides are persisted —
 // per-option overrides and admin-added options land in config.options; for
@@ -30,7 +31,8 @@ const Body = z.object({
   required: z.boolean().nullish(),
   order: z.number().int().min(-100000).max(100000).nullish(),
   section: z.string().trim().min(1).max(60).nullish(),
-  options: z.record(z.string(), Option.nullable()).optional()
+  options: z.record(z.string(), Option.nullable()).optional(),
+  optionOrder: z.array(z.string().max(41)).max(500).nullish()
 })
 
 export default defineEventHandler(async (event) => {
