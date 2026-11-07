@@ -180,16 +180,21 @@ describe('who a view is shared with', () => {
 })
 
 describe('a hand-picked view\'s own cards', () => {
-  it('editors create cards without create on the type, and delete only the ones created there', async () => {
+  it('editors create cards with create on the type, and delete only the ones created there', async () => {
     const { org, auth } = await createViewsOrgWith(sql, ['admin'])
     const owner = withOrgHeader(auth, org.slug)
-    const role = await createViewsRole(sql, org.id, ['views.use', 'records.access', 'records.entries.read'])
+    const role = await createViewsRole(sql, org.id, ['views.use', 'records.access', 'records.entries.read', 'records.entries.create'])
     const editor = await addViewsMember(sql, org.id, [role])
     const editorOpts = withOrgHeader(editor.auth, org.slug)
+    const noCreateRole = await createViewsRole(sql, org.id, ['views.use', 'records.access', 'records.entries.read'])
+    const noCreate = await addViewsMember(sql, org.id, [noCreateRole])
+    const noCreateOpts = withOrgHeader(noCreate.auth, org.slug)
 
     const view = await pickedView(owner)
     await $fetch(`/api/views/${view.id}/shares`, { method: 'POST', body: { userId: editor.user.id, level: 'edit' }, ...owner })
+    await $fetch(`/api/views/${view.id}/shares`, { method: 'POST', body: { userId: noCreate.user.id, level: 'edit' }, ...owner })
 
+    await expectStatus(newCard(noCreateOpts, view.id, 'test-views Not allowed'), 403)
     const own = await newCard(editorOpts, view.id, 'test-views Made here')
     const fromElsewhere = await $fetch<{ id: string }>('/api/records/entries/item', { method: 'POST', body: { fields: { name: 'test-views Made elsewhere' } }, ...owner })
     await $fetch(`/api/views/${view.id}/cards`, { method: 'POST', body: { recordId: fromElsewhere.id, columnKey: 'todo' }, ...owner })

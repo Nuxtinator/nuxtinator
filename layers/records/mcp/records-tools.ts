@@ -264,7 +264,7 @@ export const searchRecordsTool = defineMcpTool({
         total = res.total
       }
 
-      const hydrated = await hydrateRecords(tx, input.type, rows)
+      const hydrated = await hydrateRecords(tx, tenant, input.type, rows)
       const last = await lastActivity(tx, hydrated.map(r => r.id))
       const records = hydrated.map(r => ({
         id: r.id,

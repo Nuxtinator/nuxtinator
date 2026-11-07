@@ -146,6 +146,13 @@ export async function sanitizeViewDefinition(tx: Tx, typeKey: string, raw: unkno
   return out
 }
 
+/** Whether listRecords can sort by `key`: the record row's own columns and jsonb fields. */
+export function isSortableField(fields: Awaited<ReturnType<typeof getRecordTypeFields>>, key: string): boolean {
+  if (INTRINSIC_KEYS.has(key)) return true
+  const field = fields.find(f => f.key === key && !f.orphan)
+  return !!field && (field.storage === 'promoted' || field.storage === 'jsonb')
+}
+
 /**
  * Validates a tab definition against its layout and the record
  * type's real fields, and returns it typed. Filter values are coerced later by
@@ -203,6 +210,7 @@ export async function sanitizeTabDefinition(
     }
   }
   if (def.sort && !known(def.sort.field)) badDefinition(`unknown sort field "${def.sort.field}"`)
+  if (def.sort && !isSortableField(fields, def.sort.field)) badDefinition(`records cannot be sorted by "${def.sort.field}"`)
 
   const filter = sanitizeFilter(rawFilter, fields)
   if (filter) def.filter = filter

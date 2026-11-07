@@ -434,18 +434,14 @@ export const moveCardTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, async (tx, tenant) => {
-      const { view } = await requireView(tx, tenant, input.view, 'view')
+      const { view, access } = await requireView(tx, tenant, input.view, 'view')
       const tab = await requireTab(tx, view, input.tab)
-      const tabDef = tab.definition as ViewTabDefinition
-      if (tabDef.columns || !tabDef.groupField || input.fromColumn === input.toColumn) {
-        await requireView(tx, tenant, input.view, 'edit')
-      }
       const groupField = await groupFieldOf(tx, view, tab)
       const records = await getViewRecords(tx, tenant, view, tab, groupField, {})
       const columns = await boardColumns(tx, view, tab, records)
       const target = columns.find(c => c.key === input.toColumn)
       const order = [...(target?.cards.map(c => c.id) ?? []).filter(id => id !== input.record), input.record]
-      await moveViewsCard(tx, tenant, view, tab, {
+      await moveViewsCard(tx, tenant, view, access, tab, {
         recordId: input.record,
         fromColumn: input.fromColumn,
         toColumn: input.toColumn,

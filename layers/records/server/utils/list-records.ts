@@ -691,6 +691,47 @@ export async function requireRecordType(tx: Tx, typeKey: string, ctx: TenantCont
   return type
 }
 
+/**
+ * The ids among `ids` the caller may open: per record type, the type's read
+ * permission, its app gate and the record-visibility rule.
+ */
+export async function visibleRecordIds(tx: Tx, ctx: TenantContext, ids: string[]): Promise<Set<string>> {
+  const visible = new Set<string>()
+  if (ids.length === 0) return visible
+  const rows = await tx
+    .selectFrom('records_entries')
+    .select(['id', 'record_type'])
+    .where('id', 'in', ids)
+    .execute()
+  const byType = new Map<string, string[]>()
+  for (const row of rows) {
+    const list = byType.get(row.record_type) ?? []
+    list.push(row.id)
+    byType.set(row.record_type, list)
+  }
+  for (const [typeKey, typeIds] of byType) {
+    if (!(await resolveTypePermission(tx, ctx, typeKey, 'read'))) continue
+    let type: RecordTypeSetting
+    try {
+      type = await requireRecordType(tx, typeKey, ctx)
+    } catch {
+      continue
+    }
+    if (await resolveTypePermission(tx, ctx, typeKey, 'view_all')) {
+      for (const id of typeIds) visible.add(id)
+      continue
+    }
+    const seen = await tx
+      .selectFrom('records_entries')
+      .select('id')
+      .where('id', 'in', typeIds)
+      .where(eb => visibilityPredicate(eb, ctx.userId, type))
+      .execute()
+    for (const r of seen) visible.add(r.id)
+  }
+  return visible
+}
+
 // The list visibility rule applied to a single record. 404 both for missing
 // rows and for rows the caller may not see, so existence is never leaked.
 export async function assertRecordVisible(

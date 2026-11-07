@@ -77,11 +77,11 @@ const typeInfo = computed(() =>
   types.value.find(t => t.key === view.value?.recordTypeKey) ?? null)
 const canEditDefinition = computed(() =>
   view.value?.accessLevel === 'edit' || view.value?.accessLevel === 'owner')
-// A hand-picked view's editors create its own cards; elsewhere, and on types
-// whose boards don't share records, the type decides.
+// Creating takes the type's create permission; on a hand-picked view it also
+// takes 'edit' on the view, since the record becomes one of its cards.
 const canCreate = computed(() => {
-  if (picked.value && typeInfo.value?.boardsGrantVisibility) return canEditDefinition.value
-  return typeInfo.value?.canCreate ?? false
+  const typeAllows = typeInfo.value?.canCreate ?? false
+  return picked.value ? typeAllows && canEditDefinition.value : typeAllows
 })
 const isOwner = computed(() => view.value?.accessLevel === 'owner')
 const picked = computed(() => !!view.value?.definition.picked)

@@ -5,7 +5,7 @@
 // ungrouped list's order are view state and need 'edit'.
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
-import { requireTab, requireView, type ViewTabDefinition } from '../../../../utils/views'
+import { requireTab, requireView } from '../../../../utils/views'
 import { moveViewsCard, VIEWS_MOVE_ORDER_MAX } from '../../../../utils/placements'
 
 const Body = z.object({
@@ -24,13 +24,9 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 400, statusMessage: 'Invalid body', data: parsed.error.flatten() })
     }
     const { tabId, ...input } = parsed.data
-    const { view } = await requireView(tx, ctx, viewId, 'view')
+    const { view, access } = await requireView(tx, ctx, viewId, 'view')
     const tab = await requireTab(tx, view, tabId)
-    const def = tab.definition as ViewTabDefinition
-    if (def.columns || !def.groupField || input.fromColumn === input.toColumn) {
-      await requireView(tx, ctx, viewId, 'edit')
-    }
-    await moveViewsCard(tx, ctx, view, tab, input)
+    await moveViewsCard(tx, ctx, view, access, tab, input)
     return { ok: true }
   })
 })

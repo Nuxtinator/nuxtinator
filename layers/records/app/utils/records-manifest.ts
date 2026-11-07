@@ -174,6 +174,8 @@ export interface RecordsLinkValue {
 export interface RecordsConnectedRecord {
   id: string
   name: string
+  /** The caller can't open the linked record: its name is withheld (''). */
+  hidden?: true
 }
 
 type FieldValue<F extends RecordsFieldDef> =

@@ -20,21 +20,27 @@ const typePath = useRecordsTypePath()
 // optimistic window where the patched value is a bare id array until the
 // server response replaces it with { id, name } objects.
 const knownNames = ref(new Map<string, string>())
+// Linked records the caller can't open: they keep their place, not a name.
+const hiddenIds = ref(new Set<string>())
 
 const current = computed<RecordsConnectedRecord[]>(() => {
   const raw = Array.isArray(props.modelValue) ? props.modelValue : []
   return raw.map((v) => {
     if (v !== null && typeof v === 'object' && 'id' in v) return v as RecordsConnectedRecord
     const id = String(v)
+    if (hiddenIds.value.has(id)) return { id, name: '', hidden: true }
     return { id, name: knownNames.value.get(id) ?? id }
   })
 })
 
 watch(current, (list) => {
   for (const item of list) {
-    if (item.name !== item.id) knownNames.value.set(item.id, item.name)
+    if (item.hidden) hiddenIds.value.add(item.id)
+    else if (item.name !== item.id) knownNames.value.set(item.id, item.name)
   }
 }, { immediate: true })
+
+const labelOf = (item: RecordsConnectedRecord) => item.hidden ? 'Hidden record' : item.name
 
 const searchTerm = ref('')
 const results = ref<RecordsConnectedRecord[]>([])
@@ -82,7 +88,7 @@ interface RecordItem {
 const items = computed<RecordItem[]>(() => {
   const out = results.value.map(r => ({ label: r.name, value: r.id }))
   for (const item of current.value) {
-    if (!out.some(i => i.value === item.id)) out.push({ label: item.name, value: item.id })
+    if (!out.some(i => i.value === item.id)) out.push({ label: labelOf(item), value: item.id })
   }
   return out
 })
@@ -116,13 +122,13 @@ function onChange(value: string[]) {
       <UButton
         v-for="item in current"
         :key="item.id"
-        :to="typePath(field.target ?? '', item.id)"
+        :to="item.hidden ? undefined : typePath(field.target ?? '', item.id)"
         color="neutral"
         variant="subtle"
         size="xs"
-        icon="i-lucide-link"
+        :icon="item.hidden ? 'i-lucide-lock' : 'i-lucide-link'"
       >
-        {{ item.name }}
+        {{ labelOf(item) }}
       </UButton>
     </div>
   </div>

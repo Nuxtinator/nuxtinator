@@ -33,6 +33,7 @@ import { getRecordType, getRecordTypeFields, recordsStatusDefault, type RecordsF
 import { normalizeChannelValue } from './normalize'
 import { recordRecordsActivity } from './records-activity'
 import { closingRulesOf, enforceClosingRules } from './closing'
+import { visibleRecordIds } from './list-records'
 
 type Tx = Transaction<Database>
 
@@ -95,6 +96,7 @@ function connectionReverseSources(typeKey: string, fieldKey: string): string[] {
 
 export async function hydrateRecords(
   tx: Tx,
+  ctx: TenantContext,
   typeKey: string,
   rows: RecordRow[]
 ): Promise<RecordsHydratedRecord[]> {
@@ -217,7 +219,8 @@ export async function hydrateRecords(
     }
     // Connection values surface as { id, name } so pickers and panels render
     // linked records without per-record lookups — one batched name query
-    // covers every edge on the page.
+    // covers every edge on the page. Records the caller can't open keep their
+    // id (so a full-list edit doesn't drop the edge) but not their name.
     const connectedIds = new Set<string>()
     for (const rec of out.values()) {
       for (const def of connDefs) {
@@ -225,18 +228,21 @@ export async function hydrateRecords(
       }
     }
     const connectedNames = new Map<string, string>()
-    if (connectedIds.size > 0) {
+    const visible = await visibleRecordIds(tx, ctx, [...connectedIds])
+    if (visible.size > 0) {
       const nameRows = await tx
         .selectFrom('records_entries')
         .select(['id', 'name'])
-        .where('id', 'in', [...connectedIds])
+        .where('id', 'in', [...visible])
         .execute()
       for (const r of nameRows) connectedNames.set(r.id, r.name)
     }
     for (const rec of out.values()) {
       for (const def of connDefs) {
         rec.fields[def.key] = (rec.fields[def.key] as string[]).map(
-          (id): RecordsConnectedRecord => ({ id, name: connectedNames.get(id) ?? id })
+          (id): RecordsConnectedRecord => visible.has(id)
+            ? { id, name: connectedNames.get(id) ?? id }
+            : { id, name: '', hidden: true }
         )
       }
     }
@@ -265,7 +271,7 @@ export async function hydrateRecords(
 
 export async function getRecord(
   tx: Tx,
-  _ctx: TenantContext,
+  ctx: TenantContext,
   typeKey: string,
   id: string
 ): Promise<RecordsHydratedRecord> {
@@ -281,7 +287,7 @@ export async function getRecord(
   if (!row) {
     throw createError({ statusCode: 404, statusMessage: 'Record not found.' })
   }
-  const [hydrated] = await hydrateRecords(tx, typeKey, [row])
+  const [hydrated] = await hydrateRecords(tx, ctx, typeKey, [row])
   return hydrated!
 }
 
@@ -291,7 +297,7 @@ export async function getRecord(
 // written.
 export async function deleteRecord(
   tx: Tx,
-  _ctx: TenantContext,
+  ctx: TenantContext,
   typeKey: string,
   id: string
 ): Promise<void> {

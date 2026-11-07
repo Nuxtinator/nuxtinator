@@ -52,13 +52,13 @@ const groups = computed<ConnectionGroup[]>(() =>
         <UButton
           v-for="item in group.items"
           :key="item.id"
-          :to="typePath(group.field.target ?? '', item.id)"
+          :to="item.hidden ? undefined : typePath(group.field.target ?? '', item.id)"
           color="neutral"
           variant="subtle"
           size="xs"
-          icon="i-lucide-link"
+          :icon="item.hidden ? 'i-lucide-lock' : 'i-lucide-link'"
         >
-          {{ item.name }}
+          {{ item.hidden ? 'Hidden record' : item.name }}
         </UButton>
       </div>
     </div>

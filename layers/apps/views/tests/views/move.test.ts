@@ -13,7 +13,9 @@ import {
   createViewsUser,
   addTestMembership,
   getAuthHeaders,
-  withOrgHeader
+  withOrgHeader,
+  issueMcpBearer,
+  callMcpTool
 } from '../helpers'
 
 const sql = getHostAdminDb()
@@ -184,6 +186,55 @@ describe('field-grouped moves', () => {
       recordId: b.id, fromColumn: 'new', toColumn: 'active', columnOrder: [b.id]
     })
     expect((await recordFields(owner, b.id)).status).toBe('active')
+  })
+
+  it('a field-grouped drag by a view-level caller leaves the column order alone', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['admin'])
+    const owner = withOrgHeader(auth, org.slug)
+    const view = await createView(owner, { groupField: 'status' })
+    const a = await createContact(owner, { name: 'test-views Kept A', status: 'active' })
+    const b = await createContact(owner, { name: 'test-views Moved B', status: 'new' })
+
+    const roleName = await createViewsRole(sql, org.id, ['views.use', 'crm.access', 'crm.contacts.read', 'crm.contacts.view_all', 'crm.contacts.update'])
+    const viewer = await createViewsUser(sql)
+    await addTestMembership(sql, { user_id: viewer.id, org_id: org.id, roles: [roleName] })
+    const viewerOpts = withOrgHeader(getAuthHeaders(viewer), org.slug)
+
+    await move(viewerOpts, view.id, {
+      recordId: b.id, fromColumn: 'new', toColumn: 'active', columnOrder: [b.id, a.id, '00000000-0000-4000-8000-000000000000']
+    })
+    expect((await recordFields(owner, b.id)).status).toBe('active')
+    expect((await feed(owner, view.id)).placements).toEqual([])
+  })
+
+  it('an unknown id in columnOrder is skipped, not a 500', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['admin'])
+    const owner = withOrgHeader(auth, org.slug)
+    const view = await createView(owner, { groupField: 'status' })
+    const a = await createContact(owner, { name: 'test-views Ghost A', status: 'new' })
+    const b = await createContact(owner, { name: 'test-views Ghost B', status: 'new' })
+    const ghost = '00000000-0000-4000-8000-000000000000'
+
+    await move(owner, view.id, { recordId: b.id, fromColumn: 'new', toColumn: 'new', columnOrder: [b.id, ghost, a.id] })
+    const ranked = (await feed(owner, view.id)).placements.map(p => p.recordId).sort()
+    expect(ranked).toEqual([a.id, b.id].sort())
+  })
+
+  it('a connected app needs records.write to move a card on a field-grouped tab', async () => {
+    const { org, auth, user } = await createViewsOrgWith(sql, ['admin'])
+    const owner = withOrgHeader(auth, org.slug)
+    const view = await createView(owner, { groupField: 'status' })
+    const rec = await createContact(owner, { name: 'test-views Scoped', status: 'new' })
+
+    const viewsOnly = await issueMcpBearer(sql, user.id, ['views.use'])
+    const refused = await callMcpTool(viewsOnly.token, 'views_move_card', { org: org.slug, view: view.id, record: rec.id, fromColumn: 'new', toColumn: 'active' })
+    expect(refused.isError).toBe(true)
+    expect((await recordFields(owner, rec.id)).status).toBe('new')
+
+    const writer = await issueMcpBearer(sql, user.id, ['views.use', 'records.write'])
+    const moved = await callMcpTool(writer.token, 'views_move_card', { org: org.slug, view: view.id, record: rec.id, fromColumn: 'new', toColumn: 'active' })
+    expect(moved.isError).toBeFalsy()
+    expect((await recordFields(owner, rec.id)).status).toBe('active')
   })
 
   it('view access is not record access: a views-only caller cannot move', async () => {

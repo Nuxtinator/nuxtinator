@@ -121,6 +121,42 @@ describe('grouping by a connection (milestones)', () => {
   })
 })
 
+describe('linked records the viewer cannot open', () => {
+  it('keep their id but not their name, and cards leave them out of counts', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['admin'])
+    const admin = withOrgHeader(auth, org.slug)
+    const author = await addViewsMember(sql, org.id)
+    const authorOpts = withOrgHeader(author.auth, org.slug)
+    const friend = await addViewsMember(sql, org.id)
+    const friendOpts = withOrgHeader(friend.auth, org.slug)
+
+    await $fetch('/api/records/schema/types', { method: 'POST', body: { typeKey: 'test_views_deliverables', label: 'Deliverables', labelSingular: 'Deliverable' }, ...admin })
+    await $fetch('/api/records/schema/types/test_views_deliverables/fields', {
+      method: 'POST',
+      body: { fieldKey: 'items', kind: 'connection', label: 'Items', target: 'item' },
+      ...admin
+    })
+
+    // Items are personal: the friend never sees the author's.
+    const secret = await createRecord(authorOpts, 'item', { name: 'test-views Secret item' })
+    const deliverable = await createRecord(authorOpts, 'test_views_deliverables', { name: 'test-views Shared deliverable', items: [secret.id] })
+    const board = await createView(authorOpts, {
+      recordTypeKey: 'test_views_deliverables',
+      visibility: 'org',
+      definition: { columns: [{ key: 'todo', label: 'To do' }], cardFields: ['items'], cardConnections: { items: 'count' } }
+    })
+    await $fetch(`/api/views/${board.id}/cards`, { method: 'POST', body: { recordId: deliverable.id, columnKey: 'todo' }, ...authorOpts })
+
+    expect((await getFields(authorOpts, 'test_views_deliverables', deliverable.id)).items)
+      .toEqual([{ id: secret.id, name: 'test-views Secret item' }])
+    expect((await getFields(friendOpts, 'test_views_deliverables', deliverable.id)).items)
+      .toEqual([{ id: secret.id, name: '', hidden: true }])
+
+    expect((await feed(authorOpts, board.id)).items[0]?.progress?.items).toEqual({ total: 1, done: 0 })
+    expect((await feed(friendOpts, board.id)).items[0]?.progress?.items).toEqual({ total: 0, done: 0 })
+  })
+})
+
 describe('shared custom boards grant visibility', () => {
   it('a personal item on a shared board becomes visible to the people it is shared with, and only them', async () => {
     const { org, auth } = await createViewsOrgWith(sql, ['member'])
@@ -170,6 +206,32 @@ describe('shared custom boards grant visibility', () => {
       ...noShareOpts
     })).rejects.toMatchObject({ statusCode: 403 })
     expect((await feed(owner, board.id)).items).toEqual([])
+  })
+
+  it('adding a card takes edit access to the record, so a view-only share stays view-only', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['member'])
+    const owner = withOrgHeader(auth, org.slug)
+    const role = await createViewsRole(sql, org.id, ['views.use', 'records.access', 'records.entries.read', 'records.entries.share'])
+    const reader = await addViewsMember(sql, org.id, [role])
+    const readerOpts = withOrgHeader(reader.auth, org.slug)
+
+    const item = await createRecord(owner, 'item', { name: 'test-views Read only' })
+    await $fetch(`/api/records/entries/item/${item.id}/shares`, { method: 'POST', body: { userId: reader.user.id, level: 'view' }, ...owner })
+
+    const board = await createView(readerOpts, {
+      recordTypeKey: 'item',
+      definition: { columns: [{ key: 'ideas', label: 'Ideas' }] }
+    })
+    await expect($fetch(`/api/views/${board.id}/cards`, {
+      method: 'POST',
+      body: { recordId: item.id, columnKey: 'ideas' },
+      ...readerOpts
+    })).rejects.toMatchObject({ statusCode: 403 })
+    await expect($fetch(`/api/records/entries/item/${item.id}`, {
+      method: 'PATCH',
+      body: { fields: { name: 'test-views Rewritten' } },
+      ...readerOpts
+    })).rejects.toMatchObject({ statusCode: 403 })
   })
 
   it('never widens who sees a contact', async () => {

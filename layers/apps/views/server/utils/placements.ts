@@ -31,7 +31,7 @@ import type { TenantContext } from '#tenant/server'
 import { applyFieldPatch, assertRecordVisible, deleteRecord, getRecordType, getRecordTypeFields, requireRecordType, requireRecordUpdate, requireTypePermission, resolveTypePermission } from '#records/server'
 import type { RecordsFieldSetting } from '#records/server'
 import { getViewsGroupValues } from './view-records'
-import type { ViewDefinition, ViewRow, ViewTabDefinition, ViewTabRow } from './views'
+import type { ViewDefinition, ViewRow, ViewsAccessLevel, ViewTabDefinition, ViewTabRow } from './views'
 
 type Tx = Transaction<Database>
 
@@ -49,6 +49,18 @@ export interface ViewsMoveInput {
 
 function badMove(message: string): never {
   throw createError({ statusCode: 400, statusMessage: message })
+}
+
+// A connected app changes records only with the records.write scope; for a
+// session, the records kernel's checks alone decide.
+function requireRecordsWriteScope(ctx: TenantContext): void {
+  if (ctx.clientId && !ctx.perms.has('records.write')) {
+    throw createError({ statusCode: 403, statusMessage: 'Permission required: records.write' })
+  }
+}
+
+function requireViewEdit(access: ViewsAccessLevel): void {
+  if (access === 'view') throw createError({ statusCode: 403, statusMessage: 'View access required: edit' })
 }
 
 async function resolveGroupField(tx: Tx, view: ViewRow, key: string): Promise<RecordsFieldSetting> {
@@ -105,14 +117,24 @@ function isValidColumn(field: RecordsFieldSetting, key: string): boolean {
   }
 }
 
+// The listed ids that may get a placement row: the view's records on a
+// hand-picked view, else records of the view's type.
+async function rankableIds(tx: Tx, view: ViewRow, columnOrder: string[]): Promise<Set<string>> {
+  if ((view.definition as ViewDefinition).picked) return await viewItemSet(tx, view.id)
+  const rows = await tx
+    .selectFrom('records_entries')
+    .select('id')
+    .where('id', 'in', columnOrder)
+    .where('record_type', '=', view.record_type_key)
+    .execute()
+  return new Set(rows.map(r => r.id))
+}
+
 async function writeRank(
   tx: Tx,
   view: ViewRow,
   tab: ViewTabRow,
-  input: ViewsMoveInput,
-  // A hand-picked view's boards hold only the view's records: cards the
-  // client lists that aren't in the view never get a placement row.
-  eligibleIds: Set<string> | null
+  input: ViewsMoveInput
 ): Promise<void> {
   const { recordId, toColumn, columnOrder } = input
   if (!columnOrder.includes(recordId)) badMove('columnOrder must include the moved record')
@@ -139,9 +161,8 @@ async function writeRank(
   if (edgeOk && (prevRank === null || nextRank === null || prevRank < nextRank)) {
     upserts.push({ record_id: recordId, rank: generateKeyBetween(prevRank, nextRank) })
   } else {
-    const eligible = eligibleIds
-      ? columnOrder.filter(id => id === recordId || eligibleIds.has(id))
-      : columnOrder
+    const eligibleIds = await rankableIds(tx, view, columnOrder)
+    const eligible = columnOrder.filter(id => id === recordId || eligibleIds.has(id))
     const keys = generateNKeysBetween(null, null, eligible.length)
     eligible.forEach((id, i) => upserts.push({ record_id: id, rank: keys[i]! }))
   }
@@ -177,10 +198,17 @@ async function assertInView(tx: Tx, ctx: TenantContext, view: ViewRow, recordId:
   }
 }
 
+/**
+ * `access` is the caller's level on the view. On field-grouped tabs a drag to
+ * another column edits the record, so 'view' is enough and the records
+ * kernel's update check decides; the order within a column, own columns and
+ * an ungrouped list's order are view state and need 'edit'.
+ */
 export async function moveViewsCard(
   tx: Tx,
   ctx: TenantContext,
   view: ViewRow,
+  access: ViewsAccessLevel,
   tab: ViewTabRow,
   input: ViewsMoveInput
 ): Promise<void> {
@@ -189,6 +217,7 @@ export async function moveViewsCard(
   if (input.columnOrder.length > VIEWS_MOVE_ORDER_MAX) badMove('columnOrder too large')
 
   if (def.columns) {
+    requireViewEdit(access)
     const picked = !!(view.definition as ViewDefinition).picked
     const noColumn = input.toColumn === '' && !picked
     if (!noColumn && !def.columns.some(c => c.key === input.toColumn)) badMove(`Unknown column "${input.toColumn}"`)
@@ -200,24 +229,27 @@ export async function moveViewsCard(
       .where('record_id', '=', input.recordId)
       .where('column_key', '!=', input.toColumn)
       .execute()
-    await writeRank(tx, view, tab, input, picked ? await viewItemSet(tx, view.id) : null)
+    await writeRank(tx, view, tab, input)
     return
   }
 
   if (!def.groupField) {
+    requireViewEdit(access)
     if (tab.layout !== 'list') badMove('View has no grouping')
     if (input.toColumn !== '' || (input.fromColumn !== null && input.fromColumn !== '')) {
       badMove('An ungrouped list has no sections')
     }
     await assertInView(tx, ctx, view, input.recordId)
-    await writeRank(tx, view, tab, input, null)
+    await writeRank(tx, view, tab, input)
     return
   }
 
+  if (input.fromColumn === input.toColumn) requireViewEdit(access)
   const field = await resolveGroupField(tx, view, def.groupField)
   if (!isValidColumn(field, input.toColumn)) badMove(`Unknown column "${input.toColumn}"`)
 
   if (input.fromColumn !== input.toColumn) {
+    requireRecordsWriteScope(ctx)
     await requireRecordUpdate(tx, ctx, view.record_type_key, input.recordId)
     await assertInView(tx, ctx, view, input.recordId)
     const row = await tx
@@ -238,7 +270,7 @@ export async function moveViewsCard(
     await assertInView(tx, ctx, view, input.recordId)
   }
 
-  await writeRank(tx, view, tab, input, null)
+  if (access !== 'view') await writeRank(tx, view, tab, input)
 
   // Sweep the stale source-column rank row when the card left that column.
   const leftSource = dragMode(field) === 'move' || input.toColumn === ''
@@ -256,8 +288,8 @@ export async function moveViewsCard(
  * Adds an existing record to a hand-picked view. With a tab and a column, it
  * also lands at the end of that column (a board with its own columns) or of
  * that tab's list. On types whose boards grant visibility, adding shows the
- * record to everyone who can open the view, so it takes the type's share
- * permission.
+ * record to everyone who can open the view and lets its editors edit it, so
+ * it takes the type's share permission and edit access to the record.
  */
 export async function addViewsCard(
   tx: Tx,
@@ -273,6 +305,7 @@ export async function addViewsCard(
   const type = await getRecordType(tx, view.record_type_key)
   if (type?.boardsGrantVisibility ?? true) {
     await requireTypePermission(tx, ctx, view.record_type_key, 'share')
+    await requireRecordUpdate(tx, ctx, view.record_type_key, recordId)
   }
 
   const added = await tx
@@ -288,9 +321,7 @@ export async function addViewsCard(
 /**
  * Creates a record on a hand-picked view: it becomes one of the view's own
  * cards (created here), so editors of the view can delete it again. Creating
- * takes the view's 'edit' level, not the type's create permission — except
- * on types whose boards don't grant visibility (contacts), where the type
- * decides.
+ * takes the type's create permission.
  */
 export async function createViewsCard(
   tx: Tx,
@@ -302,8 +333,9 @@ export async function createViewsCard(
   if (!(view.definition as ViewDefinition).picked) {
     badMove('This view shows every matching record — create the record on its type instead')
   }
-  const type = await requireRecordType(tx, view.record_type_key, ctx)
-  if (!type.boardsGrantVisibility) await requireTypePermission(tx, ctx, view.record_type_key, 'create')
+  requireRecordsWriteScope(ctx)
+  await requireRecordType(tx, view.record_type_key, ctx)
+  await requireTypePermission(tx, ctx, view.record_type_key, 'create')
   const record = await applyFieldPatch(tx, ctx, view.record_type_key, null, fields)
   await tx
     .insertInto('views_items')
@@ -325,6 +357,7 @@ export async function deleteViewsCardRecord(
   recordId: string
 ): Promise<void> {
   if (!(view.definition as ViewDefinition).picked) badMove('Only views of hand-picked records delete their cards')
+  requireRecordsWriteScope(ctx)
   const typeKey = view.record_type_key
   const type = await requireRecordType(tx, typeKey, ctx)
   await assertRecordVisible(tx, ctx, typeKey, recordId)
