@@ -466,9 +466,9 @@ export const addCommentTool = defineMcpTool({
   }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
+      await requireTypePermission(tx, tenant, input.type, 'read')
       await requireRecordType(tx, input.type, tenant)
       await assertRecordVisible(tx, tenant, input.type, input.id)
-      await requireRecordUpdate(tx, tenant, input.type, input.id)
       const comment = await addComment(tx, tenant, input.id, { body: input.body })
       return text('Comment added.', {
         comment: { id: comment.id, body: comment.body, createdAt: comment.createdAt.toISOString() }

@@ -1,7 +1,8 @@
 // Share levels through the share + record routes: level round-trips on the
 // shares feed, re-sharing upserts the level, and an edit-level share grants
-// record-scoped update (field patch, comments) to a user with no crm slugs
-// at all — while view shares stay read-only and delete stays type-level.
+// record-scoped update (field patch) to a user with no crm slugs at all —
+// while view shares stay read-only and delete stays type-level. Commenting
+// takes the type's read, like reading the thread.
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import { randomUUID } from 'node:crypto'
@@ -94,11 +95,11 @@ describe('share levels', () => {
     expect(patched.capabilities.canEdit).toBe(true)
     expect(patched.capabilities.canDelete).toBe(false)
 
-    const comment = await $fetch<{ id: string }>(
+    const commentDenied = await $fetch(
       `/api/records/entries/contacts/${editable.id}/comments`,
       { method: 'POST', body: { body: 'test-records edit-share comment' }, ...outsiderOpts }
-    )
-    expect(comment.id).toBeTruthy()
+    ).catch(e => e)
+    expect(commentDenied.statusCode).toBe(403)
 
     // View share → visible but read-only.
     const viewDenied = await $fetch(`/api/records/entries/contacts/${viewable.id}`, {
@@ -107,10 +108,12 @@ describe('share levels', () => {
       ...outsiderOpts
     }).catch(e => e)
     expect(viewDenied.statusCode).toBe(403)
-    // ...but anyone who can see a record can comment on it.
+    // With the type's read, a view share is enough to comment.
+    const reader = await addRecordsMember(sql, org.id, ['member'])
+    await share(adminOpts, viewable.id, reader.user.id, 'view')
     const viewComment = await $fetch<{ id: string }>(
       `/api/records/entries/contacts/${viewable.id}/comments`,
-      { method: 'POST', body: { body: 'test-records view-share comment' }, ...outsiderOpts }
+      { method: 'POST', body: { body: 'test-records view-share comment' }, ...withOrgHeader(reader.auth, org.slug) }
     )
     expect(viewComment.id).toBeTruthy()
 

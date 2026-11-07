@@ -21,7 +21,7 @@ import { sql } from 'kysely'
 import type { Selectable, Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
-import { storageOf } from '#records'
+import { RECORDS_RESERVED_TYPE_KEYS, storageOf } from '#records'
 import type { RecordsCardConnectionDisplay, RecordsCardLayout, RecordsFieldDef, RecordsFieldKind, RecordsFieldOption } from '#records'
 import {
   getRecordType,
@@ -121,6 +121,9 @@ export async function createRecordType(
 ): Promise<RecordTypeSetting> {
   if (!RECORDS_SCHEMA_SLUG_RE.test(input.typeKey)) {
     bad('Type key must be a slug: [a-z][a-z0-9_]{1,40}')
+  }
+  if (RECORDS_RESERVED_TYPE_KEYS.includes(input.typeKey)) {
+    bad(`Type key '${input.typeKey}' is reserved`)
   }
   const existing = await getRecordTypes(tx)
   if (existing.some(t => t.key === input.typeKey)) {

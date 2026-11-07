@@ -138,6 +138,10 @@ export interface RecordTypeManifest {
 }
 
 /** Identity helper that preserves literal types (option keys stay literal). */
+// Type keys that would collide with the records app's own pages
+// (/records/settings), so no record type can take them.
+export const RECORDS_RESERVED_TYPE_KEYS: readonly string[] = ['settings']
+
 export function defineRecordType<const M extends RecordTypeManifest>(manifest: M): M {
   return manifest
 }

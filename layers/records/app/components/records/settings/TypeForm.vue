@@ -42,7 +42,8 @@ watch(label, (v) => {
   if (props.mode === 'create' && !keyTouched.value) typeKey.value = recordsSlugify(v)
 })
 
-const keyValid = computed(() => RECORDS_SLUG_CLIENT_RE.test(typeKey.value))
+const keyReserved = computed(() => RECORDS_RESERVED_TYPE_KEYS.includes(typeKey.value))
+const keyValid = computed(() => RECORDS_SLUG_CLIENT_RE.test(typeKey.value) && !keyReserved.value)
 const canSubmit = computed(() =>
   label.value.trim().length > 0
   && labelSingular.value.trim().length > 0
@@ -96,7 +97,7 @@ function submit() {
       label="Key"
       :required="mode === 'create'"
       :help="mode === 'create' ? 'Lowercase letters, digits and underscores. Cannot be changed later.' : 'Keys are permanent — rename via the labels above.'"
-      :error="mode === 'create' && typeKey !== '' && !keyValid ? 'Must match [a-z][a-z0-9_]{1,40}' : undefined"
+      :error="mode === 'create' && typeKey !== '' && !keyValid ? (keyReserved ? 'This key is reserved' : 'Must match [a-z][a-z0-9_]{1,40}') : undefined"
     >
       <UInput
         v-model="typeKey"

@@ -142,8 +142,8 @@ describe('records MCP permission paths', () => {
     const refused = await callMcpTool(token, 'records_update', { org: org.slug, type: 'contacts', id: rec.id, fields: { nickname: 'Shy' } })
     expect(refused.isError).toBe(true)
     expect(refused.content[0]!.text).toMatch(/^Forbidden/)
-    const comment = await callMcpTool(token, 'records_add_comment', { org: org.slug, type: 'contacts', id: rec.id, body: 'hello' })
-    expect(comment.isError).toBe(true)
+    // Anyone who can see a record can comment on it, as over HTTP.
+    ok(await callMcpTool(token, 'records_add_comment', { org: org.slug, type: 'contacts', id: rec.id, body: 'hello' }))
 
     await share('edit')
     ok(await callMcpTool(token, 'records_update', { org: org.slug, type: 'contacts', id: rec.id, fields: { nickname: 'Shy' } }))

@@ -200,6 +200,16 @@ describe('admin custom fields (orphan rows with kind)', () => {
     }).catch(e => e)
     expect(collision.statusCode).toBe(409)
   })
+
+  it('refuses a type key the records app uses for its own pages', async () => {
+    const { org, auth } = await createRecordsOrgWith(sql, ['admin'])
+    const res = await $fetch('/api/records/schema/types', {
+      method: 'POST',
+      body: { typeKey: 'settings', label: 'Settings', labelSingular: 'Setting' },
+      ...withOrgHeader(auth, org.slug)
+    }).catch(e => e)
+    expect(res.statusCode).toBe(400)
+  })
 })
 
 describe('option order', () => {

@@ -34,7 +34,7 @@ Client, from a Nuxt app plugin, via `#records`: `registerRecordsDetailPanel`, `r
 
 ## Visibility
 
-Without `<type>.view_all`, a caller sees records they created, records shared with them, records referencing them through a user field, and whatever registered visibility sources grant — the views layer grants the cards of hand-picked views the caller can open, and edit on them at 'edit' — for types whose `boardsGrantVisibility` isn't false. Anyone who can see a record can comment on it.
+Without `<type>.view_all`, a caller sees records they created, records shared with them, records referencing them through a user field, and whatever registered visibility sources grant — the views layer grants the cards of hand-picked views the caller can open, and edit on them at 'edit' — for types whose `boardsGrantVisibility` isn't false. Anyone who holds the type's read and can see a record can comment on it.
 
 ## Permissions
 
