@@ -398,6 +398,8 @@ export interface ViewSummary {
   ownerId: string
   ownerName: string
   accessLevel: ViewsAccessLevel
+  /** The teams a view with visibility 'teams' opens to. */
+  teams: ContainerTeam[]
   createdAt: Date
   updatedAt: Date
 }
@@ -437,6 +439,9 @@ export async function listViews(tx: Tx, ctx: TenantContext): Promise<ViewSummary
     .orderBy('v.updated_at', 'desc')
     .execute()
 
+  const teamsByView = await getContainerTeams(
+    tx, 'views_definitions', rows.filter(r => r.visibility === 'teams').map(r => r.id))
+
   return rows.map((row) => {
     let accessLevel: ViewsAccessLevel
     if (row.owner_id === ctx.userId || isAdmin) accessLevel = 'owner'
@@ -452,6 +457,7 @@ export async function listViews(tx: Tx, ctx: TenantContext): Promise<ViewSummary
       ownerId: row.owner_id,
       ownerName: row.owner_name,
       accessLevel,
+      teams: teamsByView.get(row.id) ?? [],
       createdAt: row.created_at,
       updatedAt: row.updated_at
     }

@@ -6,15 +6,24 @@
 // columns. A list may group into sections by a field. What the view holds
 // starts on "every matching record" for types the caller can see all of, else
 // on its own cards, and can't change later. On success it navigates straight
-// to the new view.
+// to the new view. `audience` sets who it starts open to: 'mine' starts
+// private; 'teams' starts on the caller's team (they pick when they have
+// several), or Everyone when they have none.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsLayout, ViewsVisibility } from '../../utils/views-types'
+
+const props = withDefaults(defineProps<{
+  audience?: 'mine' | 'teams'
+}>(), {
+  audience: 'mine'
+})
 
 const open = defineModel<boolean>('open', { default: false })
 
 const viewsPath = useViewsPath()
 const { visibleTypes, ensureTypes, getFields } = useRecordsTypes()
 const { create } = useViewsList()
+const { mode: teamsMode, teams, pending: teamsPending } = useTeams('views')
 
 // Fresh boards start with the classic three lanes; edit-level users reshape
 // them later from the board itself.
@@ -37,6 +46,7 @@ const orgLevel = ref<'view' | 'edit'>('view')
 const teamLevels = ref<Record<string, 'view' | 'edit'>>({})
 const creating = ref(false)
 const createError = ref<string | null>(null)
+const audienceApplied = ref(false)
 
 const fields = ref<RecordsFieldSetting[]>([])
 const fieldsPending = ref(false)
@@ -55,10 +65,25 @@ watch(open, (v) => {
   orgLevel.value = 'view'
   teamLevels.value = {}
   createError.value = null
+  audienceApplied.value = false
   ensureTypes().catch(() => {
     // The type select stays empty; submit stays disabled.
   })
 })
+
+// Runs once per opening, after the caller's teams have loaded.
+watch([open, teamsPending], () => {
+  if (!open.value || audienceApplied.value || teamsPending.value) return
+  audienceApplied.value = true
+  if (props.audience !== 'teams') return
+  const myTeams = teams.value.filter(t => t.mine && !t.archived)
+  if (teamsMode.value === 'teams' && myTeams.length > 0) {
+    visibility.value = 'teams'
+    teamIds.value = myTeams.length === 1 ? [myTeams[0]!.id] : []
+  } else {
+    visibility.value = 'org'
+  }
+}, { immediate: true })
 
 watch(typeKey, async (key) => {
   groupField.value = undefined
@@ -111,6 +136,7 @@ const KANBAN_MODE_ITEMS = [
 
 const canSubmit = computed(() => {
   if (!name.value.trim() || !typeKey.value) return false
+  if (visibility.value === 'teams' && teamIds.value.length === 0) return false
   if (viewType.value === 'kanban' && kanbanMode.value === 'field' && !groupField.value) return false
   return true
 })

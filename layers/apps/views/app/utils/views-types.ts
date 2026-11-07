@@ -69,11 +69,13 @@ export interface ViewSummary {
   ownerId: string
   ownerName: string
   accessLevel: ViewsAccessLevel
+  /** The teams a view with visibility 'teams' opens to. */
+  teams: Array<{ id: string, name: string, icon: string | null, image: string | null, archived: boolean }>
   createdAt: string
   updatedAt: string
 }
 
-export interface ViewDetail extends Omit<ViewSummary, 'layout' | 'tabCount'> {
+export interface ViewDetail extends Omit<ViewSummary, 'layout' | 'tabCount' | 'teams'> {
   definition: ViewsViewDefinition
   tabs: ViewsTab[]
   /** The view reached the caller through a share row of their own. */

@@ -1,6 +1,7 @@
 // The accessible-views list (landing page + sidebar) and view creation.
-// Grouping is presentation: "mine" = I own it, everything else splits by
-// how it reached me (a share or one of my teams vs. org-wide visibility).
+// Grouping is presentation, by audience: views open to a team or everyone
+// are the team's whoever owns them; private views are mine when I own them,
+// else shared with me by name.
 
 import type {
   ViewDetail,
@@ -49,11 +50,11 @@ export function useViewsList() {
   }
 
   const myId = computed<string | null>(() => (user.value as { id?: string } | null)?.id ?? null)
-  const mine = computed(() => items.value.filter(v => v.ownerId === myId.value))
+  const teamViews = computed(() => items.value.filter(v => v.visibility !== 'private'))
+  const mine = computed(() =>
+    items.value.filter(v => v.visibility === 'private' && v.ownerId === myId.value))
   const sharedWithMe = computed(() =>
-    items.value.filter(v => v.ownerId !== myId.value && v.visibility !== 'org'))
-  const orgWide = computed(() =>
-    items.value.filter(v => v.ownerId !== myId.value && v.visibility === 'org'))
+    items.value.filter(v => v.visibility === 'private' && v.ownerId !== myId.value))
 
   async function create(input: ViewsCreateInput): Promise<ViewDetail> {
     const created = await $fetch<ViewDetail>('/api/views', {
@@ -64,5 +65,5 @@ export function useViewsList() {
     return created
   }
 
-  return { items, pending, error, refresh, mine, sharedWithMe, orgWide, create }
+  return { items, pending, error, refresh, teamViews, mine, sharedWithMe, create }
 }
