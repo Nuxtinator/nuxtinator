@@ -11,7 +11,8 @@ A two-way shared email inbox: signed Mailgun webhooks in, a queued send sweep ou
 3-pane triage UI. Conversations key on `crm_channels` — the CRM address registry —
 never on contact records: an inbound sender gets history before (and whether or not)
 they ever become a contact. First app-layer→app-layer dependency in the monorepo
-(`@nuxtinator/crm` in optionalDependencies; imports via `#crm/server`).
+(`@nuxtinator/crm` and `@nuxtinator/records` in optionalDependencies; channel and
+consent services via `#crm/server`, record services via `#records/server`).
 
 ## Decision log (what we chose and why)
 

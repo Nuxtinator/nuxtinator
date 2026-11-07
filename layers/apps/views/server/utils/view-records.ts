@@ -324,6 +324,14 @@ export interface ViewRecords {
   card: ViewsCardLayout
 }
 
+// A connected app reads a view's records only with the records.read scope;
+// for a session, the records kernel's checks alone decide.
+export function requireRecordsReadScope(ctx: TenantContext): void {
+  if (ctx.clientId && !ctx.perms.has('records.read')) {
+    throw createError({ statusCode: 403, statusMessage: 'Permission required: records.read' })
+  }
+}
+
 export async function getViewRecords(
   tx: Tx,
   ctx: TenantContext,

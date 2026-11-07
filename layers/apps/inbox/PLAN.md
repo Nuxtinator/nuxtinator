@@ -293,11 +293,11 @@ consumes server-evaluated capabilities). Blocker cleared on the working branch (
 - **Compose-new-to-contact (~8k, partial).** Backend is ready (`POST /api/inbox/conversations`
   `channelId` mode). Missing: a locked-recipient mode in `ComposeModal` (only free-text `toEmail`
   today) and the contact-page entry point. **Preserve:** hide/disable compose when the record has no
-  email channel link; preselect the `is_primary` channel; consider `recordCrmActivity` on
+  email channel link; preselect the `is_primary` channel; consider `recordRecordsActivity` on
   create for CRM-timeline parity (channelId mode logs nothing today).
 - **Search parity (~8k, from Phase-1-adjacent).** List search currently misses the linked CRM
   contact's record name and the contact's *other* channel values — "John Smith" (mail client sends
-  "JS") isn't findable by CRM name. Join `crm_contact_channels → crm_records.name` + sibling channels.
+  "JS") isn't findable by CRM name. Join `crm_contact_channels → records_entries.name` + sibling channels.
 
 ## Phase 6 — Per-user identities & signatures  (~93k)
 
@@ -339,8 +339,8 @@ On dev.md's Deferred list.
 - **Internal notes on conversations (~60k):** an `inbox_comments` table FK'd to `inbox_conversations`
   `ON DELETE CASCADE` (target keeps threads on contact deletion, so no cleanup hook needed — only
   org-cascade). Tiptap JSON body **sanitized server-side** (the XSS boundary), author or
-  `author_label` for system notes, own-comment-only edit/delete with an `(edited)` marker. CRM's
-  `crm_record_comments` + `comments.ts` (keyset cursor pagination, 10k cap, author-label-wins) is the
+  `author_label` for system notes, own-comment-only edit/delete with an `(edited)` marker. The records kernel's
+  `records_comments` + `comments.ts` (keyset cursor pagination, 10k cap, author-label-wins) is the
   in-repo model to adapt. **Preserve:** the empty-tiptap-doc guard (incl. single-empty-paragraph);
   system notes (null user) never editable.
 - **@Mentions in notes (~25k):** extract mention user-ids from the *sanitized* doc (extracting from
@@ -389,7 +389,7 @@ contact-form dependency — listed there.)
 - **Suppression visibility on the contact record + timeline (~20k, partial):** the data (reason/
   detail/source/created_at) already exists in the DB but `consent.get.ts` exposes only
   `suppressed: boolean`; expose the detail, add a "Not receiving" badge on record list/detail, and
-  write a `recordCrmActivity` entry on suppress (nothing is logged today). Per-channel model means one
+  write a `recordRecordsActivity` entry on suppress (nothing is logged today). Per-channel model means one
   suppression fans out to several linked records — decide record-fanout vs channel-level timeline.
 
 ## Phase 9 — Public contact-form endpoint + `#inbox/server` barrel  (~45k + 50k consent)

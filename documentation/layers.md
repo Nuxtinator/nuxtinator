@@ -74,7 +74,7 @@ export default defineAppConfig({
 
 The host itself ships **no** permissions or roles — operator-admin is the `users.is_admin` boolean (no slug), checked via `requireOperatorAdmin(event)` from [tenant-kernel/server.ts](../layers/core/tenant-kernel/server.ts).
 
-The `admin` role gets every registered permission. A host keeps a layer's permission from admins with `withholdFromAdmin` from a Nitro plugin, e.g. `withholdFromAdmin(['crm.schema.manage'])` to keep the CRM's schema builder from org admins; users then hold it only through another role or a per-user grant.
+The `admin` role gets every registered permission. A host keeps a layer's permission from admins with `withholdFromAdmin` from a Nitro plugin, e.g. `withholdFromAdmin(['records.schema.manage'])` to keep the records schema builder from org admins; users then hold it only through another role or a per-user grant.
 
 ### A host's own account page
 

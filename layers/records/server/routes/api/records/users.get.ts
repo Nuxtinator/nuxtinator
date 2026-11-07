@@ -2,7 +2,7 @@
 // User directory for user_select pickers and assignment filters. In
 // multi-tenant mode it lists the active org's members; in single mode all
 // users. Returns { items: [{ id, name, email, avatarUrl }] } ordered by
-// name. Permission: org membership.
+// name. Permission: read access to some record type the caller can open.
 //
 // `ids` (comma-separated) resolves named users instead of listing a page of
 // the directory: a record can reference anyone in the org, so a caller that
@@ -12,6 +12,7 @@
 
 import { z } from 'zod'
 import { withOrgContext } from '#tenant/server'
+import { requireAnyRecordTypeRead } from '../../../utils/list-records'
 
 const MAX_IDS = 100
 
@@ -23,6 +24,7 @@ const Query = z.object({
 
 export default defineEventHandler(async (event) => {
   return await withOrgContext(event, async (tx, ctx) => {
+    await requireAnyRecordTypeRead(tx, ctx)
     const parsed = Query.safeParse(getQuery(event))
     if (!parsed.success) {
       throw createError({ statusCode: 400, statusMessage: 'Invalid query', data: parsed.error.flatten() })

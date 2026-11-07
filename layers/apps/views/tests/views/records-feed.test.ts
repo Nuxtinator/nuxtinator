@@ -3,12 +3,14 @@
 // request only, and the grouping-field-missing marker fires when a tab points
 // at a deleted field.
 import { describe, it, expect, afterEach } from 'vitest'
-import { $fetch } from '@nuxt/test-utils/e2e'
+import { $fetch, url as nuxtUrl } from '@nuxt/test-utils/e2e'
 import {
   getHostAdminDb,
   cleanupViewsTestData,
   createViewsOrgWith,
-  withOrgHeader
+  withOrgHeader,
+  issueMcpBearer,
+  callMcpTool
 } from '../helpers'
 
 const sql = getHostAdminDb()
@@ -116,5 +118,29 @@ describe('records feed', () => {
     const res = await $fetch<Feed>(`/api/views/${view.id}/records`, opts)
     expect(res.groupFieldMissing).toBe(true)
     expect(res.items).toEqual([])
+  })
+
+  it('a connected app needs records.read to read a view\'s records', async () => {
+    const { org, auth, user } = await createViewsOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    await createContact(opts, { name: 'test-views Scoped read', status: 'active' })
+    const view = await $fetch<{ id: string }>('/api/views', {
+      method: 'POST',
+      body: { name: 'test-views scoped', recordTypeKey: 'contacts', tab: { layout: 'kanban', definition: { groupField: 'status' } } },
+      ...opts
+    })
+    const feed = (token: string) => fetch(nuxtUrl(`/api/views/${view.id}/records`), {
+      headers: { 'authorization': `Bearer ${token}`, 'x-active-org': org.slug }
+    })
+
+    const viewsOnly = await issueMcpBearer(sql, user.id, ['views.use'])
+    expect((await feed(viewsOnly.token)).status).toBe(403)
+    expect((await callMcpTool(viewsOnly.token, 'views_get_board', { org: org.slug, view: view.id })).isError).toBe(true)
+
+    const reader = await issueMcpBearer(sql, user.id, ['views.use', 'records.read'])
+    const ok = await feed(reader.token)
+    expect(ok.status).toBe(200)
+    expect(((await ok.json()) as Feed).items.map(i => i.name)).toContain('test-views Scoped read')
+    expect((await callMcpTool(reader.token, 'views_get_board', { org: org.slug, view: view.id })).isError).toBeFalsy()
   })
 })

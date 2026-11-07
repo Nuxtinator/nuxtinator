@@ -9,7 +9,7 @@ import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
 import { getRecordTypeFields } from '#records/server'
 import { requireTab, requireView, type ViewTabDefinition } from '../../../../utils/views'
-import { effectiveCardLayout, getViewRecords } from '../../../../utils/view-records'
+import { effectiveCardLayout, getViewRecords, requireRecordsReadScope } from '../../../../utils/view-records'
 
 const Query = z.object({
   tab: z.string().uuid().optional(),
@@ -23,6 +23,7 @@ const Query = z.object({
 export default defineEventHandler(async (event) => {
   const viewId = getRouterParam(event, 'id')!
   return await withOrgPermission(event, { appId: 'views' }, 'views.use', async (tx, ctx) => {
+    requireRecordsReadScope(ctx)
     const { view } = await requireView(tx, ctx, viewId, 'view')
 
     const parsed = Query.safeParse(getQuery(event))

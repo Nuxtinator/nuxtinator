@@ -31,7 +31,7 @@ import {
   type ViewTabRow
 } from '../server/utils/views'
 import { updateTab } from '../server/utils/tabs'
-import { getViewRecords, type ViewRecords } from '../server/utils/view-records'
+import { getViewRecords, requireRecordsReadScope, type ViewRecords } from '../server/utils/view-records'
 import { addViewsCard, dragMode, moveViewsCard } from '../server/utils/placements'
 
 type Tx = Transaction<Database>
@@ -364,6 +364,7 @@ export const getBoardTool = defineMcpTool({
   input: z.object({ org: orgInput, view: viewIdInput, tab: tabIdInput }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, async (tx, tenant) => {
+      requireRecordsReadScope(tenant)
       const { view } = await requireView(tx, tenant, input.view, 'view')
       const tab = await requireTab(tx, view, input.tab)
       const def = tab.definition as ViewTabDefinition

@@ -25,7 +25,7 @@ import { z } from 'zod'
 import type { Database } from '#core/server/database/schema'
 import { isAppEnabledForCurrentOrg, type TenantContext } from '#tenant/server'
 import { APP_TEAM_GATE_MESSAGE, isAppOpenToUser } from '#core/server/utils/groups'
-import { getRecordType, getRecordTypeFields, recordsStatusDefault, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
+import { getRecordType, getRecordTypes, getRecordTypeFields, recordsStatusDefault, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
 import { resolveTypePermission } from './type-permissions'
 import type { RecordRow } from './record-storage'
 import {
@@ -689,6 +689,24 @@ export async function requireRecordType(tx: Tx, typeKey: string, ctx: TenantCont
     throw createError({ statusCode: 403, statusMessage: APP_TEAM_GATE_MESSAGE })
   }
   return type
+}
+
+/**
+ * 403 unless the caller can read some record type whose app is open to them:
+ * the gate for surfaces that serve every type, like the user directory.
+ */
+export async function requireAnyRecordTypeRead(tx: Tx, ctx: TenantContext): Promise<void> {
+  for (const type of await getRecordTypes(tx)) {
+    if (type.orphan) continue
+    if (!(await resolveTypePermission(tx, ctx, type.key, 'read'))) continue
+    try {
+      await requireRecordType(tx, type.key, ctx)
+      return
+    } catch {
+      continue
+    }
+  }
+  throw createError({ statusCode: 403, statusMessage: 'Permission required: read access to a record type' })
 }
 
 /**

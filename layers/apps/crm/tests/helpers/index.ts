@@ -74,7 +74,7 @@ export async function addCrmMember(
 // so the seed must supply org_id explicitly. `data` is bound through
 // ::text::jsonb — postgres-js double-encodes a pre-stringified param bound
 // with a bare ::jsonb cast, storing a jsonb string scalar that degrades the
-// doc on the kernel's first `||` merge (dev.md gotcha 1).
+// doc on the kernel's first `||` merge (records dev.md gotcha 1).
 export async function createTestContact(
   sql: ReturnType<typeof postgres>,
   opts: {
