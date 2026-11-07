@@ -30,14 +30,6 @@ export default defineNitroPlugin(() => {
     requiredPermission: 'crm.contacts.read',
     order: 10
   })
-  registerNavItem({
-    appId: 'crm',
-    title: 'Settings',
-    path: '/records/settings',
-    icon: 'i-lucide-settings',
-    requiredPermission: 'records.schema.manage',
-    order: 90
-  })
 
   registerRecordType(contactsManifest)
   registerRecordsStorageDriver(channelStorageDriver)

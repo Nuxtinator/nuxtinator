@@ -8,7 +8,7 @@ const open = defineModel<boolean>('open', { default: false })
 const admin = useRecordsSchemaAdmin()
 const { applyTypeAccess } = useRecordsPermissionsAdmin()
 const toast = useToast()
-const recordsPath = useRecordsPath()
+const settingsPath = useRecordsSettingsPath()
 
 const creating = ref(false)
 const createError = ref<string | null>(null)
@@ -37,7 +37,7 @@ async function onCreate(payload: { typeKey: string, label: string, labelSingular
       })
     }
     open.value = false
-    await navigateTo(recordsPath(`/settings/types/${created.key}`))
+    await navigateTo(settingsPath(`/types/${created.key}`))
   } catch (err) {
     createError.value = recordsErrorMessage(err, 'Failed to create record type')
   } finally {

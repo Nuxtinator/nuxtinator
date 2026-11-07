@@ -136,6 +136,16 @@ export function useRecordsPath() {
   return (path: string): string => `${orgPrefix(route.params?.orgSlug)}/records${path}`
 }
 
+// Builds a path under the record-type settings: the org settings shell in
+// multi mode, the host admin shell in single mode.
+export function useRecordsSettingsPath() {
+  const route = useRoute()
+  const tenancy = useRuntimeConfig().public.tenancy
+  return (path = ''): string => tenancy
+    ? `${orgPrefix(route.params?.orgSlug)}/settings/records${path}`
+    : `/admin/records${path}`
+}
+
 // The list path for a type (no id) or a record's detail path, honoring the
 // type routes other layers register (contacts live under /crm/contacts).
 export function useRecordsTypePath() {

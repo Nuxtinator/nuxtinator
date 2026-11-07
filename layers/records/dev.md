@@ -71,10 +71,15 @@ deletion). Core's `activity_logs` = host ops log; the kernel never writes it.
 Comments (`records_comments`, nullable `author_id` + `author_label`) are their own
 stream, merged with activity client-side in the Timeline component.
 
-**The schema builder lives at `/records/settings`, not the host admin shell.** Core's
-`/admin` is operator-gated and its sections endpoint filters out anything with a
-`requiredPermission`; schema customization is org-scoped data needing org context.
-Don't move it back.
+**The schema builder lives in the org settings shell (`/@<slug>/settings/records`),
+not the host admin shell, in multi mode.** Core's `/admin` is operator-gated and its
+sections endpoint filters out anything with a `requiredPermission`; schema
+customization is org-scoped data needing org context. Single mode has no org settings
+shell, so there it sits at `/admin/records`. The page bodies are shared components
+(`RecordsSettings{Catalog,Type,Permissions}Page`); `useRecordsSettingsPath()` builds
+links into whichever shell is active. The records app is registered with
+`launcher: false`: members don't browse raw records (Views is their surface), so it
+has no launcher tile or rail entry, but its record pages stay reachable by link.
 
 ## Table inventory (9)
 
@@ -188,7 +193,7 @@ canShare, canDelete }` (canEdit = `canUpdateRecord`); the types GET returns
 `canRead`/`canCreate` per type. UI gates on these server-evaluated flags, not
 client-side slug checks (gotcha 6).
 
-**Admin surface: `/records/settings/permissions`** (gated `records.schema.manage`).
+**Admin surface: `/@<slug>/settings/records/permissions`** (`/admin/records/permissions` in single mode; gated `records.schema.manage`).
 A roles × actions matrix per record type — tri-state cells where Inherit
 renders the role's slug fallback muted and Allow/Deny write explicit rows;
 the admin row is locked always-allow — backed by GET/PUT

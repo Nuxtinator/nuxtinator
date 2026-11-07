@@ -17,7 +17,7 @@ const orgKey = useRecordsOrgKey()
 
 const { types, ensureTypes, getFields } = useRecordsTypes()
 const { canManage, ensureAccess } = useRecordsSchemaAdmin()
-const recordsPath = useRecordsPath()
+const settingsPath = useRecordsSettingsPath()
 
 const typeInfo = computed(() => types.value.find(t => t.key === typeKey.value) ?? null)
 const typeLabel = computed(() => typeInfo.value?.label ?? typeKey.value)
@@ -102,7 +102,7 @@ const showEmpty = computed(() =>
           color="neutral"
           :aria-label="`${typeLabel} settings`"
           title="Settings"
-          :to="recordsPath(`/settings/types/${typeKey}`)"
+          :to="settingsPath(`/types/${typeKey}`)"
         />
         <UButton
           v-if="canCreate"

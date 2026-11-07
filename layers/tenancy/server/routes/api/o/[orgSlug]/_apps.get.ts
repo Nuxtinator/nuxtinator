@@ -18,7 +18,7 @@ export default defineEventHandler(async (event) => {
 
     const apps = getRegisteredApps()
       .filter((app) => {
-        if (!enabled.has(app.id) || closed.has(app.id)) return false
+        if (app.launcher === false || !enabled.has(app.id) || closed.has(app.id)) return false
         if (!app.requiredPermission) return true
         return ctx.perms.has(app.requiredPermission as never)
       })
