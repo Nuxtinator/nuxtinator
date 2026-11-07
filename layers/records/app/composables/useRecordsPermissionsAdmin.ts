@@ -50,6 +50,18 @@ export interface RecordsUserGrant {
   createdAt: string
 }
 
+/** Who can see and update a type's records, as asked when creating a type. */
+export type RecordsTypeAccess = 'everyone' | 'involved' | 'admins'
+
+// 'everyone' grants the member role full use; other roles keep their slug
+// answers. 'admins' denies every non-admin role. 'involved' stores nothing:
+// members see only records they created, are assigned to, or had shared
+// with them.
+const ACCESS_PRESETS: Record<Exclude<RecordsTypeAccess, 'involved'>, { roles: 'member' | 'non-admin', grants: Record<string, boolean> }> = {
+  everyone: { roles: 'member', grants: { read: true, create: true, update: true, view_all: true } },
+  admins: { roles: 'non-admin', grants: { read: false, create: false, update: false, delete: false, share: false, view_all: false } }
+}
+
 // In-flight dedupe for the catalog. SSR is off, so module state is safe.
 let catalogPromise: Promise<void> | null = null
 
@@ -69,6 +81,16 @@ export function useRecordsPermissionsAdmin() {
       method: 'PUT',
       body: { grants }
     })
+  }
+
+  /** Writes the access preset's role grants for the type. */
+  async function applyTypeAccess(typeKey: string, access: RecordsTypeAccess): Promise<void> {
+    if (access === 'involved') return
+    const view = await getRoleGrants(typeKey)
+    const preset = ACCESS_PRESETS[access]
+    const roles = view.roles.filter(r => preset.roles === 'member' ? r.key === 'member' : r.key !== 'admin')
+    const grants = Object.fromEntries(roles.map(r => [r.key, { ...preset.grants }]))
+    await saveRoleGrants(typeKey, grants)
   }
 
   /** Fetches the crm.* permission catalog once; concurrent callers share it. */
@@ -114,6 +136,7 @@ export function useRecordsPermissionsAdmin() {
     catalog,
     getRoleGrants,
     saveRoleGrants,
+    applyTypeAccess,
     ensureCatalog,
     getUserGrants,
     addUserGrant,

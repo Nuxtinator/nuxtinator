@@ -3,6 +3,7 @@
 // derived from the label until touched, then locked forever after create)
 // and the type editor's "About" card (key shown read-only; label changes
 // on code types persist as overrides server-side).
+import type { RecordsTypeAccess } from '../../../composables/useRecordsPermissionsAdmin'
 
 const props = defineProps<{
   mode: 'create' | 'edit'
@@ -16,7 +17,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  submit: [payload: { typeKey: string, label: string, labelSingular: string, icon: string | null }]
+  submit: [payload: { typeKey: string, label: string, labelSingular: string, icon: string | null, access?: RecordsTypeAccess }]
   cancel: []
 }>()
 
@@ -24,6 +25,16 @@ const label = ref(props.initial?.label ?? '')
 const labelSingular = ref(props.initial?.labelSingular ?? '')
 const icon = ref<string | null>(props.initial?.icon ?? null)
 const typeKey = ref(props.initial?.typeKey ?? '')
+const access = ref<RecordsTypeAccess>('everyone')
+
+const accessItems = computed(() => {
+  const plural = (label.value.trim() || 'records').toLowerCase()
+  return [
+    { value: 'everyone', label: 'Everyone', description: `Every member sees and updates all ${plural}.` },
+    { value: 'involved', label: 'People involved', description: `Members see the ${plural} they created, are assigned to, or that are shared with them.` },
+    { value: 'admins', label: 'Admins only', description: `Only admins see ${plural}.` }
+  ]
+})
 
 // The key follows the label while the admin hasn't typed a key themselves.
 const keyTouched = ref(props.mode === 'edit')
@@ -44,7 +55,8 @@ function submit() {
     typeKey: typeKey.value,
     label: label.value.trim(),
     labelSingular: labelSingular.value.trim(),
-    icon: icon.value
+    icon: icon.value,
+    ...(props.mode === 'create' ? { access: access.value } : {})
   })
 }
 </script>
@@ -100,6 +112,19 @@ function submit() {
     >
       <IconPicker
         v-model="icon"
+        :disabled="busy"
+      />
+    </UFormField>
+
+    <UFormField
+      v-if="mode === 'create'"
+      label="Who can see and update them?"
+      help="Fine-tune per role later in the type's permissions."
+    >
+      <URadioGroup
+        v-model="access"
+        :items="accessItems"
+        variant="card"
         :disabled="busy"
       />
     </UFormField>

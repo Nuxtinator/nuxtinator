@@ -255,7 +255,7 @@ async function moveField(field: RecordsFieldSetting, dir: -1 | 1) {
         </template>
       </header>
 
-      <div class="flex-1 overflow-y-auto p-4 space-y-8">
+      <div class="flex-1 overflow-y-auto p-4 pb-24 space-y-8">
         <div
           v-if="!ready"
           class="grid place-items-center py-24 text-(--ui-text-muted)"
@@ -388,6 +388,22 @@ async function moveField(field: RecordsFieldSetting, dir: -1 | 1) {
               @move="moveField"
               @toggle-hidden="toggleFieldHidden"
             />
+          </section>
+
+          <section
+            v-if="!isOrphan"
+            class="space-y-3"
+          >
+            <div>
+              <h2 class="text-base font-semibold">
+                Permissions
+              </h2>
+              <p class="text-sm text-(--ui-text-muted)">
+                What each role may do with {{ typeInfo.label.toLowerCase() }}. Cells left on
+                Inherit follow the role's permission slugs.
+              </p>
+            </div>
+            <RecordsSettingsRoleGrantsMatrix :type-key="typeKey" />
           </section>
         </template>
       </div>

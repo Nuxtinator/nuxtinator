@@ -9,6 +9,11 @@
 // and personal extra grants are additive, so neither can be denied here.
 import type { RecordsRoleGrantsView } from '../../../composables/useRecordsPermissionsAdmin'
 
+const props = defineProps<{
+  /** Fixed record type; when set the type picker is hidden. */
+  typeKey?: string
+}>()
+
 const { types, ensureTypes } = useRecordsTypes()
 const { getRoleGrants, saveRoleGrants } = useRecordsPermissionsAdmin()
 const orgKey = useRecordsOrgKey()
@@ -24,7 +29,10 @@ const ACTION_LABELS: Record<string, string> = {
 
 type CellState = 'inherit' | 'allow' | 'deny'
 
-const selectedType = ref<string | undefined>(undefined)
+const selectedType = ref<string | undefined>(props.typeKey)
+watch(() => props.typeKey, (key) => {
+  if (key) selectedType.value = key
+})
 const view = ref<RecordsRoleGrantsView | null>(null)
 const draft = ref<Record<string, Record<string, boolean>>>({})
 const loading = ref(false)
@@ -153,6 +161,7 @@ function reset() {
   <div class="space-y-3">
     <div class="flex items-center gap-3 flex-wrap">
       <USelect
+        v-if="!props.typeKey"
         v-model="selectedType"
         :items="typeItems"
         class="w-56"

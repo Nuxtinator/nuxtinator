@@ -35,6 +35,12 @@ const items = computed<SidebarNavItem[]>(() =>
   }))
 )
 
+const createOpen = ref(false)
+function openCreate() {
+  open.value = false
+  createOpen.value = true
+}
+
 const settingsItems = computed<SidebarNavItem[]>(() =>
   canManage.value === true
     ? [{ to: recordsPath('/settings'), label: 'Settings', icon: 'i-lucide-settings' }]
@@ -59,6 +65,18 @@ const settingsItems = computed<SidebarNavItem[]>(() =>
     >
       No record types yet.
     </p>
+    <button
+      v-if="canManage === true"
+      type="button"
+      class="w-full flex items-center gap-3 px-3 py-2 mt-1 rounded-md text-sm text-(--ui-text-muted) hover:bg-(--ui-bg-accented) hover:text-(--ui-text) transition-colors"
+      @click="openCreate"
+    >
+      <UIcon
+        name="i-lucide-plus"
+        class="size-5 shrink-0"
+      />
+      <span class="flex-1 text-left truncate">New record type</span>
+    </button>
     <SidebarNav
       v-if="settingsItems.length > 0"
       class="mt-4 pt-4 border-t border-(--ui-border)"
@@ -99,6 +117,18 @@ const settingsItems = computed<SidebarNavItem[]>(() =>
         >
           No record types yet.
         </p>
+        <button
+          v-if="canManage === true"
+          type="button"
+          class="w-full flex items-center gap-3 px-3 py-2 mt-1 rounded-md text-sm text-(--ui-text-muted) hover:bg-(--ui-bg-accented) hover:text-(--ui-text) transition-colors"
+          @click="openCreate"
+        >
+          <UIcon
+            name="i-lucide-plus"
+            class="size-5 shrink-0"
+          />
+          <span class="flex-1 text-left truncate">New record type</span>
+        </button>
         <SidebarNav
           v-if="settingsItems.length > 0"
           class="mt-4 pt-4 border-t border-(--ui-border)"
@@ -107,4 +137,9 @@ const settingsItems = computed<SidebarNavItem[]>(() =>
       </SidebarPanel>
     </template>
   </USlideover>
+
+  <RecordsSettingsCreateTypeModal
+    v-if="canManage === true"
+    v-model:open="createOpen"
+  />
 </template>

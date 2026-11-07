@@ -16,6 +16,8 @@ const typeKey = computed(() => props.typeKey)
 const orgKey = useRecordsOrgKey()
 
 const { types, ensureTypes, getFields } = useRecordsTypes()
+const { canManage, ensureAccess } = useRecordsSchemaAdmin()
+const recordsPath = useRecordsPath()
 
 const typeInfo = computed(() => types.value.find(t => t.key === typeKey.value) ?? null)
 const typeLabel = computed(() => typeInfo.value?.label ?? typeKey.value)
@@ -33,6 +35,7 @@ watch([typeKey, orgKey], async ([key, org]) => {
   ensureTypes().catch(() => {
     // The fields fetch below reports errors; the catalog retries with it.
   })
+  ensureAccess()
   fieldSettings.value = null
   fieldsError.value = null
   if (!key) return
@@ -92,6 +95,15 @@ const showEmpty = computed(() =>
         <h1 class="flex-1 text-lg font-semibold truncate">
           {{ typeLabel }}
         </h1>
+        <UButton
+          v-if="canManage && typeInfo"
+          icon="i-lucide-settings"
+          variant="ghost"
+          color="neutral"
+          :aria-label="`${typeLabel} settings`"
+          title="Settings"
+          :to="recordsPath(`/settings/types/${typeKey}`)"
+        />
         <UButton
           v-if="canCreate"
           icon="i-lucide-plus"

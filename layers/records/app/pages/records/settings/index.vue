@@ -53,27 +53,6 @@ async function toggleHidden(type: RecordsTypeSummary, hidden: boolean) {
 }
 
 const createOpen = ref(false)
-const creating = ref(false)
-const createError = ref<string | null>(null)
-
-async function onCreate(payload: { typeKey: string, label: string, labelSingular: string, icon: string | null }) {
-  creating.value = true
-  createError.value = null
-  try {
-    const created = await admin.createType({
-      typeKey: payload.typeKey,
-      label: payload.label,
-      labelSingular: payload.labelSingular,
-      icon: payload.icon ?? undefined
-    })
-    createOpen.value = false
-    await navigateTo(recordsPath(`/settings/types/${created.key}`))
-  } catch (err) {
-    createError.value = recordsErrorMessage(err, 'Failed to create record type')
-  } finally {
-    creating.value = false
-  }
-}
 
 function openType(type: RecordsTypeSummary) {
   navigateTo(recordsPath(`/settings/types/${type.key}`))
@@ -240,25 +219,6 @@ function openType(type: RecordsTypeSummary) {
       </div>
     </section>
 
-    <UModal v-model:open="createOpen">
-      <template #content>
-        <div class="p-6 space-y-4">
-          <h2 class="text-lg font-semibold">
-            New record type
-          </h2>
-          <UAlert
-            v-if="createError"
-            color="error"
-            :title="createError"
-          />
-          <RecordsSettingsTypeForm
-            mode="create"
-            :busy="creating"
-            @submit="onCreate"
-            @cancel="createOpen = false"
-          />
-        </div>
-      </template>
-    </UModal>
+    <RecordsSettingsCreateTypeModal v-model:open="createOpen" />
   </div>
 </template>
