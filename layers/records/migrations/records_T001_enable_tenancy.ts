@@ -1,10 +1,9 @@
 import { type Kysely, sql } from 'kysely'
 
-// Late tenancy migration (`_TL<NNN>_`): org_id + RLS for the record kernel's
-// tables, plus the org-scoped uniques. On hosts that load the crm layer its
-// crm_T001–T003 already did all of this under the tables' old names, so
-// every step here checks first and skips what exists; on hosts that load
-// records without crm, this is where the kernel tables become per-org.
+// org_id + RLS for the record kernel's tables, plus the org-scoped uniques.
+// On hosts that load the crm layer its crm_T001–T003 already did all of
+// this, so every step here checks first and skips what exists; on hosts that
+// load records without crm, this is where the kernel tables become per-org.
 
 async function hasColumn(db: Kysely<unknown>, table: string, column: string): Promise<boolean> {
   const res = await sql<{ present: boolean }>`

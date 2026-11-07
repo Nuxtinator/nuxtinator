@@ -2,9 +2,8 @@ import { type Kysely, sql } from 'kysely'
 
 // The record kernel's tables were created as crm_* (crm_001–crm_012) while
 // the kernel lived in the crm layer; they now belong to the records layer
-// and take its prefix. A late migration (`_L<NNN>_`, see core's
-// migration-names.ts) so it runs after every tenancy retrofit committed
-// against the old names (crm_T001–T003).
+// and take its prefix. The crm layer's tenancy retrofits (crm_T001–T003) run
+// after this on a fresh install and accept either name.
 //
 // ALTER ... RENAME only rewrites catalog entries: rows, RLS policies,
 // foreign keys (including the crm and inbox tables pointing at these) and

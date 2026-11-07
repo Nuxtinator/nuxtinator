@@ -1,8 +1,7 @@
 import { type Kysely, sql } from 'kysely'
 
-// The views tables. A late migration (`_L<NNN>_`) because cards and items
-// reference records_entries, which the records layer's late rename
-// (records_L001) produces.
+// The views tables. Cards and items reference records_entries, which the
+// records layer's rename (records_001) produces; `views_` sorts after it.
 //
 // - views_definitions: one row per view — record type, who can open it
 //   (visibility + views_teams + views_shares), base filter and whether it

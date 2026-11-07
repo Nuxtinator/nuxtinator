@@ -4,7 +4,7 @@ The record kernel: record types and their fields, the records themselves, and ev
 
 ## Data model
 
-Nine tables: `records_entries` (one row per record of any type, with promoted `name`/`status` columns and a jsonb `data` bag), the multi-value storage classes `records_field_entries`, `records_user_refs`, `records_connections`, plus `records_shares`, `records_activity`, `records_comments`, and the schema-builder override tables `records_types` / `records_fields`. They were created as `crm_*` by `crm_001`–`crm_012` (kept under their original names in [migrations/](migrations/)) and renamed by `records_L001`; `records_TL001` scopes them per org on hosts without the crm layer.
+Nine tables: `records_entries` (one row per record of any type, with promoted `name`/`status` columns and a jsonb `data` bag), the multi-value storage classes `records_field_entries`, `records_user_refs`, `records_connections`, plus `records_shares`, `records_activity`, `records_comments`, and the schema-builder override tables `records_types` / `records_fields`. They were created as `crm_*` by `crm_001`–`crm_012` (kept under their original names in [migrations/](migrations/)) and renamed by `records_001`; `records_T001` scopes them per org on hosts without the crm layer.
 
 A record can carry `user_id`, the user account of the person it describes (one record per type per user).
 

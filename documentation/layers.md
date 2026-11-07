@@ -595,9 +595,9 @@ export async function down(db: Kysely<unknown>): Promise<void> {
 
 The tenancy layer's [tenant-migrations module](../layers/tenancy/modules/tenant-migrations.ts) discovers `*_T<NNN>_*.ts` files across layers and feeds them to the migrator only when the tenancy layer is loaded. In single mode they exist on disk but never run.
 
-#### Late migrations
+#### Ordering across layers
 
-Migration keys sort in four phases: regular (`<app>_NNN_`), tenancy (`<app>_T<NNN>_`, keyed `zzz_`), late (`<app>_L<NNN>_`, keyed `zzzz_`) and late tenancy (`<app>_TL<NNN>_`, keyed `zzzz_`, tenancy-only). A late migration runs after every tenancy retrofit, so it can rename a table those retrofits were written against: on a fresh multi-tenant install the retrofit runs against the old name first, then the rename. After a late rename, any later migration touching that table must be late as well. Committed migrations stay immutable either way — a rename is always a new late migration.
+Migrations run in two phases: every layer's regular migrations (`<app>_NNN_`), then, with tenancy loaded, every tenancy retrofit (`<app>_T<NNN>_`, keyed `zzz_`). Each phase is one pass sorted by name across all layers, so a migration that uses another layer's table must sort after the one that creates or renames it. The record kernel's tables are renamed from `crm_*` to `records_*` by `records_001`; a regular migration touching them must sort after it (a `crm_NNN` migration sorts before it, so such a change belongs in the records layer). Tenancy retrofits run after every rename, so `crm_T001`–`T003`, written against the old names, look up whichever name is in place.
 
 Tables that should *not* be org-scoped (e.g. global lookup tables) — just don't list them in your tenancy migration.
 

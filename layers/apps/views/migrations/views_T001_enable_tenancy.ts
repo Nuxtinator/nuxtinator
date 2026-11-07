@@ -1,7 +1,6 @@
 import { type Kysely, sql } from 'kysely'
 
-// Tenancy for the views tables: `org_id` + RLS on each. A late tenancy
-// migration so it runs after views_L001.
+// Tenancy for the views tables: `org_id` + RLS on each.
 
 async function enableTenantScoping(db: Kysely<unknown>, table: string): Promise<void> {
   await sql`
