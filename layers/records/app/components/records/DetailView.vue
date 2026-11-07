@@ -4,8 +4,8 @@
 // connections panel, and the merged comment/activity timeline. The
 // server-evaluated capabilities on the detail response gate every write
 // affordance: without canEdit, editors render as formatted read-only values,
-// field widgets lose their mutation controls, renaming is off, and the
-// comment composer hides; the delete button needs canDelete. With canEdit,
+// field widgets lose their mutation controls and renaming is off; anyone
+// who can open the record can comment. The delete button needs canDelete. With canEdit,
 // editable kinds commit inline through the optimistic patchFields. Kinds with
 // a registered field widget (the crm layer's channel widget) render through
 // it instead; widgets change the record through their own routes and ask for
@@ -300,7 +300,7 @@ async function removeRecord() {
         ref="timeline"
         :type-key="typeKey"
         :record-id="recordId"
-        :can-comment="canEdit"
+        :can-comment="true"
       />
 
       <RecordsCloseRecordModal

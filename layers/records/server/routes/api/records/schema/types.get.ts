@@ -2,8 +2,8 @@
 // Merged record-type catalog (code manifests ⊳ DB overrides). Returns
 // { canManage, types: [{ key, label, labelSingular, icon, hidden, custom,
 //   orphan, statusField, closedReasonField, boardsGrantVisibility, card,
-//   canRead, canCreate }] }. canManage says whether the caller holds
-// records.schema.manage — the settings UI's access signal. canRead/canCreate are the caller's
+//   canRead, canCreate, canViewAll }] }. canManage says whether the caller holds
+// records.schema.manage — the settings UI's access signal. canRead/canCreate/canViewAll are the caller's
 // type-evaluator answers — per-type role-grant rows make client-side slug
 // checks unreliable, so the server is the only truthful source. Hidden,
 // stale (orphan), and non-readable entries only appear for schema managers —
@@ -37,7 +37,8 @@ export default defineEventHandler(async (event) => {
         boardsGrantVisibility: t.boardsGrantVisibility,
         card: t.card,
         canRead: caps.read,
-        canCreate: caps.create
+        canCreate: caps.create,
+        canViewAll: caps.view_all
       })
     }
     return { canManage, types: out }

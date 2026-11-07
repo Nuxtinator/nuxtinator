@@ -15,6 +15,8 @@
 //      per-role set comes from core's getRolePermissions for that single
 //      role — ctx.perms is the pre-unioned effective set and cannot answer
 //      per-role questions.
+//   4. Team grants (config.teamGrants): an allowed action for any team the
+//      caller is in → true. Teams only add; they never deny.
 //
 // All lookups (direct grants, per-role slug sets, merged type definitions)
 // are memoized per TenantContext — one object per request/transaction, so
@@ -27,9 +29,11 @@ import type { Permission } from '#core/app/utils/permissions'
 import type { TenantContext } from '#tenant/server'
 import { getRolePermissions } from '#core/server/utils/rbac'
 import { getUserGrantedPermissions } from '#core/server/utils/permission-grants'
+import { getUserGroups } from '#core/server/utils/groups'
 import { getRecordTypes, type RecordTypeSetting } from './definition-settings'
-import { RECORD_ACTIONS, permFor, type RecordAction, type RecordsTypeRoleGrants } from './records-perms'
+import { RECORD_ACTIONS, permFor, type RecordAction, type RecordsTypeRoleGrants, type RecordsTypeTeamGrants } from './records-perms'
 import { hasEditShare } from './shares'
+import { getRecordsVisibilitySources } from './records-registry'
 
 type Tx = Transaction<Database>
 
@@ -39,6 +43,7 @@ interface EvalMemo {
   directGrants?: Promise<Set<Permission>>
   roleSlugs: Map<string, Promise<Set<Permission>>>
   types?: Promise<RecordTypeSetting[]>
+  teamIds?: Promise<Set<string>>
 }
 
 const memos = new WeakMap<TenantContext, EvalMemo>()
@@ -73,15 +78,24 @@ function roleSlugSet(tx: Tx, ctx: TenantContext, role: string): Promise<Set<Perm
   return hit
 }
 
-// The type's roleGrants map from the merged definitions — one definitions
-// read per request regardless of how many types get evaluated.
-async function typeRoleGrants(tx: Tx, ctx: TenantContext, typeKey: string): Promise<RecordsTypeRoleGrants> {
+// The caller's teams in the current org (host groups in single mode).
+function teamIds(tx: Tx, ctx: TenantContext): Promise<Set<string>> {
+  const memo = memoFor(ctx)
+  if (!memo.teamIds) {
+    memo.teamIds = getUserGroups(tx, ctx.userId, ctx.orgId).then(groups => new Set(groups.map(g => g.id)))
+  }
+  return memo.teamIds
+}
+
+// The type's role and team grants from the merged definitions — one
+// definitions read per request regardless of how many types get evaluated.
+async function typeGrants(tx: Tx, ctx: TenantContext, typeKey: string): Promise<{ roles: RecordsTypeRoleGrants, teams: RecordsTypeTeamGrants }> {
   const memo = memoFor(ctx)
   if (!memo.types) {
     memo.types = getRecordTypes(tx)
   }
-  const types = await memo.types
-  return types.find(t => t.key === typeKey)?.roleGrants ?? {}
+  const type = (await memo.types).find(t => t.key === typeKey)
+  return { roles: type?.roleGrants ?? {}, teams: type?.teamGrants ?? {} }
 }
 
 async function resolveAgainst(
@@ -90,15 +104,20 @@ async function resolveAgainst(
   typeKey: string,
   action: RecordAction,
   grants: Set<Permission>,
-  roleGrants: RecordsTypeRoleGrants
+  typeGrants: { roles: RecordsTypeRoleGrants, teams: RecordsTypeTeamGrants }
 ): Promise<boolean> {
   const slug = permFor(typeKey, action)
   if (grants.has(slug)) return true
   for (const role of ctx.roles) {
-    const row = roleGrants[role]?.[action]
+    const row = typeGrants.roles[role]?.[action]
     if (row === true) return true
     if (row === false) continue
     if ((await roleSlugSet(tx, ctx, role)).has(slug)) return true
+  }
+  const granting = Object.entries(typeGrants.teams).filter(([, actions]) => actions[action] === true)
+  if (granting.length > 0) {
+    const mine = await teamIds(tx, ctx)
+    if (granting.some(([groupId]) => mine.has(groupId))) return true
   }
   return false
 }
@@ -111,8 +130,7 @@ export async function resolveTypePermission(
 ): Promise<boolean> {
   if (ctx.roles.includes('admin')) return true
   const grants = await directGrants(tx, ctx)
-  const roleGrants = await typeRoleGrants(tx, ctx, typeKey)
-  return await resolveAgainst(tx, ctx, typeKey, action, grants, roleGrants)
+  return await resolveAgainst(tx, ctx, typeKey, action, grants, await typeGrants(tx, ctx, typeKey))
 }
 
 // All six actions in one pass, sharing the grant and per-role slug lookups.
@@ -127,9 +145,9 @@ export async function resolveTypeCapabilities(
     return caps
   }
   const grants = await directGrants(tx, ctx)
-  const roleGrants = await typeRoleGrants(tx, ctx, typeKey)
+  const forType = await typeGrants(tx, ctx, typeKey)
   for (const action of RECORD_ACTIONS) {
-    caps[action] = await resolveAgainst(tx, ctx, typeKey, action, grants, roleGrants)
+    caps[action] = await resolveAgainst(tx, ctx, typeKey, action, grants, forType)
   }
   return caps
 }
@@ -147,8 +165,10 @@ export async function requireTypePermission(
 }
 
 // The record-scoped update capability: the type-level update answer OR an
-// edit-level share on this specific record. Delete has no share-level
-// equivalent — it stays type-level only.
+// edit-level share on this specific record OR a visibility source that lets
+// the caller edit it (a hand-picked view at 'edit'), on types whose boards
+// grant visibility. Delete has no share-level equivalent — it stays
+// type-level only.
 export async function canUpdateRecord(
   tx: Tx,
   ctx: TenantContext,
@@ -156,7 +176,19 @@ export async function canUpdateRecord(
   recordId: string
 ): Promise<boolean> {
   if (await resolveTypePermission(tx, ctx, typeKey, 'update')) return true
-  return await hasEditShare(tx, recordId, ctx.userId)
+  if (await hasEditShare(tx, recordId, ctx.userId)) return true
+  const sources = getRecordsVisibilitySources().filter(s => s.editPredicate)
+  if (sources.length === 0) return false
+  const types = await (memoFor(ctx).types ??= getRecordTypes(tx))
+  if (types.find(t => t.key === typeKey)?.boardsGrantVisibility === false) return false
+  const row = await tx
+    .selectFrom('records_entries')
+    .select('id')
+    .where('id', '=', recordId)
+    .where('record_type', '=', typeKey)
+    .where(eb => eb.or(sources.map(s => s.editPredicate!(eb, { userId: ctx.userId, typeKey }))))
+    .executeTakeFirst()
+  return !!row
 }
 
 export async function requireRecordUpdate(

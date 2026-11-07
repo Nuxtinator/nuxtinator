@@ -24,7 +24,7 @@ import type {
   RecordsStorage
 } from '#records'
 import { getRegisteredRecordTypes, getRegisteredRecordType } from './records-registry'
-import type { RecordsTypeRoleGrants } from './records-perms'
+import type { RecordsTypeRoleGrants, RecordsTypeTeamGrants } from './records-perms'
 
 type RecordTypeRow = Selectable<Database['records_types']>
 type RecordFieldRow = Selectable<Database['records_fields']>
@@ -48,6 +48,8 @@ export interface RecordTypeSetting {
    * expected storage shape (grants are org data, never code defaults).
    */
   roleGrants: RecordsTypeRoleGrants
+  /** Per-team action grants from config.teamGrants (group id → actions); empty when absent. */
+  teamGrants: RecordsTypeTeamGrants
   /** True for admin-created types (an is_custom row with no code manifest). */
   custom: boolean
   /** True for stale rows: no code manifest and not admin-created either. */
@@ -104,6 +106,12 @@ function roleGrantsOf(config: Record<string, unknown> | undefined): RecordsTypeR
   return {}
 }
 
+function teamGrantsOf(config: Record<string, unknown> | undefined): RecordsTypeTeamGrants {
+  const raw = config?.teamGrants
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as RecordsTypeTeamGrants
+  return {}
+}
+
 // config.closedReasonField: a field key picked in the schema builder, or
 // null to drop the code-declared one. Absent means the manifest's.
 function closedReasonFieldOf(config: Record<string, unknown> | undefined, fallback: string | undefined): string | undefined {
@@ -132,6 +140,7 @@ export const getRecordTypes = defineSettings<RecordTypeManifest, RecordTypeRow, 
         hidden: row?.hidden ?? false,
         config: row?.config ?? {},
         roleGrants: roleGrantsOf(row?.config),
+        teamGrants: teamGrantsOf(row?.config),
         custom: false,
         orphan: false,
         manifest,
@@ -154,6 +163,7 @@ export const getRecordTypes = defineSettings<RecordTypeManifest, RecordTypeRow, 
       hidden: r.hidden,
       config: r.config,
       roleGrants: roleGrantsOf(r.config),
+      teamGrants: teamGrantsOf(r.config),
       custom: r.is_custom,
       orphan: !r.is_custom,
       permissionPrefix: RECORDS_DEFAULT_PERMISSION_PREFIX,

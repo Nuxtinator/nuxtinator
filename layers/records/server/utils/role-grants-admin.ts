@@ -11,8 +11,9 @@ import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
 import { getAllStaticRoles } from '#core/server/utils/roles-registry'
 import { getRolePermissions } from '#core/server/utils/rbac'
+import { listGroups } from '#core/server/utils/groups'
 import type { RecordTypeSetting } from './definition-settings'
-import { RECORD_ACTIONS, permFor, type RecordAction, type RecordsTypeRoleGrants } from './records-perms'
+import { RECORD_ACTIONS, permFor, type RecordAction, type RecordsTypeRoleGrants, type RecordsTypeTeamGrants } from './records-perms'
 
 type Tx = Transaction<Database>
 
@@ -37,12 +38,24 @@ export interface RecordsEffectiveGrantCell {
 
 export type RecordsTypeEffectiveGrants = Record<string, Record<RecordAction, RecordsEffectiveGrantCell>>
 
+/** A team row of the matrix: one of the scope's groups. */
+export interface RecordsMatrixTeam {
+  id: string
+  name: string
+  icon: string | null
+  image: string | null
+  archived: boolean
+}
+
 /** Response body of the role-grants GET/PUT routes. */
 export interface RecordsRoleGrantsView {
   actions: readonly RecordAction[]
   roles: RecordsMatrixRole[]
   grants: RecordsTypeRoleGrants
   effective: RecordsTypeEffectiveGrants
+  /** The org's teams (host groups in single mode); archived ones only while they carry grants. */
+  teams: RecordsMatrixTeam[]
+  teamGrants: RecordsTypeTeamGrants
 }
 
 // The org's assignable roles: host + app-static roles (admin and member
@@ -96,5 +109,11 @@ export async function buildRoleGrantsView(
     }
     effective[role.key] = cells
   }
-  return { actions: RECORD_ACTIONS, roles, grants, effective }
+  const teamGrants = type.teamGrants
+  const teams = (await listGroups(tx, ctx.orgId))
+    .filter(g => !g.archived_at || teamGrants[g.id])
+    .map(g => ({ id: g.id, name: g.name, icon: g.icon, image: g.image, archived: !!g.archived_at }))
+  const known = new Set(teams.map(t => t.id))
+  const liveTeamGrants = Object.fromEntries(Object.entries(teamGrants).filter(([id]) => known.has(id)))
+  return { actions: RECORD_ACTIONS, roles, grants, effective, teams, teamGrants: liveTeamGrants }
 }

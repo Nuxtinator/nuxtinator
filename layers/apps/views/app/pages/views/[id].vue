@@ -1,9 +1,9 @@
 <script setup lang="ts">
 // One open view: header (name, its tabs, share, view menu), the active
 // tab's toolbar and renderer, and the interaction plumbing — optimistic moves
-// with the poll loop suspended while a drag settles, quick-add through the
-// records create route, the list's done checkbox, and tab and definition
-// updates. The active tab rides in ?tab= so a tab can be linked to.
+// with the poll loop suspended while a drag settles, quick-add (through the
+// records create route, or as one of a hand-picked view's own cards), the
+// list's done checkbox, and tab and definition updates. The active tab rides in ?tab= so a tab can be linked to.
 import { generateNKeysBetween } from 'fractional-indexing'
 import { recordsFilterRuleCount } from '#records'
 import type { RecordsFieldSetting, RecordsFilterGroup } from '#records/client'
@@ -75,9 +75,14 @@ watch([records, fields], ([recs, defs]) => {
 
 const typeInfo = computed(() =>
   types.value.find(t => t.key === view.value?.recordTypeKey) ?? null)
-const canCreate = computed(() => typeInfo.value?.canCreate ?? false)
 const canEditDefinition = computed(() =>
   view.value?.accessLevel === 'edit' || view.value?.accessLevel === 'owner')
+// A hand-picked view's editors create its own cards; elsewhere, and on types
+// whose boards don't share records, the type decides.
+const canCreate = computed(() => {
+  if (picked.value && typeInfo.value?.boardsGrantVisibility) return canEditDefinition.value
+  return typeInfo.value?.canCreate ?? false
+})
 const isOwner = computed(() => view.value?.accessLevel === 'owner')
 const picked = computed(() => !!view.value?.definition.picked)
 
@@ -185,16 +190,19 @@ async function onQuickAdd({ columnKey, name }: { columnKey: string, name: string
       if (columnKey !== '') recordFields[field.key] = single ? columnKey : [columnKey]
       else if (single) recordFields[field.key] = null
     }
+    if (picked.value) {
+      await $fetch(`/api/views/${v.id}/cards`, {
+        method: 'POST',
+        body: { fields: recordFields, tabId: t.id, columnKey: isCustom.value ? columnKey : undefined }
+      })
+      await refreshRecords()
+      return
+    }
     const created = await $fetch<{ id: string }>(`/api/records/entries/${v.recordTypeKey}`, {
       method: 'POST',
       body: { fields: recordFields }
     })
-    if (picked.value) {
-      await $fetch(`/api/views/${v.id}/cards`, {
-        method: 'POST',
-        body: { recordId: created.id, tabId: t.id, columnKey: isCustom.value ? columnKey : undefined }
-      })
-    } else if (isCustom.value && columnKey !== '') {
+    if (isCustom.value && columnKey !== '') {
       // Own columns on a view of every matching record: the new card's
       // column is its placement, at the end of the column it was added from.
       const inColumn = (tabRecords.value?.placements ?? [])
@@ -268,14 +276,23 @@ async function onAddTargetColumn(label: string) {
 
 const addCardColumn = ref<string | null>(null)
 
+// A card created on this view (and on no other) is deleted, after a confirm;
+// any other card only comes off the view.
 async function onRemoveCard(recordId: string) {
   const v = view.value
   if (!v) return
+  const card = tabRecords.value?.items.find(i => i.id === recordId)
+  if (card?.ownCard) {
+    if (!await confirmAction({ title: `Delete "${card.name}"?`, confirmLabel: 'Delete', color: 'error' })) return
+  }
   try {
-    await $fetch(`/api/views/${v.id}/cards/${recordId}`, { method: 'DELETE' })
+    await $fetch(`/api/views/${v.id}/cards/${recordId}`, {
+      method: 'DELETE',
+      query: card?.ownCard ? { record: 'delete' } : undefined
+    })
     await refreshRecords()
   } catch (err) {
-    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to remove the record') })
+    toast.add({ color: 'error', title: recordsErrorMessage(err, card?.ownCard ? 'Failed to delete the card' : 'Failed to remove the record') })
   }
 }
 
@@ -782,6 +799,7 @@ const menuItems = computed(() => {
           :records="tabRecords"
           :fields="fields"
           :can-create="canCreate"
+          :can-remove="canEditDefinition"
           :done-status="doneStatus"
           @move="onMove"
           @open="openRecordId = $event"
@@ -857,10 +875,10 @@ const menuItems = computed(() => {
     <ViewsFilterModal
       v-if="view"
       v-model:open="viewFilterOpen"
-      :title="canEditDefinition ? 'Filter for every tab' : 'This view\'s filter'"
+      :title="isOwner ? 'Filter for every tab' : 'This view\'s filter'"
       :fields="fields"
       :filter="view.definition.filter ?? null"
-      :readonly="!canEditDefinition"
+      :readonly="!isOwner"
       :saving="saving"
       @save="onViewFilter"
     />
@@ -944,7 +962,18 @@ const menuItems = computed(() => {
           <h2 class="text-lg font-semibold">
             Delete this view?
           </h2>
-          <p class="text-sm text-(--ui-text-muted)">
+          <p
+            v-if="view?.ownCardCount"
+            class="text-sm text-(--ui-text-muted)"
+          >
+            "{{ view.name }}", its tabs, its sharing settings and the
+            {{ view.ownCardCount === 1 ? 'card' : `${view.ownCardCount} cards` }} created on it
+            will be deleted. Cards added from elsewhere, or also on another view, are kept.
+          </p>
+          <p
+            v-else
+            class="text-sm text-(--ui-text-muted)"
+          >
             "{{ view?.name }}", its tabs and its sharing settings will be
             removed. The records it shows are not touched.
           </p>
@@ -961,7 +990,7 @@ const menuItems = computed(() => {
               :loading="deleting"
               @click="deleteView"
             >
-              Delete
+              {{ view?.ownCardCount ? `Delete view and ${view.ownCardCount === 1 ? 'card' : `${view.ownCardCount} cards`}` : 'Delete' }}
             </UButton>
           </div>
         </div>

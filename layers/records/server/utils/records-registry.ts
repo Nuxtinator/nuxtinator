@@ -211,11 +211,27 @@ export async function runRecordsPatchGuards(tx: Tx, args: { typeKey: string, rec
 //
 // Extra ways a caller without view_all may see a record, ORed into the
 // kernel's visibility rule (creator, share, user reference). Applied only to
-// types whose `boardsGrantVisibility` is not false.
+// types whose `boardsGrantVisibility` is not false. A source can also let a
+// caller edit the record (like an edit-level share) and say who it shares the
+// record with, for the record's share list.
+
+/** One place a record is shared through, as listed on the record's Share list. */
+export interface RecordsShareVia {
+  sourceId: string
+  /** e.g. the view's name. */
+  label: string
+  /** App-local path to where the sharing is managed. */
+  path: string
+  /** Who it reaches and at which level. */
+  audience: Array<{ kind: 'user' | 'team' | 'everyone', name: string, level: 'view' | 'edit' }>
+}
 
 export interface RecordsVisibilitySource {
   id: string
   predicate: (eb: Eb, args: { userId: string, typeKey: string }) => Expression<SqlBool>
+  /** Matches the records this source lets `userId` edit. */
+  editPredicate?: (eb: Eb, args: { userId: string, typeKey: string }) => Expression<SqlBool>
+  describe?: (tx: Tx, recordId: string) => Promise<RecordsShareVia[]>
 }
 
 const _visibilitySources = new Map<string, RecordsVisibilitySource>()

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Share management popover: who can open the view (everyone, its teams, or
-// nobody else — the owner's call, saved as it changes) and the people it is
-// shared with, at what level, picked from the org directory. A person's share
+// nobody else) and the people it is shared with, each at Can view or Can
+// edit. Only the owner changes it; changes save as they're made, one save at
+// a time, and a change made during a save is sent after it. A person's share
 // applies whatever the view's visibility.
 import type { ViewsShareEntry, ViewDetail, ViewsVisibility } from '../../utils/views-types'
 
@@ -103,41 +104,65 @@ const isOwner = computed(() => props.view.accessLevel === 'owner')
 
 const visibility = ref<string>(props.view.visibility)
 const teamIds = ref<string[]>(props.view.teams.map(t => t.id))
+const orgLevel = ref<'view' | 'edit'>(props.view.orgLevel)
+const teamLevels = ref<Record<string, 'view' | 'edit'>>(savedTeamLevels())
 const savingAccess = ref(false)
+let saveAgain = false
+
+function savedTeamLevels(): Record<string, 'view' | 'edit'> {
+  return Object.fromEntries(props.view.teams.map(t => [t.id, t.level]))
+}
 
 function resetAccess() {
+  if (savingAccess.value) return
   visibility.value = props.view.visibility
   teamIds.value = props.view.teams.map(t => t.id)
+  orgLevel.value = props.view.orgLevel
+  teamLevels.value = savedTeamLevels()
 }
-watch(() => [props.view.visibility, props.view.teams], resetAccess)
+watch(() => [props.view.visibility, props.view.teams, props.view.orgLevel], resetAccess)
 
 function accessChanged(): boolean {
   if (visibility.value !== props.view.visibility) return true
+  if (visibility.value === 'org') return orgLevel.value !== props.view.orgLevel
   if (visibility.value !== 'teams') return false
-  const saved = new Set(props.view.teams.map(t => t.id))
-  return teamIds.value.length !== saved.size || teamIds.value.some(id => !saved.has(id))
+  const saved = new Map(props.view.teams.map(t => [t.id, t.level]))
+  return teamIds.value.length !== saved.size
+    || teamIds.value.some(id => saved.get(id) !== (teamLevels.value[id] ?? 'view'))
 }
 
 async function saveAccess() {
-  if (savingAccess.value || !accessChanged()) return
+  if (savingAccess.value) {
+    saveAgain = true
+    return
+  }
+  if (!accessChanged()) return
   savingAccess.value = true
   try {
     await $fetch(`/api/views/${props.view.id}`, {
       method: 'PATCH',
       body: {
         visibility: visibility.value as ViewsVisibility,
-        teamIds: visibility.value === 'teams' ? teamIds.value : []
+        teamIds: visibility.value === 'teams' ? teamIds.value : [],
+        ...(visibility.value === 'teams' ? { teamLevels: teamLevels.value } : {}),
+        ...(visibility.value === 'org' ? { orgLevel: orgLevel.value } : {})
       }
     })
     emit('changed')
   } catch (err) {
     toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to change who can open the view') })
-    resetAccess()
-  } finally {
+    saveAgain = false
     savingAccess.value = false
+    resetAccess()
+    return
+  }
+  savingAccess.value = false
+  if (saveAgain) {
+    saveAgain = false
+    await saveAccess()
   }
 }
-watch([visibility, teamIds], saveAccess)
+watch([visibility, teamIds, orgLevel, teamLevels], saveAccess, { deep: true })
 </script>
 
 <template>
@@ -160,15 +185,21 @@ watch([visibility, teamIds], saveAccess)
         <TeamAccessField
           v-model:visibility="visibility"
           v-model:team-ids="teamIds"
+          v-model:org-level="orgLevel"
+          v-model:team-levels="teamLevels"
           app-id="views"
           none-value="private"
+          levels
           :current-teams="view.teams"
-          :disabled="!isOwner || savingAccess"
+          :disabled="!isOwner"
         />
 
         <USeparator label="People" />
 
-        <div class="flex items-center gap-2">
+        <div
+          v-if="isOwner"
+          class="flex items-center gap-2"
+        >
           <USelectMenu
             v-model="newUserId"
             :items="candidateItems"
@@ -212,6 +243,7 @@ watch([visibility, teamIds], saveAccess)
             />
             <span class="flex-1 text-sm truncate">{{ share.displayName }}</span>
             <USelectMenu
+              v-if="isOwner"
               :model-value="share.level"
               :items="LEVEL_ITEMS"
               value-key="value"
@@ -220,7 +252,12 @@ watch([visibility, teamIds], saveAccess)
               class="w-26"
               @update:model-value="setLevel(share, $event as 'view' | 'edit')"
             />
+            <span
+              v-else
+              class="text-xs text-(--ui-text-muted)"
+            >{{ share.level === 'edit' ? 'Can edit' : 'Can view' }}</span>
             <UButton
+              v-if="isOwner"
               icon="i-lucide-x"
               variant="ghost"
               color="neutral"

@@ -31,6 +31,10 @@ export interface RecordsRoleGrantsView {
   /** The stored override rows — only explicit true/false entries exist. */
   grants: Record<string, Record<string, boolean>>
   effective: Record<string, Record<string, RecordsEffectiveCell>>
+  /** The org's teams; archived ones only while they carry grants. */
+  teams: Array<{ id: string, name: string, icon: string | null, image: string | null, archived: boolean }>
+  /** Team id → the actions that team is given on top of roles. */
+  teamGrants: Record<string, Record<string, true>>
 }
 
 /** A catalog entry as served by GET /api/records/schema/permissions. */
@@ -72,14 +76,15 @@ export function useRecordsPermissionsAdmin() {
     return await $fetch<RecordsRoleGrantsView>(`/api/records/schema/types/${typeKey}/role-grants`)
   }
 
-  /** Full replacement of the type's grants; answers with the fresh view. */
+  /** Full replacement of the type's grants; answers with the fresh view. Team grants are replaced only when given. */
   async function saveRoleGrants(
     typeKey: string,
-    grants: Record<string, Record<string, boolean>>
+    grants: Record<string, Record<string, boolean>>,
+    teamGrants?: Record<string, Record<string, true>>
   ): Promise<RecordsRoleGrantsView> {
     return await $fetch<RecordsRoleGrantsView>(`/api/records/schema/types/${typeKey}/role-grants`, {
       method: 'PUT',
-      body: { grants }
+      body: teamGrants ? { grants, teamGrants } : { grants }
     })
   }
 

@@ -15,10 +15,13 @@ import {
   getRecordType,
   getRecordTypeFields,
   hydrateRecords,
-  listRecords
+  listRecords,
+  requireRecordType,
+  requireTypePermission,
+  resolveTypePermission
 } from '#records/server'
 import type { RecordsFieldSetting, RecordListItem, RecordsListOpts } from '#records/server'
-import type { ViewDefinition, ViewRow, ViewTabDefinition, ViewTabRow } from './views'
+import { ownCardsQuery, ownsItsCards, type ViewDefinition, type ViewRow, type ViewTabDefinition, type ViewTabRow } from './views'
 
 type Tx = Transaction<Database>
 
@@ -56,6 +59,8 @@ export interface ViewsBoardItem extends RecordListItem {
   fields?: Record<string, unknown>
   /** Per connection card field shown as count or progress: linked and done totals. */
   progress?: Record<string, { total: number, done: number }>
+  /** Created on this hand-picked view and on no other: its editors can delete it. */
+  ownCard?: true
 }
 
 /** The card layout a view renders: its own choice, else its type's default. */
@@ -272,6 +277,7 @@ export const VIEWS_CONNECTION_COLUMN_CAP = 100
 
 async function connectionColumns(tx: Tx, ctx: TenantContext, field: RecordsFieldSetting): Promise<ViewsGroupColumn[]> {
   if (!field.target) return []
+  if (!(await resolveTypePermission(tx, ctx, field.target, 'read'))) return []
   const page = await listRecords(tx, ctx, field.target, {
     sort: 'created_at',
     dir: 'asc',
@@ -322,6 +328,10 @@ export async function getViewRecords(
   groupFieldDef: RecordsFieldSetting | null,
   overlay: ViewsRecordsOverlay
 ): Promise<ViewRecords> {
+  // A view shows what the type lets each viewer see: the same read and app
+  // checks as the records routes.
+  await requireTypePermission(tx, ctx, view.record_type_key, 'read')
+  await requireRecordType(tx, view.record_type_key, ctx)
   const viewDef = view.definition as ViewDefinition
   const opts: RecordsListOpts = mergedListOpts(view, tab, overlay)
   const card = await effectiveCardLayout(tx, view, tab)
@@ -338,6 +348,7 @@ export async function getViewRecords(
     })
     const items = withTimestamps(page.items)
     await attachCardFieldValues(tx, view, card, items)
+    await markOwnCards(tx, view, items)
     return { items, total: page.total, truncated: false, placements: [], card }
   }
 
@@ -362,6 +373,13 @@ export async function getViewRecords(
     if (groupFieldDef.kind === 'connection') groupColumns = await connectionColumns(tx, ctx, groupFieldDef)
   }
   await attachCardFieldValues(tx, view, card, items)
+  await markOwnCards(tx, view, items)
 
   return { items, total, truncated: items.length < total, placements, groupColumns, card }
+}
+
+async function markOwnCards(tx: Tx, view: ViewRow, items: ViewsBoardItem[]): Promise<void> {
+  if (items.length === 0 || !(await ownsItsCards(tx, view))) return
+  const own = new Set((await ownCardsQuery(tx, view.id).select('i.record_id').execute()).map(r => r.record_id))
+  for (const item of items) if (own.has(item.id)) item.ownCard = true
 }

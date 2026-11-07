@@ -42,7 +42,9 @@ const values = useViewsCardValues(() => ({
 }))
 
 const menuItems = computed(() => props.removable
-  ? [[{ label: 'Remove from view', icon: 'i-lucide-x', onSelect: () => emit('remove') }]]
+  ? [[props.item.ownCard
+      ? { label: 'Delete card', icon: 'i-lucide-trash-2', color: 'error' as const, onSelect: () => emit('remove') }
+      : { label: 'Remove from view', icon: 'i-lucide-x', onSelect: () => emit('remove') }]]
   : [])
 </script>
 

@@ -1,5 +1,5 @@
 // POST /api/views/:id/shares — add or re-level a share
-// ({ userId, level }). Owner or 'edit' manage shares. Sharing to the owner
+// ({ userId, level }). Only the owner manages shares. Sharing to the owner
 // is meaningless and rejected. A share applies whatever the view's
 // visibility.
 import { z } from 'zod'
@@ -20,7 +20,7 @@ export default defineEventHandler(async (event) => {
     }
     const { userId, level } = parsed.data
 
-    const { view } = await requireView(tx, ctx, viewId, 'edit')
+    const { view } = await requireView(tx, ctx, viewId, 'owner')
     if (userId === view.owner_id) {
       throw createError({ statusCode: 400, statusMessage: 'The owner already holds every level' })
     }

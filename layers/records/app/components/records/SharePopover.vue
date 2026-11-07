@@ -7,7 +7,9 @@
 // record-visibility rule and type-permission evaluator. The add/remove/level
 // controls hide unless `canShare` — the record detail's server-evaluated
 // capability, passed down from the page; the server enforces the permission
-// regardless, so the client gate is presentation only.
+// regardless, so the client gate is presentation only. Below the shares, the
+// views that share the record (hand-picked views holding it) are listed with
+// who they reach; that access is changed on the view.
 import type { RecordsUser } from '../../composables/useRecordsUsers'
 import type { RecordsShareLevel } from '../../composables/useRecordsShares'
 
@@ -23,7 +25,7 @@ const emit = defineEmits<{
 
 const toast = useToast()
 
-const { shares, pending, error, refresh, addShare, removeShare } = useRecordsShares(
+const { shares, via, pending, error, refresh, addShare, removeShare } = useRecordsShares(
   () => props.typeKey,
   () => props.recordId
 )
@@ -175,13 +177,13 @@ async function onRemove(userId: string) {
           />
         </div>
         <p
-          v-else-if="shares.length === 0"
+          v-else-if="shares.length === 0 && via.length === 0"
           class="text-sm text-(--ui-text-muted)"
         >
           Not shared with anyone yet.
         </p>
         <ul
-          v-else
+          v-else-if="shares.length > 0"
           class="space-y-1"
         >
           <li
@@ -223,6 +225,33 @@ async function onRemove(userId: string) {
               :aria-label="`Remove ${share.name}`"
               @click="onRemove(share.userId)"
             />
+          </li>
+        </ul>
+
+        <ul
+          v-if="via.length > 0"
+          class="space-y-1"
+        >
+          <li
+            v-for="v in via"
+            :key="`${v.sourceId}:${v.path}`"
+            class="flex items-start gap-2"
+          >
+            <UIcon
+              name="i-lucide-kanban"
+              class="size-4 mt-0.5 shrink-0 text-(--ui-text-muted)"
+            />
+            <div class="min-w-0 text-sm">
+              <NuxtLink
+                :to="v.path"
+                class="font-medium hover:underline"
+              >
+                {{ v.label }}
+              </NuxtLink>
+              <p class="text-xs text-(--ui-text-muted)">
+                {{ v.audience.length === 0 ? 'Only its owner' : v.audience.map(a => `${a.name} · ${a.level === 'edit' ? 'can edit' : 'can view'}`).join(', ') }}
+              </p>
+            </div>
           </li>
         </ul>
 

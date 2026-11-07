@@ -15,6 +15,8 @@ export interface ViewsViewsTable {
   // Key into CRM's type registry — types can be code manifests, so no FK.
   record_type_key: string
   visibility: Generated<ViewsVisibility>
+  // Everyone's level on an org-wide view; null = 'view'.
+  org_level: 'edit' | null
   owner_id: string
   // Only explicit choices (base filter, hand-picked records); shape
   // validated by server/utils/views.ts, defaults live in code.
@@ -26,9 +28,9 @@ export interface ViewsViewsTable {
 export interface ViewSharesTable {
   view_id: string
   user_id: string
-  // 'view' opens the view and drags cards; 'edit' also changes the view
-  // definition. Neither widens CRM record access.
-  level: Generated<ViewsShareLevel>
+  // 'view' opens the view; 'edit' also edits its tabs. On a hand-picked view
+  // the level also applies to its cards.
+  level: ViewsShareLevel
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
@@ -49,6 +51,8 @@ export interface ViewTabsTable {
 export interface ViewTeamsTable {
   container_id: string
   group_id: string
+  // The team's level; null = 'view'.
+  level: 'edit' | null
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
@@ -56,6 +60,8 @@ export interface ViewTeamsTable {
 export interface ViewItemsTable {
   view_id: string
   record_id: string
+  // The record was created on this view.
+  created_here: Generated<boolean>
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 

@@ -9,7 +9,7 @@ import type { RecordsFieldSetting } from '../../utils/field-kinds'
 const props = defineProps<{
   typeKey: string
   recordId: string
-  /** The record detail's canEdit capability — false hides the composer. */
+  /** False hides the composer. */
   canComment: boolean
 }>()
 

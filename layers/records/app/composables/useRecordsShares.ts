@@ -19,8 +19,17 @@ export interface RecordsShare {
   createdAt: string
 }
 
+/** A place besides direct shares that shares the record (a hand-picked view). */
+export interface RecordsShareVia {
+  sourceId: string
+  label: string
+  path: string
+  audience: Array<{ kind: 'user' | 'team' | 'everyone', name: string, level: RecordsShareLevel }>
+}
+
 export function useRecordsShares(typeKey: MaybeRefOrGetter<string>, recordId: MaybeRefOrGetter<string>) {
   const shares = ref<RecordsShare[]>([])
+  const via = ref<RecordsShareVia[]>([])
   const pending = ref(false)
   const error = ref<string | null>(null)
 
@@ -30,8 +39,9 @@ export function useRecordsShares(typeKey: MaybeRefOrGetter<string>, recordId: Ma
     if (!toValue(typeKey) || !toValue(recordId)) return
     pending.value = true
     try {
-      const res = await $fetch<{ items: RecordsShare[] }>(url())
+      const res = await $fetch<{ items: RecordsShare[], via: RecordsShareVia[] }>(url())
       shares.value = res.items
+      via.value = res.via ?? []
       error.value = null
     } catch (err) {
       error.value = recordsErrorMessage(err, 'Failed to load shares')
@@ -61,5 +71,5 @@ export function useRecordsShares(typeKey: MaybeRefOrGetter<string>, recordId: Ma
     shares.value = res.items
   }
 
-  return { shares, pending, error, refresh, addShare, removeShare }
+  return { shares, via, pending, error, refresh, addShare, removeShare }
 }

@@ -349,11 +349,11 @@ const menuItems = computed(() => [[
             />
             <UButton
               v-if="isCustom && canManage && picked"
-              icon="i-lucide-x"
+              :icon="card.ownCard ? 'i-lucide-trash-2' : 'i-lucide-x'"
               variant="ghost"
               color="neutral"
               size="xs"
-              aria-label="Remove from board"
+              :aria-label="card.ownCard ? 'Delete card' : 'Remove from board'"
               class="absolute top-1 right-1 opacity-0 group-hover:opacity-100"
               @click.stop="emit('removeCard', card.id)"
             />

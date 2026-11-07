@@ -1,5 +1,5 @@
-// GET /api/views/:id/shares — who a view is shared with. Owner or
-// 'edit' can see (and therefore manage) the share list.
+// GET /api/views/:id/shares — who a view is shared with. Owner or 'edit'
+// can see the list; only the owner changes it.
 import { withOrgPermission } from '#tenant/server'
 import { requireView } from '../../../../utils/views'
 

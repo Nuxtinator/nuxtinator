@@ -1,9 +1,12 @@
 <script setup lang="ts">
-// Create-view modal: name, record type, and the first tab's layout — a
-// board, a list or a table. A board groups by a field (columns = its values)
-// or has its own columns (a Trello-style board; the view then holds only
-// records added to it). A list may group into sections by a field. On success
-// it navigates straight to the new view.
+// Create-view modal: name, record type, what the view holds — its own cards
+// (it starts empty and holds only records added or created on it) or every
+// matching record of the type — and the first tab's layout: a board, a list
+// or a table. A board groups by a field (columns = its values) or has its own
+// columns. A list may group into sections by a field. What the view holds
+// starts on "every matching record" for types the caller can see all of, else
+// on its own cards, and can't change later. On success it navigates straight
+// to the new view.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsLayout, ViewsVisibility } from '../../utils/views-types'
 
@@ -24,11 +27,14 @@ const DEFAULT_COLUMNS = [
 const name = ref('')
 const icon = ref<string | null>(null)
 const typeKey = ref<string | undefined>(undefined)
+const kind = ref<'picked' | 'matching'>('picked')
 const viewType = ref<ViewsLayout>('kanban')
 const kanbanMode = ref<'field' | 'custom'>('field')
 const groupField = ref<string | undefined>(undefined)
 const visibility = ref<string>('private')
 const teamIds = ref<string[]>([])
+const orgLevel = ref<'view' | 'edit'>('view')
+const teamLevels = ref<Record<string, 'view' | 'edit'>>({})
 const creating = ref(false)
 const createError = ref<string | null>(null)
 
@@ -40,11 +46,14 @@ watch(open, (v) => {
   name.value = ''
   icon.value = null
   typeKey.value = undefined
+  kind.value = 'picked'
   viewType.value = 'kanban'
   kanbanMode.value = 'field'
   groupField.value = undefined
   visibility.value = 'private'
   teamIds.value = []
+  orgLevel.value = 'view'
+  teamLevels.value = {}
   createError.value = null
   ensureTypes().catch(() => {
     // The type select stays empty; submit stays disabled.
@@ -55,6 +64,7 @@ watch(typeKey, async (key) => {
   groupField.value = undefined
   fields.value = []
   if (!key) return
+  kind.value = visibleTypes.value.find(t => t.key === key)?.canViewAll ? 'matching' : 'picked'
   fieldsPending.value = true
   try {
     const res = await getFields(key)
@@ -87,6 +97,12 @@ watch(viewType, (type) => {
   else if (type !== 'kanban' && groupField.value === statusGroupKey()) groupField.value = undefined
 })
 
+const typeLabel = computed(() => visibleTypes.value.find(t => t.key === typeKey.value)?.label ?? 'records')
+const KIND_ITEMS = computed(() => [
+  { value: 'picked' as const, label: 'Its own cards', icon: 'i-lucide-square-plus' },
+  { value: 'matching' as const, label: `All ${typeLabel.value.toLowerCase()}`, icon: 'i-lucide-layers' }
+])
+
 const VIEW_TYPE_ITEMS = (['kanban', 'list', 'table'] as const).map(value => ({ value, ...VIEWS_LAYOUT_META[value] }))
 const KANBAN_MODE_ITEMS = [
   { value: 'field' as const, label: 'Group by a field', icon: 'i-lucide-tag' },
@@ -106,12 +122,12 @@ async function submit() {
   try {
     const tabDefinition: Record<string, unknown> = {}
     const definition: Record<string, unknown> = {}
+    if (kind.value === 'picked') definition.picked = true
     if (viewType.value === 'kanban') {
       if (kanbanMode.value === 'field') {
         tabDefinition.groupField = groupField.value
       } else {
-        tabDefinition.columns = DEFAULT_COLUMNS
-        definition.picked = true
+        tabDefinition.columns = kind.value === 'picked' ? DEFAULT_COLUMNS : []
       }
     } else if (viewType.value === 'list' && groupField.value) {
       tabDefinition.groupField = groupField.value
@@ -122,6 +138,8 @@ async function submit() {
       recordTypeKey: typeKey.value!,
       visibility: visibility.value as ViewsVisibility,
       teamIds: visibility.value === 'teams' ? teamIds.value : undefined,
+      teamLevels: visibility.value === 'teams' ? teamLevels.value : undefined,
+      orgLevel: visibility.value === 'org' ? orgLevel.value : undefined,
       definition,
       tab: { layout: viewType.value, definition: tabDefinition }
     })
@@ -181,6 +199,17 @@ async function submit() {
             label-key="label"
             placeholder="Select a record type..."
             class="w-full"
+            :disabled="creating"
+          />
+        </UFormField>
+
+        <UFormField
+          v-if="typeKey"
+          label="Holds"
+        >
+          <ViewsChoiceCards
+            v-model="kind"
+            :items="KIND_ITEMS"
             :disabled="creating"
           />
         </UFormField>
@@ -255,8 +284,11 @@ async function submit() {
         <TeamAccessField
           v-model:visibility="visibility"
           v-model:team-ids="teamIds"
+          v-model:org-level="orgLevel"
+          v-model:team-levels="teamLevels"
           app-id="views"
           none-value="private"
+          levels
           :disabled="creating"
         />
 

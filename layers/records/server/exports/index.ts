@@ -28,7 +28,8 @@ export type {
   RecordsClosingEvent,
   RecordsClosingHook,
   RecordsPatchGuard,
-  RecordsVisibilitySource
+  RecordsVisibilitySource,
+  RecordsShareVia
 } from '../utils/records-registry'
 
 export {
@@ -46,7 +47,7 @@ export { hydrateRecords, getRecord, applyFieldPatch, deleteRecord } from '../uti
 export type { RecordRow, RecordsHydratedRecord } from '../utils/record-storage'
 
 export { permFor, RECORD_ACTIONS } from '../utils/records-perms'
-export type { RecordAction, RecordsTypeRoleGrants } from '../utils/records-perms'
+export type { RecordAction, RecordsTypeRoleGrants, RecordsTypeTeamGrants } from '../utils/records-perms'
 
 export {
   resolveTypePermission,
@@ -102,13 +103,14 @@ export type {
 export { listActivity } from '../utils/activity'
 export type { RecordsActivityItem, RecordsActivityPage } from '../utils/activity'
 
-export { listShares, addShare, removeShare, hasEditShare } from '../utils/shares'
+export { listShares, listShareVia, addShare, removeShare, hasEditShare } from '../utils/shares'
 export type { RecordsShareEntry, RecordsShareLevel } from '../utils/shares'
 
 export {
   createRecordType,
   updateRecordType,
   updateTypeRoleGrants,
+  updateTypeTeamGrants,
   deleteRecordType,
   createField,
   updateField,

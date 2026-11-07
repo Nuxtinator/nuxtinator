@@ -1,11 +1,10 @@
 // POST /api/views/:id/move — a drag landed on a tab (the view's first tab
-// when tabId is left out). 'view' access is enough to move cards
-// (Trello-loose); on field-grouped tabs the record write itself still goes
-// through the records kernel's update permission, so a caller who may not
-// edit the record gets a 403 from that check, not from the view.
+// when tabId is left out). On field-grouped tabs the drag edits the record,
+// so 'view' access is enough and the records kernel's update check decides.
+// Own columns and an ungrouped list's order are view state and need 'edit'.
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
-import { requireTab, requireView } from '../../../../utils/views'
+import { requireTab, requireView, type ViewTabDefinition } from '../../../../utils/views'
 import { moveViewsCard, VIEWS_MOVE_ORDER_MAX } from '../../../../utils/placements'
 
 const Body = z.object({
@@ -26,6 +25,8 @@ export default defineEventHandler(async (event) => {
     const { tabId, ...input } = parsed.data
     const { view } = await requireView(tx, ctx, viewId, 'view')
     const tab = await requireTab(tx, view, tabId)
+    const def = tab.definition as ViewTabDefinition
+    if (def.columns || !def.groupField) await requireView(tx, ctx, viewId, 'edit')
     await moveViewsCard(tx, ctx, view, tab, input)
     return { ok: true }
   })

@@ -27,18 +27,18 @@ Server, from a Nitro plugin, via `#records/server`:
 - `registerRecordsStorageDriver(driver)` — implement a storage class (hydrate, filter, search, validate, write).
 - `registerRecordsClosingHook(fn)` — run when a record closes.
 - `registerRecordsPatchGuard(fn)` — refuse a PATCH through the record route.
-- `registerRecordsVisibilitySource(source)` — another way a caller may see a record.
+- `registerRecordsVisibilitySource(source)` — another way a caller may see a record; with `editPredicate` it also lets them edit it, and `describe` lists it on the record's share list.
 - `registerRecordsFieldFilter(phase, fn)` — rewrite a patch before validation.
 
 Client, from a Nuxt app plugin, via `#records`: `registerRecordsDetailPanel`, `registerRecordsFieldWidget` (replace a kind's row on the detail page), `registerRecordsFieldKindSettings` (extra schema-builder inputs for a kind), `registerRecordsSettingsSection`, `registerRecordsTypeRoute` (give a type its own home, e.g. contacts under `/crm/contacts`). `#records/client` exports the client field settings, formatters and badge colors; `ListView` / `DetailView` components render any type.
 
 ## Visibility
 
-Without `<type>.view_all`, a caller sees records they created, records shared with them, records referencing them through a user field, and whatever registered visibility sources grant — the views layer grants the cards of custom boards the caller can open — for types whose `boardsGrantVisibility` isn't false.
+Without `<type>.view_all`, a caller sees records they created, records shared with them, records referencing them through a user field, and whatever registered visibility sources grant — the views layer grants the cards of hand-picked views the caller can open, and edit on them at 'edit' — for types whose `boardsGrantVisibility` isn't false. Anyone who can see a record can comment on it.
 
 ## Permissions
 
-`records.access` gates the app. Types without their own namespace share `records.entries.{read,create,update,delete,share,view_all}`; the per-type evaluator (`resolveTypePermission`) layers direct user grants and per-type role rows on top. `records.schema.manage` gates the schema builder; `records.read` / `records.write` say what connected apps may do. Default grants: members get read/create/update/share plus `records.read` / `records.write`; org admins get everything.
+`records.access` gates the app. Types without their own namespace share `records.entries.{read,create,update,delete,share,view_all}`; the per-type evaluator (`resolveTypePermission`) layers direct user grants, per-type role rows and per-type team rows (`config.teamGrants`, which only add) on top. `records.schema.manage` gates the schema builder; `records.read` / `records.write` say what connected apps may do. Default grants: members get read/create/update/share plus `records.read` / `records.write`; org admins get everything.
 
 ## MCP tools
 

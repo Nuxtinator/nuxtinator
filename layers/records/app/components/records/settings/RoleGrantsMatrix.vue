@@ -7,6 +7,8 @@
 // PUTs the full grants object — the server stores only explicit entries.
 // The admin row is locked always-allow: admins bypass the matrix entirely,
 // and personal extra grants are additive, so neither can be denied here.
+// Team rows follow the roles: a team only adds, so its cells toggle between
+// nothing and Allow.
 import type { RecordsRoleGrantsView } from '../../../composables/useRecordsPermissionsAdmin'
 
 const props = defineProps<{
@@ -35,6 +37,7 @@ watch(() => props.typeKey, (key) => {
 })
 const view = ref<RecordsRoleGrantsView | null>(null)
 const draft = ref<Record<string, Record<string, boolean>>>({})
+const teamDraft = ref<Record<string, Record<string, true>>>({})
 const loading = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
@@ -55,8 +58,8 @@ onMounted(async () => {
   }
 })
 
-function draftFrom(grants: Record<string, Record<string, boolean>>): Record<string, Record<string, boolean>> {
-  return Object.fromEntries(Object.entries(grants).map(([role, actions]) => [role, { ...actions }]))
+function draftFrom<T>(grants: Record<string, Record<string, T>>): Record<string, Record<string, T>> {
+  return Object.fromEntries(Object.entries(grants).map(([key, actions]) => [key, { ...actions }]))
 }
 
 // Keyed on the org as well as the type: org switching is SPA navigation and
@@ -64,6 +67,7 @@ function draftFrom(grants: Record<string, Record<string, boolean>>): Record<stri
 watch([selectedType, orgKey], async ([typeKey]) => {
   view.value = null
   draft.value = {}
+  teamDraft.value = {}
   error.value = null
   if (!typeKey) return
   loading.value = true
@@ -73,6 +77,7 @@ watch([selectedType, orgKey], async ([typeKey]) => {
     if (current()) {
       view.value = res
       draft.value = draftFrom(res.grants)
+      teamDraft.value = draftFrom(res.teamGrants)
     }
   } catch (err) {
     if (current()) error.value = recordsErrorMessage(err, 'Failed to load role grants')
@@ -123,6 +128,25 @@ function cellTitle(role: string, action: string): string {
   return 'Always deny for this type (personal extra grants still apply). Click to inherit.'
 }
 
+function teamAllowed(teamId: string, action: string): boolean {
+  return teamDraft.value[teamId]?.[action] === true
+}
+
+function toggleTeam(teamId: string, action: string) {
+  const next = { ...(teamDraft.value[teamId] ?? {}) }
+  if (next[action]) delete next[action]
+  else next[action] = true
+  teamDraft.value = { ...teamDraft.value, [teamId]: next }
+}
+
+const cleanedTeamDraft = computed(() => {
+  const out: Record<string, Record<string, true>> = {}
+  for (const [team, actions] of Object.entries(teamDraft.value)) {
+    if (Object.keys(actions).length > 0) out[team] = actions
+  }
+  return out
+})
+
 // Only explicit entries count — a role whose overrides were all cleared
 // drops out entirely, matching what the server persists.
 const cleanedDraft = computed(() => {
@@ -135,6 +159,7 @@ const cleanedDraft = computed(() => {
 
 const dirty = computed(() =>
   JSON.stringify(cleanedDraft.value) !== JSON.stringify(view.value?.grants ?? {})
+  || JSON.stringify(cleanedTeamDraft.value) !== JSON.stringify(view.value?.teamGrants ?? {})
 )
 
 async function save() {
@@ -142,9 +167,10 @@ async function save() {
   saving.value = true
   error.value = null
   try {
-    const res = await saveRoleGrants(selectedType.value, cleanedDraft.value)
+    const res = await saveRoleGrants(selectedType.value, cleanedDraft.value, cleanedTeamDraft.value)
     view.value = res
     draft.value = draftFrom(res.grants)
+    teamDraft.value = draftFrom(res.teamGrants)
   } catch (err) {
     error.value = recordsErrorMessage(err, 'Failed to save role grants')
   } finally {
@@ -153,7 +179,9 @@ async function save() {
 }
 
 function reset() {
-  if (view.value) draft.value = draftFrom(view.value.grants)
+  if (!view.value) return
+  draft.value = draftFrom(view.value.grants)
+  teamDraft.value = draftFrom(view.value.teamGrants)
 }
 </script>
 
@@ -270,6 +298,47 @@ function reset() {
               />
             </td>
           </tr>
+          <template v-if="view.teams.length > 0">
+            <tr class="bg-(--ui-bg-elevated)/50">
+              <th
+                class="text-left font-medium px-3 py-2"
+                :colspan="view.actions.length + 1"
+              >
+                Team
+              </th>
+            </tr>
+            <tr
+              v-for="team in view.teams"
+              :key="team.id"
+            >
+              <td class="px-3 py-1.5">
+                <div class="flex items-center gap-2">
+                  <GroupAvatar
+                    :name="team.name"
+                    :icon="team.icon"
+                    :image="team.image"
+                    size="2xs"
+                  />
+                  <span class="truncate">{{ team.archived ? `${team.name} (archived)` : team.name }}</span>
+                </div>
+              </td>
+              <td
+                v-for="action in view.actions"
+                :key="action"
+                class="text-center px-2 py-1.5"
+              >
+                <UButton
+                  :icon="teamAllowed(team.id, action) ? 'i-lucide-check' : 'i-lucide-minus'"
+                  color="neutral"
+                  variant="ghost"
+                  size="xs"
+                  :class="teamAllowed(team.id, action) ? 'text-(--ui-success)' : 'text-(--ui-text-muted) opacity-40'"
+                  :aria-label="`${team.name} / ${ACTION_LABELS[action] ?? action}: ${teamAllowed(team.id, action) ? 'allow' : 'from roles'}`"
+                  @click="toggleTeam(team.id, action)"
+                />
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </div>

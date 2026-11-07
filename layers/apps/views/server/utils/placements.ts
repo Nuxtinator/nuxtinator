@@ -28,7 +28,7 @@ import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
-import { applyFieldPatch, assertRecordVisible, getRecordType, getRecordTypeFields, requireRecordUpdate, requireTypePermission } from '#records/server'
+import { applyFieldPatch, assertRecordVisible, deleteRecord, getRecordType, getRecordTypeFields, requireRecordType, requireRecordUpdate, requireTypePermission, resolveTypePermission } from '#records/server'
 import type { RecordsFieldSetting } from '#records/server'
 import { getViewsGroupValues } from './view-records'
 import type { ViewDefinition, ViewRow, ViewTabDefinition, ViewTabRow } from './views'
@@ -282,8 +282,80 @@ export async function addViewsCard(
     .returning('record_id')
     .executeTakeFirst()
   if (!added) badMove('Record is already in this view')
+  if (placement) await placeAtEnd(tx, view, recordId, placement)
+}
 
-  if (!placement) return
+/**
+ * Creates a record on a hand-picked view: it becomes one of the view's own
+ * cards (created here), so editors of the view can delete it again. Creating
+ * takes the view's 'edit' level, not the type's create permission — except
+ * on types whose boards don't grant visibility (contacts), where the type
+ * decides.
+ */
+export async function createViewsCard(
+  tx: Tx,
+  ctx: TenantContext,
+  view: ViewRow,
+  fields: Record<string, unknown>,
+  placement: { tab: ViewTabRow, columnKey?: string } | null
+): Promise<{ id: string }> {
+  if (!(view.definition as ViewDefinition).picked) {
+    badMove('This view shows every matching record — create the record on its type instead')
+  }
+  const type = await requireRecordType(tx, view.record_type_key, ctx)
+  if (!type.boardsGrantVisibility) await requireTypePermission(tx, ctx, view.record_type_key, 'create')
+  const record = await applyFieldPatch(tx, ctx, view.record_type_key, null, fields)
+  await tx
+    .insertInto('views_items')
+    .values({ view_id: view.id, record_id: record.id, created_here: true })
+    .execute()
+  if (placement) await placeAtEnd(tx, view, record.id, placement)
+  return { id: record.id }
+}
+
+/**
+ * Deletes a card's record from a hand-picked view. Editors of the view may
+ * delete records created on it that no other view holds; anything else needs
+ * the type's delete permission.
+ */
+export async function deleteViewsCardRecord(
+  tx: Tx,
+  ctx: TenantContext,
+  view: ViewRow,
+  recordId: string
+): Promise<void> {
+  if (!(view.definition as ViewDefinition).picked) badMove('Only views of hand-picked records delete their cards')
+  const typeKey = view.record_type_key
+  const type = await requireRecordType(tx, typeKey, ctx)
+  await assertRecordVisible(tx, ctx, typeKey, recordId)
+  const item = await tx
+    .selectFrom('views_items')
+    .select('created_here')
+    .where('view_id', '=', view.id)
+    .where('record_id', '=', recordId)
+    .executeTakeFirst()
+  if (!item) badMove('Record is not in this view')
+  const elsewhere = await tx
+    .selectFrom('views_items')
+    .select('view_id')
+    .where('record_id', '=', recordId)
+    .where('view_id', '<>', view.id)
+    .executeTakeFirst()
+  const ownCard = item.created_here && !elsewhere && type.boardsGrantVisibility
+  if (!ownCard && !(await resolveTypePermission(tx, ctx, typeKey, 'delete'))) {
+    throw createError({ statusCode: 403, statusMessage: 'Only cards created on this view, and on no other, can be deleted from it' })
+  }
+  await deleteRecord(tx, ctx, typeKey, recordId)
+}
+
+// Lands a record at the end of a column (a board with its own columns) or of
+// an ungrouped list; grouped tabs place records by their field values.
+async function placeAtEnd(
+  tx: Tx,
+  view: ViewRow,
+  recordId: string,
+  placement: { tab: ViewTabRow, columnKey?: string }
+): Promise<void> {
   const { tab } = placement
   const def = tab.definition as ViewTabDefinition
   let columnKey: string

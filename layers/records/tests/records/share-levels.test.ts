@@ -107,6 +107,12 @@ describe('share levels', () => {
       ...outsiderOpts
     }).catch(e => e)
     expect(viewDenied.statusCode).toBe(403)
+    // ...but anyone who can see a record can comment on it.
+    const viewComment = await $fetch<{ id: string }>(
+      `/api/records/entries/contacts/${viewable.id}/comments`,
+      { method: 'POST', body: { body: 'test-records view-share comment' }, ...outsiderOpts }
+    )
+    expect(viewComment.id).toBeTruthy()
 
     // No share → not even visible.
     const invisibleDenied = await $fetch(`/api/records/entries/contacts/${invisible.id}`, {

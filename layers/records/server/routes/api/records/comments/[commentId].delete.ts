@@ -4,12 +4,11 @@
 // Author-or-moderator rule: the author may delete their own comment; a caller
 // with the type evaluator's delete answer (the moderator bar) may delete
 // anyone's. The type-scoped permissions depend on the comment's record, so
-// after loading the comment the route checks the record type's app gate, the
-// record-visibility rule and the record-scoped update gate (type update
-// answer OR an edit-level share).
+// after loading the comment the route checks the record type's app gate and
+// the record-visibility rule — the same bar as adding a comment.
 
 import { withOrgContext } from '#tenant/server'
-import { requireRecordUpdate, resolveTypePermission } from '../../../../utils/type-permissions'
+import { resolveTypePermission } from '../../../../utils/type-permissions'
 import { assertRecordVisible, requireRecordType } from '../../../../utils/list-records'
 import { deleteComment, getCommentRecord } from '../../../../utils/comments'
 
@@ -22,7 +21,6 @@ export default defineEventHandler(async (event) => {
     }
     await requireRecordType(tx, ref.recordType, ctx)
     await assertRecordVisible(tx, ctx, ref.recordType, ref.recordId)
-    await requireRecordUpdate(tx, ctx, ref.recordType, ref.recordId)
 
     const canModerate = await resolveTypePermission(tx, ctx, ref.recordType, 'delete')
     await deleteComment(tx, ctx, commentId, { canModerate })

@@ -12,6 +12,8 @@ const props = defineProps<{
   records: ViewRecords
   fields: RecordsFieldSetting[]
   canCreate: boolean
+  /** Rows of a hand-picked view can come off it (or, for its own cards, be deleted). */
+  canRemove: boolean
   /** The type's closed status and the status a reopened record takes; null = no checkbox. */
   doneStatus: { done: string, reopen: string } | null
 }>()
@@ -138,7 +140,7 @@ function submitQuickAdd(section: string) {
           :group-field-key="view.definition.groupField ?? null"
           :done="isDone(item.status)"
           :drop-before="dropTarget?.section === section.key && dropTarget.before === item.id && dragging?.recordId !== item.id"
-          :removable="view.picked"
+          :removable="view.picked && canRemove"
           @open="emit('open', $event)"
           @toggle="emit('toggleDone', { recordId: item.id, done: $event })"
           @remove="emit('removeCard', item.id)"

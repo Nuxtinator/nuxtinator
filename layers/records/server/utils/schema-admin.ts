@@ -33,7 +33,7 @@ import {
   type RecordsFieldSetting
 } from './definition-settings'
 import { getRecordsStorageDriver, getRegisteredRecordType } from './records-registry'
-import { RECORD_ACTIONS, type RecordAction, type RecordsTypeRoleGrants } from './records-perms'
+import { RECORD_ACTIONS, type RecordAction, type RecordsTypeRoleGrants, type RecordsTypeTeamGrants } from './records-perms'
 
 type Tx = Transaction<Database>
 type RecordFieldRow = Selectable<Database['records_fields']>
@@ -385,6 +385,20 @@ export async function updateTypeRoleGrants(
     if (Object.keys(cleanActions).length > 0) clean[role] = cleanActions
   }
 
+  return await writeGrantsConfig(tx, ctx, type, 'roleGrants', clean)
+}
+
+// Stores one grants map under config[key] on the type's row, dropping the key
+// when the map is empty and the row itself when a code type is left with no
+// overrides at all.
+async function writeGrantsConfig(
+  tx: Tx,
+  ctx: TenantContext,
+  type: RecordTypeSetting,
+  key: 'roleGrants' | 'teamGrants',
+  value: Record<string, unknown>
+): Promise<RecordTypeSetting> {
+  const typeKey = type.key
   const row = await tx
     .selectFrom('records_types')
     .selectAll()
@@ -392,8 +406,8 @@ export async function updateTypeRoleGrants(
     .executeTakeFirst()
 
   const config: Record<string, unknown> = { ...(row?.config ?? {}) }
-  if (Object.keys(clean).length > 0) config.roleGrants = clean
-  else delete config.roleGrants
+  if (Object.keys(value).length > 0) config[key] = value
+  else delete config[key]
 
   const hasOverrides = (row?.label_override ?? null) !== null
     || (row?.label_singular_override ?? null) !== null
@@ -430,6 +444,32 @@ export async function updateTypeRoleGrants(
   }
 
   return (await getRecordType(tx, typeKey))!
+}
+
+// Replaces a type's per-team action grants (config.teamGrants). Teams only
+// add access, so only allowed actions persist; a team left with none drops
+// out. Group ids are shape-checked here — whether they name the scope's
+// groups is the caller's concern.
+export async function updateTypeTeamGrants(
+  tx: Tx,
+  ctx: TenantContext,
+  typeKey: string,
+  grants: Record<string, Partial<Record<string, boolean>>>
+): Promise<RecordTypeSetting> {
+  const type = await getRecordType(tx, typeKey)
+  if (!type || type.orphan) notFound(`Unknown record type: ${typeKey}`)
+
+  const clean: RecordsTypeTeamGrants = {}
+  for (const [groupId, actions] of Object.entries(grants)) {
+    if (!/^[0-9a-f-]{36}$/i.test(groupId)) bad(`Invalid team id: ${groupId}`)
+    const allowed: Partial<Record<RecordAction, true>> = {}
+    for (const [action, value] of Object.entries(actions)) {
+      if (!(RECORD_ACTIONS as readonly string[]).includes(action)) bad(`Unknown action: ${action}`)
+      if (value === true) allowed[action as RecordAction] = true
+    }
+    if (Object.keys(allowed).length > 0) clean[groupId] = allowed
+  }
+  return await writeGrantsConfig(tx, ctx, type, 'teamGrants', clean)
 }
 
 export async function deleteRecordType(

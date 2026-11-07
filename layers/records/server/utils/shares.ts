@@ -13,6 +13,8 @@ import type { Database } from '#core/server/database/schema'
 import type { RecordsShareLevel } from '../database/schema.d'
 import type { TenantContext } from '#tenant/server'
 import { recordRecordsActivity } from './records-activity'
+import { getRecordsVisibilitySources, type RecordsShareVia } from './records-registry'
+import { getRecordType } from './definition-settings'
 
 type Tx = Transaction<Database>
 
@@ -180,4 +182,19 @@ export async function removeShare(
     .where('id', '=', userId)
     .executeTakeFirst()
   await recordRecordsActivity(tx, ctx, recordId, 'unshared', { note: target?.display_name })
+}
+
+/**
+ * The places other than direct shares that share a record (hand-picked views
+ * holding it), for the record's share list. Empty on types whose boards don't
+ * grant visibility.
+ */
+export async function listShareVia(tx: Tx, typeKey: string, recordId: string): Promise<RecordsShareVia[]> {
+  const type = await getRecordType(tx, typeKey)
+  if (type && !type.boardsGrantVisibility) return []
+  const out: RecordsShareVia[] = []
+  for (const source of getRecordsVisibilitySources()) {
+    if (source.describe) out.push(...await source.describe(tx, recordId))
+  }
+  return out
 }

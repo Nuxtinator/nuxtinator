@@ -27,6 +27,7 @@ export interface RecordsTypeSummary {
   /** The caller's type-evaluator answers — the server is the only truthful source. */
   canRead: boolean
   canCreate: boolean
+  canViewAll: boolean
 }
 
 /** Response of GET /api/records/schema/types/:type/fields. */

@@ -1,14 +1,15 @@
 // View access matrix + definition validation — every route goes through
 // these instead of inlining its own queries.
 //
-// Access model: the owner (and the host `admin` role) holds every level;
-// share rows grant 'view' or 'edit' whatever the visibility; visibility 'org'
-// grants a baseline 'view' to any caller that reached the route (which
-// already required `views.use`), and 'teams' grants it to members of the
-// view's teams (views_teams). Opening a view never widens record access by itself — what
-// a viewer sees inside it is the records kernel's answer, which includes the
-// hand-picked records of views they can open for types that allow it (see
-// boardVisibilitySource).
+// Access model: the owner (and the host `admin` role) holds every level.
+// Everyone else's level is the highest of their share row, their teams' rows
+// on a 'teams' view and Everyone's level on an 'org' view ('view' unless
+// 'edit' is stored). 'view' opens the view; 'edit' also edits its tabs; the
+// owner alone decides who can open it, its base filter, and deletes it.
+// A view that shows every matching record grants nothing on records — what a
+// viewer sees in it is the records kernel's answer. A hand-picked view shares
+// its cards: everyone who can open it sees them, and 'edit' edits them (see
+// board-visibility.ts).
 //
 // A view holds tabs: the view owns the record type, sharing, base filter and
 // hand-picked records; each tab owns its layout, grouping or columns, card
@@ -21,6 +22,7 @@ import { generateKeyBetween } from 'fractional-indexing'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
 import {
+  getRecordType,
   getRecordTypeFields,
   parseRecordsFilterGroup,
   requireRecordType,
@@ -232,10 +234,33 @@ export function viewOpenToUser(alias: string, userId: string): RawBuilder<SqlBoo
   )))`
 }
 
+/**
+ * Whether `userId` holds 'edit' or more on the view (aliased `alias`): its
+ * owner, an edit share, Everyone at 'edit' on an org-wide view, or one of
+ * their teams at 'edit'.
+ */
+export function viewEditableByUser(alias: string, userId: string): RawBuilder<SqlBool> {
+  const col = (name: string) => sql.ref(`${alias}.${name}`)
+  return sql<SqlBool>`(
+    ${col('owner_id')} = ${userId}::uuid
+    or exists (select 1 from views_shares es where es.view_id = ${col('id')} and es.user_id = ${userId}::uuid and es.level = 'edit')
+    or (${col('visibility')} = 'org' and ${col('org_level')} = 'edit')
+    or (${col('visibility')} = 'teams' and exists (
+      select 1 from views_teams et join group_members egm on egm.group_id = et.group_id
+      where et.container_id = ${col('id')} and egm.user_id = ${userId}::uuid and et.level = 'edit'
+    ))
+  )`
+}
+
+function maxLevel(a: ViewsShareLevel | null, b: ViewsShareLevel | null): ViewsShareLevel | null {
+  if (a === 'edit' || b === 'edit') return 'edit'
+  return a ?? b
+}
+
 export async function getViewAccess(
   tx: Tx,
   ctx: TenantContext,
-  view: Pick<ViewRow, 'id' | 'owner_id' | 'visibility'>
+  view: Pick<ViewRow, 'id' | 'owner_id' | 'visibility' | 'org_level'>
 ): Promise<ViewAccess | null> {
   if (view.owner_id === ctx.userId || ctx.roles.includes('admin')) {
     return { level: 'owner', viaShare: false }
@@ -246,15 +271,21 @@ export async function getViewAccess(
     .where('view_id', '=', view.id)
     .where('user_id', '=', ctx.userId)
     .executeTakeFirst()
-  if (share) return { level: share.level as ViewsShareLevel, viaShare: true }
-  if (view.visibility === 'private') return null
-  const open = await tx
-    .selectFrom('views_definitions as v')
-    .select('v.id')
-    .where('v.id', '=', view.id)
-    .where(viewOpenToUser('v', ctx.userId))
-    .executeTakeFirst()
-  return open ? { level: 'view', viaShare: false } : null
+  let reached: ViewsShareLevel | null = null
+  if (view.visibility === 'org') {
+    reached = view.org_level ?? 'view'
+  } else if (view.visibility === 'teams') {
+    const teams = await tx
+      .selectFrom('views_teams as vt')
+      .innerJoin('group_members as gm', 'gm.group_id', 'vt.group_id')
+      .select('vt.level')
+      .where('vt.container_id', '=', view.id)
+      .where('gm.user_id', '=', ctx.userId)
+      .execute()
+    for (const t of teams) reached = maxLevel(reached, t.level ?? 'view')
+  }
+  const level = maxLevel((share?.level as ViewsShareLevel | undefined) ?? null, reached)
+  return level ? { level, viaShare: !!share } : null
 }
 
 /**
@@ -400,7 +431,8 @@ export async function listViews(tx: Tx, ctx: TenantContext): Promise<ViewSummary
       eb.selectFrom('views_tabs as t')
         .select(eb2 => eb2.fn.countAll<string>().as('n'))
         .whereRef('t.view_id', '=', 'v.id')
-        .as('tab_count')
+        .as('tab_count'),
+      viewEditableByUser('v', ctx.userId).as('can_edit')
     ])
     .orderBy('v.updated_at', 'desc')
     .execute()
@@ -408,8 +440,7 @@ export async function listViews(tx: Tx, ctx: TenantContext): Promise<ViewSummary
   return rows.map((row) => {
     let accessLevel: ViewsAccessLevel
     if (row.owner_id === ctx.userId || isAdmin) accessLevel = 'owner'
-    else if (row.share_level) accessLevel = row.share_level as ViewsShareLevel
-    else accessLevel = 'view'
+    else accessLevel = row.can_edit ? 'edit' : 'view'
     return {
       id: row.id,
       name: row.name,
@@ -434,7 +465,9 @@ export function toViewDetail(
   ownerName: string,
   /** Whether the caller reached the view through a share row of their own. */
   sharedWithMe = false,
-  teams: ContainerTeam[] = []
+  teams: Array<ContainerTeam & { level: ViewsShareLevel }> = [],
+  /** Records created on this hand-picked view and on no other — what deleting it deletes. */
+  ownCardCount = 0
 ) {
   return {
     id: view.id,
@@ -442,6 +475,8 @@ export function toViewDetail(
     icon: view.icon,
     recordTypeKey: view.record_type_key,
     visibility: view.visibility,
+    orgLevel: (view.org_level ?? 'view') as ViewsShareLevel,
+    ownCardCount,
     ownerId: view.owner_id,
     ownerName,
     accessLevel: access,
@@ -468,8 +503,72 @@ export async function loadViewDetail(
     .select('display_name')
     .where('id', '=', view.owner_id)
     .executeTakeFirstOrThrow()
-  const teams = (await getContainerTeams(tx, 'views_definitions', [view.id])).get(view.id) ?? []
-  return toViewDetail(view, await listTabs(tx, view.id), access, owner.display_name, viaShare, teams)
+  const levels = new Map((await tx
+    .selectFrom('views_teams')
+    .select(['group_id', 'level'])
+    .where('container_id', '=', view.id)
+    .execute()).map(r => [r.group_id, (r.level ?? 'view') as ViewsShareLevel]))
+  const teams = ((await getContainerTeams(tx, 'views_definitions', [view.id])).get(view.id) ?? [])
+    .map(t => ({ ...t, level: levels.get(t.id) ?? 'view' as ViewsShareLevel }))
+  const ownCardCount = await ownsItsCards(tx, view) ? await countOwnCards(tx, view.id) : 0
+  return toViewDetail(view, await listTabs(tx, view.id), access, owner.display_name, viaShare, teams, ownCardCount)
+}
+
+/**
+ * Whether the view's own cards (records created on it) are its to delete: a
+ * hand-picked view over a type whose boards grant visibility.
+ */
+export async function ownsItsCards(tx: Tx, view: Pick<ViewRow, 'definition' | 'record_type_key'>): Promise<boolean> {
+  if (!(view.definition as ViewDefinition).picked) return false
+  return (await getRecordType(tx, view.record_type_key))?.boardsGrantVisibility ?? false
+}
+
+/** Records created on the view that no other view holds. */
+export function ownCardsQuery(tx: Tx, viewId: string) {
+  return tx
+    .selectFrom('views_items as i')
+    .where('i.view_id', '=', viewId)
+    .where('i.created_here', '=', true)
+    .where(eb => eb.not(eb.exists(
+      eb.selectFrom('views_items as o')
+        .select('o.record_id')
+        .whereRef('o.record_id', '=', 'i.record_id')
+        .where('o.view_id', '<>', viewId)
+    )))
+}
+
+async function countOwnCards(tx: Tx, viewId: string): Promise<number> {
+  const row = await ownCardsQuery(tx, viewId)
+    .select(eb => eb.fn.countAll<string>().as('n'))
+    .executeTakeFirst()
+  return Number(row?.n ?? 0)
+}
+
+/**
+ * Sets who a view opens to and at which level: Everyone's level on an
+ * org-wide view, each team's on a 'teams' view. Only 'edit' is stored.
+ */
+export async function setViewLevels(
+  tx: Tx,
+  viewId: string,
+  input: { visibility: ViewsVisibility, orgLevel?: ViewsShareLevel, teamLevels?: Record<string, ViewsShareLevel> }
+): Promise<void> {
+  await tx
+    .updateTable('views_definitions')
+    .set({ org_level: input.visibility === 'org' && input.orgLevel === 'edit' ? 'edit' : null })
+    .where('id', '=', viewId)
+    .execute()
+  if (input.visibility !== 'teams') return
+  const edit = Object.entries(input.teamLevels ?? {}).filter(([, l]) => l === 'edit').map(([id]) => id)
+  await tx.updateTable('views_teams').set({ level: null }).where('container_id', '=', viewId).execute()
+  if (edit.length > 0) {
+    await tx
+      .updateTable('views_teams')
+      .set({ level: 'edit' })
+      .where('container_id', '=', viewId)
+      .where('group_id', 'in', edit)
+      .execute()
+  }
 }
 
 export interface CreateViewInput {

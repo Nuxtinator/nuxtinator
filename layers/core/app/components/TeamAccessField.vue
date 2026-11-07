@@ -7,6 +7,8 @@
 // With `noneValue`, ticking nothing is allowed and saves that visibility (the
 // container is then open only to its owner and the people it is shared with);
 // the field then always shows, as just Everyone when there are no teams.
+// With `levels`, Everyone and each ticked team also pick Can view / Can edit
+// (`orgLevel`, `teamLevels`; an absent team level means 'view').
 // A new container binds `fresh` (true when its form opens): the first time the
 // field shows, it starts with nothing ticked so the creator chooses, then
 // clears `fresh` so going back to the form keeps that choice.
@@ -16,11 +18,23 @@ const props = defineProps<{
   currentTeams?: { id: string, name: string, icon?: string | null, image?: string | null, archived?: boolean }[]
   disabled?: boolean
   noneValue?: string
+  levels?: boolean
 }>()
 
 const visibility = defineModel<string>('visibility', { required: true })
 const teamIds = defineModel<string[]>('teamIds', { required: true })
 const fresh = defineModel<boolean>('fresh', { default: false })
+const orgLevel = defineModel<'view' | 'edit'>('orgLevel', { default: 'view' })
+const teamLevels = defineModel<Record<string, 'view' | 'edit'>>('teamLevels', { default: () => ({}) })
+
+const LEVEL_ITEMS = [
+  { label: 'Can view', value: 'view' },
+  { label: 'Can edit', value: 'edit' }
+]
+
+const setTeamLevel = (id: string, level: 'view' | 'edit') => {
+  teamLevels.value = { ...teamLevels.value, [id]: level }
+}
 
 const { mode, teams } = useTeams(props.appId)
 
@@ -95,7 +109,18 @@ const tip = computed(() => props.noneValue
           icon="i-lucide-users"
           size="2xs"
         />
-        <span class="text-sm font-medium">Everyone</span>
+        <span class="text-sm font-medium flex-1">Everyone</span>
+        <USelect
+          v-if="levels && everyone"
+          :model-value="orgLevel"
+          :items="LEVEL_ITEMS"
+          size="xs"
+          class="w-26 pointer-events-auto"
+          :disabled="disabled"
+          aria-label="Everyone's access"
+          @click.stop
+          @update:model-value="orgLevel = $event as 'view' | 'edit'"
+        />
       </CheckboxRow>
       <CheckboxRow
         v-for="t in teamItems"
@@ -111,7 +136,18 @@ const tip = computed(() => props.noneValue
           :image="t.image"
           size="2xs"
         />
-        <span class="text-sm">{{ t.name }}</span>
+        <span class="text-sm flex-1">{{ t.name }}</span>
+        <USelect
+          v-if="levels && !everyone && teamIds.includes(t.id)"
+          :model-value="teamLevels[t.id] ?? 'view'"
+          :items="LEVEL_ITEMS"
+          size="xs"
+          class="w-26 pointer-events-auto"
+          :disabled="disabled"
+          :aria-label="`${t.name}'s access`"
+          @click.stop
+          @update:model-value="setTeamLevel(t.id, $event as 'view' | 'edit')"
+        />
       </CheckboxRow>
     </ul>
   </UFormField>

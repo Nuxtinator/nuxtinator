@@ -5,6 +5,7 @@ import type { RecordsFilterGroup } from '#records/client'
 export type ViewsLayout = 'kanban' | 'table' | 'list'
 export type ViewsVisibility = 'private' | 'org' | 'teams'
 export type ViewsAccessLevel = 'view' | 'edit' | 'owner'
+export type ViewsShareLevel = 'view' | 'edit'
 
 export type ViewsConnectionDisplay = 'names' | 'count' | 'progress'
 
@@ -77,8 +78,12 @@ export interface ViewDetail extends Omit<ViewSummary, 'layout' | 'tabCount'> {
   tabs: ViewsTab[]
   /** The view reached the caller through a share row of their own. */
   sharedWithMe: boolean
-  /** The teams a view with visibility 'teams' opens to. */
-  teams: Array<{ id: string, name: string, icon: string | null, image: string | null, archived: boolean }>
+  /** The teams a view with visibility 'teams' opens to, each at its level. */
+  teams: Array<{ id: string, name: string, icon: string | null, image: string | null, archived: boolean, level: ViewsShareLevel }>
+  /** Everyone's level on an org-wide view. */
+  orgLevel: ViewsShareLevel
+  /** Records created on this hand-picked view and on no other — deleted with it. */
+  ownCardCount: number
 }
 
 /**
@@ -120,6 +125,8 @@ export interface ViewsBoardItem {
   fields?: Record<string, unknown>
   /** Per connection card field shown as count or progress: linked and done totals. */
   progress?: Record<string, { total: number, done: number }>
+  /** Created on this hand-picked view and on no other: deleting it from the view deletes it. */
+  ownCard?: true
 }
 
 export interface ViewRecords {

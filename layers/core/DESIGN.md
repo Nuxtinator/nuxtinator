@@ -17,7 +17,7 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 | Confirm before a destructive action | `if (!await confirmAction({ title, confirmLabel })) return` with `const confirmAction = useConfirm()`; or `<ConfirmModal v-model:open @confirm :loading>` when the modal should stay open while the work runs |
 | Labelled divider | `<USeparator label="…">` |
 | Theme or language picker | `<ThemeToggle>`, `<LocaleSwitcher>` |
-| Who can see a project, portfolio or other container | `<TeamAccessField app-id v-model:visibility v-model:team-ids>` in its create and settings forms |
+| Who can see a project, portfolio or other container | `<TeamAccessField app-id v-model:visibility v-model:team-ids>` in its create and settings forms; add `levels` with `v-model:org-level` / `v-model:team-levels` when Everyone and teams also get Can view / Can edit |
 | Admin "show all teams" switch | `<ShowAllTeamsToggle app-id>` in the app's sidebar or toolbar, behind `<app>.all_teams` |
 | Manage one scope's groups / limit an app to groups | `<GroupsManager>` / `<AppGroupsModal>` |
 | Show a group in a list or picker | `<GroupAvatar :name :icon :image>` beside its name; in a menu or select item, `avatar: groupAvatarProps(group)` |
