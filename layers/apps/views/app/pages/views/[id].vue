@@ -183,14 +183,21 @@ async function onQuickAdd({ columnKey, name }: { columnKey: string, name: string
   const t = tab.value
   if (!v || !t) return
   try {
-    const recordFields: Record<string, unknown> = { name }
+    // The new record takes the values the view's and tab's filters pin, so it
+    // shows up on the tab it was added from.
+    const recordFields: Record<string, unknown> = {
+      ...viewsFilterPrefill([v.definition.filter, t.definition.filter], fields.value, myUserId.value),
+      name
+    }
     const field = groupFieldDef.value
     if (!isCustom.value && field) {
       const single = field.kind === 'key_select' || (field.kind === 'user_select' && !field.multiple)
+      const pinned = Array.isArray(recordFields[field.key]) ? recordFields[field.key] as unknown[] : []
       // "No value" is a value: an explicit null keeps the type's default
       // (a task's "open") from putting the new record in another column.
-      if (columnKey !== '') recordFields[field.key] = single ? columnKey : [columnKey]
+      if (columnKey !== '') recordFields[field.key] = single ? columnKey : [...new Set([...pinned, columnKey])]
       else if (single) recordFields[field.key] = null
+      else delete recordFields[field.key]
     }
     if (picked.value) {
       await $fetch(`/api/views/${v.id}/cards`, {
