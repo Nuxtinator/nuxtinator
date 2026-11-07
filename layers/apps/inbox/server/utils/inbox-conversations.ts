@@ -181,7 +181,7 @@ function filterConditions(eb: ConversationEb, filters: InboxConversationFilters)
       )
       OR EXISTS (
         SELECT 1 FROM crm_contact_channels cc
-        JOIN crm_records r ON r.id = cc.record_id
+        JOIN records_entries r ON r.id = cc.record_id
         WHERE cc.channel_id = inbox_conversations.channel_id AND r.name ILIKE ${term}
       )
       OR EXISTS (

@@ -2,34 +2,36 @@ import { sql } from 'kysely'
 import type { Kysely } from 'kysely'
 import type { SeedContext } from '#core/seeds/types'
 import type {
-  CrmRecordsTable,
-  CrmRecordFieldEntriesTable,
-  CrmRecordUserRefsTable,
-  CrmRecordConnectionsTable,
+  RecordsEntriesTable,
+  RecordFieldEntriesTable,
+  RecordUserRefsTable,
+  RecordConnectionsTable,
+  RecordActivityTable,
+  RecordCommentsTable
+} from '@nuxtinator/records/schema'
+import { normalizeChannelValue, channelFingerprint } from '@nuxtinator/records/normalize'
+import type {
   CrmChannelsTable,
   CrmContactChannelsTable,
   CrmChannelConsentsTable,
-  CrmConsentEventsTable,
-  CrmRecordActivityTable,
-  CrmRecordCommentsTable
+  CrmConsentEventsTable
 } from '../server/database/schema'
-import { normalizeChannelValue, channelFingerprint } from '../server/utils/normalize'
 
 // Untyped pass-through: tenancy mode adds an `org_id` column at runtime that
 // isn't reflected in this layer's compile-time schema, so we widen the rows
 // with an optional org_id and rely on the runtime DEFAULT to fill it (via the
 // `app.current_org` GUC set inside the transaction).
-type CrmSeedDb = {
-  crm_records: CrmRecordsTable & { org_id?: string }
-  crm_record_field_entries: CrmRecordFieldEntriesTable & { org_id?: string }
-  crm_record_user_refs: CrmRecordUserRefsTable & { org_id?: string }
-  crm_record_connections: CrmRecordConnectionsTable & { org_id?: string }
+type RecordsSeedDb = {
+  records_entries: RecordsEntriesTable & { org_id?: string }
+  records_field_entries: RecordFieldEntriesTable & { org_id?: string }
+  records_user_refs: RecordUserRefsTable & { org_id?: string }
+  records_connections: RecordConnectionsTable & { org_id?: string }
   crm_channels: CrmChannelsTable & { org_id?: string }
   crm_contact_channels: CrmContactChannelsTable & { org_id?: string }
   crm_channel_consents: CrmChannelConsentsTable & { org_id?: string }
   crm_consent_events: CrmConsentEventsTable & { org_id?: string }
-  crm_record_activity: CrmRecordActivityTable & { org_id?: string }
-  crm_record_comments: CrmRecordCommentsTable & { org_id?: string }
+  records_activity: RecordActivityTable & { org_id?: string }
+  records_comments: RecordCommentsTable & { org_id?: string }
 }
 
 // House style for jsonb binds (matches the kernel): pre-stringify and route
@@ -209,7 +211,7 @@ const RELATIONS: Array<[string, string]> = [
 // Get-or-create the shared identity row for an address (the seed-side twin
 // of the kernel's claimChannel).
 async function ensureChannel(
-  db: Kysely<CrmSeedDb>,
+  db: Kysely<RecordsSeedDb>,
   type: 'email' | 'phone',
   value: string
 ): Promise<string> {
@@ -233,7 +235,7 @@ async function ensureChannel(
 // pair has no state yet — re-runs stay quiet, mirroring the service's
 // idempotency rule.
 async function ensureConsent(
-  db: Kysely<CrmSeedDb>,
+  db: Kysely<RecordsSeedDb>,
   channelId: string,
   channel: { type: string, value: string },
   consent: { purpose: string, status: 'opt_in' | 'opt_out', source: string },
@@ -276,14 +278,14 @@ async function ensureConsent(
 }
 
 async function ensureContact(
-  db: Kysely<CrmSeedDb>,
+  db: Kysely<RecordsSeedDb>,
   contact: ContactSeed,
   users: Map<SeedUserKey, { id: string }>,
   adminId: string,
   log: SeedContext['log']
 ): Promise<string | null> {
   const existing = await db
-    .selectFrom('crm_records')
+    .selectFrom('records_entries')
     .select('id')
     .where('record_type', '=', 'contacts')
     .where('name', '=', contact.name)
@@ -295,7 +297,7 @@ async function ensureContact(
 
   const createdAt = daysAgo(contact.createdDaysAgo)
   const record = await db
-    .insertInto('crm_records')
+    .insertInto('records_entries')
     .values({
       record_type: 'contacts',
       name: contact.name,
@@ -313,7 +315,7 @@ async function ensureContact(
   for (const [fieldKey, values] of Object.entries(contact.entries ?? {})) {
     if (!values || values.length === 0) continue
     await db
-      .insertInto('crm_record_field_entries')
+      .insertInto('records_field_entries')
       .values(values.map((value, i) => ({
         record_id: recordId,
         field_key: fieldKey,
@@ -330,7 +332,7 @@ async function ensureContact(
     const user = users.get(key)
     if (!user) continue
     await db
-      .insertInto('crm_record_user_refs')
+      .insertInto('records_user_refs')
       .values({ record_id: recordId, field_key: 'assigned_to', user_id: user.id, created_by: adminId })
       .onConflict(oc => oc.doNothing())
       .execute()
@@ -358,7 +360,7 @@ async function ensureContact(
 
   // A 'created' activity row so the timeline has an anchor entry.
   await db
-    .insertInto('crm_record_activity')
+    .insertInto('records_activity')
     .values({
       record_id: recordId,
       actor_user_id: adminId,
@@ -377,7 +379,7 @@ async function ensureContact(
     if (!author) continue
     const at = new Date(createdAt.getTime() + (i + 1) * 60 * 60 * 1000)
     await db
-      .insertInto('crm_record_comments')
+      .insertInto('records_comments')
       .values({
         record_id: recordId,
         author_id: author.id,
@@ -398,7 +400,7 @@ async function ensureContact(
 }
 
 export default async function seed(ctx: SeedContext): Promise<void> {
-  const db = ctx.db as Kysely<CrmSeedDb>
+  const db = ctx.db as Kysely<RecordsSeedDb>
 
   const adminUser = ctx.users.find(u => u.isAdmin)
   if (!adminUser) {
@@ -418,7 +420,7 @@ export default async function seed(ctx: SeedContext): Promise<void> {
   // inserts so the column DEFAULT resolves to the demo org. Single-tenant
   // mode skips the SET LOCAL because the column doesn't exist.
   await db.transaction().execute(async (tx) => {
-    const t = tx as unknown as Kysely<CrmSeedDb>
+    const t = tx as unknown as Kysely<RecordsSeedDb>
     if (ctx.orgId) {
       await sql`SET LOCAL app.current_org = ${sql.lit(ctx.orgId)}`.execute(tx)
     }
@@ -434,7 +436,7 @@ export default async function seed(ctx: SeedContext): Promise<void> {
       const toId = idsByName.get(toName)
       if (!fromId || !toId) continue
       await t
-        .insertInto('crm_record_connections')
+        .insertInto('records_connections')
         .values({ from_record_id: fromId, field_key: 'relation', to_record_id: toId, meta: jsonb({}) })
         .onConflict(oc => oc.doNothing())
         .execute()

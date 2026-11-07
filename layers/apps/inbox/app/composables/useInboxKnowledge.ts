@@ -20,7 +20,7 @@ export interface InboxGroundingRefreshResult {
 }
 
 export function useInboxKnowledge() {
-  const orgKey = useCrmOrgKey()
+  const orgKey = useRecordsOrgKey()
   const items = ref<InboxKnowledgeEntry[]>([])
   const statusFilter = ref<InboxKnowledgeStatusFilter>('all')
   const loaded = ref(false)

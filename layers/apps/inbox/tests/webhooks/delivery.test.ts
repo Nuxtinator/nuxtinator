@@ -178,7 +178,7 @@ describe('delivery events webhook', () => {
     })
 
     const rows = await sql`
-      SELECT action, note, actor_label, actor_user_id FROM crm_record_activity
+      SELECT action, note, actor_label, actor_user_id FROM records_activity
       WHERE record_id = ${record.id} AND action IN ('email_suppressed', 'unsubscribed')
       ORDER BY action
     `

@@ -18,12 +18,14 @@
   "optionalDependencies": {
     "@nuxtinator/ai": "*",
     "@nuxtinator/core": "*",
-    "@nuxtinator/crm": "*"
+    "@nuxtinator/crm": "*",
+    "@nuxtinator/records": "*"
   },
   "nuxtinator": {
     "requires": {
       "@nuxtinator/core": ">=3.1.0",
-      "@nuxtinator/crm": "*"
+      "@nuxtinator/crm": ">=0.5.0",
+      "@nuxtinator/records": ">=0.1.0"
     }
   },
   "peerDependencies": {

@@ -13,7 +13,7 @@ export interface InboxCannedResponse {
 }
 
 export function useInboxCanned() {
-  const orgKey = useCrmOrgKey()
+  const orgKey = useRecordsOrgKey()
   const items = ref<InboxCannedResponse[]>([])
   const loaded = ref(false)
   // The picker degrades silently on a fetch failure (no error toast) — the

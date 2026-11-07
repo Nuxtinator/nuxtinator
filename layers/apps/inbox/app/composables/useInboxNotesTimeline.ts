@@ -34,7 +34,7 @@ function toMs(v: string | number): number {
 }
 
 export function useInboxNotesTimeline(conversationId: MaybeRefOrGetter<string | null>) {
-  const orgKey = useCrmOrgKey()
+  const orgKey = useRecordsOrgKey()
   const notes = ref<InboxNote[]>([])
   const activity = ref<InboxActivityItem[]>([])
   const notesCursor = ref<string | null>(null)

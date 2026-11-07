@@ -1,17 +1,19 @@
 {
   "name": "@nuxtinator/crm",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./nuxt.config.ts"
   },
   "optionalDependencies": {
-    "@nuxtinator/core": "*"
+    "@nuxtinator/core": "*",
+    "@nuxtinator/records": "*"
   },
   "nuxtinator": {
     "requires": {
-      "@nuxtinator/core": ">=3.1.0"
+      "@nuxtinator/core": ">=3.1.0",
+      "@nuxtinator/records": ">=0.1.0"
     }
   },
   "peerDependencies": {

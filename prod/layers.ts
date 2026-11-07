@@ -45,7 +45,9 @@ export const LAYERS: readonly LayerSpec[] = [
   { id: 'context',       pkg: '@nuxtinator/context',       repo: 'Nuxtinator/nuxtinator', subdir: 'layers/apps/context' },
   // Needs context + ai. Add crm + inbox too for the "still need help?" handoff.
   { id: 'helpinator',    pkg: '@nuxtinator/helpinator',    repo: 'Nuxtinator/nuxtinator', subdir: 'layers/apps/helpinator' },
+  { id: 'records',       pkg: '@nuxtinator/records',       repo: 'Nuxtinator/nuxtinator', subdir: 'layers/records' },
   { id: 'crm',           pkg: '@nuxtinator/crm',           repo: 'Nuxtinator/nuxtinator', subdir: 'layers/apps/crm' },
+  { id: 'views',         pkg: '@nuxtinator/views',         repo: 'Nuxtinator/nuxtinator', subdir: 'layers/apps/views' },
   { id: 'dev',           pkg: '@nuxtinator/dev',           repo: 'Nuxtinator/nuxtinator', subdir: 'layers/dev' }
 
   // Pin a first-party layer to auto-take 1.x minors/patches but hold majors:
