@@ -23,6 +23,7 @@ import {
 } from '#records/server'
 import type { RecordsFieldSetting, RecordListItem, RecordsListOpts } from '#records/server'
 import { isSortableField, ownCardsQuery, ownsItsCards, type ViewDefinition, type ViewRow, type ViewTabDefinition, type ViewTabRow } from './views'
+import { isViewFieldKey, readViewValues, viewFieldGroupValues, viewFieldsOf, viewFieldsWithType, viewVirtualFields } from './view-fields'
 
 type Tx = Transaction<Database>
 
@@ -60,6 +61,8 @@ export interface ViewsBoardItem extends RecordListItem {
   progress?: Record<string, { total: number, done: number }>
   /** Created on this hand-picked view and on no other: its editors can delete it. */
   ownCard?: true
+  /** Values of the view's own fields, keyed by field key (views with fields only). */
+  viewValues?: Record<string, unknown>
 }
 
 /** The card layout a view renders: its own choice, else its type's default. */
@@ -68,6 +71,8 @@ export interface ViewsCardLayout {
   connections: Record<string, RecordsCardConnectionDisplay>
   /** True when the view stores its own layout instead of the type default. */
   custom: boolean
+  /** The type's cover field: its first image tops each board card. */
+  cover?: string
 }
 
 // What a tab shows when neither it nor its type names card fields.
@@ -79,21 +84,24 @@ const DEFAULT_CARD_FIELDS: Record<ViewTabRow['layout'], string[]> = {
 
 export async function effectiveCardLayout(tx: Tx, view: ViewRow, tab: ViewTabRow): Promise<ViewsCardLayout> {
   const def = tab.definition as ViewTabDefinition
-  if (def.cardFields) {
-    return { fields: def.cardFields, connections: def.cardConnections ?? {}, custom: true }
-  }
   const type = await getRecordType(tx, view.record_type_key)
+  const cover = type?.card?.cover ? { cover: type.card.cover } : {}
+  if (def.cardFields) {
+    return { fields: def.cardFields, connections: def.cardConnections ?? {}, custom: true, ...cover }
+  }
   return {
     fields: type?.card?.fields ?? DEFAULT_CARD_FIELDS[tab.layout],
     connections: type?.card?.connections ?? {},
-    custom: false
+    custom: false,
+    ...cover
   }
 }
 
 // A list row carries the record's own columns and its jsonb blob. Everything
 // else — multi-selects, tags, links, user references, connections, channel
-// links — lives in a side table, which is why the list engine leaves it out.
-const SIDE_TABLE_STORAGES = new Set(['entries', 'user_refs', 'connections', 'channels'])
+// links, files — lives in a side table, which is why the list engine leaves
+// it out.
+const SIDE_TABLE_STORAGES = new Set(['entries', 'user_refs', 'connections', 'channels', 'attachments'])
 
 /**
  * Fills in the side-table values for the card fields a view actually shows.
@@ -108,12 +116,12 @@ async function attachCardFieldValues(
   layout: ViewsCardLayout,
   items: ViewsBoardItem[]
 ): Promise<void> {
-  const chosen = layout.fields
+  const chosen = layout.cover ? [...layout.fields, layout.cover] : layout.fields
   if (items.length === 0 || chosen.length === 0) return
 
   const defs = await getRecordTypeFields(tx, view.record_type_key)
   const shown = defs.filter(d => chosen.includes(d.key) && !d.orphan)
-  await attachConnectionProgress(tx, ctx, shown, layout, items)
+  await attachConnectionProgress(tx, ctx, view, shown, layout, items)
   const keys = shown.filter(d => SIDE_TABLE_STORAGES.has(d.storage)).map(d => d.key)
   if (keys.length === 0) return
 
@@ -137,11 +145,13 @@ async function attachCardFieldValues(
 
 // Linked and done totals for connection card fields shown as count or
 // progress, over the linked records the viewer can open. "Done" means the
-// linked record sits in a closed status of its own type (a done task). One
-// query per such field over the whole page.
+// linked record sits in a closed status of its own type (a done task). Links
+// written from the other side count too (a task's subtasks are the tasks
+// naming it as their parent). One query per such field over the whole page.
 async function attachConnectionProgress(
   tx: Tx,
   ctx: TenantContext,
+  view: ViewRow,
   shown: RecordsFieldSetting[],
   layout: ViewsCardLayout,
   items: ViewsBoardItem[]
@@ -153,21 +163,36 @@ async function attachConnectionProgress(
     const targetType = await getRecordType(tx, def.target)
     const targetDefs = targetType ? await getRecordTypeFields(tx, def.target) : []
     const closed = targetType ? closingRulesOf(targetType, targetDefs).closedStatuses : []
-    const rows = await tx
+    const forward = await tx
       .selectFrom('records_connections as c')
       .innerJoin('records_entries as t', 't.id', 'c.to_record_id')
-      .select(['c.from_record_id', 'c.to_record_id', 't.status'])
+      .select(['c.from_record_id as owner', 'c.to_record_id as linked', 't.status'])
       .where('c.from_record_id', 'in', ids)
       .where('c.field_key', '=', def.key)
       .execute()
-    const visible = await visibleRecordIds(tx, ctx, [...new Set(rows.map(r => r.to_record_id))])
+    const reverseKeys = targetDefs
+      .filter(d => d.kind === 'connection' && d.target === view.record_type_key && d.reverseKey === def.key)
+      .map(d => d.key)
+    const reverse = reverseKeys.length === 0
+      ? []
+      : await tx
+          .selectFrom('records_connections as c')
+          .innerJoin('records_entries as t', 't.id', 'c.from_record_id')
+          .select(['c.to_record_id as owner', 'c.from_record_id as linked', 't.status'])
+          .where('c.to_record_id', 'in', ids)
+          .where('c.field_key', 'in', reverseKeys)
+          .execute()
+    const rows = [...forward, ...reverse]
+    const visible = await visibleRecordIds(tx, ctx, [...new Set(rows.map(r => r.linked))])
     const totals = new Map<string, { total: number, done: number }>()
+    const counted = new Set<string>()
     for (const row of rows) {
-      if (!visible.has(row.to_record_id)) continue
-      const entry = totals.get(row.from_record_id) ?? { total: 0, done: 0 }
+      if (!visible.has(row.linked) || counted.has(`${row.owner}:${row.linked}`)) continue
+      counted.add(`${row.owner}:${row.linked}`)
+      const entry = totals.get(row.owner) ?? { total: 0, done: 0 }
       entry.total++
       if (row.status && closed.includes(row.status)) entry.done++
-      totals.set(row.from_record_id, entry)
+      totals.set(row.owner, entry)
     }
     for (const item of items) {
       item.progress = { ...(item.progress ?? {}), [def.key]: totals.get(item.id) ?? { total: 0, done: 0 } }
@@ -184,8 +209,15 @@ function mergedListOpts(view: ViewRow, tab: ViewTabRow, overlay: ViewsRecordsOve
     where: [viewDef.filter, tabDef.filter].filter(f => !!f && f.rules.length > 0) as NonNullable<ViewDefinition['filter']>[],
     q: overlay.q,
     sort: overlay.sort ?? tabDef.sort?.field,
-    dir: overlay.dir ?? tabDef.sort?.dir
+    dir: overlay.dir ?? tabDef.sort?.dir,
+    virtualFields: viewVirtualFields(view)
   }
+}
+
+async function attachViewValues(tx: Tx, view: ViewRow, items: ViewsBoardItem[]): Promise<void> {
+  if (viewFieldsOf(view).length === 0 || items.length === 0) return
+  const values = await readViewValues(tx, view, items.map(i => i.id))
+  for (const item of items) item.viewValues = values.get(item.id) ?? {}
 }
 
 // List rows carry the record's snake_case columns; the feed serves the same
@@ -204,14 +236,22 @@ export async function viewItemIds(tx: Tx, viewId: string): Promise<string[]> {
   return rows.map(r => r.record_id)
 }
 
-/** Reads the grouping field's current value(s) per record, storage-aware. */
+/**
+ * Reads the grouping field's current value(s) per record, storage-aware. A
+ * field of the view's own (`view` given and the key is one of its fields)
+ * reads from views_values.
+ */
 export async function getViewsGroupValues(
   tx: Tx,
   field: RecordsFieldSetting,
-  items: RecordListItem[]
+  items: RecordListItem[],
+  view?: Pick<ViewRow, 'id' | 'definition'>
 ): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>()
   if (items.length === 0) return out
+  if (view && isViewFieldKey(view, field.key)) {
+    return await viewFieldGroupValues(tx, view, field.key, items.map(i => i.id))
+  }
 
   if (field.storage === 'promoted') {
     // An unset status sits in the type's default column.
@@ -332,6 +372,14 @@ export function requireRecordsReadScope(ctx: TenantContext): void {
   }
 }
 
+// A connected app changes records, and values on them, only with the
+// records.write scope; for a session, the records kernel's checks alone decide.
+export function requireRecordsWriteScope(ctx: TenantContext): void {
+  if (ctx.clientId && !ctx.perms.has('records.write')) {
+    throw createError({ statusCode: 403, statusMessage: 'Permission required: records.write' })
+  }
+}
+
 export async function getViewRecords(
   tx: Tx,
   ctx: TenantContext,
@@ -348,7 +396,7 @@ export async function getViewRecords(
   const opts: RecordsListOpts = mergedListOpts(view, tab, overlay)
   // A saved sort on a field that has since gone falls back to the default order.
   const savedSort = (tab.definition as ViewTabDefinition).sort
-  if (!overlay.sort && savedSort && !isSortableField(await getRecordTypeFields(tx, view.record_type_key), savedSort.field)) {
+  if (!overlay.sort && savedSort && !isSortableField(await viewFieldsWithType(tx, view), savedSort.field)) {
     opts.sort = undefined
     opts.dir = undefined
   }
@@ -366,6 +414,7 @@ export async function getViewRecords(
     })
     const items = withTimestamps(page.items)
     await attachCardFieldValues(tx, ctx, view, card, items)
+    await attachViewValues(tx, view, items)
     await markOwnCards(tx, view, items)
     return { items, total: page.total, truncated: false, placements: [], card }
   }
@@ -386,11 +435,12 @@ export async function getViewRecords(
 
   let groupColumns: ViewsGroupColumn[] | undefined
   if (groupFieldDef) {
-    const values = await getViewsGroupValues(tx, groupFieldDef, rows)
+    const values = await getViewsGroupValues(tx, groupFieldDef, rows, view)
     for (const item of items) item.groupValues = values.get(item.id) ?? []
     if (groupFieldDef.kind === 'connection') groupColumns = await connectionColumns(tx, ctx, groupFieldDef)
   }
   await attachCardFieldValues(tx, ctx, view, card, items)
+  await attachViewValues(tx, view, items)
   await markOwnCards(tx, view, items)
 
   return { items, total, truncated: items.length < total, placements, groupColumns, card }

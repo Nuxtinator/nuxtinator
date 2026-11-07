@@ -10,6 +10,17 @@ import {
 import fixWebmDuration from 'fix-webm-duration'
 import { getActiveSlug } from '#tenant'
 
+// What POST /api/videos/upload-url returns. Named here because the typed
+// route lookup gives up (unknown) once a host has enough routes.
+interface UploadUrlResponse {
+  success: boolean
+  videoId: string
+  videoKey: string
+  videoUploadUrl: string
+  thumbnailKey: string | null
+  thumbnailUploadUrl: string | null
+}
+
 interface UploadProgress {
   stage: 'validating' | 'compressing' | 'uploading' | 'finalizing' | 'complete' | 'error'
   progress: number
@@ -250,7 +261,7 @@ export const useVideoUpload = () => {
       }
 
       // Get pre-signed upload URLs
-      const response = await $fetch('/api/videos/upload-url', {
+      const response = await $fetch<UploadUrlResponse>('/api/videos/upload-url', {
         method: 'POST',
         body: {
           fileName: originalFileName,
@@ -556,7 +567,7 @@ export const useVideoUpload = () => {
       }
 
       // Step 1: Request pre-signed URLs from server
-      const urlResponse = await $fetch('/api/videos/upload-url', {
+      const urlResponse = await $fetch<UploadUrlResponse>('/api/videos/upload-url', {
         method: 'POST',
         body: {
           fileName: `recording-${Date.now()}.${fileExtension}`,

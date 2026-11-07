@@ -5,7 +5,7 @@
 // page a registered field widget may take over (the crm layer's channel
 // widget for communication_channel).
 
-import type { RecordsFieldKind, RecordsFieldOption, RecordsLinkValue } from '#records'
+import type { RecordsAttachmentValue, RecordsFieldKind, RecordsFieldOption, RecordsLinkValue } from '#records'
 
 /** A merged field definition as served by GET /api/records/schema/types/:type/fields. */
 export interface RecordsFieldSetting {
@@ -155,7 +155,33 @@ export const RECORDS_FIELD_KINDS: Record<RecordsFieldKind, RecordsKindRenderer> 
       const links = asArray(value) as RecordsLinkValue[]
       return links.length > 0 ? links.map(l => l.label || l.url).join(', ') : EMPTY
     }
+  },
+  attachments: {
+    component: 'RecordsFieldsAttachmentsField',
+    // Hydrated files and timeline entries both carry the file name.
+    format: (value) => {
+      const files = asArray(value) as Array<{ name?: string }>
+      return files.length > 0 ? files.map(f => f.name ?? '').join(', ') : EMPTY
+    }
   }
+}
+
+/** The files of an attachments value (anything else reads as none). */
+export function recordsAttachmentList(value: unknown): RecordsAttachmentValue[] {
+  return asArray(value).filter((v): v is RecordsAttachmentValue =>
+    v !== null && typeof v === 'object' && 'id' in v && 'url' in v)
+}
+
+/** Whether a file can show as an image (thumbnail, card cover). */
+export function recordsIsImage(file: Pick<RecordsAttachmentValue, 'mime'>): boolean {
+  return file.mime.startsWith('image/')
+}
+
+/** A file size for people: 820 B, 14 KB, 3.2 MB. */
+export function recordsFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 /** Unknown kinds (stale orphan fields) fall back to plain-text display. */

@@ -17,16 +17,21 @@ import TagsField from './fields/TagsField.vue'
 import UserSelectField from './fields/UserSelectField.vue'
 import ConnectionField from './fields/ConnectionField.vue'
 import LinkField from './fields/LinkField.vue'
+import AttachmentsField from './fields/AttachmentsField.vue'
 
 const props = defineProps<{
   field: RecordsFieldSetting
   value: unknown
   /** The record detail's canEdit capability — false renders read-only. */
   editable: boolean
+  /** Attachments fields: where the editor uploads files. */
+  uploadUrl?: string
 }>()
 
 const emit = defineEmits<{
   commit: [value: unknown]
+  /** Attachments fields: files were uploaded; the record should be refetched. */
+  uploaded: []
 }>()
 
 // Maps the dispatcher's component names onto the imported editors —
@@ -43,7 +48,8 @@ const EDITORS: Record<string, Component> = {
   RecordsFieldsTagsField: TagsField,
   RecordsFieldsUserSelectField: UserSelectField,
   RecordsFieldsConnectionField: ConnectionField,
-  RecordsFieldsLinkField: LinkField
+  RecordsFieldsLinkField: LinkField,
+  RecordsFieldsAttachmentsField: AttachmentsField
 }
 
 const renderer = computed(() => recordsRendererFor(props.field.kind))
@@ -76,7 +82,13 @@ const formatted = computed(() => renderer.value.format(props.value, props.field,
         v-if="editor"
         :field="field"
         :model-value="value"
+        v-bind="field.kind === 'attachments' ? { uploadUrl } : {}"
         @commit="emit('commit', $event)"
+        @uploaded="emit('uploaded')"
+      />
+      <RecordsAttachmentsList
+        v-else-if="field.kind === 'attachments'"
+        :value="value"
       />
       <p
         v-else

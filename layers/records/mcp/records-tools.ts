@@ -364,18 +364,22 @@ export const listTimelineTool = defineMcpTool({
 
 // ─── Write tools ────────────────────────────────────────────────────────────
 
+const shareInput = z.boolean().optional().describe('Set true to assign someone (an assignee or other access-granting people field) who can\'t see the record yet; doing so shares it with them. Without it the call is refused and names those people, so confirm with the user first.')
+
 export const createRecordTool = defineMcpTool({
   name: 'records_create',
   title: 'Create Record',
   description: 'Create a record, e.g. a task from a meeting or a contact from a business card. `fields.name` is required. Email and phone fields take an array of addresses. Adding an address never opts the person in to anything; record consent separately with crm_set_consent.',
   appId: 'records',
   scope: 'records.write',
-  input: z.object({ org: orgInput, type: typeInput, fields: fieldsInput }).strict(),
+  input: z.object({ org: orgInput, type: typeInput, fields: fieldsInput, share: shareInput }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
       await requireTypePermission(tx, tenant, input.type, 'create')
       const { defs, rules } = await typeContext(tx, tenant, input.type)
-      const record = await applyFieldPatch(tx, tenant, input.type, null, input.fields)
+      const record = await applyFieldPatch(tx, tenant, input.type, null, input.fields, {
+        sharing: input.share ? 'confirmed' : 'ask'
+      })
       const changes = diffFields(defs, null, record.fields)
       return text(`Created ${record.name} (${record.id}). ${changeSummary(changes)}`, {
         record: recordOut(record, rules),
@@ -391,7 +395,7 @@ export const updateRecordTool = defineMcpTool({
   description: 'Change fields on a record. Only the fields you pass change. Returns each changed field\'s value before and after, so the change can be shown and undone. To close a record use records_close; to change consent use crm_set_consent.',
   appId: 'records',
   scope: 'records.write',
-  input: z.object({ org: orgInput, type: typeInput, id: idInput, fields: fieldsInput }).strict(),
+  input: z.object({ org: orgInput, type: typeInput, id: idInput, fields: fieldsInput, share: shareInput }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
       const { defs, rules } = await typeContext(tx, tenant, input.type)
@@ -399,7 +403,9 @@ export const updateRecordTool = defineMcpTool({
       await requireRecordUpdate(tx, tenant, input.type, input.id)
       await runRecordsPatchGuards(tx, { typeKey: input.type, recordId: input.id, fields: input.fields })
       const before = await getRecord(tx, tenant, input.type, input.id)
-      const record = await applyFieldPatch(tx, tenant, input.type, input.id, input.fields)
+      const record = await applyFieldPatch(tx, tenant, input.type, input.id, input.fields, {
+        sharing: input.share ? 'confirmed' : 'ask'
+      })
       const changes = diffFields(defs, before.fields, record.fields)
       return text(`Updated ${record.name}. ${changeSummary(changes)}`, {
         record: recordOut(record, rules),

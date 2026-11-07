@@ -7,9 +7,9 @@
 // kernel's — same tab, different callers, possibly different records.
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
-import { getRecordTypeFields } from '#records/server'
 import { requireTab, requireView, type ViewTabDefinition } from '../../../../utils/views'
 import { effectiveCardLayout, getViewRecords, requireRecordsReadScope } from '../../../../utils/view-records'
+import { viewFieldsWithType } from '../../../../utils/view-fields'
 
 const Query = z.object({
   tab: z.string().uuid().optional(),
@@ -35,10 +35,10 @@ export default defineEventHandler(async (event) => {
     const definition = tab.definition as ViewTabDefinition
     let groupFieldDef = null
     if (tab.layout !== 'table' && definition.groupField) {
-      const fields = await getRecordTypeFields(tx, view.record_type_key)
+      const fields = await viewFieldsWithType(tx, view)
       groupFieldDef = fields.find(f => f.key === definition.groupField && !f.orphan) ?? null
       if (!groupFieldDef) {
-        // The grouping field was deleted from the type: the client renders
+        // The grouping field was deleted (from the type or the view): the client renders
         // the explicit "grouping field missing" state off this marker.
         const card = await effectiveCardLayout(tx, view, tab)
         return { tabId: tab.id, items: [], total: 0, truncated: false, placements: [], card, groupFieldMissing: true }

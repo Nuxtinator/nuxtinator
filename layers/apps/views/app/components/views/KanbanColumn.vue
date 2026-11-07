@@ -25,6 +25,8 @@ const props = defineProps<{
   fields: RecordsFieldSetting[]
   cardFields: string[]
   cardConnections?: Record<string, ViewsConnectionDisplay>
+  /** An attachments field whose first image tops each card. */
+  coverKey?: string | null
   groupFieldKey: string | null
   /** Caller may create records of this type (server re-enforces). */
   canQuickAdd: boolean
@@ -342,6 +344,7 @@ const menuItems = computed(() => [[
               :fields="fields"
               :card-fields="cardFields"
               :card-connections="cardConnections"
+              :cover-key="coverKey"
               :group-field-key="groupFieldKey"
               @open="emit('open', $event)"
               @dragstart="onCardDragStart($event, card)"

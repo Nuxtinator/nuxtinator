@@ -173,16 +173,19 @@ export async function deleteFromS3(key: string, visibility: 'public' | 'private'
 /**
  * Generate a signed URL for accessing a file in private bucket.
  * `responseParams` (e.g. `response-content-disposition`) are signed into the
- * URL and override the headers S3 sends back for that request.
+ * URL and override the headers S3 sends back for that request. `requestDate`
+ * (default now) is when the signature starts; passing a rounded time keeps
+ * the URL identical across calls, so browsers can cache what it points at.
  */
 export async function generateSignedUrl(
   key: string,
   expiresIn: number = SIGNED_URL_EXPIRATION,
-  responseParams?: S3ResponseOverrideParams
+  responseParams?: S3ResponseOverrideParams,
+  requestDate?: Date
 ): Promise<string> {
   try {
     const client = getS3Client()
-    const url = await client.presignedGetObject(key, { expirySeconds: expiresIn, responseParams })
+    const url = await client.presignedGetObject(key, { expirySeconds: expiresIn, responseParams, requestDate })
     return url
   } catch (error: any) {
     console.error('S3 signed URL generation error:', error)

@@ -72,7 +72,7 @@ export const RECORDS_DEFAULT_PERMISSION_PREFIX = 'records.entries'
 const CONNECTION_DISPLAYS = new Set<RecordsCardConnectionDisplay>(['names', 'count', 'progress'])
 
 // config.card, shape-checked: a list of field keys plus optional per-field
-// connection displays. Anything else reads as "not set".
+// connection displays and a cover field. Anything else reads as "not set".
 function cardOf(config: Record<string, unknown> | undefined, fallback: RecordsCardLayout | undefined): RecordsCardLayout | null {
   const raw = config?.card
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
@@ -87,7 +87,10 @@ function cardOf(config: Record<string, unknown> | undefined, fallback: RecordsCa
           }
         }
       }
-      return { fields: fields as string[], connections }
+      const cover = (raw as { cover?: unknown }).cover
+      return typeof cover === 'string' && cover !== ''
+        ? { fields: fields as string[], connections, cover }
+        : { fields: fields as string[], connections }
     }
   }
   return fallback ?? null
@@ -197,6 +200,8 @@ export interface RecordsFieldSetting {
   /** Merged options: manifest options ⊳ config overrides + custom options. */
   options?: Record<string, RecordsFieldOption>
   multiple?: boolean
+  /** user_select: naming someone lets them see the record (code-declared only). */
+  grantsAccess?: boolean
   target?: string
   reverseKey?: string
   channelType?: string
@@ -263,6 +268,7 @@ function mergeManifestField(key: string, def: RecordsFieldDef, row: RecordFieldR
     default: statusDefaultOf(def, options),
     options,
     multiple: def.multiple,
+    grantsAccess: def.kind === 'user_select' && def.grantsAccess === true ? true : undefined,
     target: def.target,
     reverseKey: def.reverseKey,
     channelType: def.channelType,
@@ -278,12 +284,13 @@ function mergeOrphanField(row: RecordFieldRow): RecordsFieldSetting {
   // Custom fields never promote to record columns and can't join the
   // user_refs storage class (it carries code-owned semantics), so storage is
   // clamped to entries or jsonb — except connection, whose target type is
-  // kept in config and whose edges are forward-only, and
-  // communication_channel, whose one definition input (the channel type,
-  // kept in config by the schema builder) is admin-suppliable, so it routes
-  // to the channel storage driver like a manifest channel field.
+  // kept in config and whose edges are forward-only, attachments, whose files
+  // live in their own table, and communication_channel, whose one definition
+  // input (the channel type, kept in config by the schema builder) is
+  // admin-suppliable, so it routes to the channel storage driver like a
+  // manifest channel field.
   const natural = storageOf({ kind })
-  const storage = natural === 'channels' || natural === 'entries' || natural === 'connections' ? natural : 'jsonb'
+  const storage = natural === 'channels' || natural === 'entries' || natural === 'connections' || natural === 'attachments' ? natural : 'jsonb'
   return {
     key: row.field_key,
     kind,
@@ -365,6 +372,11 @@ export async function getRecordTypeFields(tx: DbClient, typeKey: string): Promis
   })
   const fields = await reader(tx)
   return fields.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
+}
+
+/** Keys of the type's people fields that let the people they name see the record. */
+export function recordsAccessGrantingKeys(defs: RecordsFieldSetting[]): string[] {
+  return defs.filter(d => d.grantsAccess && d.storage === 'user_refs' && !d.orphan).map(d => d.key)
 }
 
 /** The status an unset status column reads as: the status field's default. */

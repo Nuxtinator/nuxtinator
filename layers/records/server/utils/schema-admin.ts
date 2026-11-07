@@ -48,7 +48,8 @@ export const RECORDS_OPTION_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/
 // entries; connection, whose one definition input (the target type) is
 // admin-suppliable — admin connections are forward-only, since reverse keys
 // pair two code manifests; and communication_channel, whose channel type is
-// admin-suppliable and whose storage driver handles the rest. user_select
+// admin-suppliable and whose storage driver handles the rest; attachments,
+// whose files live in records_attachments. user_select
 // carries code-owned semantics (the assignment summary) and stays code-only.
 // Kinds whose storage has no registered driver are refused.
 export const RECORDS_ADMIN_FIELD_KINDS = [
@@ -62,6 +63,7 @@ export const RECORDS_ADMIN_FIELD_KINDS = [
   'multi_select',
   'tags',
   'link',
+  'attachments',
   'connection',
   'communication_channel'
 ] as const
@@ -168,7 +170,8 @@ export interface UpdateRecordTypePatch {
 const CARD_CONNECTION_DISPLAYS = new Set<RecordsCardConnectionDisplay>(['names', 'count', 'progress'])
 
 // The card layout's keys must name live fields of the type (or the record's
-// own timestamps), and connection displays only connection fields.
+// own timestamps), connection displays only connection fields, and the cover
+// an attachments field.
 async function validateCardLayout(tx: Tx, typeKey: string, card: RecordsCardLayout): Promise<RecordsCardLayout> {
   const fields = (await getRecordTypeFields(tx, typeKey)).filter(f => !f.orphan)
   const byKey = new Map(fields.map(f => [f.key, f]))
@@ -183,9 +186,14 @@ async function validateCardLayout(tx: Tx, typeKey: string, card: RecordsCardLayo
     if (!CARD_CONNECTION_DISPLAYS.has(display)) bad(`Unknown connection display: ${display}`)
     connections[key] = display
   }
-  return Object.keys(connections).length > 0
-    ? { fields: [...card.fields], connections }
-    : { fields: [...card.fields] }
+  if (card.cover !== undefined && byKey.get(card.cover)?.kind !== 'attachments') {
+    bad(`${card.cover} is not an attachments field`)
+  }
+  return {
+    fields: [...card.fields],
+    ...(Object.keys(connections).length > 0 ? { connections } : {}),
+    ...(card.cover ? { cover: card.cover } : {})
+  }
 }
 
 // The code-default section ordering a sectionOrder override is compared
@@ -548,6 +556,10 @@ export async function createField(
   // always resolves them), so a custom field can never claim those keys.
   if (input.fieldKey === 'name' || input.fieldKey === 'status') {
     bad(`'${input.fieldKey}' is a reserved field key`)
+  }
+  // Views key their own fields `vf_…` and address them alongside the type's.
+  if (input.fieldKey.startsWith('vf_')) {
+    bad('Field keys starting with vf_ are reserved')
   }
   if (!(RECORDS_ADMIN_FIELD_KINDS as readonly string[]).includes(input.kind)) {
     bad(`Unsupported field kind: ${input.kind}`)

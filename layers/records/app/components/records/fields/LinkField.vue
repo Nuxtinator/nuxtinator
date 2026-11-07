@@ -58,17 +58,17 @@ function remove(index: number) {
         @click="remove(i)"
       />
     </div>
-    <div class="flex gap-2">
+    <div class="flex flex-wrap gap-2">
       <UInput
         v-model="draftUrl"
         placeholder="example.com/page"
-        class="flex-1 sm:max-w-xs"
+        class="flex-1 min-w-40 sm:max-w-xs"
         @keydown.enter.prevent="add"
       />
       <UInput
         v-model="draftLabel"
         placeholder="Label (optional)"
-        class="w-36"
+        class="flex-1 min-w-28 max-w-36"
         @keydown.enter.prevent="add"
       />
       <UButton

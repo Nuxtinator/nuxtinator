@@ -11,7 +11,6 @@ import {
   listTabs,
   requireTab,
   sanitizeTabDefinition,
-  type ViewDefinition,
   type ViewRow,
   type ViewTabDefinition,
   type ViewTabRow
@@ -48,9 +47,7 @@ export async function updateTab(tx: Tx, view: ViewRow, tabId: string, patch: Vie
     const raw = patch.definition !== undefined
       ? patch.definition
       : adaptToLayout(tab.definition as ViewTabDefinition, layout)
-    const definition = await sanitizeTabDefinition(tx, view.record_type_key, layout, raw, {
-      picked: !!(view.definition as ViewDefinition).picked
-    })
+    const definition = await sanitizeTabDefinition(tx, view, layout, raw)
     set.layout = layout
     // jsonb params bind reliably only through the text cast.
     set.definition = sql`${JSON.stringify(definition)}::text::jsonb`

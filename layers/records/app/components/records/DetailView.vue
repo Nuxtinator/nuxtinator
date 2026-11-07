@@ -53,6 +53,7 @@ watch([typeKey, orgKey], async ([key, org]) => {
 }, { immediate: true })
 
 const { record, pending, error, refresh, patchFields } = useRecordsRecord(typeKey, recordId)
+const shareConfirm = useRecordsShareConfirm()
 
 // Server-evaluated capability flags for this record (see RecordCapabilities).
 const canEdit = computed(() => record.value?.capabilities.canEdit ?? false)
@@ -142,8 +143,8 @@ async function commitField(field: RecordsFieldSetting, value: unknown) {
     return
   }
   try {
-    await patchFields({ [field.key]: value })
-    refreshTimeline()
+    const saved = await shareConfirm(confirmShare => patchFields({ [field.key]: value }, { confirmShare }))
+    if (saved) refreshTimeline()
   } catch (err) {
     toast.add({
       title: 'Update failed',
@@ -278,7 +279,9 @@ async function removeRecord() {
             :field="field"
             :value="fieldValue(field)"
             :editable="canEdit"
+            :upload-url="field.kind === 'attachments' ? `/api/records/entries/${typeKey}/${recordId}/attachments?field=${field.key}` : undefined"
             @commit="commitField(field, $event)"
+            @uploaded="onWidgetChanged"
           />
         </template>
       </RecordsFieldSection>

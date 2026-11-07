@@ -1,7 +1,8 @@
 // The values a card or list row shows for its card fields, in the order the
 // tab chose. Values come from the record row (status, timestamps, jsonb
-// fields), from the grouping values, or from the side-table values the feed
-// attaches for the chosen keys — so any field of the type can be shown. User
+// fields), from the grouping values, from the side-table values the feed
+// attaches for the chosen keys, or from the view's own field values — so any
+// field of the type or the view can be shown. Files show as a count. User
 // fields carry ids to render as people; connection fields shown as a count
 // or progress carry the totals.
 import type { RecordsFieldSetting } from '#records/client'
@@ -15,6 +16,8 @@ export interface ViewsCardValueSource {
   cardConnections?: Record<string, ViewsConnectionDisplay>
   /** The tab's grouping field key, whose values ride on groupValues. */
   groupFieldKey: string | null
+  /** The card's cover field, shown as an image instead of a value. */
+  coverKey?: string | null
 }
 
 export interface ViewsCardValue {
@@ -42,11 +45,11 @@ export function useViewsCardValues(source: () => ViewsCardValueSource) {
   const userName = (id: string) => byId.value.get(id)?.name ?? null
 
   return computed<ViewsCardValue[]>(() => {
-    const { item, fields, cardFields, cardConnections, groupFieldKey } = source()
+    const { item, fields, cardFields, cardConnections, groupFieldKey, coverKey } = source()
     const fieldMap = new Map(fields.map(f => [f.key, f]))
     const out: ViewsCardValue[] = []
     for (const key of cardFields) {
-      if (key === 'name') continue
+      if (key === 'name' || key === coverKey) continue
       const intrinsic = INTRINSIC_DEFS[key]
       if (intrinsic) {
         const raw = key === 'created_at' ? item.createdAt : item.updatedAt
@@ -58,7 +61,8 @@ export function useViewsCardValues(source: () => ViewsCardValueSource) {
         ?? (key === 'status' ? fields.find(f => f.column === 'status') : undefined)
       if (!field) continue
       let raw: unknown = null
-      if (field.column === 'status' || key === 'status') raw = item.status
+      if (viewsIsViewField(field)) raw = item.viewValues?.[field.key] ?? null
+      else if (field.column === 'status' || key === 'status') raw = item.status
       else if (viewsFieldStorage(field) === 'jsonb') raw = item.data[field.key]
       else if (item.fields && field.key in item.fields) raw = item.fields[field.key]
       else if (field.key === groupFieldKey) raw = item.groupValues
@@ -69,6 +73,12 @@ export function useViewsCardValues(source: () => ViewsCardValueSource) {
         if (progress.total === 0) continue
         if (display === 'count') out.push({ key, label: field.label, text: String(progress.total) })
         else out.push({ key, label: field.label, text: `${progress.done}/${progress.total}`, progress })
+        continue
+      }
+
+      if (field.kind === 'attachments') {
+        const count = recordsAttachmentList(raw).length
+        if (count > 0) out.push({ key, label: field.label, text: String(count) })
         continue
       }
 

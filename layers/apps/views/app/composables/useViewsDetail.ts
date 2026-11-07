@@ -18,6 +18,8 @@ export interface ViewsMovePayload {
   fromColumn: string | null
   toColumn: string
   columnOrder: string[]
+  /** Resends a drag refused for handing the card to someone who can't see it yet. */
+  confirmShare?: boolean
 }
 
 export function useViewsDetail(viewId: MaybeRefOrGetter<string>, tabId: MaybeRefOrGetter<string | null>) {

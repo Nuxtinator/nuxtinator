@@ -42,7 +42,8 @@ export default defineEventHandler(async (event) => {
       const current = view.definition as ViewDefinition
       const definition = await sanitizeViewDefinition(tx, view.record_type_key, {
         ...body.definition,
-        ...(current.picked ? { picked: true } : {})
+        ...(current.picked ? { picked: true } : {}),
+        ...(current.fields ? { fields: current.fields } : {})
       })
       // jsonb params bind reliably only through the text cast.
       patch.definition = sql`${JSON.stringify(definition)}::text::jsonb`

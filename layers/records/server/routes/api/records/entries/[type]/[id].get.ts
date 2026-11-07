@@ -4,7 +4,7 @@
 // capability flags for this record — canEdit is the type update answer OR an
 // edit-level share on this record; canShare/canDelete are type-level.
 // Permission: the type evaluator's read answer plus the record-visibility
-// rule — view_all, shared, or referenced through a user field; invisible
+// rule — view_all, shared, or named in an access-granting people field; invisible
 // records 404 like missing ones.
 
 import { withOrgContext } from '#tenant/server'

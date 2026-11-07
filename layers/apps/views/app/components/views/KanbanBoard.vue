@@ -66,6 +66,7 @@ onMounted(() => {
 
 const cardFields = computed(() => props.records.card.fields)
 const cardConnections = computed(() => props.records.card.connections)
+const coverKey = computed(() => props.records.card.cover ?? null)
 
 // Tag columns added from the board this session; they become real columns
 // the moment a card carries the tag, and vanish on reload otherwise.
@@ -212,6 +213,7 @@ const columnModalOpen = computed({
       :fields="fields"
       :card-fields="cardFields"
       :card-connections="cardConnections"
+      :cover-key="coverKey"
       :group-field-key="groupField?.key ?? null"
       :can-quick-add="canCreate"
       :can-manage="isCustom && canEditDefinition && column.key !== VIEWS_NO_VALUE_COLUMN"

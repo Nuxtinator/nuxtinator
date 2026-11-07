@@ -36,6 +36,7 @@ export {
   getRecordTypes,
   getRecordType,
   getRecordTypeFields,
+  recordsAccessGrantingKeys,
   RECORDS_DEFAULT_PERMISSION_PREFIX
 } from '../utils/definition-settings'
 export type { RecordTypeSetting, RecordsFieldSetting } from '../utils/definition-settings'
@@ -43,8 +44,21 @@ export type { RecordTypeSetting, RecordsFieldSetting } from '../utils/definition
 export { normalizeChannelValue, channelFingerprint } from '../utils/normalize'
 export type { NormalizedChannelValue } from '../utils/normalize'
 
-export { hydrateRecords, getRecord, applyFieldPatch, deleteRecord } from '../utils/record-storage'
-export type { RecordRow, RecordsHydratedRecord } from '../utils/record-storage'
+export { hydrateRecords, getRecord, applyFieldPatch, deleteRecord, activityValue } from '../utils/record-storage'
+export type { RecordRow, RecordsHydratedRecord, ApplyFieldPatchOpts } from '../utils/record-storage'
+
+export {
+  addRecordAttachment,
+  applyAttachmentsPatch,
+  deleteRecordAttachments,
+  listRecordAttachments,
+  RECORDS_ATTACHMENT_MAX_MB,
+  RECORDS_ATTACHMENTS_PER_FIELD
+} from '../utils/attachments'
+export type { RecordsAttachmentFile } from '../utils/attachments'
+
+export { requireShareConfirmation, recordsUnsharedAssignees, RECORDS_SHARE_CONFIRMATION } from '../utils/share-confirmation'
+export type { RecordsSharingMode, RecordsShareConfirmationUser } from '../utils/share-confirmation'
 
 export { permFor, RECORD_ACTIONS } from '../utils/records-perms'
 export type { RecordAction, RecordsTypeRoleGrants, RecordsTypeTeamGrants } from '../utils/records-perms'
@@ -69,8 +83,8 @@ export type {
 export { requireGrantTarget, assertRecordsPermissionSlug, listRecordsUserGrants } from '../utils/user-grants'
 export type { RecordsUserGrantEntry } from '../utils/user-grants'
 
-export { listRecords, requireRecordType, requireAnyRecordTypeRead, assertRecordVisible, parseRecordsFilterGroup, visibleRecordIds } from '../utils/list-records'
-export type { RecordsListOpts, RecordListItem, RecordsListResult } from '../utils/list-records'
+export { listRecords, requireRecordType, requireAnyRecordTypeRead, assertRecordVisible, parseRecordsFilterGroup, visibleRecordIds, recordsVisibilityScope, RECORDS_VIRTUAL_SCALAR_KINDS } from '../utils/list-records'
+export type { RecordsListOpts, RecordListItem, RecordsListResult, RecordsVisibilityScope, RecordsVirtualField } from '../utils/list-records'
 export { RECORDS_FILTER_ME, recordsFilterRuleCount } from '../../client/filters'
 export type { RecordsFilterGroup, RecordsFilterNode, RecordsFilterRule, RecordsFilterOp } from '../../client/filters'
 

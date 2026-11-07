@@ -50,7 +50,7 @@ export const contactsManifest = defineRecordType({
         other: { label: 'Other' }
       }
     },
-    assigned_to: { kind: 'user_select', label: 'Assigned to', multiple: true, section: 'details', order: 4 },
+    assigned_to: { kind: 'user_select', label: 'Assigned to', multiple: true, grantsAccess: true, section: 'details', order: 4 },
     nickname: { kind: 'text', label: 'Nickname', section: 'details', order: 5 },
     contact_email: { kind: 'communication_channel', label: 'Email', channelType: 'email', section: 'channels', order: 1 },
     contact_phone: { kind: 'communication_channel', label: 'Phone', channelType: 'phone', section: 'channels', order: 2 },

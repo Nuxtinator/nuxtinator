@@ -21,10 +21,11 @@ afterEach(async () => { await cleanupRecordsTestData(sql) })
 
 type Opts = ReturnType<typeof withOrgHeader>
 
+// Confirmed: assigning someone who can't see the contact yet shares it.
 async function createContact(opts: Opts, fields: Record<string, unknown>): Promise<{ id: string }> {
   return await $fetch<{ id: string }>('/api/records/entries/contacts', {
     method: 'POST',
-    body: { fields },
+    body: { fields, confirmShare: true },
     ...opts
   })
 }

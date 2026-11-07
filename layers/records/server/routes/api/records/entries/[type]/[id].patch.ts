@@ -1,5 +1,5 @@
 // PATCH /api/records/entries/:type/:id
-// Body: { fields: { <fieldKey>: value } } — scalar fields take a value (null
+// Body: { fields: { <fieldKey>: value }, confirmShare? } — scalar fields take a value (null
 // clears), multi-value fields take an array (replace) or the D.T-style
 // { values: [{ value, delete? }], force_values? } list. Runs the kernel's
 // field-patch pipeline and returns the updated hydrated detail with the
@@ -19,7 +19,10 @@ import {
 } from '#records/server'
 
 const Body = z.object({
-  fields: z.record(z.string(), z.unknown())
+  fields: z.record(z.string(), z.unknown()),
+  // Resends a write refused because it would share the record with someone
+  // named in an access-granting people field (409 records.share_confirmation).
+  confirmShare: z.boolean().optional()
 })
 
 export default defineEventHandler(async (event) => {
@@ -36,7 +39,9 @@ export default defineEventHandler(async (event) => {
     }
 
     await runRecordsPatchGuards(tx, { typeKey, recordId: id, fields: parsed.data.fields })
-    const record = await applyFieldPatch(tx, ctx, typeKey, id, parsed.data.fields)
+    const record = await applyFieldPatch(tx, ctx, typeKey, id, parsed.data.fields, {
+      sharing: parsed.data.confirmShare ? 'confirmed' : 'ask'
+    })
     const caps = await resolveTypeCapabilities(tx, ctx, typeKey)
     return {
       id: record.id,

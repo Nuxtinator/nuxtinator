@@ -1,7 +1,7 @@
 // Record share service. records_shares grants a user visibility of one
 // record — the list engine's visibility rule (see list-records.ts) admits a
-// non-view_all caller to exactly the records shared with them or referencing
-// them through a user field. Rows are (record_id, user_id) with the grantor
+// non-view_all caller to exactly the records shared with them or naming
+// them in an access-granting people field. Rows are (record_id, user_id) with the grantor
 // stamped in granted_by and a level: 'view' grants visibility only, 'edit'
 // additionally grants record-scoped update capability (consumed by the
 // type-permission evaluator). Share and unshare both land on the record's

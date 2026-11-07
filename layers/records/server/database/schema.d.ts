@@ -116,8 +116,30 @@ export interface RecordFieldsTable {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
+// One uploaded file on one record's attachments field (see records_003).
+export interface RecordAttachmentsTable {
+  id: Generated<string>
+  record_id: string
+  field_key: string
+  storage_key: string
+  filename: string
+  mime: string
+  size_bytes: ColumnType<string, number | string, number | string>
+  sort_order: Generated<number>
+  created_by: string | null
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
+// Object-storage keys of deleted attachments, waiting for the sweep.
+export interface RecordAttachmentTrashTable {
+  storage_key: string
+  deleted_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
 declare global {
   interface NuxtinatorDatabaseTables {
+    records_attachments: RecordAttachmentsTable
+    records_attachment_trash: RecordAttachmentTrashTable
     records_entries: RecordsEntriesTable
     records_field_entries: RecordFieldEntriesTable
     records_user_refs: RecordUserRefsTable

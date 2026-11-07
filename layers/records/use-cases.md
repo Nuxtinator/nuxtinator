@@ -23,9 +23,21 @@ The goal in one line: **a dynamic PocketBase with views**. Records hold any shap
 
 A member creates a board such as "ways to bake a pizza" from generic `item` cards, or "person 1 todos" from `task` cards. Nobody else sees those cards until the member shares the view.
 
-- `item` (the freeform card) and `task` (assignee, due date, Open/Done) ship as built-in types that orgs can hide. A generic item covers most needs.
-- Members don't hold `view_all` on items or tasks, so they're personal by default. A member sees what they created, what was shared with them, what names them in a people field, and the cards on hand-picked views they can open.
+- `item` (the freeform card: notes, tags, link, date, people, priority, files with a cover image) and `task` (assignee, priority, start and due dates, tags, subtasks, files, To do / In progress / Done) ship as built-in types that orgs can hide, field by field or whole. A generic item covers most needs.
+- Members don't hold `view_all` on items or tasks, so they're personal by default. A member sees what they created, what was shared with them, the tasks assigned to them, and the cards on hand-picked views they can open.
+- Access only comes from sharing. Naming someone in a people field doesn't share a card with them; the exceptions are a task's assignee and a contact's Assigned to, which hand the record over. Assigning someone who can't see the record yet asks first, everywhere: the record page, a view, a board drag, a new card and MCP (which needs `share: true`).
 - Status: built.
+
+### 1a. Tracking anything, with fields of its own
+
+A member wants to track ways to bake a pizza: oven temperature, time, a rating, whether they've tried it. Nobody should need an admin to add those fields.
+
+- Creating a view starts with "What are you tracking?": To-dos (a task board by status), an ideas board (items in their own columns), a list of anything (items), or one of the org's record types the member can create. Everything else (record type, what the view holds, layout, grouping) waits under "More options".
+- Any view, hand-picked or "All ‹type›", can have **fields of its own**. The owner adds, renames and deletes them; anyone with Can edit fills them in; everyone who opens the view sees the same values. Kinds: text, long text, number, yes/no, date, dropdown, multi-select, tags, links, people and files.
+- View fields work like type fields on that view: card fields, table columns, filters, sorts, grouping (a drag between columns sets the value), and the values a new card's filters pin. In the slideover they sit in a section named after the view.
+- Values stay inside their view: the record page doesn't show them, and a person named in a view's people field gains no access. Taking a card off a hand-picked view drops its values there; deleting a field or the view drops them all.
+- "Copy view" makes a private copy of any view's structure (fields, tabs, columns, filters) with no cards, so a board someone likes becomes the template for the next one.
+- Status: built. Still to come: owners letting editors manage fields, showing a record's view values on its record page, and promoting a view field to a field of the type.
 
 ### 2. My tasks, several ways
 
@@ -93,6 +105,7 @@ A sales team shares a pipeline view of contacts.
 - Contacts opt out of board-granted visibility (`boardsGrantVisibility: false`). A shared contacts view shares the lens, not the contacts: each person sees the contacts their role already allows.
 - Linked records the caller can't open come back with no name, and card counts and progress leave them out.
 - Contacts' status is New / Active / Paused / Closed.
+- Assigned to is the one people field on contacts that shares a contact, after the same confirmation as a task's assignee.
 - Status: built.
 
 ### 9. Every record can be finished or archived
@@ -101,14 +114,16 @@ Nobody should have to build a "done" state for each new type.
 
 - Every type has a status field. Types that don't declare one get Open / Done, with Done closing the record. The field can't be hidden. Its options can be renamed, recolored, reordered, added and removed, but at least one open and one closed option must always remain.
 - A record with no stored status reads, filters, sorts and groups as the default. New boards start grouped by Status.
-- Status: built. Still open: whether lists and tables hide done records by default.
+- Tasks start with To do / In progress / Done, so a new task board has three columns.
+- Lists and tables show done records, for now.
+- Status: built.
 
 ### 10. An agent creates what's missing
 
 A user wants to start recording events, and there's no event type. The agent creates the `event` type with the fields worth tracking, creates a view for it, and the user starts adding data.
 
 - Records MCP has schema tools (`records_create_type`, `records_add_field`, `records_update_field`), gated by `records.schema.manage`. Their descriptions tell the agent to reuse or extend an existing type before creating one.
-- Views MCP creates views and tabs, sets filters, and adds and moves cards. OAuth clients need `records.read` to read a view's records and `records.write` to change them through a view.
+- Views MCP creates views and tabs, sets filters, adds, creates and moves cards, and manages and fills in a view's own fields (`views_add_field`, `views_set_values` and the rest). OAuth clients need `records.read` to read a view's records and `records.write` to change them, or their view values, through a view. A write that would assign someone who can't see the record needs `share: true`.
 - A type's default card layout means a view the agent creates looks right straight away.
 - Status: built.
 
@@ -125,6 +140,9 @@ The meetings layer creates todos for people. Those todos should be `task` record
 
 - **AI quick-add**, the way the capture app does it: typing "check the oil in 6 months" creates a task with a due date.
 - Selecting several cards and moving them at once.
+- Letting a view's editors (not just its owner) manage its fields.
+- Showing a record's view-field values outside the view, and promoting a view field to a type field.
+- Hiding done records in lists and tables by default (they show for now).
 - Automation rules (a reason "workflows" was dropped as a name: nothing automates yet).
 - Timeline, calendar and whiteboard layouts.
 - Realtime updates. Views poll.
