@@ -28,7 +28,7 @@ export interface InboxRecordChannel {
 }
 
 export function useInboxRecordConversations(recordId: MaybeRefOrGetter<string>) {
-  const orgKey = useCrmOrgKey()
+  const orgKey = useRecordsOrgKey()
   const items = ref<InboxRecordConversationRow[]>([])
   const channels = ref<InboxRecordChannel[]>([])
   // Total matching conversations — can exceed items.length (the list itself

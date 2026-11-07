@@ -25,7 +25,7 @@ import { createError } from 'h3'
 import { defineMcpTool, mcpError, type McpToolContext } from '#mcp-layer'
 import { withOrgPermission, type TenantContext } from '#tenant/server'
 import type { Database } from '#core/server/database/schema'
-import { resolveTypePermission } from '#crm/server'
+import { resolveTypePermission } from '#records/server'
 import {
   inboxGetConversation,
   inboxListConversations,
@@ -292,11 +292,11 @@ const readConversationTool = defineMcpTool({
         if (await resolveTypePermission(tx, tenant, 'contacts', 'read')) {
           const rows = await tx
             .selectFrom('crm_contact_channels')
-            .innerJoin('crm_records', 'crm_records.id', 'crm_contact_channels.record_id')
-            .select(['crm_records.id', 'crm_records.name'])
+            .innerJoin('records_entries', 'records_entries.id', 'crm_contact_channels.record_id')
+            .select(['records_entries.id', 'records_entries.name'])
             .where('crm_contact_channels.channel_id', '=', conversation.channel_id)
-            .where('crm_records.record_type', '=', 'contacts')
-            .groupBy(['crm_records.id', 'crm_records.name'])
+            .where('records_entries.record_type', '=', 'contacts')
+            .groupBy(['records_entries.id', 'records_entries.name'])
             .execute()
           contacts = rows.map(r => ({ id: r.id, name: u.wrap(r.name) }))
           if (rows.length) contactRecord = u.wrap(await formatInboxContactRecord(tx, tenant, conversation.channel_id))

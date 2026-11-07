@@ -11,7 +11,7 @@ export default defineEventHandler(async (event) => {
       .selectFrom('crm_channel_suppressions as s')
       .innerJoin('crm_channels as ch', 'ch.id', 's.channel_id')
       .leftJoin('crm_contact_channels as cc', 'cc.channel_id', 's.channel_id')
-      .leftJoin('crm_records as r', 'r.id', 'cc.record_id')
+      .leftJoin('records_entries as r', 'r.id', 'cc.record_id')
       .select([
         's.channel_id as channel_id',
         's.reason as reason',

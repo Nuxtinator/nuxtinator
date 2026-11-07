@@ -7,7 +7,7 @@ export interface InboxAiStatus {
 }
 
 export function useInboxAiStatus(feature = 'inbox.draft') {
-  const orgKey = useCrmOrgKey()
+  const orgKey = useRecordsOrgKey()
   const status = ref<InboxAiStatus>({ configured: false, hasEnabledModel: false, featureAvailable: false })
 
   async function refresh() {

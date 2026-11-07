@@ -4,6 +4,11 @@
 // the app's `all_teams` permission). Teams already on the container stay
 // listed even when the caller can't pick them. Renders nothing unless the
 // container is limited or the org runs teams and the caller has one to pick.
+// With `noneValue`, ticking nothing is allowed and saves that visibility (the
+// container is then open only to its owner and the people it is shared with);
+// the field then always shows, as just Everyone when there are no teams.
+// With `levels`, Everyone and each ticked team also pick Can view / Can edit
+// (`orgLevel`, `teamLevels`; an absent team level means 'view').
 // A new container binds `fresh` (true when its form opens): the first time the
 // field shows, it starts with nothing ticked so the creator chooses, then
 // clears `fresh` so going back to the form keeps that choice.
@@ -12,15 +17,28 @@ const props = defineProps<{
   // Teams the container is limited to now, for display.
   currentTeams?: { id: string, name: string, icon?: string | null, image?: string | null, archived?: boolean }[]
   disabled?: boolean
+  noneValue?: string
+  levels?: boolean
 }>()
 
 const visibility = defineModel<string>('visibility', { required: true })
 const teamIds = defineModel<string[]>('teamIds', { required: true })
 const fresh = defineModel<boolean>('fresh', { default: false })
+const orgLevel = defineModel<'view' | 'edit'>('orgLevel', { default: 'view' })
+const teamLevels = defineModel<Record<string, 'view' | 'edit'>>('teamLevels', { default: () => ({}) })
+
+const LEVEL_ITEMS = [
+  { label: 'Can view', value: 'view' },
+  { label: 'Can edit', value: 'edit' }
+]
+
+const setTeamLevel = (id: string, level: 'view' | 'edit') => {
+  teamLevels.value = { ...teamLevels.value, [id]: level }
+}
 
 const { mode, teams } = useTeams(props.appId)
 
-const shown = computed(() => (mode.value === 'teams' && teams.value.length > 0) || visibility.value === 'teams')
+const shown = computed(() => !!props.noneValue || (mode.value === 'teams' && teams.value.length > 0) || visibility.value === 'teams')
 
 watch(shown, (on) => {
   if (!on || !fresh.value) return
@@ -40,36 +58,45 @@ const teamItems = computed(() => {
 
 // "Everyone" checks every team too. Unticking a team from there limits the
 // container to the rest; unticking Everyone starts from no teams.
-const everyone = computed(() => visibility.value !== 'teams')
+const isNone = computed(() => !!props.noneValue && visibility.value === props.noneValue)
+const everyone = computed(() => visibility.value !== 'teams' && !isNone.value)
 const isChecked = (id: string) => everyone.value || teamIds.value.includes(id)
+
+const setTeams = (ids: string[]) => {
+  teamIds.value = ids
+  visibility.value = ids.length === 0 && props.noneValue ? props.noneValue : 'teams'
+}
 
 const onEveryone = (on: boolean) => {
   if (on) {
     visibility.value = 'org'
+    if (props.noneValue) teamIds.value = []
   } else {
-    visibility.value = 'teams'
-    teamIds.value = []
+    setTeams([])
   }
 }
 
 const onTeam = (id: string, on: boolean) => {
   if (everyone.value) {
-    visibility.value = 'teams'
-    teamIds.value = teamItems.value.map(t => t.id).filter(t => t !== id)
+    setTeams(teamItems.value.map(t => t.id).filter(t => t !== id))
   } else {
-    teamIds.value = on ? [...teamIds.value.filter(t => t !== id), id] : teamIds.value.filter(t => t !== id)
+    setTeams(on ? [...teamIds.value.filter(t => t !== id), id] : teamIds.value.filter(t => t !== id))
   }
 }
+
+const tip = computed(() => props.noneValue
+  ? 'Untick Everyone to limit it to teams, or untick everything to keep it to you and the people it is shared with.'
+  : 'Untick Everyone to limit it to teams and hide it from everyone else in the org. Admins can still show all teams.')
 </script>
 
 <template>
   <UFormField
     v-if="shown"
-    :help="!everyone && teamIds.length === 0 ? 'Pick Everyone or at least one team.' : undefined"
+    :help="!noneValue && !everyone && teamIds.length === 0 ? 'Pick Everyone or at least one team.' : undefined"
   >
     <template #label>
       Who can see it
-      <InfoTip text="Untick Everyone to limit it to teams and hide it from everyone else in the org. Admins can still show all teams." />
+      <InfoTip :text="tip" />
     </template>
     <ul class="max-h-72 overflow-y-auto divide-y divide-(--ui-border) border border-(--ui-border) rounded-md">
       <CheckboxRow
@@ -82,7 +109,18 @@ const onTeam = (id: string, on: boolean) => {
           icon="i-lucide-users"
           size="2xs"
         />
-        <span class="text-sm font-medium">Everyone</span>
+        <span class="text-sm font-medium flex-1">Everyone</span>
+        <USelect
+          v-if="levels && everyone"
+          :model-value="orgLevel"
+          :items="LEVEL_ITEMS"
+          size="xs"
+          class="w-26 pointer-events-auto"
+          :disabled="disabled"
+          aria-label="Everyone's access"
+          @click.stop
+          @update:model-value="orgLevel = $event as 'view' | 'edit'"
+        />
       </CheckboxRow>
       <CheckboxRow
         v-for="t in teamItems"
@@ -98,7 +136,18 @@ const onTeam = (id: string, on: boolean) => {
           :image="t.image"
           size="2xs"
         />
-        <span class="text-sm">{{ t.name }}</span>
+        <span class="text-sm flex-1">{{ t.name }}</span>
+        <USelect
+          v-if="levels && !everyone && teamIds.includes(t.id)"
+          :model-value="teamLevels[t.id] ?? 'view'"
+          :items="LEVEL_ITEMS"
+          size="xs"
+          class="w-26 pointer-events-auto"
+          :disabled="disabled"
+          :aria-label="`${t.name}'s access`"
+          @click.stop
+          @update:model-value="setTeamLevel(t.id, $event as 'view' | 'edit')"
+        />
       </CheckboxRow>
     </ul>
   </UFormField>

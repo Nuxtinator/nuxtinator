@@ -16,7 +16,7 @@ export default defineEventHandler(async (event) => {
   return await withOrgContext(event, async (tx, ctx) => {
     const closed = await appsClosedToUser(tx, null, ctx.userId)
     const apps = (await getApps(tx))
-      .filter(a => a.installed && a.scope !== 'user' && a.status !== 'disabled' && a.status !== 'host_controlled' && a.status !== 'admins')
+      .filter(a => a.installed && a.launcher && a.scope !== 'user' && a.status !== 'disabled' && a.status !== 'host_controlled' && a.status !== 'admins')
       .filter(a => !a.requiredPermission || ctx.perms.has(a.requiredPermission as never))
       .filter(a => !closed.has(a.id))
       .map(a => ({

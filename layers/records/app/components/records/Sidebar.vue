@@ -1,0 +1,88 @@
+<script setup lang="ts">
+// Records sidebar — record-type switcher. Docked panel on desktop, slideover
+// drawer on mobile (same split as the messages sidebar). Renders nothing
+// when useRecordsSidebar finds nothing to switch between.
+import type { SidebarNavItem } from '#core/app/utils/sidebar-nav'
+
+const open = defineModel<boolean>('open', { default: false })
+
+const route = useRoute()
+watch(() => route.path, () => {
+  open.value = false
+})
+
+const { visibleTypes, ensureTypes } = useRecordsTypes()
+const { shown } = useRecordsSidebar()
+const typePath = useRecordsTypePath()
+
+onMounted(() => {
+  ensureTypes().catch(() => {
+    // The list page surfaces load errors; the sidebar just stays empty.
+  })
+})
+
+const items = computed<SidebarNavItem[]>(() =>
+  visibleTypes.value.map(t => ({
+    to: typePath(t.key),
+    label: t.label,
+    icon: t.icon ?? 'i-lucide-folder'
+  }))
+)
+</script>
+
+<template>
+  <!-- Desktop docked panel -->
+  <SidebarPanel
+    v-if="shown"
+    class="hidden lg:flex w-64 shrink-0"
+    title="Records"
+  >
+    <SidebarNav
+      v-if="items.length > 0"
+      :items="items"
+    />
+    <p
+      v-else
+      class="text-xs text-(--ui-text-muted) px-2 py-1"
+    >
+      No record types yet.
+    </p>
+  </SidebarPanel>
+
+  <!-- Mobile drawer -->
+  <USlideover
+    v-if="shown"
+    v-model:open="open"
+    side="left"
+    :ui="{ content: 'max-w-xs' }"
+  >
+    <template #content>
+      <SidebarPanel class="border-r-0">
+        <template #header>
+          <div class="flex items-center justify-between">
+            <h1 class="text-xl font-semibold">
+              Records
+            </h1>
+            <UButton
+              icon="i-lucide-x"
+              variant="ghost"
+              color="neutral"
+              aria-label="Close menu"
+              @click="open = false"
+            />
+          </div>
+        </template>
+        <SidebarNav
+          v-if="items.length > 0"
+          :items="items"
+        />
+        <p
+          v-else
+          class="text-xs text-(--ui-text-muted) px-2 py-1"
+        >
+          No record types yet.
+        </p>
+      </SidebarPanel>
+    </template>
+  </USlideover>
+</template>

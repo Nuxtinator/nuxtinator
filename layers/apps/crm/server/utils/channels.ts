@@ -9,9 +9,8 @@ import { createHash, randomBytes } from 'node:crypto'
 import type { Selectable, Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
-import { getChannelType } from './definition-settings'
-import { normalizeChannelValue } from './normalize'
-import { recordCrmActivity } from './crm-activity'
+import { normalizeChannelValue, recordRecordsActivity } from '#records/server'
+import { getChannelType } from './channel-settings'
 
 type Tx = Transaction<Database>
 
@@ -182,7 +181,7 @@ export async function linkChannel(
     .executeTakeFirst()
 
   if (inserted) {
-    await recordCrmActivity(tx, ctx, recordId, 'channel_linked', {
+    await recordRecordsActivity(tx, ctx, recordId, 'channel_linked', {
       fieldKey,
       new: { channel_id: channelId, channel_type: channel.channel_type, value: channel.value }
     })
@@ -227,7 +226,7 @@ export async function unlinkChannel(
     throw createError({ statusCode: 404, statusMessage: 'Channel link not found.' })
   }
   await tx.deleteFrom('crm_contact_channels').where('id', '=', linkId).execute()
-  await recordCrmActivity(tx, ctx, recordId, 'channel_unlinked', {
+  await recordRecordsActivity(tx, ctx, recordId, 'channel_unlinked', {
     fieldKey: link.field_key,
     old: { channel_id: link.channel_id, channel_type: link.channel_type, value: link.value }
   })

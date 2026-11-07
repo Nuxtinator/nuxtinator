@@ -9,13 +9,13 @@
 // page refetches the record; the consent overview is fetched here once and
 // reloaded after changes.
 import type { CrmChannelEntry } from '#crm'
-import type { CrmFieldSetting } from '../../utils/field-kinds'
+import type { RecordsFieldSetting } from '#records/client'
 import type { CrmChannelConsentInfo } from '../../composables/useCrmChannels'
 
 const props = defineProps<{
   recordId: string
   typeKey: string
-  field: CrmFieldSetting
+  field: RecordsFieldSetting
   entries: CrmChannelEntry[]
   /** The record detail's canEdit capability — false renders read-only. */
   editable: boolean
@@ -79,7 +79,7 @@ async function run(action: () => Promise<unknown>, failTitle: string) {
   } catch (err) {
     toast.add({
       title: failTitle,
-      description: crmErrorMessage(err, failTitle),
+      description: recordsErrorMessage(err, failTitle),
       color: 'error'
     })
     return false

@@ -11,7 +11,7 @@ import type { Selectable, Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { ConsentEvent, ConsentStatus } from '../database/schema.d'
 import { getRegisteredConsentPurposes } from './crm-registry'
-import { channelFingerprint } from './normalize'
+import { channelFingerprint } from '@nuxtinator/records/normalize'
 import { isSuppressed } from './suppression'
 
 type Tx = Transaction<Database>

@@ -10,6 +10,20 @@ import { type Kysely, sql } from 'kysely'
 // consent state and events, suppressions, activity, comments, and the
 // schema-builder definition tables.
 
+// The record kernel's tables (crm_records, crm_record_*) carry records_*
+// names once the records layer's records_001 has renamed them, which on a
+// fresh install happens before this runs. Maps a kernel table or index name
+// to the one in place.
+async function kernelNames(db: Kysely<unknown>): Promise<(name: string) => string> {
+  const res = await sql<{ renamed: boolean }>`select to_regclass('records_entries') is not null as renamed`.execute(db)
+  if (!res.rows[0]?.renamed) return name => name
+  return (name) => {
+    if (name.startsWith('crm_records')) return `records_entries${name.slice('crm_records'.length)}`
+    if (name.startsWith('crm_record_')) return `records_${name.slice('crm_record_'.length)}`
+    return name
+  }
+}
+
 async function enableTenantScoping(db: Kysely<unknown>, table: string): Promise<void> {
   await sql`
     ALTER TABLE ${sql.ref(table)}
@@ -51,13 +65,15 @@ const TABLES = [
 ] as const
 
 export async function up(db: Kysely<unknown>): Promise<void> {
+  const name = await kernelNames(db)
   for (const t of TABLES) {
-    await enableTenantScoping(db, t)
+    await enableTenantScoping(db, name(t))
   }
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
+  const name = await kernelNames(db)
   for (const t of [...TABLES].reverse()) {
-    await disableTenantScoping(db, t)
+    await disableTenantScoping(db, name(t))
   }
 }

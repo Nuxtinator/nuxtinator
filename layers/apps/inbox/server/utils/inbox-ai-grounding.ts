@@ -8,7 +8,7 @@
 //     (data minimization: the envelope already carries it).
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
-import { resolveTypePermission, getRecord, getRecordTypeFields } from '#crm/server'
+import { resolveTypePermission, getRecord, getRecordTypeFields } from '#records/server'
 import {
   inboxListGroundingDocuments,
   inboxLatestGroundingFetchedAt
@@ -20,7 +20,7 @@ type Tx = Transaction<Database>
 
 // Borrow the exact tenant-context type the CRM kernel expects so the contact
 // formatter passes the caller's ctx straight through.
-type CrmCtx = Parameters<typeof resolveTypePermission>[1]
+type RecordsCtx = Parameters<typeof resolveTypePermission>[1]
 
 const STATIC_PACK_TTL_MS = 10 * 60 * 1000
 
@@ -96,17 +96,17 @@ function formatFieldValue(value: unknown): string {
 // record's non-channel field values. Gated on CRM `contacts.read` (never leak a
 // contact past CRM permissions). Deliberately EXCLUDES channel-storage fields
 // (email, phone) — data minimization; the model has no use for the address.
-export async function formatInboxContactRecord(tx: Tx, ctx: CrmCtx, channelId: string): Promise<string> {
+export async function formatInboxContactRecord(tx: Tx, ctx: RecordsCtx, channelId: string): Promise<string> {
   try {
     const canRead = await resolveTypePermission(tx, ctx, 'contacts', 'read')
     if (!canRead) return 'No linked contact record (contact access is not permitted for this reviewer).'
 
     const link = await tx
       .selectFrom('crm_contact_channels')
-      .innerJoin('crm_records', 'crm_records.id', 'crm_contact_channels.record_id')
-      .select('crm_records.id as record_id')
+      .innerJoin('records_entries', 'records_entries.id', 'crm_contact_channels.record_id')
+      .select('records_entries.id as record_id')
       .where('crm_contact_channels.channel_id', '=', channelId)
-      .where('crm_records.record_type', '=', 'contacts')
+      .where('records_entries.record_type', '=', 'contacts')
       .limit(1)
       .executeTakeFirst()
     if (!link) return 'No linked contact record (the sender is not a known contact).'

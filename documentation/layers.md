@@ -58,6 +58,8 @@ export default defineNitroPlugin(() => {
 
 `configureApp` applies wherever the app appears (rail, launcher, `/admin/apps`, MCP), whichever plugin runs first. It also takes `defaultStatus`, which replaces the layer's registry default (a host admin's choice on `/admin/apps` still wins), so a host decides in code which installed apps are on by default.
 
+An app registered with `launcher: false` stays installed and on (its routes, API and page guard work as usual) but gets no launcher tile or rail entry; other apps or settings pages link to its pages. The records kernel uses it: members see records through Views, and admins manage record types from org settings.
+
 The rail shows icons only, with a toggle at the bottom that shows names next to them. Each browser remembers its choice; the mobile drawer always shows names. A host sets the rest in its `app.config.ts`:
 
 ```ts
@@ -74,7 +76,7 @@ export default defineAppConfig({
 
 The host itself ships **no** permissions or roles — operator-admin is the `users.is_admin` boolean (no slug), checked via `requireOperatorAdmin(event)` from [tenant-kernel/server.ts](../layers/core/tenant-kernel/server.ts).
 
-The `admin` role gets every registered permission. A host keeps a layer's permission from admins with `withholdFromAdmin` from a Nitro plugin, e.g. `withholdFromAdmin(['crm.schema.manage'])` to keep the CRM's schema builder from org admins; users then hold it only through another role or a per-user grant.
+The `admin` role gets every registered permission. A host keeps a layer's permission from admins with `withholdFromAdmin` from a Nitro plugin, e.g. `withholdFromAdmin(['records.schema.manage'])` to keep the records schema builder from org admins; users then hold it only through another role or a per-user grant.
 
 ### A host's own account page
 
@@ -594,6 +596,10 @@ export async function down(db: Kysely<unknown>): Promise<void> {
 `enableTenantScoping` adds `org_id uuid NOT NULL DEFAULT current_org_id() REFERENCES orgs(id) ON DELETE CASCADE`, enables RLS, and adds the missing-safe `tenant_isolation` policy. The `current_org_id()` Postgres function reads `app.current_org` (set inside `defineTenantHandler`'s transaction), so INSERTs that don't specify `org_id` get the right value. Outside a transaction the column is `NULL` and the `NOT NULL` constraint blocks the insert — fail-loud, never wrong-org.
 
 The tenancy layer's [tenant-migrations module](../layers/tenancy/modules/tenant-migrations.ts) discovers `*_T<NNN>_*.ts` files across layers and feeds them to the migrator only when the tenancy layer is loaded. In single mode they exist on disk but never run.
+
+#### Ordering across layers
+
+Migrations run in two phases: every layer's regular migrations (`<app>_NNN_`), then, with tenancy loaded, every tenancy retrofit (`<app>_T<NNN>_`, keyed `zzz_`). Each phase is one pass sorted by name across all layers, so a migration that uses another layer's table must sort after the one that creates or renames it. The record kernel's tables are renamed from `crm_*` to `records_*` by `records_001`; a regular migration touching them must sort after it (a `crm_NNN` migration sorts before it, so such a change belongs in the records layer). Tenancy retrofits run after every rename, so `crm_T001`–`T003`, written against the old names, look up whichever name is in place.
 
 Tables that should *not* be org-scoped (e.g. global lookup tables) — just don't list them in your tenancy migration.
 

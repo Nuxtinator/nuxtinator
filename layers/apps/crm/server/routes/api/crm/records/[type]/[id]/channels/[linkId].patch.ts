@@ -10,11 +10,9 @@
 
 import { z } from 'zod'
 import { withOrgContext } from '#tenant/server'
+import { assertRecordVisible, getRecord, requireRecordType, requireRecordUpdate } from '#records/server'
 import type { CrmChannelEntry } from '#crm'
-import { requireRecordUpdate } from '../../../../../../../utils/type-permissions'
-import { assertRecordVisible, requireRecordType } from '../../../../../../../utils/list-records'
 import { claimChannel, linkChannel, setPrimary, unlinkChannel } from '../../../../../../../utils/channels'
-import { getRecord } from '../../../../../../../utils/record-storage'
 import { assertNotAccountOwned } from '../../../../../../../utils/account-link'
 
 const Body = z.object({
@@ -33,7 +31,7 @@ export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')!
   const linkId = getRouterParam(event, 'linkId')!
   return await withOrgContext(event, { appId: 'crm' }, async (tx, ctx) => {
-    await requireRecordType(tx, typeKey)
+    await requireRecordType(tx, typeKey, ctx)
     await assertRecordVisible(tx, ctx, typeKey, id)
     await requireRecordUpdate(tx, ctx, typeKey, id)
 

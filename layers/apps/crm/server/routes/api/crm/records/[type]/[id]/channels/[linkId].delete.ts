@@ -6,8 +6,7 @@
 
 import { z } from 'zod'
 import { withOrgContext } from '#tenant/server'
-import { requireRecordUpdate } from '../../../../../../../utils/type-permissions'
-import { assertRecordVisible, requireRecordType } from '../../../../../../../utils/list-records'
+import { assertRecordVisible, requireRecordType, requireRecordUpdate } from '#records/server'
 import { unlinkChannel } from '../../../../../../../utils/channels'
 import { assertNotAccountOwned } from '../../../../../../../utils/account-link'
 
@@ -18,7 +17,7 @@ export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')!
   const linkId = getRouterParam(event, 'linkId')!
   return await withOrgContext(event, { appId: 'crm' }, async (tx, ctx) => {
-    await requireRecordType(tx, typeKey)
+    await requireRecordType(tx, typeKey, ctx)
     await assertRecordVisible(tx, ctx, typeKey, id)
     await requireRecordUpdate(tx, ctx, typeKey, id)
 

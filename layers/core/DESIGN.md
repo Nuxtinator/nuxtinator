@@ -17,7 +17,7 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 | Confirm before a destructive action | `if (!await confirmAction({ title, confirmLabel })) return` with `const confirmAction = useConfirm()`; or `<ConfirmModal v-model:open @confirm :loading>` when the modal should stay open while the work runs |
 | Labelled divider | `<USeparator label="…">` |
 | Theme or language picker | `<ThemeToggle>`, `<LocaleSwitcher>` |
-| Who can see a project, portfolio or other container | `<TeamAccessField app-id v-model:visibility v-model:team-ids>` in its create and settings forms |
+| Who can see a project, portfolio or other container | `<TeamAccessField app-id v-model:visibility v-model:team-ids>` in its create and settings forms; add `levels` with `v-model:org-level` / `v-model:team-levels` when Everyone and teams also get Can view / Can edit |
 | Admin "show all teams" switch | `<ShowAllTeamsToggle app-id>` in the app's sidebar or toolbar, behind `<app>.all_teams` |
 | Manage one scope's groups / limit an app to groups | `<GroupsManager>` / `<AppGroupsModal>` |
 | Show a group in a list or picker | `<GroupAvatar :name :icon :image>` beside its name; in a menu or select item, `avatar: groupAvatarProps(group)` |
@@ -50,6 +50,9 @@ Either way, destructive actions open behind an outlined error button and confirm
 ## Dialogs and feedback
 
 - Creating something starts from an "Add …" button that opens a modal with its fields. No input field sitting next to the create button on the page.
+- A list page split into columns by who an item is for (Teams / Mine) puts a ghost "+" in each column's header instead of one page-level button; it opens the create modal already set to that column's audience.
+- A modal with a form uses `UModal`'s `title`, `#body` and `#footer`: the title in the header, fields in the body with `space-y-5`, Cancel and the main action at the end of the footer (the submit button points at the form with `form="<id>"`).
+- A choice among two or three kinds (a layout, how a board gets its columns) is a row of cards, each with an icon and a name: `URadioGroup` with `variant="card"` and `indicator="hidden"`. Plain radio buttons are for choices that need no picture.
 - Never use `alert()`, `confirm()` or `prompt()`. Confirm with `useConfirm()` / `ConfirmModal`; report success and errors with `useToast()`.
 
 ## Colors and surfaces

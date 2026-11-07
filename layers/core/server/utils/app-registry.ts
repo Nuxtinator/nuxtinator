@@ -49,6 +49,10 @@ export interface AppEntry {
   // Personal apps only: the permissions a user holds while the app is on for
   // them. Personal apps take no permissions from roles.
   permissions?: string[]
+  // false: the app stays installed and turned on (its routes and API work)
+  // but has no launcher tile or rail entry; its pages are reached by links
+  // from other apps or from settings.
+  launcher?: boolean
 }
 
 // How a host presents an installed app, set with `configureApp` from a host

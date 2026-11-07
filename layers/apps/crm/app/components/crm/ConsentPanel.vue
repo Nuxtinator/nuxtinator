@@ -52,7 +52,7 @@ async function load() {
   } catch (err) {
     toast.add({
       title: 'Failed to load consent',
-      description: crmErrorMessage(err, 'Failed to load consent'),
+      description: recordsErrorMessage(err, 'Failed to load consent'),
       color: 'error'
     })
   } finally {
@@ -95,7 +95,7 @@ async function apply(purposeKey: string, status: CrmConsentStatus) {
   } catch (err) {
     toast.add({
       title: 'Consent update failed',
-      description: crmErrorMessage(err, 'Failed to update consent'),
+      description: recordsErrorMessage(err, 'Failed to update consent'),
       color: 'error'
     })
   } finally {

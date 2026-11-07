@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The middle pane: search, status strip, conversation rows. Selection is
 // route-driven — clicking a row navigates to /inbox/:id (org prefix
-// preserved by the router guard via useCrmPath).
+// preserved by the router guard via useRecordsPath).
 import type { InboxConversationListRow, InboxCounts, InboxScope } from '../../composables/useInboxConversations'
 import type { InboxTag } from '../../composables/useInboxTags'
 

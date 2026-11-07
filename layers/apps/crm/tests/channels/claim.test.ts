@@ -29,7 +29,7 @@ afterEach(async () => { await cleanupCrmTestData(sql) })
 type Opts = ReturnType<typeof withOrgHeader>
 
 async function createContact(opts: Opts, name: string): Promise<{ id: string }> {
-  return await $fetch<{ id: string }>('/api/crm/records/contacts', {
+  return await $fetch<{ id: string }>('/api/records/entries/contacts', {
     method: 'POST',
     body: { fields: { name } },
     ...opts

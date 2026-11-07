@@ -12,7 +12,7 @@ export type InboxTagColor = typeof INBOX_TAG_COLORS[number]
 export interface InboxTag { slug: string, name: string, color: InboxTagColor }
 
 export function useInboxTags() {
-  const orgKey = useCrmOrgKey()
+  const orgKey = useRecordsOrgKey()
   const palette = ref<InboxTag[]>([])
   const pending = ref(false)
 

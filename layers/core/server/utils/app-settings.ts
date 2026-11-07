@@ -36,6 +36,8 @@ export interface AppCatalogEntry {
   // True when a registered layer claims this app. False = orphan DB row
   // (layer uninstalled but catalog row remains).
   installed: boolean
+  // False for apps registered with `launcher: false` (no launcher tile or rail entry).
+  launcher: boolean
   created_at: Date | string | null
   updated_at: Date | string | null
 }
@@ -71,6 +73,7 @@ export const getApps = defineSettings<AppEntry, AppRow, AppCatalogEntry>({
         scope: app.scope ?? 'org',
         permissions: app.permissions ?? [],
         installed: true,
+        launcher: app.launcher !== false,
         created_at: row?.created_at ?? null,
         updated_at: row?.updated_at ?? null
       }
@@ -89,6 +92,7 @@ export const getApps = defineSettings<AppEntry, AppRow, AppCatalogEntry>({
       scope: 'org',
       permissions: [],
       installed: false,
+      launcher: false,
       created_at: row!.created_at,
       updated_at: row!.updated_at
     }

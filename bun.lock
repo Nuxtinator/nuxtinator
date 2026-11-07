@@ -25,9 +25,11 @@
         "@nuxtinator/mcp": "workspace:*",
         "@nuxtinator/messages": "workspace:*",
         "@nuxtinator/oauth": "workspace:*",
+        "@nuxtinator/records": "workspace:*",
         "@nuxtinator/social-auth": "workspace:*",
         "@nuxtinator/tenancy": "workspace:*",
         "@nuxtinator/videos": "workspace:*",
+        "@nuxtinator/views": "workspace:*",
         "kysely": "^0.28.17",
         "kysely-postgres-js": "^2.0.0",
         "nuxt": "^4.6.1",
@@ -50,7 +52,7 @@
     },
     "layers/ai": {
       "name": "@nuxtinator/ai",
-      "version": "0.8.0",
+      "version": "0.10.1",
       "dependencies": {
         "tinfoil": "^1.2.1",
       },
@@ -68,7 +70,7 @@
     },
     "layers/apps/context": {
       "name": "@nuxtinator/context",
-      "version": "1.12.2",
+      "version": "1.13.0",
       "dependencies": {
         "archiver": "^7.0.1",
         "diff": "^9.0.0",
@@ -97,9 +99,10 @@
     },
     "layers/apps/crm": {
       "name": "@nuxtinator/crm",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "optionalDependencies": {
         "@nuxtinator/core": "*",
+        "@nuxtinator/records": "*",
       },
       "peerDependencies": {
         "@nuxt/kit": "^4.0.0",
@@ -112,7 +115,7 @@
     },
     "layers/apps/feedback": {
       "name": "@nuxtinator/feedback",
-      "version": "1.10.0",
+      "version": "1.10.1",
       "dependencies": {
         "zod": "^4.1.8",
       },
@@ -128,7 +131,7 @@
     },
     "layers/apps/files": {
       "name": "@nuxtinator/files",
-      "version": "1.6.3",
+      "version": "1.6.4",
       "dependencies": {
         "dompurify": "^3.4.13",
         "marked": "^18.1.1",
@@ -146,7 +149,7 @@
     },
     "layers/apps/helpinator": {
       "name": "@nuxtinator/helpinator",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "dependencies": {
         "@mozilla/readability": "^0.6.0",
         "croner": "^10.0.1",
@@ -177,7 +180,7 @@
     },
     "layers/apps/inbox": {
       "name": "@nuxtinator/inbox",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "dependencies": {
         "croner": "^10.0.1",
         "dompurify": "^3.4.13",
@@ -191,6 +194,7 @@
         "@nuxtinator/ai": "*",
         "@nuxtinator/core": "*",
         "@nuxtinator/crm": "*",
+        "@nuxtinator/records": "*",
       },
       "peerDependencies": {
         "@nuxt/kit": "^4.0.0",
@@ -203,7 +207,7 @@
     },
     "layers/apps/list-of-100": {
       "name": "@nuxtinator/list-of-100",
-      "version": "1.1.1",
+      "version": "1.1.2",
       "dependencies": {
         "apexcharts": "^8.2.0",
         "vue3-apexcharts": "^1.11.0",
@@ -221,7 +225,7 @@
     },
     "layers/apps/messages": {
       "name": "@nuxtinator/messages",
-      "version": "1.2.4",
+      "version": "1.2.5",
       "dependencies": {
         "@emoji-mart/data": "^1.2.1",
         "croner": "^10.0.1",
@@ -258,9 +262,27 @@
         "vue": "^3.0.0",
       },
     },
+    "layers/apps/views": {
+      "name": "@nuxtinator/views",
+      "version": "0.1.0",
+      "dependencies": {
+        "fractional-indexing": "^3.2.0",
+      },
+      "optionalDependencies": {
+        "@nuxtinator/core": "*",
+        "@nuxtinator/records": "*",
+      },
+      "peerDependencies": {
+        "h3": "^1.0.0",
+        "kysely": "^0.28.0",
+        "nuxt": "^4.0.0",
+        "vue": "^3.0.0",
+        "zod": "^4.1.8",
+      },
+    },
     "layers/core": {
       "name": "@nuxtinator/core",
-      "version": "3.1.0",
+      "version": "3.3.0",
       "dependencies": {
         "@bradenmacdonald/s3-lite-client": "^1.0.0",
         "@nuxtjs/i18n": "^10.6.0",
@@ -313,7 +335,7 @@
     },
     "layers/mcp": {
       "name": "@nuxtinator/mcp",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.30.0",
         "zod": "^4.1.8",
@@ -352,6 +374,21 @@
         "vue": "^3.0.0",
       },
     },
+    "layers/records": {
+      "name": "@nuxtinator/records",
+      "version": "0.1.0",
+      "optionalDependencies": {
+        "@nuxtinator/core": "*",
+      },
+      "peerDependencies": {
+        "@nuxt/kit": "^4.0.0",
+        "h3": "^1.0.0",
+        "kysely": "^0.28.0",
+        "nuxt": "^4.0.0",
+        "vue": "^3.0.0",
+        "zod": "^4.1.8",
+      },
+    },
     "layers/social-auth": {
       "name": "@nuxtinator/social-auth",
       "version": "0.5.2",
@@ -374,7 +411,7 @@
     },
     "layers/tenancy": {
       "name": "@nuxtinator/tenancy",
-      "version": "3.6.0",
+      "version": "3.6.1",
       "optionalDependencies": {
         "@nuxtinator/core": "*",
       },
@@ -769,11 +806,15 @@
 
     "@nuxtinator/oauth": ["@nuxtinator/oauth@workspace:layers/oauth"],
 
+    "@nuxtinator/records": ["@nuxtinator/records@workspace:layers/records"],
+
     "@nuxtinator/social-auth": ["@nuxtinator/social-auth@workspace:layers/social-auth"],
 
     "@nuxtinator/tenancy": ["@nuxtinator/tenancy@workspace:layers/tenancy"],
 
     "@nuxtinator/videos": ["@nuxtinator/videos@workspace:layers/apps/videos"],
+
+    "@nuxtinator/views": ["@nuxtinator/views@workspace:layers/apps/views"],
 
     "@nuxtjs/color-mode": ["@nuxtjs/color-mode@4.0.1", "", { "dependencies": { "@nuxt/kit": "^4.4.6", "exsolve": "^1.0.8", "pathe": "^2.0.3", "pkg-types": "^2.3.1", "semver": "^7.8.1" } }, "sha512-eiA7hWXi5zNHaYKyJFCGF6i0wFZtuvR7KDXZ6jiSvwxjCpRFwphrw0MOSmNfArTSSsT1wpW+/2H92cejeVfUlg=="],
 
@@ -1768,6 +1809,8 @@
     "forwarded": ["forwarded@0.2.0", "", {}, "sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow=="],
 
     "fraction.js": ["fraction.js@5.3.4", "", {}, "sha512-1X1NTtiJphryn/uLQz3whtY6jK3fTqoE3ohKs0tT+Ujr1W59oopxmoEh7Lu5p6vBaPbgoM0bzveAW4Qi5RyWDQ=="],
+
+    "fractional-indexing": ["fractional-indexing@3.4.0", "", {}, "sha512-8J3glhz2rrpKG6KmI7wmJo3zH1VjeOpN+vTJSw1fOyO+Viqq3zX6/5NGh6oaZB2qIAYdOYuu5Dz9xp4faOO0Pg=="],
 
     "framer-motion": ["framer-motion@14.1.1", "", { "dependencies": { "motion-dom": "14.1.1", "motion-utils": "14.1.1", "tslib": "^2.4.0" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0" }, "optionalPeers": ["react", "react-dom"] }, "sha512-kPp3cepIYM8KS7Ro7+izapfcO11/qk3MCBswbEEllNRPNbq2ttekDhTJTQMuWLD8PbLi9idh5SvJbUtdxJiDzw=="],
 
