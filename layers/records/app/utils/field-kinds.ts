@@ -172,9 +172,13 @@ export function recordsAttachmentList(value: unknown): RecordsAttachmentValue[] 
     v !== null && typeof v === 'object' && 'id' in v && 'url' in v)
 }
 
+// The image types the server serves inline (others download), so the only
+// ones a thumbnail or cover can show.
+const INLINE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif'])
+
 /** Whether a file can show as an image (thumbnail, card cover). */
 export function recordsIsImage(file: Pick<RecordsAttachmentValue, 'mime'>): boolean {
-  return file.mime.startsWith('image/')
+  return INLINE_IMAGE_TYPES.has(file.mime)
 }
 
 /** A file size for people: 820 B, 14 KB, 3.2 MB. */

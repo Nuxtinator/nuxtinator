@@ -4,12 +4,15 @@
 // `addRecordAttachment` (the attachments route), never through a field patch;
 // a patch can only reorder or remove them. Deleting a row — directly or with
 // its record — queues its object in records_attachment_trash (a trigger), and
-// `sweepAttachmentTrash` deletes queued objects from storage.
+// `sweepAttachmentTrash` deletes queued objects from storage. A fresh upload
+// is queued too, outside the request's transaction, and taken off the queue
+// inside it: if the transaction never commits, the object is still swept.
 //
 // Other layers keep files for their own per-record fields here under a field
 // key they namespace (the views layer uses `views:<viewId>:<fieldKey>`), using
 // the same add / list / remove functions.
 
+import { sql } from 'kysely'
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
@@ -31,20 +34,26 @@ export const RECORDS_ATTACHMENTS_PER_FIELD = 50
 const URL_WINDOW_MS = 6 * 60 * 60 * 1000
 const URL_EXPIRY_SECONDS = 24 * 60 * 60
 
+// Queued keys wait this long before the sweep deletes them, so an upload whose
+// transaction is still open isn't swept out from under it.
+const TRASH_GRACE = sql`interval '1 hour'`
+
+// Only these open in the browser; anything else (HTML, SVG, scripts) downloads,
+// served as a plain byte stream so it can't run on the storage domain.
+const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif'])
+
 export interface RecordsAttachmentFile {
   data: Buffer
   filename: string
   mime: string
 }
 
-function contentDisposition(filename: string): string {
-  return `inline; filename*=UTF-8''${encodeURIComponent(filename)}`
-}
-
-async function signedUrl(storageKey: string, filename: string): Promise<string> {
+async function signedUrl(storageKey: string, filename: string, mime: string): Promise<string> {
   const windowStart = new Date(Math.floor(Date.now() / URL_WINDOW_MS) * URL_WINDOW_MS)
+  const inline = INLINE_TYPES.has(mime)
   return await generateSignedUrl(storageKey, URL_EXPIRY_SECONDS, {
-    'response-content-disposition': contentDisposition(filename)
+    'response-content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    'response-content-type': inline ? mime : 'application/octet-stream'
   }, windowStart)
 }
 
@@ -64,7 +73,7 @@ async function toValue(row: AttachmentRow): Promise<RecordsAttachmentValue> {
     name: row.filename,
     mime: row.mime,
     size: Number(row.size_bytes),
-    url: await signedUrl(row.storage_key, row.filename)
+    url: await signedUrl(row.storage_key, row.filename, row.mime)
   }
 }
 
@@ -122,6 +131,8 @@ export async function addRecordAttachment(
     throw createError({ statusCode: 400, statusMessage: `A field holds at most ${RECORDS_ATTACHMENTS_PER_FIELD} files.` })
   }
   const uploaded = await uploadToS3(file.data, file.filename, file.mime, 'private', 'records')
+  await db.insertInto('records_attachment_trash').values({ storage_key: uploaded.key }).execute()
+  await tx.deleteFrom('records_attachment_trash').where('storage_key', '=', uploaded.key).execute()
   const row = await tx
     .insertInto('records_attachments')
     .values({
@@ -211,6 +222,7 @@ export async function sweepAttachmentTrash(batch = 100): Promise<number> {
   const rows = await db
     .selectFrom('records_attachment_trash')
     .select('storage_key')
+    .where('deleted_at', '<', sql<Date>`now() - ${TRASH_GRACE}`)
     .orderBy('deleted_at', 'asc')
     .limit(batch)
     .execute()

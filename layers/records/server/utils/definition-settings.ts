@@ -374,9 +374,15 @@ export async function getRecordTypeFields(tx: DbClient, typeKey: string): Promis
   return fields.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
 }
 
-/** Keys of the type's people fields that let the people they name see the record. */
-export function recordsAccessGrantingKeys(defs: RecordsFieldSetting[]): string[] {
-  return defs.filter(d => d.grantsAccess && d.storage === 'user_refs' && !d.orphan).map(d => d.key)
+/**
+ * Keys of the type's people fields that let the people they name see the
+ * record. The flag is code-only (admins can't create people fields or change
+ * it), so this reads the registry, never the database.
+ */
+export function recordsAccessGrantingKeys(typeKey: string): string[] {
+  return Object.entries(recordTypeCodeFields(getRegisteredRecordType(typeKey)))
+    .filter(([, def]) => def.kind === 'user_select' && def.grantsAccess === true && !def.column)
+    .map(([key]) => key)
 }
 
 /** The status an unset status column reads as: the status field's default. */

@@ -9,7 +9,7 @@ import { sql } from 'kysely'
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import { getMemberPermissions, type TenantContext } from '#tenant/server'
-import { getRecordType, getRecordTypeFields, recordsAccessGrantingKeys } from './definition-settings'
+import { getRecordType, recordsAccessGrantingKeys } from './definition-settings'
 import { recordsVisibilityScope, visibilityPredicate } from './list-records'
 import { resolveTypePermission } from './type-permissions'
 
@@ -80,7 +80,7 @@ export async function recordsUnsharedAssignees(
   recordId: string,
   before: Record<string, unknown> | null
 ): Promise<RecordsShareConfirmationUser[]> {
-  const grantKeys = recordsAccessGrantingKeys(await getRecordTypeFields(tx, typeKey))
+  const grantKeys = recordsAccessGrantingKeys(typeKey)
   if (grantKeys.length === 0) return []
   const previous = new Set<string>()
   for (const key of grantKeys) {

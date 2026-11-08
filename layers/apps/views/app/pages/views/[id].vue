@@ -88,10 +88,21 @@ const typeInfo = computed(() =>
 const canEditDefinition = computed(() =>
   view.value?.accessLevel === 'edit' || view.value?.accessLevel === 'owner')
 // Creating takes the type's create permission; on a hand-picked view it also
-// takes 'edit' on the view, since the record becomes one of its cards.
+// takes 'edit' on the view, since the record becomes one of its cards. So
+// does a tab whose filters or grouping set one of the view's own fields on a
+// new card: without it the card would miss that value and drop off the tab.
 const canCreate = computed(() => {
   const typeAllows = typeInfo.value?.canCreate ?? false
-  return picked.value ? typeAllows && canEditDefinition.value : typeAllows
+  if (!typeAllows) return false
+  return picked.value || setsViewFields.value ? canEditDefinition.value : true
+})
+const setsViewFields = computed(() => {
+  const v = view.value
+  const t = tab.value
+  if (!v || !t || viewFields.value.length === 0) return false
+  if (t.definition.groupField?.startsWith(VIEWS_FIELD_KEY_PREFIX)) return true
+  const pinned = viewsFilterPrefill([v.definition.filter, t.definition.filter], allFields.value, myUserId.value)
+  return Object.keys(pinned).some(key => key.startsWith(VIEWS_FIELD_KEY_PREFIX))
 })
 const isOwner = computed(() => view.value?.accessLevel === 'owner')
 const picked = computed(() => !!view.value?.definition.picked)
@@ -172,8 +183,10 @@ function applyOptimisticMove(payload: ViewsMovePayload) {
 }
 
 async function onMove(payload: ViewsMovePayload) {
-  // Reordering within a column is view state, which view-only access can't change.
+  // Reordering within a column and moving between columns of one of the
+  // view's own fields are view state, which view-only access can't change.
   if (!canEditDefinition.value && payload.fromColumn === payload.toColumn) return
+  if (!canEditDefinition.value && groupFieldDef.value && viewsIsViewField(groupFieldDef.value)) return
   beginDrag()
   try {
     applyOptimisticMove(payload)

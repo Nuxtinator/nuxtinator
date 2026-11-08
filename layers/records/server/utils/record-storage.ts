@@ -29,7 +29,7 @@ import {
   type RecordsFieldPatch,
   type RecordsListPatch
 } from './records-registry'
-import { getRecordType, getRecordTypeFields, recordsStatusDefault, type RecordsFieldSetting } from './definition-settings'
+import { getRecordType, getRecordTypeFields, recordsAccessGrantingKeys, recordsStatusDefault, type RecordsFieldSetting } from './definition-settings'
 import { normalizeChannelValue } from './normalize'
 import { recordRecordsActivity } from './records-activity'
 import { closingRulesOf, enforceClosingRules } from './closing'
@@ -781,7 +781,8 @@ export async function applyFieldPatch(
 
   if (isCreate) {
     for (const def of defs) {
-      if (!def.required || def.orphan) continue
+      // Files arrive by upload once the record exists, so they can't be required to create it.
+      if (!def.required || def.orphan || def.storage === 'attachments') continue
       if (def.storage === 'promoted' || def.storage === 'jsonb') {
         const value = scalarOps.get(def.key)
         if (value == null || value === '') {
@@ -888,7 +889,9 @@ export async function applyFieldPatch(
     }
   }
 
-  if (opts.sharing) {
+  // Only a write to an access-granting people field can share the record.
+  const grantKeys = recordsAccessGrantingKeys(typeKey)
+  if (opts.sharing && [...listOps.keys()].some(key => grantKeys.includes(key))) {
     await requireShareConfirmation(tx, ctx, typeKey, id, oldRecord?.fields ?? null, opts.sharing)
   }
 

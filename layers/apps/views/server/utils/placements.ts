@@ -30,7 +30,7 @@ import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
-import { applyFieldPatch, assertRecordVisible, deleteRecord, getRecordType, requireRecordType, requireRecordUpdate, requireShareConfirmation, requireTypePermission, resolveTypePermission } from '#records/server'
+import { applyFieldPatch, assertRecordVisible, deleteRecord, getRecordType, recordsAccessGrantingKeys, requireRecordType, requireRecordUpdate, requireShareConfirmation, requireTypePermission, resolveTypePermission } from '#records/server'
 import type { RecordsFieldSetting, RecordsSharingMode } from '#records/server'
 import { clearViewValues, isViewFieldKey, setViewValues, viewFieldsWithType } from './view-fields'
 import { getViewsGroupValues, requireRecordsWriteScope } from './view-records'
@@ -349,7 +349,10 @@ export async function createViewsCard(
     .execute()
   // Counted once the card is on the view, so people the view already shows
   // its cards to aren't asked about.
-  if (opts.sharing) await requireShareConfirmation(tx, ctx, view.record_type_key, record.id, null, opts.sharing)
+  const grantKeys = recordsAccessGrantingKeys(view.record_type_key)
+  if (opts.sharing && Object.keys(fields).some(key => grantKeys.includes(key))) {
+    await requireShareConfirmation(tx, ctx, view.record_type_key, record.id, null, opts.sharing)
+  }
   if (opts.viewValues && Object.keys(opts.viewValues).length > 0) {
     await setViewValues(tx, ctx, view, record.id, opts.viewValues)
   }

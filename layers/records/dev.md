@@ -79,7 +79,12 @@ attachments route; a field patch can only reorder or remove them, so a client
 can never point a field at someone else's object. An AFTER DELETE trigger copies
 each removed row's storage key into `records_attachment_trash` (no org data, no
 RLS), which catches every path — a removed file, a deleted record, a deleted
-view's files — and a Nitro plugin sweeps the queue every ten minutes. Hydrated
+view's files — and a Nitro plugin sweeps the queue every ten minutes, deleting
+keys queued over an hour ago. A fresh upload is queued outside the request's
+transaction and dequeued inside it, so an upload whose transaction rolls back
+(a later file in the same request failing, say) is still swept. Links force
+`application/octet-stream` and `attachment` for anything but plain images, so
+stored HTML/SVG never renders on the storage domain. Hydrated
 links are signed from the start of a six-hour window so they stay identical
 between polls (core's `generateSignedUrl` takes the `requestDate`).
 

@@ -77,6 +77,10 @@ export function availableAdminFieldKinds(): RecordsAdminFieldKind[] {
   })
 }
 
+// Files are uploaded onto a record that already exists, so a new record could
+// never satisfy a required attachments field.
+const FILES_NOT_REQUIRED = 'A files field can\'t be required'
+
 /** Kinds whose definition may carry an options vocabulary. */
 const OPTION_KINDS = new Set<RecordsFieldKind>(['key_select', 'multi_select', 'tags'])
 
@@ -557,6 +561,7 @@ export async function createField(
   if (input.fieldKey === 'name' || input.fieldKey === 'status') {
     bad(`'${input.fieldKey}' is a reserved field key`)
   }
+  if (input.required && input.kind === 'attachments') bad(FILES_NOT_REQUIRED)
   // Views key their own fields `vf_…` and address them alongside the type's.
   if (input.fieldKey.startsWith('vf_')) {
     bad('Field keys starting with vf_ are reserved')
@@ -779,6 +784,7 @@ export async function updateField(
   if (patch.section !== undefined && patch.section !== null) {
     validateSection(type, patch.section)
   }
+  if (patch.required === true && field.kind === 'attachments') bad(FILES_NOT_REQUIRED)
 
   const row = await getFieldRow(tx, typeKey, fieldKey)
   // Intrinsic fields (a manifest-less type's name, the default status) carry

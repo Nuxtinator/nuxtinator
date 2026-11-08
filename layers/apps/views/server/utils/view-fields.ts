@@ -10,6 +10,7 @@
 // the type's own fields: list queries get them as virtual fields, and the
 // definition validators accept them (see `viewFieldsWithType`).
 
+import { randomBytes } from 'node:crypto'
 import { sql } from 'kysely'
 import type { Transaction } from 'kysely'
 import { z } from 'zod'
@@ -351,7 +352,7 @@ export async function clearViewFiles(tx: Tx, viewId: string): Promise<void> {
 }
 
 function slug(label: string): string {
-  const base = label.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 36)
+  const base = label.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30)
   return base || 'field'
 }
 
@@ -362,12 +363,16 @@ export interface ViewFieldInput {
   multiple?: boolean
 }
 
-/** A new field for the view: a key unique among its fields, from the label. */
+/**
+ * A new field for the view, keyed from its label plus a random suffix. Keys
+ * are never reused: a tab or filter still naming a deleted field must not
+ * pick up a new field that happens to share its label.
+ */
 export function newViewField(existing: ViewFieldDef[], input: ViewFieldInput): ViewFieldDef {
   const taken = new Set(existing.map(f => f.key))
-  const base = `vf_${slug(input.label)}`
-  let key = base
-  for (let n = 2; taken.has(key); n++) key = `${base}_${n}`
+  let key: string
+  do key = `vf_${slug(input.label)}_${randomBytes(3).toString('hex')}`
+  while (taken.has(key))
   return {
     key,
     label: input.label.trim(),
@@ -409,6 +414,25 @@ export interface ViewFieldPatch {
   multiple?: boolean
 }
 
+// Takes choices that no longer exist off every card, so stored values always
+// name current options (a write would otherwise refuse the stale one).
+async function dropRemovedOptions(tx: Tx, viewId: string, field: ViewFieldDef, removed: string[]): Promise<void> {
+  if (removed.length === 0) return
+  const scope = sql`view_id = ${viewId}::uuid and field_key = ${field.key}`
+  if (field.kind === 'key_select') {
+    await sql`delete from views_values where ${scope} and value #>> '{}' = any(${removed}::text[])`.execute(tx)
+    return
+  }
+  await sql`
+    update views_values
+    set value = coalesce((
+      select jsonb_agg(e.v) from jsonb_array_elements_text(value) as e(v) where e.v <> all(${removed}::text[])
+    ), '[]'::jsonb)
+    where ${scope} and value ?| ${removed}::text[]
+  `.execute(tx)
+  await sql`delete from views_values where ${scope} and value = '[]'::jsonb`.execute(tx)
+}
+
 /** Renames a field or changes its options. Its key and kind never change. */
 export async function updateViewField(tx: Tx, view: ViewRow, key: string, patch: ViewFieldPatch): Promise<ViewRow> {
   const fields = viewFieldsOf(view)
@@ -419,6 +443,8 @@ export async function updateViewField(tx: Tx, view: ViewRow, key: string, patch:
   if (patch.options !== undefined) {
     if (!OPTION_KINDS.has(field.kind)) badField(`Only select fields have options ("${field.label}")`)
     next.options = patch.options
+    const kept = new Set(Object.keys(patch.options))
+    await dropRemovedOptions(tx, view.id, field, Object.keys(field.options ?? {}).filter(k => !kept.has(k)))
   }
   if (patch.multiple !== undefined) {
     if (field.kind !== 'user_select') badField(`Only people fields take "multiple" ("${field.label}")`)

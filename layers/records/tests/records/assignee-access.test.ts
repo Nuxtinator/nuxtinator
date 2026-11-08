@@ -143,10 +143,37 @@ describe('attachments fields', () => {
     // A file can't be added by id, only by upload.
     await expect(patch(owner, 'item', withFiles.id, { attachments: [first, randomUUID()] })).rejects.toMatchObject({ statusCode: 400 })
 
+    // Only plain images open in the browser; anything else downloads as bytes.
+    const page = await seedFile(org.id, withFiles.id, 'page.html', 2)
+    await sql`UPDATE records_attachments SET mime = 'text/html' WHERE id = ${page}`
+    const served = (await $fetch<RecordDetail>(`/api/records/entries/item/${withFiles.id}`, owner)).fields.attachments as Array<{ id: string, url: string }>
+    const html = new URL(served.find(f => f.id === page)!.url)
+    expect(html.searchParams.get('response-content-type')).toBe('application/octet-stream')
+    expect(html.searchParams.get('response-content-disposition')).toMatch(/^attachment;/)
+    expect(new URL(served.find(f => f.id === first)!.url).searchParams.get('response-content-disposition')).toMatch(/^inline;/)
+    await sql`DELETE FROM records_attachments WHERE id = ${page}`
+
     const kept = await patch(owner, 'item', withFiles.id, { attachments: [second] })
     expect((kept.fields.attachments as Array<{ id: string }>).map(f => f.id)).toEqual([second])
     const queued = await sql`SELECT 1 FROM records_attachment_trash WHERE storage_key = ${`records/test-records-${first}.png`}`
     expect(queued).toHaveLength(1)
     await sql`DELETE FROM records_attachment_trash WHERE storage_key LIKE 'records/test-records-%'`
+  })
+})
+
+describe('required files', () => {
+  it('a files field can\'t be made required, since files arrive after the record exists', async () => {
+    const { org, auth } = await createRecordsOrgWith(sql, ['admin'])
+    const owner = withOrgHeader(auth, org.slug)
+    await expect($fetch('/api/records/schema/types/item/fields', {
+      method: 'POST',
+      body: { fieldKey: 'receipts', kind: 'attachments', label: 'Receipts', required: true },
+      ...owner
+    })).rejects.toMatchObject({ statusCode: 400 })
+    await expect($fetch('/api/records/schema/types/item/fields/attachments', {
+      method: 'PATCH',
+      body: { required: true },
+      ...owner
+    })).rejects.toMatchObject({ statusCode: 400 })
   })
 })

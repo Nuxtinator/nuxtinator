@@ -87,7 +87,7 @@ describe('view fields', () => {
     await $fetch(`/api/views/${view.id}/shares`, { method: 'POST', body: { userId: viewer.user.id, level: 'view' }, ...owner })
 
     const temp = await addField(owner, view.id, { label: 'Oven temp', kind: 'number' })
-    expect(temp.key).toBe('vf_oven_temp')
+    expect(temp.key).toMatch(/^vf_oven_temp_[0-9a-f]{6}$/)
     const rating = await addField(owner, view.id, {
       label: 'Rating',
       kind: 'key_select',
@@ -168,6 +168,51 @@ describe('view fields', () => {
     })
     const after = await feed(owner, view.id, board.id)
     expect(after.items.find(i => i.id === warm.id)!.viewValues![rating.key]).toBe('great')
+  })
+
+  it('removing a choice clears it from cards, and a deleted field\'s key is never reused', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['member'])
+    const owner = withOrgHeader(auth, org.slug)
+    const view = await pickedView(owner)
+    const rating = await addField(owner, view.id, {
+      label: 'Rating',
+      kind: 'key_select',
+      options: { good: { label: 'Good' }, great: { label: 'Great' } }
+    })
+    const flavours = await addField(owner, view.id, {
+      label: 'Flavours',
+      kind: 'multi_select',
+      options: { sweet: { label: 'Sweet' }, spicy: { label: 'Spicy' } }
+    })
+    const card = await newCard(owner, view.id, 'test-views Hawaiian')
+    await setValues(owner, view.id, card.id, { [rating.key]: 'good', [flavours.key]: ['sweet', 'spicy'] })
+
+    await $fetch(`/api/views/${view.id}/fields/${rating.key}`, { method: 'PATCH', body: { options: { great: { label: 'Great' } } }, ...owner })
+    await $fetch(`/api/views/${view.id}/fields/${flavours.key}`, { method: 'PATCH', body: { options: { spicy: { label: 'Spicy' } } }, ...owner })
+    expect((await feed(owner, view.id)).items[0]!.viewValues).toEqual({ [flavours.key]: ['spicy'] })
+    // The card stays writable.
+    await setValues(owner, view.id, card.id, { [rating.key]: 'great' })
+
+    await $fetch(`/api/views/${view.id}/fields/${rating.key}`, { method: 'DELETE', ...owner })
+    const again = await addField(owner, view.id, { label: 'Rating', kind: 'number' })
+    expect(again.key).not.toBe(rating.key)
+  })
+
+  it('a contains filter on a links field matches the links, not their shape', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['member'])
+    const owner = withOrgHeader(auth, org.slug)
+    const view = await pickedView(owner)
+    const recipe = await addField(owner, view.id, { label: 'Recipe', kind: 'link' })
+    const card = await newCard(owner, view.id, 'test-views Margherita')
+    await setValues(owner, view.id, card.id, { [recipe.key]: [{ url: 'example.com/margherita', label: 'Classic' }] })
+    const tabFor = async (value: string) => (await $fetch<{ id: string }>(`/api/views/${view.id}/tabs`, {
+      method: 'POST',
+      body: { name: value, layout: 'table', definition: { filter: { match: 'all', rules: [{ field: recipe.key, op: 'contains', value }] } } },
+      ...owner
+    })).id
+    expect((await feed(owner, view.id, await tabFor('url'))).items).toHaveLength(0)
+    expect((await feed(owner, view.id, await tabFor('margherita'))).items).toHaveLength(1)
+    expect((await feed(owner, view.id, await tabFor('classic'))).items).toHaveLength(1)
   })
 
   it('a new card takes the view values it is created with', async () => {

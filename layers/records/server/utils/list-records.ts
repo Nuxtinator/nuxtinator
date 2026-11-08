@@ -530,6 +530,12 @@ function virtualListCond(eb: Eb, vf: RecordsVirtualField, cond: FilterCond): Exp
       return sql<SqlBool>`${list} ?| ${sql.val(cond.values.map(String))}::text[]`
     }
     case 'contains':
+      // Links are { url, label } objects: match their text, never their keys.
+      if (vf.def.kind === 'link') {
+        return sql<SqlBool>`exists (select 1 from jsonb_array_elements(${list}) as e(v)
+          where coalesce(e.v ->> 'url', '') ilike ${likePattern(cond.value)}
+             or coalesce(e.v ->> 'label', '') ilike ${likePattern(cond.value)})`
+      }
       return sql<SqlBool>`exists (select 1 from jsonb_array_elements_text(${list}) as e(v) where e.v ilike ${likePattern(cond.value)})`
     default:
       return badFilter(vf.def.key, `'${cond.op}' is not supported for ${vf.def.kind} fields`)
@@ -635,11 +641,10 @@ export function visibilityPredicate(
 /** The visibility scope of `typeKey` (its board rule and access-granting people fields). */
 export async function recordsVisibilityScope(tx: Tx, typeKey: string): Promise<RecordsVisibilityScope> {
   const type = await getRecordType(tx, typeKey)
-  const defs = await getRecordTypeFields(tx, typeKey)
   return {
     key: typeKey,
     boardsGrantVisibility: type?.boardsGrantVisibility ?? true,
-    grantKeys: recordsAccessGrantingKeys(defs)
+    grantKeys: recordsAccessGrantingKeys(typeKey)
   }
 }
 
