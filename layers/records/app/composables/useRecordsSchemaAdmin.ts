@@ -68,6 +68,7 @@ export const RECORDS_ADMIN_KIND_OPTIONS: Array<{ value: string, label: string }>
   { value: 'multi_select', label: 'Multi select' },
   { value: 'tags', label: 'Tags' },
   { value: 'link', label: 'Links' },
+  { value: 'attachments', label: 'Files' },
   { value: 'connection', label: 'Connection' },
   // Offered only when a layer registers kind settings for it (crm).
   { value: 'communication_channel', label: 'Channel' }

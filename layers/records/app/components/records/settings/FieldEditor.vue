@@ -143,7 +143,7 @@ async function submit() {
         label: label.value.trim(),
         icon: icon.value ?? undefined,
         section: section.value === '' ? undefined : section.value,
-        required: required.value,
+        required: required.value && kind.value !== 'attachments',
         options: isOptionKind.value && Object.keys(optionsDraft.value).length > 0
           ? optionsDraft.value
           : undefined,
@@ -327,7 +327,10 @@ const deleteLabel = computed(() => {
             />
           </UFormField>
 
-          <UFormField label="Required">
+          <UFormField
+            v-if="kind !== 'attachments'"
+            label="Required"
+          >
             <USwitch
               v-model="required"
               :disabled="saving"

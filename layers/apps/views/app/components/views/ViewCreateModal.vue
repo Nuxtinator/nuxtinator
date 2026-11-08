@@ -1,14 +1,18 @@
 <script setup lang="ts">
-// Create-view modal: name, record type, what the view holds — its own cards
-// (it starts empty and holds only records added or created on it) or every
-// matching record of the type — and the first tab's layout: a board, a list
-// or a table. A board groups by a field (columns = its values) or has its own
-// columns. A list may group into sections by a field. What the view holds
-// starts on "every matching record" for types the caller can see all of, else
-// on its own cards, and can't change later. On success it navigates straight
-// to the new view. `audience` sets who it starts open to: 'mine' starts
-// private; 'teams' starts on the caller's team (they pick when they have
-// several), or Everyone when they have none.
+// Create-view modal. It opens on "What are you tracking?": To-dos (a task
+// board by status), an ideas board (items in their own columns), a list of
+// anything (items), or one of the org's record types the caller can create.
+// A starter sets the record type, what the view holds and the first tab's
+// layout; the name and who can see it follow, with everything else under
+// "More options": the record type, what the view holds — its own cards (it
+// starts empty and holds only records added or created on it) or every
+// matching record of the type — and the layout: a board, a list or a table.
+// A board groups by a field (columns = its values) or has its own columns. A
+// list may group into sections by a field. What the view holds can't change
+// later. On success it navigates straight to the new view. `audience` sets
+// who it starts open to: 'mine' starts private; 'teams' starts on the
+// caller's team (they pick when they have several), or Everyone when they
+// have none.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsLayout, ViewsVisibility } from '../../utils/views-types'
 
@@ -33,6 +37,52 @@ const DEFAULT_COLUMNS = [
   { key: 'done', label: 'Done' }
 ]
 
+interface ViewsStarter {
+  id: string
+  label: string
+  icon: string
+  typeKey: string
+  /** What the view holds; absent = every matching record when the caller sees all of the type. */
+  kind?: 'picked' | 'matching'
+  layout: ViewsLayout
+  kanbanMode?: 'field' | 'custom'
+  placeholder: string
+}
+
+const starters = computed<ViewsStarter[]>(() => {
+  const creatable = visibleTypes.value.filter(t => t.canCreate)
+  const has = (key: string) => creatable.some(t => t.key === key)
+  const out: ViewsStarter[] = []
+  if (has('task')) {
+    out.push({ id: 'todos', label: 'To-dos', icon: 'i-lucide-square-check', typeKey: 'task', kind: 'picked', layout: 'kanban', kanbanMode: 'field', placeholder: 'My to-dos' })
+  }
+  if (has('item')) {
+    out.push({ id: 'ideas', label: 'Ideas board', icon: 'i-lucide-lightbulb', typeKey: 'item', kind: 'picked', layout: 'kanban', kanbanMode: 'custom', placeholder: 'Ideas for the project' })
+    out.push({ id: 'list', label: 'A list of anything', icon: 'i-lucide-list', typeKey: 'item', kind: 'picked', layout: 'list', placeholder: 'Ways to bake a pizza' })
+  }
+  for (const t of creatable) {
+    if (t.key === 'task' || t.key === 'item') continue
+    out.push({ id: `type:${t.key}`, label: t.label, icon: t.icon ?? 'i-lucide-database', typeKey: t.key, layout: 'kanban', kanbanMode: 'field', placeholder: t.label })
+  }
+  return out
+})
+
+const starter = ref<ViewsStarter | null>(null)
+const moreOpen = ref(false)
+
+function pickStarter(choice: ViewsStarter) {
+  starter.value = choice
+  viewType.value = choice.layout
+  kanbanMode.value = choice.kanbanMode ?? 'field'
+  typeKey.value = choice.typeKey
+  if (choice.kind) kind.value = choice.kind
+}
+
+function pickAnything() {
+  starter.value = { id: 'custom', label: 'Something else', icon: 'i-lucide-settings-2', typeKey: '', layout: 'kanban', placeholder: '' }
+  moreOpen.value = true
+}
+
 const name = ref('')
 const icon = ref<string | null>(null)
 const typeKey = ref<string | undefined>(undefined)
@@ -54,6 +104,8 @@ const fieldsPending = ref(false)
 watch(open, (v) => {
   if (!v) return
   name.value = ''
+  starter.value = null
+  moreOpen.value = false
   icon.value = null
   typeKey.value = undefined
   kind.value = 'picked'
@@ -89,7 +141,7 @@ watch(typeKey, async (key) => {
   groupField.value = undefined
   fields.value = []
   if (!key) return
-  kind.value = visibleTypes.value.find(t => t.key === key)?.canViewAll ? 'matching' : 'picked'
+  kind.value = starter.value?.kind ?? (visibleTypes.value.find(t => t.key === key)?.canViewAll ? 'matching' : 'picked')
   fieldsPending.value = true
   try {
     const res = await getFields(key)
@@ -187,11 +239,59 @@ async function submit() {
     :ui="{ content: 'sm:max-w-xl' }"
   >
     <template #body>
+      <div
+        v-if="!starter"
+        class="space-y-3"
+      >
+        <p class="text-sm font-medium">
+          What are you tracking?
+        </p>
+        <div class="grid grid-cols-2 gap-2">
+          <button
+            v-for="choice in starters"
+            :key="choice.id"
+            type="button"
+            class="flex items-center gap-3 rounded-lg border border-(--ui-border) px-3 py-3 text-left bg-(--ui-bg-elevated)/50 hover:bg-(--ui-bg-elevated) dark:border-(--ui-border-accented)"
+            @click="pickStarter(choice)"
+          >
+            <UIcon
+              :name="choice.icon"
+              class="size-5 shrink-0 text-(--ui-text-muted)"
+            />
+            <span class="text-sm font-medium">{{ choice.label }}</span>
+          </button>
+          <button
+            type="button"
+            class="flex items-center gap-3 rounded-lg border border-dashed border-(--ui-border) px-3 py-3 text-left hover:bg-(--ui-bg-elevated)/50"
+            @click="pickAnything"
+          >
+            <UIcon
+              name="i-lucide-settings-2"
+              class="size-5 shrink-0 text-(--ui-text-muted)"
+            />
+            <span class="text-sm font-medium">Something else</span>
+          </button>
+        </div>
+      </div>
+
       <form
+        v-else
         id="views-create-form"
         class="space-y-5"
         @submit.prevent="submit"
       >
+        <UButton
+          icon="i-lucide-arrow-left"
+          variant="link"
+          color="neutral"
+          size="sm"
+          class="px-0"
+          :disabled="creating"
+          @click="starter = null"
+        >
+          {{ starter.label }}
+        </UButton>
+
         <UFormField
           label="Name"
           required
@@ -201,6 +301,7 @@ async function submit() {
               v-model="name"
               autofocus
               class="flex-1"
+              :placeholder="starter.placeholder"
               :disabled="creating"
             />
             <div class="w-36 shrink-0">
@@ -213,97 +314,111 @@ async function submit() {
           </div>
         </UFormField>
 
-        <UFormField
-          label="Record type"
-          required
+        <UButton
+          v-if="!moreOpen"
+          icon="i-lucide-chevron-right"
+          variant="link"
+          color="neutral"
+          size="sm"
+          class="px-0"
+          @click="moreOpen = true"
         >
-          <USelectMenu
-            v-model="typeKey"
-            :items="typeItems"
-            :icon="typeIcon"
-            value-key="value"
-            label-key="label"
-            placeholder="Select a record type..."
-            class="w-full"
-            :disabled="creating"
-          />
-        </UFormField>
+          More options
+        </UButton>
 
-        <UFormField
-          v-if="typeKey"
-          label="Holds"
-        >
-          <ViewsChoiceCards
-            v-model="kind"
-            :items="KIND_ITEMS"
-            :disabled="creating"
-          />
-        </UFormField>
-
-        <UFormField label="Layout">
-          <ViewsChoiceCards
-            v-model="viewType"
-            :items="VIEW_TYPE_ITEMS"
-            :disabled="creating"
-          />
-        </UFormField>
-
-        <template v-if="viewType === 'kanban'">
-          <UFormField label="Columns">
-            <ViewsChoiceCards
-              v-model="kanbanMode"
-              :items="KANBAN_MODE_ITEMS"
+        <template v-if="moreOpen">
+          <UFormField
+            label="Record type"
+            required
+          >
+            <USelectMenu
+              v-model="typeKey"
+              :items="typeItems"
+              :icon="typeIcon"
+              value-key="value"
+              label-key="label"
+              placeholder="Select a record type..."
+              class="w-full"
               :disabled="creating"
             />
           </UFormField>
 
           <UFormField
-            v-if="kanbanMode === 'field'"
-            label="Group by"
-            required
+            v-if="typeKey"
+            label="Holds"
           >
-            <USelectMenu
-              v-model="groupField"
-              :items="groupFieldItems"
-              value-key="value"
-              label-key="label"
-              :placeholder="fieldsPending ? 'Loading fields...' : 'Select a field...'"
-              class="w-full"
-              :disabled="creating || !typeKey"
+            <ViewsChoiceCards
+              v-model="kind"
+              :items="KIND_ITEMS"
+              :disabled="creating"
             />
-            <template
-              v-if="typeKey && !fieldsPending && groupFieldItems.length === 0"
-              #help
+          </UFormField>
+
+          <UFormField label="Layout">
+            <ViewsChoiceCards
+              v-model="viewType"
+              :items="VIEW_TYPE_ITEMS"
+              :disabled="creating"
+            />
+          </UFormField>
+
+          <template v-if="viewType === 'kanban'">
+            <UFormField label="Columns">
+              <ViewsChoiceCards
+                v-model="kanbanMode"
+                :items="KANBAN_MODE_ITEMS"
+                :disabled="creating"
+              />
+            </UFormField>
+
+            <UFormField
+              v-if="kanbanMode === 'field'"
+              label="Group by"
+              required
             >
-              This type has no groupable field — use custom columns instead.
-            </template>
+              <USelectMenu
+                v-model="groupField"
+                :items="groupFieldItems"
+                value-key="value"
+                label-key="label"
+                :placeholder="fieldsPending ? 'Loading fields...' : 'Select a field...'"
+                class="w-full"
+                :disabled="creating || !typeKey"
+              />
+              <template
+                v-if="typeKey && !fieldsPending && groupFieldItems.length === 0"
+                #help
+              >
+                This type has no groupable field — use custom columns instead.
+              </template>
+            </UFormField>
+          </template>
+
+          <UFormField
+            v-else-if="viewType === 'list'"
+            label="Sections"
+          >
+            <div class="flex gap-2">
+              <USelectMenu
+                v-model="groupField"
+                :items="groupFieldItems"
+                value-key="value"
+                label-key="label"
+                :placeholder="fieldsPending ? 'Loading fields...' : 'No sections'"
+                class="flex-1"
+                :disabled="creating || !typeKey"
+              />
+              <UButton
+                v-if="groupField"
+                icon="i-lucide-x"
+                variant="ghost"
+                color="neutral"
+                aria-label="No sections"
+                @click="groupField = undefined"
+              />
+            </div>
           </UFormField>
         </template>
-
-        <UFormField
-          v-else-if="viewType === 'list'"
-          label="Sections"
-        >
-          <div class="flex gap-2">
-            <USelectMenu
-              v-model="groupField"
-              :items="groupFieldItems"
-              value-key="value"
-              label-key="label"
-              :placeholder="fieldsPending ? 'Loading fields...' : 'No sections'"
-              class="flex-1"
-              :disabled="creating || !typeKey"
-            />
-            <UButton
-              v-if="groupField"
-              icon="i-lucide-x"
-              variant="ghost"
-              color="neutral"
-              aria-label="No sections"
-              @click="groupField = undefined"
-            />
-          </div>
-        </UFormField>
 
         <USeparator />
 
@@ -337,6 +452,7 @@ async function submit() {
           Cancel
         </UButton>
         <UButton
+          v-if="starter"
           type="submit"
           form="views-create-form"
           :loading="creating"

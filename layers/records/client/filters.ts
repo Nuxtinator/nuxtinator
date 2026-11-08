@@ -119,6 +119,8 @@ export function recordsFilterOps(kind: string): RecordsFilterOp[] {
       return ['any_of', 'none_of', 'empty', 'not_empty']
     case 'communication_channel':
       return ['contains', 'empty', 'not_empty']
+    case 'attachments':
+      return ['empty', 'not_empty']
     default:
       return []
   }

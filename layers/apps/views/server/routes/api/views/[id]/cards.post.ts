@@ -1,5 +1,5 @@
 // POST /api/views/:id/cards — on a hand-picked view, add an existing record
-// ({ recordId }) or create one ({ fields }), with optional { tabId,
+// ({ recordId }) or create one ({ fields, viewValues?, confirmShare? }), with optional { tabId,
 // columnKey } to land it at the end of that tab's column (a board with its
 // own columns) or list. A created record is one of the view's own cards.
 // Needs 'edit' on the view (see addViewsCard and createViewsCard for the
@@ -17,7 +17,15 @@ const Placement = {
 
 const Body = z.union([
   z.object({ recordId: z.string().uuid(), ...Placement }).strict(),
-  z.object({ fields: z.record(z.string(), z.unknown()), ...Placement }).strict()
+  z.object({
+    fields: z.record(z.string(), z.unknown()),
+    // Values of the view's own fields for the new card.
+    viewValues: z.record(z.string(), z.unknown()).optional(),
+    // Resends a create refused (409 records.share_confirmation) for
+    // assigning someone who can't see the card.
+    confirmShare: z.boolean().optional(),
+    ...Placement
+  }).strict()
 ])
 
 export default defineEventHandler(async (event) => {
@@ -33,7 +41,13 @@ export default defineEventHandler(async (event) => {
       ? { tab: await requireTab(tx, view, tabId), columnKey }
       : null
     if ('fields' in parsed.data) {
-      return { ok: true, ...await createViewsCard(tx, ctx, view, parsed.data.fields, placement) }
+      return {
+        ok: true,
+        ...await createViewsCard(tx, ctx, view, parsed.data.fields, placement, {
+          viewValues: parsed.data.viewValues,
+          sharing: parsed.data.confirmShare ? 'confirmed' : 'ask'
+        })
+      }
     }
     await addViewsCard(tx, ctx, view, parsed.data.recordId, placement)
     return { ok: true, id: parsed.data.recordId }

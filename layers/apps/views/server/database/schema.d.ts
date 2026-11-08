@@ -78,8 +78,19 @@ export interface ViewCardsTable {
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
+// A value of one of a view's own fields on one record (see views_003).
+export interface ViewValuesTable {
+  view_id: string
+  record_id: string
+  field_key: string
+  value: unknown
+  updated_by: string | null
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
 declare global {
   interface NuxtinatorDatabaseTables {
+    views_values: ViewValuesTable
     views_definitions: ViewsViewsTable
     views_shares: ViewSharesTable
     views_teams: ViewTeamsTable

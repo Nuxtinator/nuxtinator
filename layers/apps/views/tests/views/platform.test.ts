@@ -260,7 +260,11 @@ describe('card layouts', () => {
     const view = await createView(opts, { recordTypeKey: 'task', definition: { groupField: 'status' } })
 
     let res = await feed(opts, view.id)
-    expect(res.card).toEqual({ fields: ['status', 'assignee', 'due_date'], connections: {}, custom: false })
+    expect(res.card).toEqual({
+      fields: ['status', 'assignee', 'due_date', 'priority', 'subtasks', 'attachments'],
+      connections: { subtasks: 'progress' },
+      custom: false
+    })
 
     await $fetch(`/api/views/${view.id}/tabs/${view.tabs[0]!.id}`, {
       method: 'PATCH',

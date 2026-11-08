@@ -4,7 +4,8 @@
 // fields), from the board's grouping values, or from the side-table values
 // the feed attaches for the chosen keys — so any field of the type can be
 // shown. User fields render as each person's avatar beside their name;
-// connection fields as names, a count, or done-progress, per the layout.
+// connection fields as names, a count, or done-progress, per the layout. A
+// cover field's first image tops the card.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsBoardItem, ViewsConnectionDisplay } from '../../utils/views-types'
 
@@ -16,6 +17,8 @@ const props = defineProps<{
   cardConnections?: Record<string, ViewsConnectionDisplay>
   /** The board's grouping field key, whose values ride on groupValues. */
   groupFieldKey: string | null
+  /** An attachments field whose first image tops the card. */
+  coverKey?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -39,6 +42,12 @@ const USER_CAP = 3
 
 const values = useViewsCardValues(() => props)
 
+const cover = computed(() => {
+  if (!props.coverKey) return null
+  const raw = props.item.fields?.[props.coverKey] ?? props.item.viewValues?.[props.coverKey]
+  return recordsAttachmentList(raw).find(recordsIsImage) ?? null
+})
+
 function onDragStart(event: DragEvent) {
   emit('dragstart', event)
 }
@@ -53,6 +62,13 @@ function onDragStart(event: DragEvent) {
     @dragstart="onDragStart"
     @dragend="emit('dragend')"
   >
+    <img
+      v-if="cover"
+      :src="cover.url"
+      :alt="cover.name"
+      loading="lazy"
+      class="-mx-3 -mt-2 mb-2 w-[calc(100%+1.5rem)] max-w-none h-32 object-cover rounded-t-lg"
+    >
     <p class="text-sm font-medium leading-snug">
       {{ item.name }}
     </p>

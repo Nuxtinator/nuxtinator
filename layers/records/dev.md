@@ -53,6 +53,48 @@ forward-only, since reverse keys pair two code manifests.
 record/field/user) — never a column. Any future user-reference field reuses that table;
 "assigned to me" is an indexed EXISTS.
 
+**Only fields that hand a record to someone grant access.** A `user_select` field
+lets the people it names see the record only when its def says `grantsAccess`
+(task's assignee, contacts' assigned to); every other people field (an item's
+People) only records who's involved. The rule exists so a member's private cards
+never reach someone because they were mentioned on them. `visibilityPredicate`
+restricts the user-refs leg to `recordsAccessGrantingKeys`. Admin-created fields
+can't be people fields, so the flag is code-only.
+
+**Assigning someone who can't see the record asks first.** Writes a person makes
+pass `sharing: 'ask'` to `applyFieldPatch` (record routes, MCP, views drags and
+card creation); a write that newly names someone in a granting field who can't
+see the record by any other path (view_all, creator, share, a visibility source)
+is refused with a 409 (`records.share_confirmation`, naming them) until resent
+`confirmed`. The check runs after the request's other writes — a card created on
+a view its assignee can already open doesn't ask. Another user's view_all is
+answered by building their tenant context (`memberContext` in
+[server/utils/share-confirmation.ts](server/utils/share-confirmation.ts)). System
+writes (producer layers, inbound mail) omit `sharing` and never ask.
+
+**Attachments: their own table, objects deleted by a trash queue.** Files on an
+`attachments` field are `records_attachments` rows (bytes in private object
+storage under `records/`). They arrive one upload at a time through the
+attachments route; a field patch can only reorder or remove them, so a client
+can never point a field at someone else's object. An AFTER DELETE trigger copies
+each removed row's storage key into `records_attachment_trash` (no org data, no
+RLS), which catches every path — a removed file, a deleted record, a deleted
+view's files — and a Nitro plugin sweeps the queue every ten minutes, deleting
+keys queued over an hour ago. A fresh upload is queued outside the request's
+transaction and dequeued inside it, so an upload whose transaction rolls back
+(a later file in the same request failing, say) is still swept. Links force
+`application/octet-stream` and `attachment` for anything but plain images, so
+stored HTML/SVG never renders on the storage domain. Hydrated
+links are signed from the start of a six-hour window so they stay identical
+between polls (core's `generateSignedUrl` takes the `requestDate`).
+
+**Virtual fields in the list engine.** `RecordsListOpts.virtualFields` lets a layer
+that keeps per-record values outside the kernel (a view's own fields) have them
+filtered and sorted like type fields: each supplies a field def and a jsonb value
+expression for the current row. Single-value kinds compare as a cast jsonb scalar,
+list kinds through jsonb array operators. Field keys starting `vf_` are reserved
+for them.
+
 **Permissions & visibility.** Types without a `permissionPrefix` share one generic
 `records.entries.*` set (slugs are code-owned; runtime types can't mint them);
 contacts use `crm.contacts.*`. `records.schema.manage` gates the builder.
@@ -81,13 +123,14 @@ links into whichever shell is active. The records app is registered with
 `launcher: false`: members don't browse raw records (Views is their surface), so it
 has no launcher tile or rail entry, but its record pages stay reachable by link.
 
-## Table inventory (9)
+## Table inventory (11)
 
 `records_entries`, `records_field_entries` (tags/multi_select/link rows,
 `normalized_value` for dedupe + reverse lookup), `records_user_refs`,
 `records_connections` (from/to + field_key, reverse reads resolved via manifests'
-`reverseKey`), `records_shares`, `records_activity`, `records_comments`,
-`records_types`, `records_fields`.
+`reverseKey`), `records_attachments` (files, see above), `records_shares`,
+`records_activity`, `records_comments`, `records_types`, `records_fields`, and
+`records_attachment_trash` (unscoped queue of storage keys to delete).
 
 Migration rules: the tables were created as `crm_*` by `crm_001`–`crm_012` (kept
 under their original names here) and renamed by `records_001`; a regular migration
@@ -114,11 +157,13 @@ client/                          ← #records/client: field settings, formatters
 server/utils/                    ← kernel: records-registry, definition-settings, record-storage
                                    (hydrateRecords/applyFieldPatch), list-records, closing, comments,
                                    activity, shares, schema-admin, records-perms, type-permissions,
-                                   role-grants-admin, user-grants, normalize
+                                   role-grants-admin, user-grants, normalize, attachments,
+                                   share-confirmation
 server/exports/index.ts          ← #records/server barrel — lives OUTSIDE server/utils so nitro's
                                    auto-import scan doesn't double-register its re-exports
 server/routes/api/records/       ← entries/[type]/…, schema/…, comments/…, users
 server/plugins/register-records.ts ← boot registrations (perms, grants, app tile, nav, item, task)
+server/plugins/records-attachment-sweep.ts ← deletes queued attachment objects from storage
 mcp/                             ← records_* data and schema tools
 migrations/  tests/  README.md
 ```

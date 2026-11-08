@@ -1,5 +1,5 @@
 // POST /api/records/entries/:type
-// Body: { fields: { <fieldKey>: value } } — `name` arrives as fields.name
+// Body: { fields: { <fieldKey>: value }, confirmShare? } — `name` arrives as fields.name
 // like any other field; multi-value fields take an array or the D.T-style
 // { values: [...] } list. Runs the kernel's field-patch pipeline (validation,
 // storage routing, activity) and returns the hydrated record detail with the
@@ -10,7 +10,10 @@ import { withOrgContext } from '#tenant/server'
 import { applyFieldPatch, requireRecordType, requireTypePermission, resolveTypeCapabilities } from '#records/server'
 
 const Body = z.object({
-  fields: z.record(z.string(), z.unknown())
+  fields: z.record(z.string(), z.unknown()),
+  // Resends a write refused because it would share the record with someone
+  // named in an access-granting people field (409 records.share_confirmation).
+  confirmShare: z.boolean().optional()
 })
 
 export default defineEventHandler(async (event) => {
@@ -24,7 +27,9 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 400, statusMessage: 'Invalid body', data: parsed.error.flatten() })
     }
 
-    const record = await applyFieldPatch(tx, ctx, typeKey, null, parsed.data.fields)
+    const record = await applyFieldPatch(tx, ctx, typeKey, null, parsed.data.fields, {
+      sharing: parsed.data.confirmShare ? 'confirmed' : 'ask'
+    })
     const caps = await resolveTypeCapabilities(tx, ctx, typeKey)
     return {
       id: record.id,

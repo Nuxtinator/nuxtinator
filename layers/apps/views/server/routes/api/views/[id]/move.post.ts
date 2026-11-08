@@ -1,8 +1,9 @@
 // POST /api/views/:id/move — a drag landed on a tab (the view's first tab
 // when tabId is left out). On field-grouped tabs a drag to another column
 // edits the record, so 'view' access is enough and the records kernel's
-// update check decides. The order within a column, own columns and an
-// ungrouped list's order are view state and need 'edit'.
+// update check decides. The order within a column, own columns, an
+// ungrouped list's order and the view's own fields are view state and need
+// 'edit'.
 import { z } from 'zod'
 import { withOrgPermission } from '#tenant/server'
 import { requireTab, requireView } from '../../../../utils/views'
@@ -13,7 +14,10 @@ const Body = z.object({
   recordId: z.string().uuid(),
   fromColumn: z.string().max(80).nullable(),
   toColumn: z.string().max(80),
-  columnOrder: z.array(z.string().uuid()).min(1).max(VIEWS_MOVE_ORDER_MAX)
+  columnOrder: z.array(z.string().uuid()).min(1).max(VIEWS_MOVE_ORDER_MAX),
+  // Resends a drag refused (409 records.share_confirmation) for handing the
+  // card to someone who can't see it yet.
+  confirmShare: z.boolean().optional()
 }).strict()
 
 export default defineEventHandler(async (event) => {

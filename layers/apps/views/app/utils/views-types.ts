@@ -15,6 +15,8 @@ export interface ViewsCardLayout {
   connections: Record<string, ViewsConnectionDisplay>
   /** The view stores its own layout instead of its type's default. */
   custom: boolean
+  /** The type's cover field: its first image tops each board card. */
+  cover?: string
 }
 
 export interface ViewsColumnDef {
@@ -23,12 +25,27 @@ export interface ViewsColumnDef {
   color?: string
 }
 
+/** Kinds a view's own field can be. */
+export type ViewsFieldKind = 'text' | 'textarea' | 'number' | 'boolean' | 'date' | 'key_select'
+  | 'multi_select' | 'tags' | 'link' | 'user_select' | 'attachments'
+
+/** One of a view's own fields, as its definition stores it. */
+export interface ViewsFieldDef {
+  key: string
+  label: string
+  kind: ViewsFieldKind
+  options?: Record<string, { label: string, color?: string }>
+  multiple?: true
+}
+
 /** What a view decides for all its tabs. */
 export interface ViewsViewDefinition {
   /** Base filter every tab narrows further. */
   filter?: RecordsFilterGroup
   /** Tabs show only the records added to the view by hand. */
   picked?: true
+  /** The view's own fields: values shared by everyone who opens the view. */
+  fields?: ViewsFieldDef[]
 }
 
 /** What one tab decides. */
@@ -129,6 +146,8 @@ export interface ViewsBoardItem {
   progress?: Record<string, { total: number, done: number }>
   /** Created on this hand-picked view and on no other: deleting it from the view deletes it. */
   ownCard?: true
+  /** Values of the view's own fields, keyed by field key (views with fields only). */
+  viewValues?: Record<string, unknown>
 }
 
 export interface ViewRecords {

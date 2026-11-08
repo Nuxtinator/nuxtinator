@@ -48,10 +48,11 @@ async function createView(opts: Opts, definition: Record<string, unknown>): Prom
   })
 }
 
+// Confirmed: assigning someone who can't see the contact yet shares it.
 async function createContact(opts: Opts, fields: Record<string, unknown>): Promise<{ id: string }> {
   return await $fetch<{ id: string }>('/api/records/entries/contacts', {
     method: 'POST',
-    body: { fields },
+    body: { fields, confirmShare: true },
     ...opts
   })
 }
@@ -125,8 +126,12 @@ describe('field-grouped moves', () => {
     const view = await createView(opts, { groupField: 'assigned_to' })
     const rec = await createContact(opts, { name: 'test-views Handover', assigned_to: [user.id, ana.user.id] })
 
-    await move(opts, view.id, {
+    // Ben can't see the contact yet: the drag shares it with him, so it asks first.
+    await expect(move(opts, view.id, {
       recordId: rec.id, fromColumn: ana.user.id, toColumn: ben.user.id, columnOrder: [rec.id]
+    })).rejects.toMatchObject({ statusCode: 409 })
+    await move(opts, view.id, {
+      recordId: rec.id, fromColumn: ana.user.id, toColumn: ben.user.id, columnOrder: [rec.id], confirmShare: true
     })
     const assigned = (await recordFields(opts, rec.id)).assigned_to as string[]
     expect([...assigned].sort()).toEqual([user.id, ben.user.id].sort())

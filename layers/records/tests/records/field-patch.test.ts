@@ -139,9 +139,19 @@ describe('PATCH user_select fields (user_refs, multiple)', () => {
     const opts = withOrgHeader(auth, org.slug)
     const rec = await createContact(opts, { name: 'test-records Assigned' })
 
-    let updated = await $fetch<RecordDetail>(`/api/records/entries/contacts/${rec.id}`, {
+    // Assigning people who can't see the contact yet shares it, so it asks first.
+    const refused = await $fetch(`/api/records/entries/contacts/${rec.id}`, {
       method: 'PATCH',
       body: { fields: { assigned_to: [m1.user.id, m2.user.id] } },
+      ...opts
+    }).catch(e => e)
+    expect(refused.statusCode).toBe(409)
+    expect(refused.data.data.code).toBe('records.share_confirmation')
+    expect(refused.data.data.users.map((u: { id: string }) => u.id).sort()).toEqual([m1.user.id, m2.user.id].sort())
+
+    let updated = await $fetch<RecordDetail>(`/api/records/entries/contacts/${rec.id}`, {
+      method: 'PATCH',
+      body: { fields: { assigned_to: [m1.user.id, m2.user.id] }, confirmShare: true },
       ...opts
     })
     expect((updated.fields.assigned_to as string[]).sort()).toEqual([m1.user.id, m2.user.id].sort())

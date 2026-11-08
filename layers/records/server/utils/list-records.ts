@@ -5,15 +5,16 @@
 // its physical home (see `storageOf` in #records): promoted columns become direct
 // WHERE clauses, jsonb keys compare through data->>'key' with a kind-aware
 // cast (number ::numeric, date/datetime ::timestamptz, boolean ::boolean),
-// and the relational storages (entries, user refs, connections) compile to
-// EXISTS subqueries; driver-backed storages (channels) compile through their
+// and the relational storages (entries, user refs, connections, attachments)
+// compile to EXISTS subqueries; driver-backed storages (channels) compile through their
 // registered driver. The intrinsic record columns — name, status,
 // updated_at, created_at — are always addressable, even on admin-created
 // types that have no code manifest.
 //
 // Visibility: a caller without <type>.view_all sees only records they created
 // (records_entries.created_by), records shared with them (records_shares), or
-// records referencing them through a user field (records_user_refs), plus
+// records naming them in an access-granting people field (an assignee,
+// records_user_refs), plus
 // whatever registered visibility sources grant (records on boards they can
 // open) for types that allow it.
 // Routes never inline these clauses — they go through `listRecords` /
@@ -25,7 +26,7 @@ import { z } from 'zod'
 import type { Database } from '#core/server/database/schema'
 import { isAppEnabledForCurrentOrg, type TenantContext } from '#tenant/server'
 import { APP_TEAM_GATE_MESSAGE, isAppOpenToUser } from '#core/server/utils/groups'
-import { getRecordType, getRecordTypes, getRecordTypeFields, recordsStatusDefault, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
+import { getRecordType, getRecordTypes, getRecordTypeFields, recordsAccessGrantingKeys, recordsStatusDefault, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
 import { resolveTypePermission } from './type-permissions'
 import type { RecordRow } from './record-storage'
 import {
@@ -73,7 +74,26 @@ export interface RecordsListOpts {
   dir?: 'asc' | 'desc'
   limit?: number
   offset?: number
+  /**
+   * Fields that aren't the type's own (a view's fields), addressable by
+   * filter trees and sort like the type's fields.
+   */
+  virtualFields?: RecordsVirtualField[]
 }
+
+/**
+ * A field kept outside the record (by another layer) that list queries can
+ * still filter and sort on. Single-value kinds keep a jsonb scalar, every
+ * other kind a jsonb array (people as user ids, files as file ids).
+ */
+export interface RecordsVirtualField {
+  def: RecordsFieldSetting
+  /** The field's jsonb value for the current `records_entries` row, null when unset. */
+  value: () => RawBuilder<unknown>
+}
+
+/** Kinds a virtual field stores as one jsonb scalar; the rest store a jsonb array. */
+export const RECORDS_VIRTUAL_SCALAR_KINDS = new Set(['text', 'textarea', 'number', 'boolean', 'date', 'datetime', 'key_select'])
 
 export type RecordListItem = RecordRow & {
   /** User ids referenced through user fields — the assignment summary. */
@@ -281,6 +301,16 @@ function connectionsCond(eb: Eb, def: RecordsFieldSetting, cond: FilterCond): Ex
   }
 }
 
+// Attachments filter by presence only: "has files" / "has none".
+function attachmentsCond(eb: Eb, def: RecordsFieldSetting, cond: FilterCond): Expression<SqlBool> {
+  const base = eb.selectFrom('records_attachments as fa')
+    .select('fa.id')
+    .whereRef('fa.record_id', '=', 'records_entries.id')
+    .where('fa.field_key', '=', def.key)
+  if (cond.op === 'eq' && cond.value === null) return eb.not(eb.exists(base))
+  return badFilter(def.key, `'${cond.op}' is not supported for attachments fields`)
+}
+
 function driverCond(eb: Eb, def: RecordsFieldSetting, cond: FilterCond): Expression<SqlBool> {
   const driver = getRecordsStorageDriver(def.storage)
   if (!driver) badFilter(def.key, `no storage driver for ${def.storage} fields`)
@@ -301,6 +331,8 @@ function filterPredicate(eb: Eb, def: RecordsFieldSetting, raw: unknown): Expres
         return connectionsCond(eb, def, cond)
       case 'channels':
         return driverCond(eb, def, cond)
+      case 'attachments':
+        return attachmentsCond(eb, def, cond)
     }
   })
   return conds.length === 1 ? conds[0]! : eb.and(conds)
@@ -408,8 +440,13 @@ function treeScalarLhs(def: RecordsFieldSetting): RawBuilder<unknown> {
 
 const DATE_KINDS = new Set(['date', 'datetime'])
 
-function scalarRule(eb: Eb, def: RecordsFieldSetting, rule: RecordsFilterRule): Expression<SqlBool> {
-  const lhs = treeScalarLhs(def)
+function scalarRule(
+  eb: Eb,
+  def: RecordsFieldSetting,
+  rule: RecordsFilterRule,
+  override?: { lhs: RawBuilder<unknown>, text: RawBuilder<unknown> }
+): Expression<SqlBool> {
+  const lhs = override?.lhs ?? treeScalarLhs(def)
   const textLike = def.kind === 'text' || def.kind === 'textarea'
   const empty = (): Expression<SqlBool> => textLike
     ? eb.or([eb(lhs, 'is', null), eb(lhs, '=', '')])
@@ -430,7 +467,7 @@ function scalarRule(eb: Eb, def: RecordsFieldSetting, rule: RecordsFilterRule): 
     case 'none_of':
       return eb.or([eb(lhs, 'is', null), eb(lhs, 'not in', ruleValues(rule).map(v => coerceComparable(def, v)))])
     case 'contains':
-      return eb(def.storage === 'promoted' ? lhs : jsonbText(def.key), 'ilike', likePattern(String(rule.value)))
+      return eb(override?.text ?? (def.storage === 'promoted' ? lhs : jsonbText(def.key)), 'ilike', likePattern(String(rule.value)))
     case 'on': return eb(dayLhs, '=', day(rule.value))
     case 'before': return eb(dayLhs, '<', day(rule.value))
     case 'after': return eb(dayLhs, '>', day(rule.value))
@@ -469,6 +506,49 @@ function multiRule(
   }
 }
 
+// A virtual scalar's comparison expression: its jsonb text, cast to the kind.
+function virtualScalarExpr(vf: RecordsVirtualField): RawBuilder<unknown> {
+  const text = sql`(${vf.value()} #>> '{}')`
+  switch (vf.def.kind) {
+    case 'number': return sql`(${text})::numeric`
+    case 'boolean': return sql`(${text})::boolean`
+    case 'date':
+    case 'datetime': return sql`(${text})::timestamptz`
+    default: return text
+  }
+}
+
+// One condition over a virtual list field's jsonb array.
+function virtualListCond(eb: Eb, vf: RecordsVirtualField, cond: FilterCond): Expression<SqlBool> {
+  const list = sql`coalesce(${vf.value()}, '[]'::jsonb)`
+  switch (cond.op) {
+    case 'eq':
+      if (cond.value === null) return sql<SqlBool>`jsonb_array_length(${list}) = 0`
+      return sql<SqlBool>`${list} @> jsonb_build_array(${String(cond.value)}::text)`
+    case 'in': {
+      if (cond.values.length === 0) return sql<SqlBool>`false`
+      return sql<SqlBool>`${list} ?| ${sql.val(cond.values.map(String))}::text[]`
+    }
+    case 'contains':
+      // Links are { url, label } objects: match their text, never their keys.
+      if (vf.def.kind === 'link') {
+        return sql<SqlBool>`exists (select 1 from jsonb_array_elements(${list}) as e(v)
+          where coalesce(e.v ->> 'url', '') ilike ${likePattern(cond.value)}
+             or coalesce(e.v ->> 'label', '') ilike ${likePattern(cond.value)})`
+      }
+      return sql<SqlBool>`exists (select 1 from jsonb_array_elements_text(${list}) as e(v) where e.v ilike ${likePattern(cond.value)})`
+    default:
+      return badFilter(vf.def.key, `'${cond.op}' is not supported for ${vf.def.kind} fields`)
+  }
+}
+
+function compileVirtualRule(eb: Eb, vf: RecordsVirtualField, rule: RecordsFilterRule, userId: string): Expression<SqlBool> {
+  if (RECORDS_VIRTUAL_SCALAR_KINDS.has(vf.def.kind)) {
+    return scalarRule(eb, vf.def, rule, { lhs: virtualScalarExpr(vf), text: sql`(${vf.value()} #>> '{}')` })
+  }
+  return multiRule(eb, vf.def, rule, c => virtualListCond(eb, vf, c), v => v === RECORDS_FILTER_ME ? userId : v)
+}
+
 function compileRule(eb: Eb, def: RecordsFieldSetting, rule: RecordsFilterRule, userId: string): Expression<SqlBool> {
   switch (def.storage) {
     case 'promoted':
@@ -482,6 +562,8 @@ function compileRule(eb: Eb, def: RecordsFieldSetting, rule: RecordsFilterRule, 
       return multiRule(eb, def, rule, c => connectionsCond(eb, def, c))
     case 'channels':
       return multiRule(eb, def, rule, c => driverCond(eb, def, c))
+    case 'attachments':
+      return multiRule(eb, def, rule, c => attachmentsCond(eb, def, c))
   }
 }
 
@@ -489,10 +571,13 @@ function compileFilterGroup(
   eb: Eb,
   group: RecordsFilterGroup,
   defsByKey: Map<string, RecordsFieldSetting>,
-  userId: string
+  userId: string,
+  virtual: Map<string, RecordsVirtualField> = new Map()
 ): Expression<SqlBool> {
   const parts = group.rules.map((node) => {
-    if (isRecordsFilterGroup(node)) return compileFilterGroup(eb, node, defsByKey, userId)
+    if (isRecordsFilterGroup(node)) return compileFilterGroup(eb, node, defsByKey, userId, virtual)
+    const vf = virtual.get(node.field)
+    if (vf) return compileVirtualRule(eb, vf, node, userId)
     const def = resolveTreeDef(defsByKey, node.field)
     if (!def) badTree(`unknown field "${node.field}"`)
     return compileRule(eb, def, node, userId)
@@ -513,15 +598,23 @@ function qPredicate(eb: Eb, q: string): Expression<SqlBool> {
   return eb.or(legs)
 }
 
+/** Who may see a type's records without view_all, as visibilityPredicate needs it. */
+export interface RecordsVisibilityScope {
+  key: string
+  boardsGrantVisibility: boolean
+  /** People fields whose named users see the record (see recordsAccessGrantingKeys). */
+  grantKeys: string[]
+}
+
 export function visibilityPredicate(
   eb: Eb,
   userId: string,
-  type: Pick<RecordTypeSetting, 'key' | 'boardsGrantVisibility'>
+  type: RecordsVisibilityScope
 ): Expression<SqlBool> {
   const sources = type.boardsGrantVisibility
     ? getRecordsVisibilitySources().map(s => s.predicate(eb, { userId, typeKey: type.key }))
     : []
-  return eb.or([
+  const legs: Expression<SqlBool>[] = [
     // Creators always see their own records — without this leg, a caller
     // lacking view_all who creates a record of a type with no user-reference
     // field (most custom types) would lose sight of it the moment it saves.
@@ -531,15 +624,28 @@ export function visibilityPredicate(
         .select('vs.record_id')
         .whereRef('vs.record_id', '=', 'records_entries.id')
         .where('vs.user_id', '=', userId)
-    ),
-    eb.exists(
+    )
+  ]
+  if (type.grantKeys.length > 0) {
+    legs.push(eb.exists(
       eb.selectFrom('records_user_refs as vu')
         .select('vu.record_id')
         .whereRef('vu.record_id', '=', 'records_entries.id')
         .where('vu.user_id', '=', userId)
-    ),
-    ...sources
-  ])
+        .where('vu.field_key', 'in', type.grantKeys)
+    ))
+  }
+  return eb.or([...legs, ...sources])
+}
+
+/** The visibility scope of `typeKey` (its board rule and access-granting people fields). */
+export async function recordsVisibilityScope(tx: Tx, typeKey: string): Promise<RecordsVisibilityScope> {
+  const type = await getRecordType(tx, typeKey)
+  return {
+    key: typeKey,
+    boardsGrantVisibility: type?.boardsGrantVisibility ?? true,
+    grantKeys: recordsAccessGrantingKeys(typeKey)
+  }
 }
 
 // name/status are physical columns on every record row, so they stay
@@ -592,9 +698,11 @@ export async function listRecords(
     if (!def) throw createError({ statusCode: 400, statusMessage: `Unknown filter field: ${key}` })
     preds.push(eb => filterPredicate(eb, def, raw))
   }
+  const virtual = new Map((opts.virtualFields ?? []).map(vf => [vf.def.key, vf]))
+  const treeDefs = [...defs, ...(opts.virtualFields ?? []).map(vf => vf.def)]
   for (const raw of opts.where ?? []) {
-    const group = parseRecordsFilterGroup(raw, defs)
-    preds.push(eb => compileFilterGroup(eb, group, defsByKey, ctx.userId))
+    const group = parseRecordsFilterGroup(raw, treeDefs)
+    preds.push(eb => compileFilterGroup(eb, group, defsByKey, ctx.userId, virtual))
   }
   if (opts.ids) {
     if (opts.ids.length === 0) return { items: [], total: 0 }
@@ -614,8 +722,7 @@ export async function listRecords(
     ]))
   }
   if (!(await resolveTypePermission(tx, ctx, typeKey, 'view_all'))) {
-    const type = await getRecordType(tx, typeKey)
-    const scope = { key: typeKey, boardsGrantVisibility: type?.boardsGrantVisibility ?? true }
+    const scope = await recordsVisibilityScope(tx, typeKey)
     preds.push(eb => visibilityPredicate(eb, ctx.userId, scope))
   }
 
@@ -629,8 +736,14 @@ export async function listRecords(
 
   const sortKey = opts.sort ?? 'updated_at'
   let query = base.selectAll()
+  const sortVirtual = virtual.get(sortKey)
   if (sortKey === 'updated_at' || sortKey === 'created_at') {
     query = query.orderBy(`records_entries.${sortKey}`, dir)
+  } else if (sortVirtual) {
+    if (!RECORDS_VIRTUAL_SCALAR_KINDS.has(sortVirtual.def.kind)) {
+      throw createError({ statusCode: 400, statusMessage: `Cannot sort by field: ${sortKey}` })
+    }
+    query = query.orderBy(virtualScalarExpr(sortVirtual), dir)
   } else {
     const def = resolveFieldDef(defsByKey, sortKey)
     if (!def || (def.storage !== 'promoted' && def.storage !== 'jsonb')) {
@@ -729,9 +842,8 @@ export async function visibleRecordIds(tx: Tx, ctx: TenantContext, ids: string[]
   }
   for (const [typeKey, typeIds] of byType) {
     if (!(await resolveTypePermission(tx, ctx, typeKey, 'read'))) continue
-    let type: RecordTypeSetting
     try {
-      type = await requireRecordType(tx, typeKey, ctx)
+      await requireRecordType(tx, typeKey, ctx)
     } catch {
       continue
     }
@@ -739,11 +851,12 @@ export async function visibleRecordIds(tx: Tx, ctx: TenantContext, ids: string[]
       for (const id of typeIds) visible.add(id)
       continue
     }
+    const scope = await recordsVisibilityScope(tx, typeKey)
     const seen = await tx
       .selectFrom('records_entries')
       .select('id')
       .where('id', 'in', typeIds)
-      .where(eb => visibilityPredicate(eb, ctx.userId, type))
+      .where(eb => visibilityPredicate(eb, ctx.userId, scope))
       .execute()
     for (const r of seen) visible.add(r.id)
   }
@@ -767,8 +880,7 @@ export async function assertRecordVisible(
     .where('id', '=', recordId)
     .where('record_type', '=', typeKey)
   if (!(await resolveTypePermission(tx, ctx, typeKey, 'view_all'))) {
-    const type = await getRecordType(tx, typeKey)
-    const scope = { key: typeKey, boardsGrantVisibility: type?.boardsGrantVisibility ?? true }
+    const scope = await recordsVisibilityScope(tx, typeKey)
     qb = qb.where(eb => visibilityPredicate(eb, ctx.userId, scope))
   }
   const row = await qb.executeTakeFirst()

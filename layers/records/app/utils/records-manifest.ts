@@ -40,6 +40,7 @@ export type RecordsFieldKind =
   | 'communication_channel'
   | 'connection'
   | 'link'
+  | 'attachments'
 
 // Where a field's values physically live:
 //   promoted    — a real column on records_entries (name, status)
@@ -48,7 +49,8 @@ export type RecordsFieldKind =
 //   user_refs   — rows in records_user_refs (user references)
 //   connections — rows in records_connections (record↔record edges)
 //   channels    — a registered storage driver (the crm layer's channel service)
-export type RecordsStorage = 'promoted' | 'jsonb' | 'entries' | 'user_refs' | 'connections' | 'channels'
+//   attachments — rows in records_attachments (uploaded files, bytes in object storage)
+export type RecordsStorage = 'promoted' | 'jsonb' | 'entries' | 'user_refs' | 'connections' | 'channels' | 'attachments'
 
 export interface RecordsFieldOption {
   label: string
@@ -85,6 +87,12 @@ export interface RecordsFieldDef {
   column?: 'name' | 'status'
   /** user_select: allow multiple users (assigned_to is multi-user). */
   multiple?: boolean
+  /**
+   * user_select: naming someone lets them see the record. Only fields whose
+   * purpose is handing a record to a person (an assignee) set it; every other
+   * people field only records who is involved.
+   */
+  grantsAccess?: boolean
   /** connection: target record-type key. */
   target?: string
   /** connection: field key on the target type used for reverse reads. */
@@ -103,6 +111,8 @@ export interface RecordsCardLayout {
   fields: string[]
   /** Per connection field shown on the card; unlisted ones show names. */
   connections?: Record<string, RecordsCardConnectionDisplay>
+  /** An attachments field whose first image tops the card as its cover. */
+  cover?: string
 }
 
 export interface RecordTypeManifest {
@@ -159,6 +169,8 @@ export function storageOf(def: Pick<RecordsFieldDef, 'kind' | 'column'>): Record
       return 'connections'
     case 'communication_channel':
       return 'channels'
+    case 'attachments':
+      return 'attachments'
     default:
       return 'jsonb'
   }
@@ -171,6 +183,16 @@ export function storageOf(def: Pick<RecordsFieldDef, 'kind' | 'column'>): Record
 export interface RecordsLinkValue {
   url: string
   label?: string
+}
+
+/** An uploaded file as it appears on a hydrated record. */
+export interface RecordsAttachmentValue {
+  id: string
+  name: string
+  mime: string
+  size: number
+  /** A time-limited link to the file. */
+  url: string
 }
 
 /** A connection edge as it appears on a hydrated record — id plus the
@@ -196,7 +218,8 @@ type FieldValue<F extends RecordsFieldDef> =
                   // Shaped by the layer that registers the channel storage driver.
                   : F['kind'] extends 'communication_channel' ? unknown[]
                     : F['kind'] extends 'link' ? RecordsLinkValue[]
-                      : unknown
+                      : F['kind'] extends 'attachments' ? RecordsAttachmentValue[]
+                        : unknown
 
 /** Logical (post-hydration) record shape derived from a manifest. */
 export type InferRecordShape<M extends RecordTypeManifest> = {

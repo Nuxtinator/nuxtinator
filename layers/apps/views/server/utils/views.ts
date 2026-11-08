@@ -23,14 +23,15 @@ import type { Database } from '#core/server/database/schema'
 import { isActiveOrgMember, type TenantContext } from '#tenant/server'
 import {
   getRecordType,
-  getRecordTypeFields,
   parseRecordsFilterGroup,
   requireRecordType,
   requireTypePermission,
+  type RecordsFieldSetting,
   type RecordsFilterGroup
 } from '#records/server'
 import { getContainerTeams, type ContainerTeam } from '#core/server/utils/team-access'
 import type { ViewsLayout, ViewsShareLevel, ViewsVisibility } from '../database/schema'
+import { clearViewFiles, sanitizeViewFields, viewFieldsWithType, type ViewFieldDef } from './view-fields'
 
 type Tx = Transaction<Database>
 
@@ -56,6 +57,8 @@ export interface ViewDefinition {
   filter?: RecordsFilterGroup
   /** Tabs show only the records added to the view by hand (views_items). */
   picked?: true
+  /** The view's own fields (see view-fields.ts). */
+  fields?: ViewFieldDef[]
 }
 
 // What one tab decides. Rendering defaults (card fields when unset, sort
@@ -120,7 +123,8 @@ export const viewsTabDefinitionSchema = z.object({
 
 const viewDefinitionSchema = z.object({
   filter: z.unknown().optional(),
-  picked: z.literal(true).optional()
+  picked: z.literal(true).optional(),
+  fields: z.unknown().optional()
 }).strict()
 
 function badDefinition(message: string): never {
@@ -128,26 +132,28 @@ function badDefinition(message: string): never {
 }
 
 /** An empty filter group is stored as no filter at all. */
-function sanitizeFilter(raw: unknown, fields: Awaited<ReturnType<typeof getRecordTypeFields>>): RecordsFilterGroup | undefined {
+function sanitizeFilter(raw: unknown, fields: RecordsFieldSetting[]): RecordsFilterGroup | undefined {
   if (raw === undefined || raw === null) return undefined
   const group = parseRecordsFilterGroup(raw, fields)
   return group.rules.length > 0 ? group : undefined
 }
 
-/** Validates a view-level definition (base filter, hand-picked flag). */
+/** Validates a view-level definition (base filter, hand-picked flag, own fields). */
 export async function sanitizeViewDefinition(tx: Tx, typeKey: string, raw: unknown): Promise<ViewDefinition> {
   const parsed = viewDefinitionSchema.safeParse(raw ?? {})
   if (!parsed.success) badDefinition(parsed.error.issues[0]?.message ?? 'malformed')
-  const fields = await getRecordTypeFields(tx, typeKey)
+  const viewFields = sanitizeViewFields(parsed.data.fields)
+  const fields = await viewFieldsWithType(tx, { record_type_key: typeKey, definition: { fields: viewFields } })
   const out: ViewDefinition = {}
   const filter = sanitizeFilter(parsed.data.filter, fields)
   if (filter) out.filter = filter
   if (parsed.data.picked) out.picked = true
+  if (viewFields.length > 0) out.fields = viewFields
   return out
 }
 
 /** Whether listRecords can sort by `key`: the record row's own columns and jsonb fields. */
-export function isSortableField(fields: Awaited<ReturnType<typeof getRecordTypeFields>>, key: string): boolean {
+export function isSortableField(fields: RecordsFieldSetting[], key: string): boolean {
   if (INTRINSIC_KEYS.has(key)) return true
   const field = fields.find(f => f.key === key && !f.orphan)
   return !!field && (field.storage === 'promoted' || field.storage === 'jsonb')
@@ -160,11 +166,11 @@ export function isSortableField(fields: Awaited<ReturnType<typeof getRecordTypeF
  */
 export async function sanitizeTabDefinition(
   tx: Tx,
-  typeKey: string,
+  view: Pick<ViewRow, 'record_type_key' | 'definition'>,
   layout: ViewsLayout,
-  raw: unknown,
-  opts: { picked: boolean }
+  raw: unknown
 ): Promise<ViewTabDefinition> {
+  const opts = { picked: !!(view.definition as ViewDefinition).picked }
   const parsed = viewsTabDefinitionSchema.safeParse(raw ?? {})
   if (!parsed.success) badDefinition(parsed.error.issues[0]?.message ?? 'malformed')
   const { filter: rawFilter, ...rest } = parsed.data
@@ -185,7 +191,7 @@ export async function sanitizeTabDefinition(
     badDefinition('tables are not grouped')
   }
 
-  const fields = await getRecordTypeFields(tx, typeKey)
+  const fields = await viewFieldsWithType(tx, view)
   const byKey = new Map(fields.map(f => [f.key, f]))
   const known = (key: string) => byKey.has(key) || INTRINSIC_KEYS.has(key)
 
@@ -354,9 +360,7 @@ export interface ViewTabInput {
 
 /** Adds a tab after the view's last one. */
 export async function insertTab(tx: Tx, view: ViewRow, input: ViewTabInput): Promise<ViewTabRow> {
-  const definition = await sanitizeTabDefinition(tx, view.record_type_key, input.layout, input.definition, {
-    picked: !!(view.definition as ViewDefinition).picked
-  })
+  const definition = await sanitizeTabDefinition(tx, view, input.layout, input.definition)
   const last = await tx
     .selectFrom('views_tabs')
     .select('position')
@@ -553,7 +557,8 @@ export function ownCardsQuery(tx: Tx, viewId: string) {
 
 /**
  * Deletes a view together with its own cards (records created on it that no
- * other view holds). Shares, tabs and placements go via FK cascade.
+ * other view holds) and the files on its own fields. Shares, tabs,
+ * placements and field values go via FK cascade.
  */
 export async function deleteViewWithOwnCards(
   tx: Tx,
@@ -563,6 +568,7 @@ export async function deleteViewWithOwnCards(
   if (own.length > 0) {
     await tx.deleteFrom('records_entries').where('id', 'in', own.map(r => r.record_id)).execute()
   }
+  await clearViewFiles(tx, view.id)
   await tx.deleteFrom('views_definitions').where('id', '=', view.id).execute()
 }
 
@@ -646,5 +652,42 @@ export async function createView(tx: Tx, ctx: TenantContext, input: CreateViewIn
     .returningAll()
     .executeTakeFirstOrThrow()
   await insertTab(tx, view, input.tab)
+  return await loadViewDetail(tx, view, 'owner', false)
+}
+
+/**
+ * A copy of a view's structure, owned by the caller and private: its record
+ * type, base filter, whether it holds hand-picked records, its own fields,
+ * and its tabs (layouts, columns, card fields, filters, sorts). No cards,
+ * values, placements or sharing come along.
+ */
+export async function copyView(tx: Tx, ctx: TenantContext, source: ViewRow, name: string): Promise<ViewDetail> {
+  await requireTypePermission(tx, ctx, source.record_type_key, 'read')
+  await requireRecordType(tx, source.record_type_key, ctx)
+  const definition = await sanitizeViewDefinition(tx, source.record_type_key, source.definition)
+  const view = await tx
+    .insertInto('views_definitions')
+    .values({
+      name,
+      icon: source.icon,
+      record_type_key: source.record_type_key,
+      visibility: 'private',
+      owner_id: ctx.userId,
+      definition: sql`${JSON.stringify(definition)}::text::jsonb`
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow()
+  for (const tab of await listTabs(tx, source.id)) {
+    await tx
+      .insertInto('views_tabs')
+      .values({
+        view_id: view.id,
+        name: tab.name,
+        layout: tab.layout,
+        position: tab.position,
+        definition: sql`${JSON.stringify(tab.definition)}::text::jsonb`
+      })
+      .execute()
+  }
   return await loadViewDetail(tx, view, 'owner', false)
 }

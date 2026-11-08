@@ -23,7 +23,8 @@ const Body = z.object({
   boardsGrantVisibility: z.boolean().nullish(),
   card: z.object({
     fields: z.array(z.string().trim().min(1).max(41)).max(20),
-    connections: z.record(z.string(), z.enum(['names', 'count', 'progress'])).optional()
+    connections: z.record(z.string(), z.enum(['names', 'count', 'progress'])).optional(),
+    cover: z.string().trim().min(1).max(41).optional()
   }).nullish()
 })
 

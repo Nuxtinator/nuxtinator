@@ -11,6 +11,8 @@
 //   one it was dragged from and stays in the other; multi-selects, tags and
 //   connections *add* — the target value joins and the source value stays,
 //   so carrying a deliverable into next quarter keeps this quarter too.
+//   Grouped by one of the view's own fields, the drag sets that field's
+//   value on the view instead (same move/add rule), which takes 'edit'.
 // - A board with its own columns: the drag is pure view state — the
 //   placement row moves. Records of the view with no placement on the tab
 //   sit in its first column on a hand-picked view, and in a leading
@@ -28,9 +30,10 @@ import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
-import { applyFieldPatch, assertRecordVisible, deleteRecord, getRecordType, getRecordTypeFields, requireRecordType, requireRecordUpdate, requireTypePermission, resolveTypePermission } from '#records/server'
-import type { RecordsFieldSetting } from '#records/server'
-import { getViewsGroupValues } from './view-records'
+import { applyFieldPatch, assertRecordVisible, deleteRecord, getRecordType, recordsAccessGrantingKeys, requireRecordType, requireRecordUpdate, requireShareConfirmation, requireTypePermission, resolveTypePermission } from '#records/server'
+import type { RecordsFieldSetting, RecordsSharingMode } from '#records/server'
+import { clearViewValues, isViewFieldKey, setViewValues, viewFieldsWithType } from './view-fields'
+import { getViewsGroupValues, requireRecordsWriteScope } from './view-records'
 import type { ViewDefinition, ViewRow, ViewsAccessLevel, ViewTabDefinition, ViewTabRow } from './views'
 
 type Tx = Transaction<Database>
@@ -45,18 +48,12 @@ export interface ViewsMoveInput {
   toColumn: string
   /** Target column's record ids in visual order after the drop. */
   columnOrder: string[]
+  /** Resends a drag refused for handing the card to someone who can't see it yet. */
+  confirmShare?: boolean
 }
 
 function badMove(message: string): never {
   throw createError({ statusCode: 400, statusMessage: message })
-}
-
-// A connected app changes records only with the records.write scope; for a
-// session, the records kernel's checks alone decide.
-function requireRecordsWriteScope(ctx: TenantContext): void {
-  if (ctx.clientId && !ctx.perms.has('records.write')) {
-    throw createError({ statusCode: 403, statusMessage: 'Permission required: records.write' })
-  }
 }
 
 function requireViewEdit(access: ViewsAccessLevel): void {
@@ -64,7 +61,7 @@ function requireViewEdit(access: ViewsAccessLevel): void {
 }
 
 async function resolveGroupField(tx: Tx, view: ViewRow, key: string): Promise<RecordsFieldSetting> {
-  const fields = await getRecordTypeFields(tx, view.record_type_key)
+  const fields = await viewFieldsWithType(tx, view)
   const field = fields.find(f => f.key === key && !f.orphan)
   if (!field) {
     throw createError({ statusCode: 409, statusMessage: `Grouping field "${key}" no longer exists on this type` })
@@ -185,7 +182,7 @@ async function viewItemSet(tx: Tx, viewId: string): Promise<Set<string>> {
   return new Set(rows.map(r => r.record_id))
 }
 
-async function assertInView(tx: Tx, ctx: TenantContext, view: ViewRow, recordId: string): Promise<void> {
+export async function assertInView(tx: Tx, ctx: TenantContext, view: ViewRow, recordId: string): Promise<void> {
   await assertRecordVisible(tx, ctx, view.record_type_key, recordId)
   if ((view.definition as ViewDefinition).picked) {
     const item = await tx
@@ -249,23 +246,31 @@ export async function moveViewsCard(
   if (!isValidColumn(field, input.toColumn)) badMove(`Unknown column "${input.toColumn}"`)
 
   if (input.fromColumn !== input.toColumn) {
+    const ownField = isViewFieldKey(view, field.key)
     requireRecordsWriteScope(ctx)
-    await requireRecordUpdate(tx, ctx, view.record_type_key, input.recordId)
+    // A field of the view's own is view state: filling it in takes 'edit'.
+    if (ownField) requireViewEdit(access)
+    else await requireRecordUpdate(tx, ctx, view.record_type_key, input.recordId)
     await assertInView(tx, ctx, view, input.recordId)
     const row = await tx
       .selectFrom('records_entries')
       .selectAll()
       .where('id', '=', input.recordId)
       .executeTakeFirstOrThrow()
-    const current = await getViewsGroupValues(tx, field, [{ ...row, assignedTo: [] }])
+    const current = await getViewsGroupValues(tx, field, [{ ...row, assignedTo: [] }], view)
     const values = current.get(input.recordId) ?? []
     if (input.fromColumn !== null && input.fromColumn !== '' && !values.includes(input.fromColumn)) {
       // The board the drag started from was stale; re-anchor on reality.
       throw createError({ statusCode: 409, statusMessage: 'Card moved since the board loaded — refresh' })
     }
-    await applyFieldPatch(tx, ctx, view.record_type_key, input.recordId, {
-      [field.key]: nextGroupValues(field, values, input.fromColumn, input.toColumn)
-    })
+    const next = nextGroupValues(field, values, input.fromColumn, input.toColumn)
+    if (ownField) {
+      await setViewValues(tx, ctx, view, input.recordId, { [field.key]: next })
+    } else {
+      await applyFieldPatch(tx, ctx, view.record_type_key, input.recordId, { [field.key]: next }, {
+        sharing: input.confirmShare ? 'confirmed' : 'ask'
+      })
+    }
   } else {
     await assertInView(tx, ctx, view, input.recordId)
   }
@@ -328,7 +333,8 @@ export async function createViewsCard(
   ctx: TenantContext,
   view: ViewRow,
   fields: Record<string, unknown>,
-  placement: { tab: ViewTabRow, columnKey?: string } | null
+  placement: { tab: ViewTabRow, columnKey?: string } | null,
+  opts: { viewValues?: Record<string, unknown>, sharing?: RecordsSharingMode } = {}
 ): Promise<{ id: string }> {
   if (!(view.definition as ViewDefinition).picked) {
     badMove('This view shows every matching record — create the record on its type instead')
@@ -341,6 +347,15 @@ export async function createViewsCard(
     .insertInto('views_items')
     .values({ view_id: view.id, record_id: record.id, created_here: true })
     .execute()
+  // Counted once the card is on the view, so people the view already shows
+  // its cards to aren't asked about.
+  const grantKeys = recordsAccessGrantingKeys(view.record_type_key)
+  if (opts.sharing && Object.keys(fields).some(key => grantKeys.includes(key))) {
+    await requireShareConfirmation(tx, ctx, view.record_type_key, record.id, null, opts.sharing)
+  }
+  if (opts.viewValues && Object.keys(opts.viewValues).length > 0) {
+    await setViewValues(tx, ctx, view, record.id, opts.viewValues)
+  }
   if (placement) await placeAtEnd(tx, view, record.id, placement)
   return { id: record.id }
 }
@@ -423,7 +438,7 @@ async function placeAtEnd(
     .execute()
 }
 
-/** Takes a record out of a hand-picked view, and off every one of its tabs. */
+/** Takes a record out of a hand-picked view, off every one of its tabs, with its view-field values. */
 export async function removeViewsCard(
   tx: Tx,
   view: ViewRow,
@@ -440,4 +455,5 @@ export async function removeViewsCard(
     .where('view_id', '=', view.id)
     .where('record_id', '=', recordId)
     .execute()
+  await clearViewValues(tx, view.id, recordId)
 }

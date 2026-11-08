@@ -1,9 +1,9 @@
 // Record hydration + the storage-routed field patch pipeline.
 //
-// A record's logical fields live in five physical homes (see `storageOf` in
-// #crm): promoted columns on records_entries, keys in records_entries.data,
-// records_field_entries rows, records_user_refs rows,
-// records_connections rows, and driver-backed storages (channel links).
+// A record's logical fields live in these physical homes (see `storageOf` in
+// #records): promoted columns on records_entries, keys in records_entries.data,
+// records_field_entries rows, records_user_refs rows, records_connections
+// rows, records_attachments rows, and driver-backed storages (channel links).
 // `hydrateRecords` reads them
 // all back into one flat `fields` map (one query per storage class, batched
 // over records); `applyFieldPatch` routes writes the other way:
@@ -20,7 +20,7 @@ import type { RawBuilder, Selectable, Transaction } from 'kysely'
 import { z } from 'zod'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
-import type { RecordsConnectedRecord, RecordsLinkValue } from '#records'
+import type { RecordsAttachmentValue, RecordsConnectedRecord, RecordsLinkValue } from '#records'
 import {
   getRecordsStorageDriver,
   getRegisteredRecordTypes,
@@ -29,11 +29,13 @@ import {
   type RecordsFieldPatch,
   type RecordsListPatch
 } from './records-registry'
-import { getRecordType, getRecordTypeFields, recordsStatusDefault, type RecordsFieldSetting } from './definition-settings'
+import { getRecordType, getRecordTypeFields, recordsAccessGrantingKeys, recordsStatusDefault, type RecordsFieldSetting } from './definition-settings'
 import { normalizeChannelValue } from './normalize'
 import { recordRecordsActivity } from './records-activity'
 import { closingRulesOf, enforceClosingRules } from './closing'
 import { visibleRecordIds } from './list-records'
+import { requireShareConfirmation, type RecordsSharingMode } from './share-confirmation'
+import { applyAttachmentsPatch, listRecordAttachments } from './attachments'
 
 type Tx = Transaction<Database>
 
@@ -64,6 +66,7 @@ function emptyValueFor(def: RecordsFieldSetting): unknown {
     case 'entries':
     case 'connections':
     case 'channels':
+    case 'attachments':
       return []
     case 'user_refs':
       return def.multiple ? [] : null
@@ -245,6 +248,16 @@ export async function hydrateRecords(
             : { id, name: '', hidden: true }
         )
       }
+    }
+  }
+
+  const attachmentKeys = defs.filter(d => d.storage === 'attachments').map(d => d.key)
+  if (attachmentKeys.length > 0) {
+    const files = await listRecordAttachments(tx, ids, attachmentKeys)
+    for (const [recordId, byField] of files) {
+      const rec = out.get(recordId)
+      if (!rec) continue
+      for (const [fieldKey, list] of byField) rec.fields[fieldKey] = list
     }
   }
 
@@ -450,6 +463,12 @@ function validateListItems(def: RecordsFieldSetting, list: ParsedList): void {
       case 'user_select':
       case 'connection':
         item.value = requireUuid(def, item.value)
+        break
+      case 'attachments':
+        // A file as hydrated ({ id, name, ... }) or its bare id.
+        item.value = requireUuid(def, item.value !== null && typeof item.value === 'object'
+          ? (item.value as { id?: unknown }).id
+          : item.value)
         break
       default:
         badValue(def, `kind '${def.kind}' does not accept a value list`)
@@ -695,6 +714,21 @@ async function assertConnectionTargetsExist(
 // applyFieldPatch
 // ---------------------------------------------------------------------------
 
+// Activity keeps a file's id and name, not its time-limited link.
+export function activityValue(def: Pick<RecordsFieldSetting, 'storage'>, value: unknown): unknown {
+  if (def.storage !== 'attachments' || !Array.isArray(value)) return value
+  return (value as RecordsAttachmentValue[]).map(f => ({ id: f.id, name: f.name }))
+}
+
+export interface ApplyFieldPatchOpts {
+  /**
+   * Set by writes a person makes: 'ask' refuses (409) a patch that names
+   * someone in an access-granting people field who can't otherwise see the
+   * record, until resent as 'confirmed'. Absent for system writes.
+   */
+  sharing?: RecordsSharingMode
+}
+
 // One pipeline for create (recordId null) and update. Returns the record as
 // hydrated after the patch.
 export async function applyFieldPatch(
@@ -702,7 +736,8 @@ export async function applyFieldPatch(
   ctx: TenantContext,
   typeKey: string,
   recordId: string | null,
-  patch: RecordsFieldPatch
+  patch: RecordsFieldPatch,
+  opts: ApplyFieldPatchOpts = {}
 ): Promise<RecordsHydratedRecord> {
   const type = await getRecordType(tx, typeKey)
   if (!type || type.orphan) {
@@ -746,7 +781,8 @@ export async function applyFieldPatch(
 
   if (isCreate) {
     for (const def of defs) {
-      if (!def.required || def.orphan) continue
+      // Files arrive by upload once the record exists, so they can't be required to create it.
+      if (!def.required || def.orphan || def.storage === 'attachments') continue
       if (def.storage === 'promoted' || def.storage === 'jsonb') {
         const value = scalarOps.get(def.key)
         if (value == null || value === '') {
@@ -847,7 +883,16 @@ export async function applyFieldPatch(
       case 'channels':
         await getRecordsStorageDriver(def.storage)!.apply(tx, ctx, id, def, list)
         break
+      case 'attachments':
+        await applyAttachmentsPatch(tx, id, def.key, list)
+        break
     }
+  }
+
+  // Only a write to an access-granting people field can share the record.
+  const grantKeys = recordsAccessGrantingKeys(typeKey)
+  if (opts.sharing && [...listOps.keys()].some(key => grantKeys.includes(key))) {
+    await requireShareConfirmation(tx, ctx, typeKey, id, oldRecord?.fields ?? null, opts.sharing)
   }
 
   const record = await getRecord(tx, ctx, typeKey, id)
@@ -858,8 +903,9 @@ export async function applyFieldPatch(
     for (const key of [...scalarOps.keys(), ...listOps.keys()]) {
       // Storage drivers write their own activity rows.
       if (defsByKey.get(key)!.storage === 'channels') continue
-      const before = oldRecord!.fields[key] ?? null
-      const after = record.fields[key] ?? null
+      const def = defsByKey.get(key)!
+      const before = activityValue(def, oldRecord!.fields[key] ?? null)
+      const after = activityValue(def, record.fields[key] ?? null)
       if (JSON.stringify(before) !== JSON.stringify(after)) {
         await recordRecordsActivity(tx, ctx, id, 'field_changed', { fieldKey: key, old: before, new: after })
       }

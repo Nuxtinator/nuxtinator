@@ -6,7 +6,35 @@ import { isRecordsFilterGroup, storageOf } from '#records'
 import type { RecordsStorage } from '#records'
 import type { RecordsFieldSetting, RecordsFilterGroup } from '#records/client'
 import { VIEWS_GROUPABLE_KINDS } from './views-types'
-import type { ViewsDefinition, ViewsLayout } from './views-types'
+import type { ViewsDefinition, ViewsFieldDef, ViewsLayout } from './views-types'
+
+/** Keys of a view's own fields start with this; type fields can't. */
+export const VIEWS_FIELD_KEY_PREFIX = 'vf_'
+
+export function viewsIsViewField(field: Pick<RecordsFieldSetting, 'key'>): boolean {
+  return field.key.startsWith(VIEWS_FIELD_KEY_PREFIX)
+}
+
+/** A view's own fields shaped like type fields, so pickers and renderers take both. */
+export function viewsFieldSettings(defs: ViewsFieldDef[] | undefined): RecordsFieldSetting[] {
+  return (defs ?? []).map((def, index) => ({
+    key: def.key,
+    kind: def.kind,
+    label: def.label,
+    icon: null,
+    section: null,
+    required: false,
+    hidden: false,
+    order: 1000 + index,
+    options: def.options ?? null,
+    custom: true,
+    orphan: false,
+    channelType: null,
+    target: null,
+    multiple: def.kind === 'user_select' && def.multiple === true,
+    column: null
+  }))
+}
 
 export function viewsFieldStorage(field: Pick<RecordsFieldSetting, 'kind' | 'column'>): RecordsStorage {
   return storageOf({ kind: field.kind, column: field.column ?? undefined })
@@ -104,13 +132,14 @@ export function viewsCardFieldChoices(fields: RecordsFieldSetting[]): ViewsCardF
 }
 
 /**
- * Every user id a view's feed refers to — values of its user fields, plus
+ * Every user id a view's feed refers to — values of its user fields (the
+ * type's and the view's own), plus
  * the grouping values when a board is grouped by one (those become its
  * columns). The names behind these ids come from a directory page that need
  * not contain them, so the view resolves exactly what it shows.
  */
 export function viewsReferencedUserIds(
-  items: Array<{ fields?: Record<string, unknown>, groupValues?: string[] }>,
+  items: Array<{ fields?: Record<string, unknown>, groupValues?: string[], viewValues?: Record<string, unknown> }>,
   fields: RecordsFieldSetting[],
   groupFieldKey: string | null
 ): string[] {
@@ -124,7 +153,7 @@ export function viewsReferencedUserIds(
     else if (typeof raw === 'string' && raw !== '') ids.add(raw)
   }
   for (const item of items) {
-    for (const key of userKeys) add(item.fields?.[key])
+    for (const key of userKeys) add(item.fields?.[key] ?? item.viewValues?.[key])
     if (groupIsUser) add(item.groupValues)
   }
   return [...ids]

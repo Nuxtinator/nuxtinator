@@ -1,7 +1,8 @@
 // MCP tools for views: list and create views, add and change their tabs
 // (board, table or list), set the view's or a tab's filter, read a tab by
-// column, add records to a hand-picked view, and move cards. Registered by
-// modules/views-mcp.ts only when the MCP layer is loaded.
+// column, add or create records on a hand-picked view, move cards, and manage
+// and fill in the view's own fields. Registered by modules/views-mcp.ts only
+// when the MCP layer is loaded.
 //
 // Every tool takes an optional `org` slug and runs inside
 // `withOrgPermission` under the `views.use` scope. View access is the same
@@ -15,7 +16,6 @@ import type { Transaction } from 'kysely'
 import { defineMcpTool, type McpToolContext } from '#mcp-layer'
 import { withOrgPermission, type TenantContext } from '#tenant/server'
 import type { Database } from '#core/server/database/schema'
-import { getRecordTypeFields } from '#records/server'
 import {
   createView,
   insertTab,
@@ -31,8 +31,18 @@ import {
   type ViewTabRow
 } from '../server/utils/views'
 import { updateTab } from '../server/utils/tabs'
-import { getViewRecords, requireRecordsReadScope, type ViewRecords } from '../server/utils/view-records'
-import { addViewsCard, dragMode, moveViewsCard } from '../server/utils/placements'
+import { getViewRecords, requireRecordsReadScope, requireRecordsWriteScope, type ViewRecords } from '../server/utils/view-records'
+import { addViewsCard, assertInView, createViewsCard, dragMode, moveViewsCard } from '../server/utils/placements'
+import {
+  addViewField,
+  deleteViewField,
+  readViewValues,
+  setViewValues,
+  updateViewField,
+  VIEW_FIELD_KINDS,
+  viewFieldsOf,
+  viewFieldsWithType
+} from '../server/utils/view-fields'
 
 type Tx = Transaction<Database>
 
@@ -48,7 +58,7 @@ const FILTER_OPS = [
 ] as const
 
 const filterRule = z.object({
-  field: z.string().min(1).max(80).describe('Field key (see records_list_types), or name, status, created_at, updated_at.'),
+  field: z.string().min(1).max(80).describe('Field key (see records_list_types, and views_list_fields for the view\'s own), or name, status, created_at, updated_at.'),
   op: z.enum(FILTER_OPS),
   value: z.unknown().optional().describe('One value; a list for any_of / none_of / all_of; [from, to] for between; none for empty / not_empty. "@me" in a people field means whoever is looking.')
 }).strict()
@@ -64,6 +74,9 @@ const filterInput = z.object({
     .describe('Rules, and groups of rules one level deep, e.g. status is open AND (assignee is @me OR assignee is empty).')
 }).strict()
   .describe('A filter. Ops by field kind: text contains/is/empty; dropdown is/is_not/any_of/none_of/empty; multi-select and tags any_of/all_of/none_of/empty; people is/any_of/none_of/empty; dates on/before/after/between/empty (YYYY-MM-DD); numbers eq/lt/gt/between/empty; checkbox is; connections any_of/none_of/empty (record ids). Pass { match: "all", rules: [] } to clear it.')
+
+const shareInput = z.boolean().optional()
+  .describe('Set true to assign someone who can\'t see the card yet; doing so shares it with them. Without it the call is refused and names those people, so confirm with the user first.')
 
 const layoutInput = z.enum(VIEWS_LAYOUTS).describe('kanban = a board of columns, list = rows with a done checkbox, table = a sortable grid.')
 
@@ -92,7 +105,7 @@ function columnsFrom(labels: string[]): Array<{ key: string, label: string }> {
 interface BoardColumn {
   key: string
   label: string
-  cards: Array<{ id: string, name: string }>
+  cards: Array<{ id: string, name: string, values?: Record<string, unknown> }>
 }
 
 // The tab's columns (board) or sections (list) with their cards, in the same
@@ -113,7 +126,7 @@ async function boardColumns(tx: Tx, view: ViewRow, tab: ViewTabRow, records: Vie
         if (ra && rb) return ra < rb ? -1 : ra > rb ? 1 : 0
         return ra ? -1 : rb ? 1 : 0
       })
-      .map(i => ({ id: i.id, name: i.name }))
+      .map(i => (i.viewValues ? { id: i.id, name: i.name, values: i.viewValues } : { id: i.id, name: i.name }))
   }
 
   if (def.columns) {
@@ -136,7 +149,7 @@ async function boardColumns(tx: Tx, view: ViewRow, tab: ViewTabRow, records: Vie
     return [{ key: '', label: tab.name, cards: ordered('', records.items.map(i => i.id)) }]
   }
 
-  const fields = await getRecordTypeFields(tx, view.record_type_key)
+  const fields = await viewFieldsWithType(tx, view)
   const field = fields.find(f => f.key === def.groupField)
   const members = new Map<string, string[]>()
   for (const item of records.items) {
@@ -159,7 +172,7 @@ async function boardColumns(tx: Tx, view: ViewRow, tab: ViewTabRow, records: Vie
 async function groupFieldOf(tx: Tx, view: ViewRow, tab: ViewTabRow) {
   const def = tab.definition as ViewTabDefinition
   if (tab.layout === 'table' || !def.groupField) return null
-  const fields = await getRecordTypeFields(tx, view.record_type_key)
+  const fields = await viewFieldsWithType(tx, view)
   return fields.find(f => f.key === def.groupField && !f.orphan) ?? null
 }
 
@@ -342,7 +355,8 @@ export const setFilterTool = defineMcpTool({
       const current = view.definition as ViewDefinition
       const definition = await sanitizeViewDefinition(tx, view.record_type_key, {
         filter: input.filter,
-        ...(current.picked ? { picked: true } : {})
+        ...(current.picked ? { picked: true } : {}),
+        ...(current.fields ? { fields: current.fields } : {})
       })
       await tx
         .updateTable('views_definitions')
@@ -378,7 +392,7 @@ export const getBoardTool = defineMcpTool({
         return text(`${records.items.length} of ${records.total} row(s)`, {
           view: { id: view.id, name: view.name },
           tab: tabInfo,
-          rows: records.items.map(i => ({ id: i.id, name: i.name, status: i.status })),
+          rows: records.items.map(i => ({ id: i.id, name: i.name, status: i.status, ...(i.viewValues ? { values: i.viewValues } : {}) })),
           total: records.total
         })
       }
@@ -431,7 +445,8 @@ export const moveCardTool = defineMcpTool({
     tab: tabIdInput,
     record: z.string().uuid(),
     fromColumn: z.string().max(80).describe('The column the card is in now ("" for "No value" or "No column").'),
-    toColumn: z.string().max(80).describe('The column to move it to ("" for "No value" or "No column").')
+    toColumn: z.string().max(80).describe('The column to move it to ("" for "No value" or "No column").'),
+    share: shareInput
   }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, async (tx, tenant) => {
@@ -446,9 +461,167 @@ export const moveCardTool = defineMcpTool({
         recordId: input.record,
         fromColumn: input.fromColumn,
         toColumn: input.toColumn,
-        columnOrder: order
+        columnOrder: order,
+        confirmShare: input.share
       })
       return text('Card moved.', { view: view.id, tab: tab.id, record: input.record, toColumn: input.toColumn })
+    })
+  }
+})
+
+export const createCardTool = defineMcpTool({
+  name: 'views_create_card',
+  title: 'Create Card',
+  description: 'Create a record as one of a hand-picked view\'s own cards (a view made with its own columns), with values for the record\'s fields (`fields`, name required) and for the view\'s own fields (`values`, keys from views_list_fields). Pass a tab and column to land it in a column. Needs edit access to the view and create access to the record type.',
+  appId: 'views',
+  scope: 'views.use',
+  input: z.object({
+    org: orgInput,
+    view: viewIdInput,
+    fields: z.record(z.string(), z.unknown()).describe('The record\'s field values; fields.name is required.'),
+    values: z.record(z.string(), z.unknown()).optional().describe('Values of the view\'s own fields.'),
+    tab: tabIdInput,
+    column: z.string().max(80).optional().describe('Column key, from views_get_board.'),
+    share: shareInput
+  }).strict(),
+  handler: async (input, ctx) => {
+    return await run(ctx, input.org, async (tx, tenant) => {
+      const { view } = await requireView(tx, tenant, input.view, 'edit')
+      const placement = input.tab || input.column
+        ? { tab: await requireTab(tx, view, input.tab), columnKey: input.column }
+        : null
+      const card = await createViewsCard(tx, tenant, view, input.fields, placement, {
+        viewValues: input.values,
+        sharing: input.share ? 'confirmed' : 'ask'
+      })
+      return text('Card created.', { view: view.id, record: card.id })
+    })
+  }
+})
+
+const fieldOptionsInput = z.array(z.string().trim().min(1).max(80)).min(1).max(50)
+  .describe('Dropdown and multi-select fields: the choices, in order.')
+
+function optionsFrom(labels: string[]): Record<string, { label: string }> {
+  return Object.fromEntries(columnsFrom(labels).map(c => [c.key, { label: c.label }]))
+}
+
+export const listFieldsTool = defineMcpTool({
+  name: 'views_list_fields',
+  title: 'List View Fields',
+  description: 'List a view\'s own fields: fields that belong to the view rather than the record type, with values shared by everyone who opens the view. Filters, sorts, grouping and card fields use their keys like any field.',
+  appId: 'views',
+  scope: 'views.use',
+  readOnly: true,
+  input: z.object({ org: orgInput, view: viewIdInput }).strict(),
+  handler: async (input, ctx) => {
+    return await run(ctx, input.org, async (tx, tenant) => {
+      const { view } = await requireView(tx, tenant, input.view, 'view')
+      const fields = viewFieldsOf(view)
+      return text(`${fields.length} field(s)`, { view: view.id, fields })
+    })
+  }
+})
+
+export const addFieldTool = defineMcpTool({
+  name: 'views_add_field',
+  title: 'Add View Field',
+  description: 'Add a field of the view\'s own, e.g. "Oven temp" (number) or "Rating" (dropdown) on a pizza board, when the record type lacks it and only this view needs it. A people field here only records who\'s involved; it never shares a card. Only the view\'s owner adds fields.',
+  appId: 'views',
+  scope: 'views.use',
+  input: z.object({
+    org: orgInput,
+    view: viewIdInput,
+    label: z.string().trim().min(1).max(80),
+    kind: z.enum(VIEW_FIELD_KINDS).describe('text, textarea, number, boolean, date, key_select (dropdown), multi_select, tags, link, user_select (people), attachments (files).'),
+    options: fieldOptionsInput.optional(),
+    multiple: z.boolean().optional().describe('People fields: several people.')
+  }).strict(),
+  handler: async (input, ctx) => {
+    return await run(ctx, input.org, async (tx, tenant) => {
+      const { view } = await requireView(tx, tenant, input.view, 'owner')
+      const { field } = await addViewField(tx, view, {
+        label: input.label,
+        kind: input.kind,
+        options: input.options ? optionsFrom(input.options) : undefined,
+        multiple: input.multiple
+      })
+      return text(`Added field ${field.label} (${field.key}).`, { view: view.id, field })
+    })
+  }
+})
+
+export const updateFieldTool = defineMcpTool({
+  name: 'views_update_field',
+  title: 'Update View Field',
+  description: 'Rename one of the view\'s own fields or replace its choices. Its kind and key don\'t change. Only the view\'s owner changes fields.',
+  appId: 'views',
+  scope: 'views.use',
+  input: z.object({
+    org: orgInput,
+    view: viewIdInput,
+    field: z.string().max(80).describe('Field key, from views_list_fields.'),
+    label: z.string().trim().min(1).max(80).optional(),
+    options: fieldOptionsInput.optional()
+  }).strict(),
+  handler: async (input, ctx) => {
+    return await run(ctx, input.org, async (tx, tenant) => {
+      const { view } = await requireView(tx, tenant, input.view, 'owner')
+      const current = viewFieldsOf(view).find(f => f.key === input.field)
+      let options: Record<string, { label: string }> | undefined
+      if (input.options) {
+        // Choices whose label is unchanged keep their key, so stored values still match.
+        const byLabel = new Map(Object.entries(current?.options ?? {}).map(([key, o]) => [o.label, key]))
+        const fresh = optionsFrom(input.options)
+        options = {}
+        for (const [key, o] of Object.entries(fresh)) options[byLabel.get(o.label) ?? key] = o
+      }
+      const updated = await updateViewField(tx, view, input.field, { label: input.label, options })
+      return text('Field updated.', { view: view.id, fields: viewFieldsOf(updated) })
+    })
+  }
+})
+
+export const deleteFieldTool = defineMcpTool({
+  name: 'views_delete_field',
+  title: 'Delete View Field',
+  description: 'Delete one of the view\'s own fields with every value filled in on it. Only the view\'s owner deletes fields; confirm with the user first.',
+  appId: 'views',
+  scope: 'views.use',
+  input: z.object({
+    org: orgInput,
+    view: viewIdInput,
+    field: z.string().max(80).describe('Field key, from views_list_fields.')
+  }).strict(),
+  handler: async (input, ctx) => {
+    return await run(ctx, input.org, async (tx, tenant) => {
+      const { view } = await requireView(tx, tenant, input.view, 'owner')
+      const updated = await deleteViewField(tx, view, input.field)
+      return text('Field deleted.', { view: view.id, fields: viewFieldsOf(updated) })
+    })
+  }
+})
+
+export const setValuesTool = defineMcpTool({
+  name: 'views_set_values',
+  title: 'Set View Values',
+  description: 'Fill in the view\'s own fields on one of its cards: { <fieldKey>: value }, null to clear. Dropdowns take a choice key, multi-selects and tags a list, people a user id (or a list), links a list of URLs. Files are added in the app. Needs edit access to the view.',
+  appId: 'views',
+  scope: 'views.use',
+  input: z.object({
+    org: orgInput,
+    view: viewIdInput,
+    record: z.string().uuid().describe('Record id of a card on the view.'),
+    values: z.record(z.string(), z.unknown())
+  }).strict(),
+  handler: async (input, ctx) => {
+    return await run(ctx, input.org, async (tx, tenant) => {
+      requireRecordsWriteScope(tenant)
+      const { view } = await requireView(tx, tenant, input.view, 'edit')
+      await assertInView(tx, tenant, view, input.record)
+      await setViewValues(tx, tenant, view, input.record, input.values)
+      const values = (await readViewValues(tx, view, [input.record])).get(input.record) ?? {}
+      return text('Values saved.', { view: view.id, record: input.record, values })
     })
   }
 })
@@ -461,5 +634,11 @@ export const viewsMcpTools = [
   setFilterTool,
   getBoardTool,
   addCardTool,
-  moveCardTool
+  createCardTool,
+  moveCardTool,
+  listFieldsTool,
+  addFieldTool,
+  updateFieldTool,
+  deleteFieldTool,
+  setValuesTool
 ]

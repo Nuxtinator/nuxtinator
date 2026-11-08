@@ -3,12 +3,28 @@
 // the records kernel's own field editors and patch pipeline (useRecordsRecord), so permissions
 // and validation are exactly the detail page's. Channels, connections
 // widgets, comments, and the timeline stay on the full record page — the
-// header links there.
+// header links there. Below the record's own fields, a section named after
+// the view holds the view's own fields: everyone who opens the view sees
+// them, and its editors fill them in.
 import type { RecordsFieldSetting, RecordsTypeFields } from '#records/client'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   typeKey: string
-}>()
+  /** The view the slideover opens from, when it has fields of its own. */
+  viewId?: string
+  viewName?: string
+  viewFields?: RecordsFieldSetting[]
+  /** The record's values for the view's fields, as the feed carries them. */
+  viewValues?: Record<string, unknown>
+  /** 'edit' on the view: its fields are editable. */
+  canEditView?: boolean
+}>(), {
+  viewId: undefined,
+  viewName: undefined,
+  viewFields: () => [],
+  viewValues: undefined,
+  canEditView: false
+})
 
 const recordId = defineModel<string | null>('recordId', { default: null })
 
@@ -19,6 +35,7 @@ const emit = defineEmits<{
 
 const toast = useToast()
 const typePath = useRecordsTypePath()
+const shareConfirm = useRecordsShareConfirm()
 const { getFields } = useRecordsTypes()
 
 const open = computed({
@@ -80,7 +97,32 @@ function fieldValue(field: RecordsFieldSetting): unknown {
 
 async function commitField(field: RecordsFieldSetting, value: unknown) {
   try {
-    await patchFields({ [field.key]: value })
+    const saved = await shareConfirm(confirmShare => patchFields({ [field.key]: value }, { confirmShare }))
+    if (saved) emit('changed')
+  } catch (err) {
+    toast.add({
+      title: 'Update failed',
+      description: recordsErrorMessage(err, `Failed to update ${field.label}`),
+      color: 'error'
+    })
+  }
+}
+// The view's own values: the feed's copy, replaced by each save's answer
+// until the next poll catches up.
+const savedViewValues = ref<Record<string, unknown> | null>(null)
+watch(() => [recordId.value, props.viewValues], () => {
+  savedViewValues.value = null
+})
+const viewValues = computed(() => savedViewValues.value ?? props.viewValues ?? {})
+
+async function commitViewField(field: RecordsFieldSetting, value: unknown) {
+  if (!props.viewId || !recordId.value) return
+  try {
+    const res = await $fetch<{ viewValues: Record<string, unknown> }>(`/api/views/${props.viewId}/values/${recordId.value}`, {
+      method: 'PATCH',
+      body: { values: { [field.key]: value } }
+    })
+    savedViewValues.value = res.viewValues
     emit('changed')
   } catch (err) {
     toast.add({
@@ -89,6 +131,12 @@ async function commitField(field: RecordsFieldSetting, value: unknown) {
       color: 'error'
     })
   }
+}
+
+function viewUploadUrl(field: RecordsFieldSetting): string | undefined {
+  return field.kind === 'attachments' && props.viewId && recordId.value
+    ? `/api/views/${props.viewId}/values/${recordId.value}/attachments?field=${field.key}`
+    : undefined
 }
 </script>
 
@@ -141,7 +189,24 @@ async function commitField(field: RecordsFieldSetting, value: unknown) {
                 :field="field"
                 :value="fieldValue(field)"
                 :editable="canEdit"
+                :upload-url="field.kind === 'attachments' && recordId ? `/api/records/entries/${typeKey}/${recordId}/attachments?field=${field.key}` : undefined"
                 @commit="commitField(field, $event)"
+                @uploaded="refresh(); emit('changed')"
+              />
+            </RecordsFieldSection>
+            <RecordsFieldSection
+              v-if="viewFields.length > 0"
+              :label="viewName ?? 'This view'"
+            >
+              <RecordsFieldRow
+                v-for="field in viewFields"
+                :key="field.key"
+                :field="field"
+                :value="viewValues[field.key] ?? null"
+                :editable="canEditView"
+                :upload-url="viewUploadUrl(field)"
+                @commit="commitViewField(field, $event)"
+                @uploaded="emit('changed')"
               />
             </RecordsFieldSection>
           </template>

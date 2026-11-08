@@ -3,7 +3,10 @@
 // tab's toolbar and renderer, and the interaction plumbing — optimistic moves
 // with the poll loop suspended while a drag settles, quick-add (through the
 // records create route, or as one of a hand-picked view's own cards), the
-// list's done checkbox, and tab and definition updates. The active tab rides in ?tab= so a tab can be linked to.
+// list's done checkbox, tab and definition updates, and the view's own
+// fields (managed by its owner, filled in by its editors). The active tab
+// rides in ?tab= so a tab can be linked to. Writes that would hand a card to
+// someone who can't see it ask first (useRecordsShareConfirm).
 import { generateNKeysBetween } from 'fractional-indexing'
 import { recordsFilterRuleCount } from '#records'
 import type { RecordsFieldSetting, RecordsFilterGroup } from '#records/client'
@@ -56,10 +59,17 @@ watch(() => view.value?.recordTypeKey, async (key) => {
   }
 }, { immediate: true })
 
+// The type's fields followed by the view's own: every picker and renderer
+// takes both.
+const allFields = computed<RecordsFieldSetting[]>(() =>
+  [...fields.value, ...viewsFieldSettings(view.value?.definition.fields)])
+const viewFields = computed(() => viewsFieldSettings(view.value?.definition.fields))
+const shareConfirm = useRecordsShareConfirm()
+
 // The people this view shows are resolved by id: the shared directory holds
 // one page of the org's members, and a record may reference anyone.
 const { ensureUserIds } = useRecordsUsers()
-watch([records, fields], ([recs, defs]) => {
+watch([records, allFields], ([recs, defs]) => {
   if (!recs || defs.length === 0) return
   const ids = viewsReferencedUserIds(
     recs.items,
@@ -78,10 +88,21 @@ const typeInfo = computed(() =>
 const canEditDefinition = computed(() =>
   view.value?.accessLevel === 'edit' || view.value?.accessLevel === 'owner')
 // Creating takes the type's create permission; on a hand-picked view it also
-// takes 'edit' on the view, since the record becomes one of its cards.
+// takes 'edit' on the view, since the record becomes one of its cards. So
+// does a tab whose filters or grouping set one of the view's own fields on a
+// new card: without it the card would miss that value and drop off the tab.
 const canCreate = computed(() => {
   const typeAllows = typeInfo.value?.canCreate ?? false
-  return picked.value ? typeAllows && canEditDefinition.value : typeAllows
+  if (!typeAllows) return false
+  return picked.value || setsViewFields.value ? canEditDefinition.value : true
+})
+const setsViewFields = computed(() => {
+  const v = view.value
+  const t = tab.value
+  if (!v || !t || viewFields.value.length === 0) return false
+  if (t.definition.groupField?.startsWith(VIEWS_FIELD_KEY_PREFIX)) return true
+  const pinned = viewsFilterPrefill([v.definition.filter, t.definition.filter], allFields.value, myUserId.value)
+  return Object.keys(pinned).some(key => key.startsWith(VIEWS_FIELD_KEY_PREFIX))
 })
 const isOwner = computed(() => view.value?.accessLevel === 'owner')
 const picked = computed(() => !!view.value?.definition.picked)
@@ -115,7 +136,7 @@ const openRecordId = ref<string | null>(null)
 
 const groupFieldDef = computed(() =>
   tab.value?.definition.groupField
-    ? fields.value.find(f => f.key === tab.value!.definition.groupField) ?? null
+    ? allFields.value.find(f => f.key === tab.value!.definition.groupField) ?? null
     : null)
 
 // Mirrors the server's drag rules (move for single-value and user fields,
@@ -162,12 +183,14 @@ function applyOptimisticMove(payload: ViewsMovePayload) {
 }
 
 async function onMove(payload: ViewsMovePayload) {
-  // Reordering within a column is view state, which view-only access can't change.
+  // Reordering within a column and moving between columns of one of the
+  // view's own fields are view state, which view-only access can't change.
   if (!canEditDefinition.value && payload.fromColumn === payload.toColumn) return
+  if (!canEditDefinition.value && groupFieldDef.value && viewsIsViewField(groupFieldDef.value)) return
   beginDrag()
   try {
     applyOptimisticMove(payload)
-    await move(payload)
+    await shareConfirm(confirmShare => move({ ...payload, confirmShare }))
   } catch (err) {
     toast.add({ color: 'error', title: recordsErrorMessage(err, 'Move failed') })
   } finally {
@@ -185,32 +208,52 @@ async function onQuickAdd({ columnKey, name }: { columnKey: string, name: string
   try {
     // The new record takes the values the view's and tab's filters pin, so it
     // shows up on the tab it was added from.
-    const recordFields: Record<string, unknown> = {
-      ...viewsFilterPrefill([v.definition.filter, t.definition.filter], fields.value, myUserId.value),
+    const pinnedValues: Record<string, unknown> = {
+      ...viewsFilterPrefill([v.definition.filter, t.definition.filter], allFields.value, myUserId.value),
       name
     }
     const field = groupFieldDef.value
     if (!isCustom.value && field) {
       const single = field.kind === 'key_select' || (field.kind === 'user_select' && !field.multiple)
-      const pinned = Array.isArray(recordFields[field.key]) ? recordFields[field.key] as unknown[] : []
+      const pinned = Array.isArray(pinnedValues[field.key]) ? pinnedValues[field.key] as unknown[] : []
       // "No value" is a value: an explicit null keeps the type's default
       // (a task's "open") from putting the new record in another column.
-      if (columnKey !== '') recordFields[field.key] = single ? columnKey : [...new Set([...pinned, columnKey])]
-      else if (single) recordFields[field.key] = null
-      else delete recordFields[field.key]
+      if (columnKey !== '') pinnedValues[field.key] = single ? columnKey : [...new Set([...pinned, columnKey])]
+      else if (single) pinnedValues[field.key] = null
+      else delete pinnedValues[field.key]
+    }
+    // Values of the view's own fields go to the view, not the record.
+    const recordFields: Record<string, unknown> = {}
+    const viewValues: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(pinnedValues)) {
+      if (key.startsWith(VIEWS_FIELD_KEY_PREFIX)) {
+        if (value !== null) viewValues[key] = value
+      } else {
+        recordFields[key] = value
+      }
     }
     if (picked.value) {
-      await $fetch(`/api/views/${v.id}/cards`, {
+      await shareConfirm(confirmShare => $fetch(`/api/views/${v.id}/cards`, {
         method: 'POST',
-        body: { fields: recordFields, tabId: t.id, columnKey: isCustom.value ? columnKey : undefined }
-      })
+        body: {
+          fields: recordFields,
+          viewValues,
+          confirmShare,
+          tabId: t.id,
+          columnKey: isCustom.value ? columnKey : undefined
+        }
+      }))
       await refreshRecords()
       return
     }
-    const created = await $fetch<{ id: string }>(`/api/records/entries/${v.recordTypeKey}`, {
+    const created = await shareConfirm(confirmShare => $fetch<{ id: string }>(`/api/records/entries/${v.recordTypeKey}`, {
       method: 'POST',
-      body: { fields: recordFields }
-    })
+      body: { fields: recordFields, confirmShare }
+    }))
+    if (!created) return
+    if (Object.keys(viewValues).length > 0 && canEditDefinition.value) {
+      await $fetch(`/api/views/${v.id}/values/${created.id}`, { method: 'PATCH', body: { values: viewValues } })
+    }
     if (isCustom.value && columnKey !== '') {
       // Own columns on a view of every matching record: the new card's
       // column is its placement, at the end of the column it was added from.
@@ -398,7 +441,7 @@ function onGroupFieldChange(groupField: string) {
   if (!t) return
   // Keys of a deleted field can still sit in the rest of the definition and
   // would fail validation, taking the repair down with them.
-  const definition = viewsPruneDefinition({ ...t.definition, groupField }, fields.value)
+  const definition = viewsPruneDefinition({ ...t.definition, groupField }, allFields.value)
   patchTab({ definition }, 'Failed to change the grouping field')
 }
 
@@ -579,6 +622,23 @@ async function deleteView() {
 
 const viewFilterCount = computed(() => recordsFilterRuleCount(view.value?.definition.filter))
 
+// --- the view's own fields + copying ----------------------------------------
+
+const fieldsOpen = ref(false)
+
+// A private copy of this view's structure — fields, tabs, columns, filters —
+// with no cards, opened straight away.
+async function copyCurrentView() {
+  const v = view.value
+  if (!v) return
+  try {
+    const copy = await $fetch<{ id: string }>(`/api/views/${v.id}/copy`, { method: 'POST', body: {} })
+    await navigateTo(viewsPath(`/${copy.id}`))
+  } catch (err) {
+    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to copy the view') })
+  }
+}
+
 const menuItems = computed(() => {
   const items: Array<Array<Record<string, unknown>>> = []
   const main: Array<Record<string, unknown>> = []
@@ -592,6 +652,13 @@ const menuItems = computed(() => {
       viewFilterOpen.value = true
     }
   })
+  main.push({
+    label: viewFields.value.length > 0 ? `Fields · ${viewFields.value.length}` : 'Fields',
+    icon: 'i-lucide-text-cursor-input',
+    onSelect: () => {
+      fieldsOpen.value = true
+    }
+  })
   if (canEditDefinition.value && isFieldGrouped.value) {
     main.push({
       label: 'Change grouping',
@@ -602,6 +669,7 @@ const menuItems = computed(() => {
     })
   }
   items.push(main)
+  items.push([{ label: 'Copy view', icon: 'i-lucide-copy', onSelect: copyCurrentView }])
   if (isOwner.value) {
     items.push([{
       label: 'Delete view',
@@ -714,7 +782,7 @@ const menuItems = computed(() => {
       v-model:q="q"
       :view="tabView"
       :view-definition="view.definition"
-      :fields="fields"
+      :fields="allFields"
       :can-edit-definition="canEditDefinition"
       :saving="saving"
       @definition-filter="onTabFilter"
@@ -770,7 +838,7 @@ const menuItems = computed(() => {
         v-if="layout === 'kanban' && tabView && tabRecords"
         :view="tabView"
         :records="tabRecords"
-        :fields="fields"
+        :fields="allFields"
         :can-edit-definition="canEditDefinition"
         :can-create="canCreate"
         @move="onMove"
@@ -806,7 +874,7 @@ const menuItems = computed(() => {
           class="flex-1 min-h-0"
           :view="tabView"
           :records="tabRecords"
-          :fields="fields"
+          :fields="allFields"
           :can-create="canCreate"
           :can-remove="canEditDefinition"
           :done-status="doneStatus"
@@ -825,7 +893,7 @@ const menuItems = computed(() => {
         v-model:page="page"
         :view="tabView"
         :records="tabRecords"
-        :fields="fields"
+        :fields="allFields"
         :sort="sort"
         :dir="dir"
         :page-size="pageSize"
@@ -844,7 +912,21 @@ const menuItems = computed(() => {
       v-if="view"
       v-model:record-id="openRecordId"
       :type-key="view.recordTypeKey"
+      :view-id="view.id"
+      :view-name="view.name"
+      :view-fields="viewFields"
+      :view-values="tabRecords?.items.find(i => i.id === openRecordId)?.viewValues"
+      :can-edit-view="canEditDefinition"
       @changed="refreshRecords"
+    />
+
+    <ViewsFieldsModal
+      v-if="view"
+      v-model:open="fieldsOpen"
+      :view-id="view.id"
+      :fields="view.definition.fields ?? []"
+      :readonly="!isOwner"
+      @changed="refresh"
     />
 
     <ViewsAddCardModal
@@ -859,7 +941,7 @@ const menuItems = computed(() => {
       v-if="tabView && tabRecords"
       v-model:open="cardFieldsOpen"
       :view="tabView"
-      :fields="fields"
+      :fields="allFields"
       :layout="tabRecords.card"
       @save="onCardFieldsChange"
     />
@@ -868,7 +950,7 @@ const menuItems = computed(() => {
       v-if="tabView && isFieldGrouped"
       v-model:open="groupFieldOpen"
       :view="tabView"
-      :fields="fields"
+      :fields="allFields"
       @save="onGroupFieldChange"
     />
 
@@ -876,7 +958,7 @@ const menuItems = computed(() => {
       v-if="view"
       v-model:open="tabModalOpen"
       :tab="tabModalTab"
-      :fields="fields"
+      :fields="allFields"
       :saving="saving"
       @save="onTabSave"
     />
@@ -885,7 +967,7 @@ const menuItems = computed(() => {
       v-if="view"
       v-model:open="viewFilterOpen"
       :title="isOwner ? 'Filter for every tab' : 'This view\'s filter'"
-      :fields="fields"
+      :fields="allFields"
       :filter="view.definition.filter ?? null"
       :readonly="!isOwner"
       :saving="saving"

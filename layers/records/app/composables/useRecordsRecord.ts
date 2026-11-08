@@ -58,8 +58,10 @@ export function useRecordsRecord(typeKey: MaybeRefOrGetter<string>, id: MaybeRef
    * are patched); the server response then replaces the whole record, so
    * multi-value list payloads self-correct on success. Throws on failure
    * after rolling back — callers surface the error (e.g. a toast).
+   * `confirmShare` resends a write refused for sharing the record with a
+   * newly named assignee (see useRecordsShareConfirm).
    */
-  async function patchFields(partial: Record<string, unknown>): Promise<RecordDetail> {
+  async function patchFields(partial: Record<string, unknown>, opts: { confirmShare?: boolean } = {}): Promise<RecordDetail> {
     const prev = record.value
     if (prev) {
       record.value = {
@@ -72,7 +74,7 @@ export function useRecordsRecord(typeKey: MaybeRefOrGetter<string>, id: MaybeRef
     try {
       const res = await $fetch<RecordDetail>(url(), {
         method: 'PATCH',
-        body: { fields: partial }
+        body: { fields: partial, ...(opts.confirmShare ? { confirmShare: true } : {}) }
       })
       record.value = res
       return res
