@@ -67,6 +67,27 @@ describe('ref fields', () => {
     expect(after.fields.test_item).toEqual({ id: item.id, label: '', missing: true })
   })
 
+  it('keeps only the target\'s id in activity, shown to each reader as they see it', async () => {
+    const { org, auth } = await createRecordsOrgWith(sql, ['member'])
+    const owner = withOrgHeader(auth, org.slug)
+    const sam = await addRecordsMember(sql, org.id)
+    const samOpts = withOrgHeader(sam.auth, org.slug)
+
+    const item = await create(owner, 'item', { name: 'test-records Layoffs' })
+    const task = await create(owner, 'task', { name: 'test-records Plan' })
+    await patch(owner, 'task', task.id, { test_item: item.id })
+    const [stored] = await sql<Array<{ new_value: unknown }>>`
+      select new_value from records_activity where record_id = ${task.id} and field_key = 'test_item'`
+    expect(stored!.new_value).toBe(item.id)
+
+    type Activity = { items: Array<{ fieldKey: string | null, newValue: unknown }> }
+    const refChange = async (opts: Opts) =>
+      (await $fetch<Activity>(`/api/records/entries/task/${task.id}/activity`, opts)).items.find(i => i.fieldKey === 'test_item')!
+    expect((await refChange(owner)).newValue).toEqual({ id: item.id, label: 'test-records Layoffs', url: `/records/item/${item.id}` })
+    await $fetch(`/api/records/entries/task/${task.id}/shares`, { method: 'POST', body: { userId: sam.user.id }, ...owner })
+    expect((await refChange(samOpts)).newValue).toEqual({ id: item.id, label: '', hidden: true })
+  })
+
   it('refuses a target the caller can\'t see or that doesn\'t exist, and clears with null', async () => {
     const { org, auth } = await createRecordsOrgWith(sql, ['member'])
     const owner = withOrgHeader(auth, org.slug)

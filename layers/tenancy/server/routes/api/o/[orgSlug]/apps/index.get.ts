@@ -1,5 +1,5 @@
 import { withOrgContext } from '#tenant/server'
-import { getOrgApps } from '../../../../../utils/app-settings'
+import { getOrgApps, requiredByTitles } from '../../../../../utils/app-settings'
 
 // Per-org app status. Registry-first three-tier merge — see
 // `server/utils/app-settings.ts`. UI for `/@<slug>/settings/apps`.
@@ -30,7 +30,7 @@ export default defineEventHandler((event) => {
         enabled: a.enabled,
         source: a.source,
         lockedByHost: a.lockedByHost,
-        requiredBy: a.requiredBy.map(id => apps.find(x => x.id === id)?.title ?? id),
+        requiredBy: requiredByTitles(a, apps),
         groups: limits.filter(l => l.app_id === a.id).map(l => l.name)
       }))
     }

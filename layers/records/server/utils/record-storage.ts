@@ -307,27 +307,42 @@ async function hydrateRefs(
     }
     idsBySource.set(def.source, ids)
   }
-  const resolved = new Map<string, Map<string, RecordsRefTarget | 'hidden'>>()
+  const resolved = new Map<string, Map<string, RecordsRefValue>>()
   for (const [sourceKey, ids] of idsBySource) {
-    const source = getRecordsRefSource(sourceKey)
-    resolved.set(sourceKey, source && ids.size > 0 ? await source.resolve(tx, ctx, [...ids]) : new Map())
+    resolved.set(sourceKey, await resolveRefValues(tx, ctx, sourceKey, [...ids]))
   }
   for (const def of refDefs) {
-    const targets = def.source ? resolved.get(def.source) : undefined
+    const values = def.source ? resolved.get(def.source) : undefined
     for (const rec of records) {
       const id = rec.fields[def.key]
-      if (typeof id !== 'string') {
-        rec.fields[def.key] = null
-        continue
-      }
-      const target = targets?.get(id)
-      let value: RecordsRefValue
-      if (target === undefined) value = { id, label: '', missing: true }
-      else if (target === 'hidden') value = { id, label: '', hidden: true }
-      else value = target.url ? { id, label: target.label, url: target.url } : { id, label: target.label }
-      rec.fields[def.key] = value
+      rec.fields[def.key] = typeof id === 'string' ? values?.get(id) ?? { id, label: '', missing: true } : null
     }
   }
+}
+
+/**
+ * Ref ids of one source as the caller sees them: the label and link for a
+ * target they can see, `hidden` for one they can't, `missing` for one that's
+ * gone (or whose source isn't registered).
+ */
+export async function resolveRefValues(
+  tx: Tx,
+  ctx: TenantContext,
+  sourceKey: string,
+  ids: string[]
+): Promise<Map<string, RecordsRefValue>> {
+  const source = getRecordsRefSource(sourceKey)
+  const targets: Map<string, RecordsRefTarget | 'hidden'> = source && ids.length > 0
+    ? await source.resolve(tx, ctx, ids)
+    : new Map()
+  const out = new Map<string, RecordsRefValue>()
+  for (const id of ids) {
+    const target = targets.get(id)
+    if (target === undefined) out.set(id, { id, label: '', missing: true })
+    else if (target === 'hidden') out.set(id, { id, label: '', hidden: true })
+    else out.set(id, target.url ? { id, label: target.label, url: target.url } : { id, label: target.label })
+  }
+  return out
 }
 
 export async function getRecord(
@@ -826,7 +841,9 @@ async function notifyNewAssignees(
 // ---------------------------------------------------------------------------
 
 // Activity keeps a file's id and name, not its time-limited link.
-export function activityValue(def: Pick<RecordsFieldSetting, 'storage'>, value: unknown): unknown {
+export function activityValue(def: Pick<RecordsFieldSetting, 'storage' | 'kind'>, value: unknown): unknown {
+  // A ref keeps only its id: the label is resolved for each reader.
+  if (def.kind === 'ref') return value !== null && typeof value === 'object' ? (value as RecordsRefValue).id : value
   if (def.storage !== 'attachments' || !Array.isArray(value)) return value
   return (value as RecordsAttachmentValue[]).map(f => ({ id: f.id, name: f.name }))
 }

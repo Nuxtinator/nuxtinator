@@ -330,7 +330,7 @@ export const listTimelineTool = defineMcpTool({
       await assertRecordVisible(tx, tenant, input.type, input.id)
       const limit = input.limit ?? 20
       const comments = await listComments(tx, input.id, { limit, before: input.commentsCursor })
-      const activity = await listActivity(tx, input.id, { limit, before: input.activityCursor })
+      const activity = await listActivity(tx, input.id, { limit, before: input.activityCursor }, { ctx: tenant, typeKey: input.type })
       const entries = [
         ...comments.items.map(c => ({
           kind: 'comment' as const,

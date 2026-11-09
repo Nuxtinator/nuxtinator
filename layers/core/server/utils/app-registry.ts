@@ -54,7 +54,8 @@ export interface AppEntry {
   // from other apps or from settings.
   launcher?: boolean
   // Org apps this one can't work without. While it's on for an org, so are
-  // they (unless the host disabled them), and they can't be turned off there.
+  // they (unless the host disabled them or controls them per org), and they
+  // can't be turned off there.
   requires?: string[]
 }
 

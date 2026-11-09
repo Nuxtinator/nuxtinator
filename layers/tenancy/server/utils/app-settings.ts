@@ -14,9 +14,9 @@
 //                               or by a host admin via /admin/apps)
 //
 // `getApps` resolves (1) and (2). `getOrgApps` adds (3), then turns on the
-// apps an enabled app requires (`registerApp({ requires })`) — derived on
-// read, never stored. The downstream helpers (`getOrgEnabledApps`,
-// `isAppEnabledForOrg`) filter off its result.
+// apps an enabled app requires (`registerApp({ requires })`, see
+// `applyRequires`) — derived on read, never stored. The downstream helpers
+// (`getOrgEnabledApps`, `isAppEnabledForOrg`) filter off its result.
 
 import { defineSettings, type DbClient } from '#core/server/utils/settings'
 import { getApps, type AppCatalogEntry } from '#core/server/utils/app-settings'
@@ -34,8 +34,8 @@ export interface OrgAppEntry extends AppCatalogEntry {
   lockedByHost: boolean
   // Catalog-level status surfaced for UI tooltips ("Default: available").
   globalStatus: AppStatus
-  // Enabled apps that require this one: while any is on, so is this one,
-  // and the org can't turn it off.
+  // Apps on by their own switch that require this one (directly or through
+  // another app): while any is on, so is this one, and it can't be turned off.
   requiredBy: string[]
 }
 
@@ -79,27 +79,52 @@ const readOrgApps = defineSettings<AppCatalogEntry, OrgAppRow, Omit<OrgAppEntry,
 })
 
 // The org's apps, with every app an enabled app requires turned on too
-// (transitively), unless the host disabled it catalog-wide.
+// (transitively), unless the host disabled it or controls it per org.
 export async function getOrgApps(tx: DbClient, ctx: { orgId: string }): Promise<OrgAppEntry[]> {
-  const apps: OrgAppEntry[] = (await readOrgApps(tx, ctx)).map(a => ({ ...a, requiredBy: [] }))
+  return applyRequires(await readOrgApps(tx, ctx))
+}
+
+type RequiresInput = Pick<OrgAppEntry, 'id' | 'status' | 'requires' | 'enabled'>
+
+// Turns on what the apps on by their own switch require and fills
+// `requiredBy` with those apps. A host-controlled app stays as the host set it
+// for the org. An app on by its own switch isn't held on by an app it requires
+// back, so apps that require each other can still be turned off one at a time.
+export function applyRequires<T extends RequiresInput>(apps: T[]): Array<T & { requiredBy: string[] }> {
   const byId = new Map(apps.map(a => [a.id, a]))
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const app of apps) {
-      if (!app.enabled) continue
-      for (const id of app.requires) {
-        const required = byId.get(id)
-        if (!required || required.status === 'disabled' || required.status === 'admins') continue
-        if (!required.requiredBy.includes(app.id)) required.requiredBy.push(app.id)
-        if (!required.enabled) {
-          required.enabled = true
-          changed = true
-        }
-      }
-    }
+  const derivable = (id: string) => {
+    const status = byId.get(id)?.status
+    return status !== undefined && status !== 'disabled' && status !== 'admins' && status !== 'host_controlled'
   }
-  return apps
+  const closures = new Map<string, Set<string>>()
+  const closure = (id: string): Set<string> => {
+    let out = closures.get(id)
+    if (out) return out
+    out = new Set<string>()
+    const stack = [...(byId.get(id)?.requires ?? [])]
+    while (stack.length > 0) {
+      const next = stack.pop()!
+      if (out.has(next) || !derivable(next)) continue
+      out.add(next)
+      stack.push(...byId.get(next)!.requires)
+    }
+    closures.set(id, out)
+    return out
+  }
+  const roots = apps.filter(a => a.enabled).map(a => a.id)
+  return apps.map((app) => {
+    const requiredBy = roots.filter(root =>
+      root !== app.id
+      && closure(root).has(app.id)
+      && !(app.enabled && closure(app.id).has(root)))
+    const heldOn = roots.some(root => root !== app.id && closure(root).has(app.id))
+    return { ...app, enabled: app.enabled || heldOn, requiredBy }
+  })
+}
+
+// The titles of the apps that keep `app` on.
+export function requiredByTitles(app: Pick<OrgAppEntry, 'requiredBy'>, apps: Array<Pick<OrgAppEntry, 'id' | 'title'>>): string[] {
+  return app.requiredBy.map(id => apps.find(a => a.id === id)?.title ?? id)
 }
 
 // Refuses (409) turning off an app that an app still on for the org requires.
@@ -107,7 +132,7 @@ export async function assertAppNotRequired(tx: DbClient, orgId: string, appId: s
   const apps = await getOrgApps(tx, { orgId })
   const app = apps.find(a => a.id === appId)
   if (!app || app.requiredBy.length === 0) return
-  const titles = app.requiredBy.map(id => apps.find(a => a.id === id)?.title ?? id)
+  const titles = requiredByTitles(app, apps)
   throw createError({ statusCode: 409, statusMessage: `${app.title} is required by ${titles.join(', ')}. Turn ${titles.length === 1 ? 'it' : 'them'} off first.` })
 }
 

@@ -51,6 +51,8 @@ Either way, destructive actions open behind an outlined error button and confirm
 
 - Creating something starts from an "Add …" button that opens a modal with its fields. No input field sitting next to the create button on the page.
 - A list page split into columns by who an item is for (Teams / Mine) puts a ghost "+" in each column's header instead of one page-level button; it opens the create modal already set to that column's audience.
+- Items declared in code that nobody can change (a built-in view) sit in their own "Built-in" row above those columns and carry a "Built-in" badge in their header. They show no rename, sharing or settings controls; a "Copy" action makes an editable one.
+- To show another app's content inside your page (a meeting's tasks), embed that app's own panel without its back button and title, with an "Open in <App>" link. Don't build a second UI for the same data.
 - A modal with a form uses `UModal`'s `title`, `#body` and `#footer`: the title in the header, fields in the body with `space-y-5`, Cancel and the main action at the end of the footer (the submit button points at the form with `form="<id>"`).
 - A create modal whose right settings depend on what the thing is for opens on a grid of "What are you …?" tiles that preset them; the name follows, and the detailed choices sit under "More options".
 - A choice among two or three kinds (a layout, how a board gets its columns) is a row of cards, each with an icon and a name: `URadioGroup` with `variant="card"` and `indicator="hidden"`. Plain radio buttons are for choices that need no picture.

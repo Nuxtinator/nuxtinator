@@ -59,9 +59,13 @@ async function search(q: string): Promise<void> {
   }
 }
 
-onMounted(() => {
-  search('')
-})
+// Targets load when the picker first opens, so reading a record costs no search.
+let loaded = false
+function onOpen(open: boolean) {
+  if (!open || loaded) return
+  loaded = true
+  search(searchTerm.value)
+}
 
 let timer: ReturnType<typeof setTimeout> | null = null
 watch(searchTerm, (q) => {
@@ -102,6 +106,7 @@ function onChange(value: unknown) {
       placeholder="Choose..."
       class="w-full sm:max-w-xs"
       @update:model-value="onChange"
+      @update:open="onOpen"
     />
     <UButton
       v-if="current"

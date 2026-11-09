@@ -11,6 +11,8 @@ import { sql } from 'kysely'
 import type { SqlBool, Transaction } from 'kysely'
 import { z } from 'zod'
 import type { Database } from '#core/server/database/schema'
+import type { TenantContext } from '#tenant/server'
+import type { RecordsRefValue } from '#records'
 import {
   clampTimelineLimit,
   decodeTimelineCursor,
@@ -18,6 +20,8 @@ import {
   type RecordsTimelineListOpts
 } from './comments'
 import { resolveClientNames } from './client-names'
+import { getRecordTypeFields } from './definition-settings'
+import { resolveRefValues } from './record-storage'
 
 type Tx = Transaction<Database>
 
@@ -44,10 +48,15 @@ export interface RecordsActivityPage {
   nextCursor: string | null
 }
 
+/**
+ * `refs` names the reader and the record's type, so ref field changes show
+ * their targets as that reader sees them; without it they stay bare ids.
+ */
 export async function listActivity(
   tx: Tx,
   recordId: string,
-  opts: RecordsTimelineListOpts = {}
+  opts: RecordsTimelineListOpts = {},
+  refs?: { ctx: TenantContext, typeKey: string }
 ): Promise<RecordsActivityPage> {
   if (!uuidSchema.safeParse(recordId).success) {
     throw createError({ statusCode: 404, statusMessage: 'Record not found.' })
@@ -95,6 +104,44 @@ export async function listActivity(
     viaClient: r.client_id ? clients.get(r.client_id) ?? r.client_id : null,
     createdAt: r.created_at
   }))
+  if (refs) await resolveActivityRefs(tx, refs.ctx, refs.typeKey, items)
   const last = rows.length > limit ? page[page.length - 1]! : null
   return { items, nextCursor: last ? encodeTimelineCursor(last.created_at, last.id) : null }
+}
+
+// A ref change is stored as the target's id (see activityValue); the reader
+// gets the target's current label, or hidden/missing.
+async function resolveActivityRefs(tx: Tx, ctx: TenantContext, typeKey: string, items: RecordsActivityItem[]): Promise<void> {
+  const changes = items.filter(i => i.action === 'field_changed' && i.fieldKey)
+  if (changes.length === 0) return
+  const sourceByKey = new Map<string, string>()
+  for (const def of await getRecordTypeFields(tx, typeKey)) {
+    if (def.kind === 'ref' && def.source) sourceByKey.set(def.key, def.source)
+  }
+  const idOf = (value: unknown): string | null => {
+    if (typeof value === 'string') return value
+    if (value !== null && typeof value === 'object' && typeof (value as { id?: unknown }).id === 'string') return (value as { id: string }).id
+    return null
+  }
+  const idsBySource = new Map<string, Set<string>>()
+  for (const item of changes) {
+    const source = sourceByKey.get(item.fieldKey!)
+    if (!source) continue
+    const ids = idsBySource.get(source) ?? new Set<string>()
+    for (const value of [item.oldValue, item.newValue]) {
+      const id = idOf(value)
+      if (id) ids.add(id)
+    }
+    idsBySource.set(source, ids)
+  }
+  const resolved = new Map<string, Map<string, RecordsRefValue>>()
+  for (const [source, ids] of idsBySource) resolved.set(source, await resolveRefValues(tx, ctx, source, [...ids]))
+  for (const item of changes) {
+    const values = resolved.get(sourceByKey.get(item.fieldKey!) ?? '')
+    if (!values) continue
+    const oldId = idOf(item.oldValue)
+    const newId = idOf(item.newValue)
+    item.oldValue = oldId ? values.get(oldId) ?? null : null
+    item.newValue = newId ? values.get(newId) ?? null : null
+  }
 }

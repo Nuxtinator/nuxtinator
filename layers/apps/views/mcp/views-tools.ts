@@ -477,7 +477,7 @@ export const moveCardTool = defineMcpTool({
         columnOrder: order,
         confirmShare: input.share
       })
-      return text('Card moved.', { view: view.id, tab: tab.id, record: input.record, toColumn: input.toColumn })
+      return text('Card moved.', { view: input.view, tab: tab.id, record: input.record, toColumn: input.toColumn })
     })
   }
 })
@@ -531,7 +531,7 @@ export const listFieldsTool = defineMcpTool({
     return await run(ctx, input.org, async (tx, tenant) => {
       const { view } = await requireView(tx, tenant, input.view, 'view')
       const fields = viewFieldsOf(view)
-      return text(`${fields.length} field(s)`, { view: view.id, fields })
+      return text(`${fields.length} field(s)`, { view: input.view, fields })
     })
   }
 })
