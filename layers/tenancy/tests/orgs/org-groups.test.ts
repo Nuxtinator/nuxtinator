@@ -1,6 +1,6 @@
 // An org's groups: management from org settings and /admin/orgs, the group
 // mode, the caller's teams, leaving the org, and the team gate on org apps.
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import {
   getHostAdminDb,
@@ -26,6 +26,17 @@ async function status(p: Promise<unknown>): Promise<number> {
 
 describe('org groups', () => {
   const sql = getHostAdminDb()
+
+  // 'messages' declares no defaultStatus, so on a fresh database it's off for every org.
+  let messagesStatus: string | null = null
+  beforeAll(async () => {
+    const [row] = await sql<{ status: string | null }[]>`SELECT status FROM apps WHERE id = 'messages'`
+    messagesStatus = row?.status ?? null
+    await sql`UPDATE apps SET status = 'default' WHERE id = 'messages'`
+  })
+  afterAll(async () => {
+    await sql`UPDATE apps SET status = ${messagesStatus} WHERE id = 'messages'`
+  })
 
   afterEach(async () => {
     await sql`DELETE FROM groups WHERE name LIKE 'test-tenancy-%'`

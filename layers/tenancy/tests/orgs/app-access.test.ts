@@ -1,6 +1,6 @@
 // The page guard's app map: every installed app's path, with per-org enabled
 // and per-user permitted flags.
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import {
   getHostAdminDb,
@@ -18,6 +18,17 @@ interface AppAccess { id: string, title: string, path: string, enabled: boolean,
 
 describe('GET /api/o/[orgSlug]/_app-access', () => {
   const sql = getHostAdminDb()
+
+  // 'messages' declares no defaultStatus, so on a fresh database it's off for every org.
+  let messagesStatus: string | null = null
+  beforeAll(async () => {
+    const [row] = await sql<{ status: string | null }[]>`SELECT status FROM apps WHERE id = 'messages'`
+    messagesStatus = row?.status ?? null
+    await sql`UPDATE apps SET status = 'default' WHERE id = 'messages'`
+  })
+  afterAll(async () => {
+    await sql`UPDATE apps SET status = ${messagesStatus} WHERE id = 'messages'`
+  })
 
   afterEach(async () => {
     await cleanupTenancyTestData(sql)
