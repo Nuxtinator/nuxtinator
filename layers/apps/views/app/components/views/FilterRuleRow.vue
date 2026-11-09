@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // One rule of the filter builder: field, operator, and a value editor that
 // fits the field's kind — options for selects, people (with "Me") for user
-// fields, records for connections, dates, numbers, or free text. Changing
+// fields, records for connections, a ref source's targets for refs, dates,
+// numbers, or free text. Changing
 // the field or operator resets the value to that shape's empty value.
 import {
   RECORDS_FILTER_ME,
@@ -60,6 +61,7 @@ const optionItems = computed(() => {
     ]
   }
   if (f.kind === 'connection') return targetItems.value
+  if (f.kind === 'ref') return refItems.value
   return Object.entries(f.options ?? {})
     .filter(([, o]) => !o.deleted)
     .map(([key, o]) => ({ label: o.label, value: key }))
@@ -67,7 +69,61 @@ const optionItems = computed(() => {
 
 const usesOptions = computed(() => {
   const kind = field.value?.kind
-  return kind === 'key_select' || kind === 'multi_select' || kind === 'user_select' || kind === 'connection'
+  return kind === 'key_select' || kind === 'multi_select' || kind === 'user_select' || kind === 'connection' || kind === 'ref'
+})
+
+// Ref rules search the source's targets as you type; chosen ones keep their
+// label when a search doesn't include them.
+type RefTarget = { id: string, label: string, hidden?: true, missing?: true }
+const refSource = computed(() => field.value?.kind === 'ref' ? field.value.source ?? null : null)
+const refSearchTerm = ref('')
+const refResults = ref<Array<{ label: string, value: string }>>([])
+const refLabels = ref(new Map<string, string>())
+const chosenRefIds = (): string[] => Array.isArray(props.rule.value) ? props.rule.value.map(String) : typeof props.rule.value === 'string' && props.rule.value !== '' ? [props.rule.value] : []
+const refItems = computed(() => {
+  const items = [...refResults.value]
+  for (const id of chosenRefIds()) {
+    if (!items.some(i => i.value === id)) items.unshift({ label: refLabels.value.get(id) ?? '…', value: id })
+  }
+  return items
+})
+
+async function searchRefs(source: string, q: string): Promise<void> {
+  try {
+    const res = await $fetch<{ items: RefTarget[] }>(`/api/records/refs/${source}`, { query: { q: q.trim() || undefined, limit: 50 } })
+    if (refSource.value !== source) return
+    refResults.value = res.items.map(r => ({ label: r.label, value: r.id }))
+    for (const r of res.items) refLabels.value.set(r.id, r.label)
+  } catch {
+    // The picker keeps its previous results; the rule can still be removed.
+  }
+}
+
+watch(refSource, async (source) => {
+  refResults.value = []
+  refSearchTerm.value = ''
+  if (!source) return
+  const chosen = chosenRefIds()
+  const [, current] = await Promise.all([
+    searchRefs(source, ''),
+    chosen.length > 0
+      ? $fetch<{ items: RefTarget[] }>(`/api/records/refs/${source}`, { query: { ids: chosen.join(',') } }).catch(() => ({ items: [] as RefTarget[] }))
+      : Promise.resolve({ items: [] as RefTarget[] })
+  ])
+  for (const c of current.items) refLabels.value.set(c.id, c.hidden ? 'Hidden' : c.missing ? 'Deleted' : c.label)
+}, { immediate: true })
+
+let refTimer: ReturnType<typeof setTimeout> | null = null
+watch(refSearchTerm, (q) => {
+  if (refTimer) clearTimeout(refTimer)
+  const source = refSource.value
+  if (!source) return
+  refTimer = setTimeout(() => {
+    searchRefs(source, q)
+  }, 250)
+})
+onBeforeUnmount(() => {
+  if (refTimer) clearTimeout(refTimer)
 })
 
 // Connection rules pick records of the target type.
@@ -175,6 +231,8 @@ const booleanValue = computed<boolean>({
         v-else-if="usesOptions && shape === 'list'"
         v-model="list"
         :items="optionItems"
+        v-model:search-term="refSearchTerm"
+        :ignore-filter="!!refSource"
         value-key="value"
         label-key="label"
         multiple
@@ -188,6 +246,8 @@ const booleanValue = computed<boolean>({
         v-else-if="usesOptions"
         v-model="singleOption"
         :items="optionItems"
+        v-model:search-term="refSearchTerm"
+        :ignore-filter="!!refSource"
         value-key="value"
         label-key="label"
         size="sm"

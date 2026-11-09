@@ -1,11 +1,12 @@
 import { withOrgContext } from '#tenant/server'
-import { getOrgApps } from '../../../../../utils/app-settings'
+import { getOrgApps, requiredByTitles } from '../../../../../utils/app-settings'
 
 // Per-org app status. Registry-first three-tier merge — see
 // `server/utils/app-settings.ts`. UI for `/@<slug>/settings/apps`.
 // A host-controlled app is listed only while it's on for the org. `groups`
 // names the org groups an app is limited to (the team gate); empty means open.
 // It's filled only for callers who manage the org's apps or groups.
+// `requiredBy` names the enabled apps that keep an app on.
 export default defineEventHandler((event) => {
   return withOrgContext(event, async (tx, ctx) => {
     const apps = await getOrgApps(tx, { orgId: ctx.orgId })
@@ -29,6 +30,7 @@ export default defineEventHandler((event) => {
         enabled: a.enabled,
         source: a.source,
         lockedByHost: a.lockedByHost,
+        requiredBy: requiredByTitles(a, apps),
         groups: limits.filter(l => l.app_id === a.id).map(l => l.name)
       }))
     }

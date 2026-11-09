@@ -1,6 +1,6 @@
 # Records Layer
 
-The record kernel: record types and their fields, the records themselves, and everything generic about them — storage, the list engine, sharing, comments, activity, closing, the schema builder, and a `/records` app for browsing any type. Other layers build on it: `crm` adds contacts with communication channels and consent, `views` adds kanban boards and tables, producer layers (meetings) write tasks. Works single-tenant out of the box; org-scoped with `@nuxtinator/tenancy`.
+The record kernel: record types and their fields, the records themselves, and everything generic about them — storage, the list engine, sharing, comments, activity, closing, the schema builder, and a `/records` app for browsing any type. Other layers build on it: `crm` adds contacts with communication channels and consent, `views` adds kanban boards and tables, producer layers (meetings) write tasks and point them at their own rows with `ref` fields. Works single-tenant out of the box; org-scoped with `@nuxtinator/tenancy`.
 
 ## Data model
 
@@ -9,6 +9,10 @@ Eleven tables: `records_entries` (one row per record of any type, with promoted 
 A record can carry `user_id`, the user account of the person it describes (one record per type per user).
 
 Where a field's values live is decided by its kind (`storageOf` in [app/utils/records-manifest.ts](app/utils/records-manifest.ts)): promoted column, jsonb key, entry rows, user refs, connection edges, attachment rows, or a registered storage driver (`channels`, provided by crm).
+
+## Refs
+
+A `ref` field points at one thing another layer owns, not a record: a task's meeting. It stores the target's id as a jsonb key and names a `source` the owning layer registers with `registerRecordsRefSource({ source, label, resolve, search })`. `resolve` turns ids into `{ label, url }` for the caller (or says a target is hidden); `search` feeds the picker. A ref reads back as `{ id, label, url }`, or `{ id, label: '', hidden: true }` / `{ id, label: '', missing: true }` when the caller can't see the target or it's gone. Writes accept only targets the caller can see; a value the record already holds is left alone. Filters offer is / is not / empty / not empty. `GET /api/records/refs/:source?q=` lists targets for pickers; `?ids=` resolves chosen ones. Ref fields are code-declared only (the schema builder doesn't offer them), usually added to another layer's type with `registerRecordFieldExtension`.
 
 ## Attachments
 
@@ -37,6 +41,7 @@ Server, from a Nitro plugin, via `#records/server`:
 - `registerRecordsPatchGuard(fn)` — refuse a PATCH through the record route.
 - `registerRecordsVisibilitySource(source)` — another way a caller may see a record; with `editPredicate` it also lets them edit it, and `describe` lists it on the record's share list.
 - `registerRecordsFieldFilter(phase, fn)` — rewrite a patch before validation.
+- `registerRecordsRefSource(source)` — what a `ref` field's ids point at (see Refs).
 
 Client, from a Nuxt app plugin, via `#records`: `registerRecordsDetailPanel`, `registerRecordsFieldWidget` (replace a kind's row on the detail page), `registerRecordsFieldKindSettings` (extra schema-builder inputs for a kind), `registerRecordsSettingsSection`, `registerRecordsTypeRoute` (give a type its own home, e.g. contacts under `/crm/contacts`). `#records/client` exports the client field settings, formatters and badge colors; `ListView` / `DetailView` components render any type.
 
@@ -45,6 +50,10 @@ Client, from a Nuxt app plugin, via `#records`: `registerRecordsDetailPanel`, `r
 Without `<type>.view_all`, a caller sees records they created, records shared with them, records naming them in an access-granting people field (`grantsAccess`: task's assignee, contacts' assigned to), and whatever registered visibility sources grant — the views layer grants the cards of hand-picked views the caller can open, and edit on them at 'edit' — for types whose `boardsGrantVisibility` isn't false. Other people fields only record who's involved. Anyone who holds the type's read and can see a record can comment on it.
 
 Naming someone in an access-granting field who can't otherwise see the record shares it with them, so writes a person makes ask first: the record routes refuse such a write with a 409 whose `data.code` is `records.share_confirmation` (with the people it names) until it's resent with `confirmShare: true`, and the MCP write tools want `share: true`. `applyFieldPatch(…, { sharing: 'ask' | 'confirmed' })` and `requireShareConfirmation` do the check for other layers; system writes leave it out. In the UI, `useRecordsShareConfirm()` asks and resends.
+
+## Notifications
+
+A person's write that newly names someone in an access-granting people field (a task's assignee, a contact's assigned to) tells them, in the app and by email: "Jane assigned you a task", linking to the record. The writer is never told about their own change, and system writes (no `sharing` option) send nothing.
 
 ## Permissions
 

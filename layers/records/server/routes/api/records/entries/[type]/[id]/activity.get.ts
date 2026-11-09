@@ -29,6 +29,6 @@ export default defineEventHandler(async (event) => {
     if (!parsed.success) {
       throw createError({ statusCode: 400, statusMessage: 'Invalid query', data: parsed.error.flatten() })
     }
-    return await listActivity(tx, id, parsed.data)
+    return await listActivity(tx, id, parsed.data, { ctx, typeKey })
   })
 })

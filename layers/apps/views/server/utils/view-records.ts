@@ -122,7 +122,8 @@ async function attachCardFieldValues(
   const defs = await getRecordTypeFields(tx, view.record_type_key)
   const shown = defs.filter(d => chosen.includes(d.key) && !d.orphan)
   await attachConnectionProgress(tx, ctx, view, shown, layout, items)
-  const keys = shown.filter(d => SIDE_TABLE_STORAGES.has(d.storage)).map(d => d.key)
+  // Refs are stored on the row but shown by their source's label.
+  const keys = shown.filter(d => SIDE_TABLE_STORAGES.has(d.storage) || d.kind === 'ref').map(d => d.key)
   if (keys.length === 0) return
 
   const hydrated = await hydrateRecords(tx, ctx, view.record_type_key, items)

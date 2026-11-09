@@ -1,6 +1,6 @@
 // Org-side app enable/disable. Marks org_apps row with source='org_admin' so
 // the host UI can distinguish org-driven from host-set state.
-import { describe, it, expect, afterEach, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import {
   getHostAdminDb,
@@ -16,6 +16,17 @@ const APP_ID = 'messages'
 
 describe('POST /api/o/[orgSlug]/apps/[appId]/{enable,disable} (org-admin)', () => {
   const sql = getHostAdminDb()
+
+  // 'messages' declares no defaultStatus, so on a fresh database it's off for every org.
+  let messagesStatus: string | null = null
+  beforeAll(async () => {
+    const [row] = await sql<{ status: string | null }[]>`SELECT status FROM apps WHERE id = 'messages'`
+    messagesStatus = row?.status ?? null
+    await sql`UPDATE apps SET status = 'default' WHERE id = 'messages'`
+  })
+  afterAll(async () => {
+    await sql`UPDATE apps SET status = ${messagesStatus} WHERE id = 'messages'`
+  })
 
   afterEach(async () => {
     await cleanupTenancyTestData(sql)

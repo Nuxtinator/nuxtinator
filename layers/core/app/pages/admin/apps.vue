@@ -73,6 +73,8 @@ interface AppOrg {
   name: string
   enabled: boolean
   source: 'auto' | 'org_admin' | 'host' | null
+  /** Apps on for the org that keep this one on (tenancy). */
+  requiredBy?: string[]
 }
 
 const orgsApp = ref<AdminApp | null>(null)
@@ -513,7 +515,10 @@ const onRemove = async () => {
               </div>
               <div class="text-xs text-(--ui-text-muted)">
                 @{{ org.slug }}
-                <template v-if="org.source === 'host'">
+                <template v-if="org.requiredBy?.length">
+                  · required by {{ org.requiredBy.join(', ') }}
+                </template>
+                <template v-else-if="org.source === 'host'">
                   · set by host
                 </template>
                 <template v-else-if="org.source === 'org_admin'">
@@ -523,7 +528,7 @@ const onRemove = async () => {
             </div>
             <USwitch
               :model-value="org.enabled"
-              :disabled="orgsApp?.status === 'disabled' || togglingOrgId === org.id"
+              :disabled="orgsApp?.status === 'disabled' || togglingOrgId === org.id || !!org.requiredBy?.length"
               @update:model-value="(v: boolean) => onToggleOrg(org, v)"
             />
           </li>

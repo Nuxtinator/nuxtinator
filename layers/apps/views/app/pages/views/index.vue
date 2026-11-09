@@ -1,11 +1,11 @@
 <script setup lang="ts">
-// Views landing — two columns by audience: Teams (views open to a team or
-// everyone, whoever owns them) and Mine (my private views, then private views
-// shared with me by name). Each column's + opens the create modal set to that
-// audience.
+// Views landing — the built-in views on top, then two columns by audience:
+// Teams (views open to a team or everyone, whoever owns them) and Mine (my
+// private views, then private views shared with me by name). Each column's +
+// opens the create modal set to that audience.
 definePageMeta({ middleware: 'auth' })
 
-const { pending, error, refresh, teamViews, mine, sharedWithMe } = useViewsList()
+const { pending, error, refresh, builtIns, teamViews, mine, sharedWithMe } = useViewsList()
 const createOpen = ref(false)
 const createAudience = ref<'mine' | 'teams'>('mine')
 
@@ -31,8 +31,26 @@ function openCreate(audience: 'mine' | 'teams') {
       :title="error"
     />
 
+    <section
+      v-if="!error && builtIns.length > 0"
+      class="space-y-2"
+    >
+      <h2 class="text-sm font-medium text-(--ui-text-muted)">
+        Built-in
+      </h2>
+      <ul class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <li
+          v-for="view in builtIns"
+          :key="view.id"
+          class="rounded-lg border border-(--ui-border) bg-(--ui-bg)"
+        >
+          <ViewsViewRow :view="view" />
+        </li>
+      </ul>
+    </section>
+
     <div
-      v-else
+      v-if="!error"
       class="grid gap-6 md:grid-cols-2 items-start"
     >
       <section class="space-y-2">

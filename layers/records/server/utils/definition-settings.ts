@@ -205,6 +205,8 @@ export interface RecordsFieldSetting {
   target?: string
   reverseKey?: string
   channelType?: string
+  /** ref: the registered ref source (code-declared only). */
+  source?: string
   settings?: Record<string, unknown>
   /** True for admin-created custom fields (a row with `kind` set). */
   custom: boolean
@@ -272,6 +274,7 @@ function mergeManifestField(key: string, def: RecordsFieldDef, row: RecordFieldR
     target: def.target,
     reverseKey: def.reverseKey,
     channelType: def.channelType,
+    source: def.kind === 'ref' ? def.source : undefined,
     settings: def.settings,
     custom: false,
     orphan: false

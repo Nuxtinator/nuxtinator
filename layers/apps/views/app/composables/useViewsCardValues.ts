@@ -4,7 +4,7 @@
 // attaches for the chosen keys, or from the view's own field values — so any
 // field of the type or the view can be shown. Files show as a count. User
 // fields carry ids to render as people; connection fields shown as a count
-// or progress carry the totals.
+// or progress carry the totals. Refs show their resolved label.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsBoardItem, ViewsConnectionDisplay } from '../utils/views-types'
 
@@ -63,8 +63,8 @@ export function useViewsCardValues(source: () => ViewsCardValueSource) {
       let raw: unknown = null
       if (viewsIsViewField(field)) raw = item.viewValues?.[field.key] ?? null
       else if (field.column === 'status' || key === 'status') raw = item.status
-      else if (viewsFieldStorage(field) === 'jsonb') raw = item.data[field.key]
       else if (item.fields && field.key in item.fields) raw = item.fields[field.key]
+      else if (viewsFieldStorage(field) === 'jsonb') raw = item.data[field.key]
       else if (field.key === groupFieldKey) raw = item.groupValues
 
       const display = cardConnections?.[field.key]

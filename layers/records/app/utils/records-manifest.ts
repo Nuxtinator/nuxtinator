@@ -41,6 +41,7 @@ export type RecordsFieldKind =
   | 'connection'
   | 'link'
   | 'attachments'
+  | 'ref'
 
 // Where a field's values physically live:
 //   promoted    — a real column on records_entries (name, status)
@@ -50,6 +51,7 @@ export type RecordsFieldKind =
 //   connections — rows in records_connections (record↔record edges)
 //   channels    — a registered storage driver (the crm layer's channel service)
 //   attachments — rows in records_attachments (uploaded files, bytes in object storage)
+// A `ref` keeps the id it points at as a jsonb scalar.
 export type RecordsStorage = 'promoted' | 'jsonb' | 'entries' | 'user_refs' | 'connections' | 'channels' | 'attachments'
 
 export interface RecordsFieldOption {
@@ -99,6 +101,8 @@ export interface RecordsFieldDef {
   reverseKey?: string
   /** communication_channel: channel type key ('email', 'phone', ...). */
   channelType?: string
+  /** ref: the registered ref source its ids belong to ('meetings'). */
+  source?: string
   /** Kind-specific extras with no schema of their own. */
   settings?: Record<string, unknown>
 }
@@ -195,6 +199,19 @@ export interface RecordsAttachmentValue {
   url: string
 }
 
+/**
+ * A ref as it appears on a hydrated record: the id plus the label and link
+ * its source resolved. `hidden` when the caller can't see the target,
+ * `missing` when it no longer exists; both withhold the label ('').
+ */
+export interface RecordsRefValue {
+  id: string
+  label: string
+  url?: string
+  hidden?: true
+  missing?: true
+}
+
 /** A connection edge as it appears on a hydrated record — id plus the
  * target record's display name, resolved server-side in one batched query. */
 export interface RecordsConnectedRecord {
@@ -219,7 +236,8 @@ type FieldValue<F extends RecordsFieldDef> =
                   : F['kind'] extends 'communication_channel' ? unknown[]
                     : F['kind'] extends 'link' ? RecordsLinkValue[]
                       : F['kind'] extends 'attachments' ? RecordsAttachmentValue[]
-                        : unknown
+                        : F['kind'] extends 'ref' ? RecordsRefValue | null
+                          : unknown
 
 /** Logical (post-hydration) record shape derived from a manifest. */
 export type InferRecordShape<M extends RecordTypeManifest> = {

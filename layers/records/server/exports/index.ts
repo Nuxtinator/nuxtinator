@@ -14,7 +14,9 @@ export {
   registerRecordsClosingHook,
   registerRecordsPatchGuard,
   runRecordsPatchGuards,
-  registerRecordsVisibilitySource
+  registerRecordsVisibilitySource,
+  registerRecordsRefSource,
+  getRecordsRefSource
 } from '../utils/records-registry'
 export type {
   RecordsFieldPatch,
@@ -29,7 +31,9 @@ export type {
   RecordsClosingHook,
   RecordsPatchGuard,
   RecordsVisibilitySource,
-  RecordsShareVia
+  RecordsShareVia,
+  RecordsRefSource,
+  RecordsRefTarget
 } from '../utils/records-registry'
 
 export {
@@ -46,6 +50,7 @@ export type { NormalizedChannelValue } from '../utils/normalize'
 
 export { hydrateRecords, getRecord, applyFieldPatch, deleteRecord, activityValue } from '../utils/record-storage'
 export type { RecordRow, RecordsHydratedRecord, ApplyFieldPatchOpts } from '../utils/record-storage'
+export type { RecordsRefValue } from '#records'
 
 export {
   addRecordAttachment,
