@@ -20,14 +20,17 @@ import type { RawBuilder, Selectable, Transaction } from 'kysely'
 import { z } from 'zod'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
-import type { RecordsAttachmentValue, RecordsConnectedRecord, RecordsLinkValue } from '#records'
+import type { RecordsAttachmentValue, RecordsConnectedRecord, RecordsLinkValue, RecordsRefValue } from '#records'
+import { createNotification } from '#core/server/utils/notifications'
 import {
+  getRecordsRefSource,
   getRecordsStorageDriver,
   getRegisteredRecordTypes,
   runRecordsClosingHooks,
   runRecordsFieldFilters,
   type RecordsFieldPatch,
-  type RecordsListPatch
+  type RecordsListPatch,
+  type RecordsRefTarget
 } from './records-registry'
 import { getRecordType, getRecordTypeFields, recordsAccessGrantingKeys, recordsStatusDefault, type RecordsFieldSetting } from './definition-settings'
 import { normalizeChannelValue } from './normalize'
@@ -251,6 +254,9 @@ export async function hydrateRecords(
     }
   }
 
+  const refDefs = defs.filter(d => d.kind === 'ref')
+  if (refDefs.length > 0) await hydrateRefs(tx, ctx, refDefs, [...out.values()])
+
   const attachmentKeys = defs.filter(d => d.storage === 'attachments').map(d => d.key)
   if (attachmentKeys.length > 0) {
     const files = await listRecordAttachments(tx, ids, attachmentKeys)
@@ -280,6 +286,48 @@ export async function hydrateRecords(
   }
 
   return rows.map(r => out.get(r.id)!)
+}
+
+// A ref's stored id becomes { id, label, url } through its source, one
+// resolve call per source for the whole page. Targets the caller can't see,
+// and ones that no longer exist, keep their id but not their label.
+async function hydrateRefs(
+  tx: Tx,
+  ctx: TenantContext,
+  refDefs: RecordsFieldSetting[],
+  records: RecordsHydratedRecord[]
+): Promise<void> {
+  const idsBySource = new Map<string, Set<string>>()
+  for (const def of refDefs) {
+    if (!def.source) continue
+    const ids = idsBySource.get(def.source) ?? new Set<string>()
+    for (const rec of records) {
+      const id = rec.fields[def.key]
+      if (typeof id === 'string') ids.add(id)
+    }
+    idsBySource.set(def.source, ids)
+  }
+  const resolved = new Map<string, Map<string, RecordsRefTarget | 'hidden'>>()
+  for (const [sourceKey, ids] of idsBySource) {
+    const source = getRecordsRefSource(sourceKey)
+    resolved.set(sourceKey, source && ids.size > 0 ? await source.resolve(tx, ctx, [...ids]) : new Map())
+  }
+  for (const def of refDefs) {
+    const targets = def.source ? resolved.get(def.source) : undefined
+    for (const rec of records) {
+      const id = rec.fields[def.key]
+      if (typeof id !== 'string') {
+        rec.fields[def.key] = null
+        continue
+      }
+      const target = targets?.get(id)
+      let value: RecordsRefValue
+      if (target === undefined) value = { id, label: '', missing: true }
+      else if (target === 'hidden') value = { id, label: '', hidden: true }
+      else value = target.url ? { id, label: target.label, url: target.url } : { id, label: target.label }
+      rec.fields[def.key] = value
+    }
+  }
 }
 
 export async function getRecord(
@@ -414,6 +462,9 @@ function validateScalar(def: RecordsFieldSetting, raw: unknown): unknown {
     }
     case 'key_select':
       return requireOptionKey(def, raw)
+    case 'ref':
+      // An id, or a ref as hydrated ({ id, label, ... }).
+      return requireUuid(def, raw !== null && typeof raw === 'object' ? (raw as { id?: unknown }).id : raw)
     default:
       badValue(def, `kind '${def.kind}' does not accept a scalar value`)
   }
@@ -710,6 +761,66 @@ async function assertConnectionTargetsExist(
   }
 }
 
+// A ref may only point at a target the caller can see. A value the record
+// already holds is left alone, so editing other fields never fails on a ref
+// the caller has since lost sight of.
+async function assertRefTargets(
+  tx: Tx,
+  ctx: TenantContext,
+  defsByKey: Map<string, RecordsFieldSetting>,
+  scalarOps: Map<string, unknown>,
+  old: RecordsHydratedRecord | null
+): Promise<void> {
+  for (const [key, value] of scalarOps) {
+    const def = defsByKey.get(key)
+    if (def?.kind !== 'ref' || typeof value !== 'string') continue
+    if ((old?.fields[key] as RecordsRefValue | null | undefined)?.id === value) continue
+    const source = def.source ? getRecordsRefSource(def.source) : undefined
+    if (!source) badValue(def, 'no ref source is registered for this field')
+    const target = (await source.resolve(tx, ctx, [value])).get(value)
+    if (!target || target === 'hidden') badValue(def, `no ${source.label.toLowerCase()} with id ${value}`)
+  }
+}
+
+function userIdsOf(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String)
+  return typeof value === 'string' ? [value] : []
+}
+
+// Tells the people a write newly names in an access-granting field (a task's
+// assignee) that the record is now theirs, in the app and by email. The
+// writer is never told about their own change.
+async function notifyNewAssignees(
+  tx: Tx,
+  ctx: TenantContext,
+  type: { key: string, labelSingular: string, app?: string },
+  record: RecordsHydratedRecord,
+  old: RecordsHydratedRecord | null,
+  grantKeys: string[]
+): Promise<void> {
+  const added = new Set<string>()
+  for (const key of grantKeys) {
+    const before = new Set(userIdsOf(old?.fields[key]))
+    for (const id of userIdsOf(record.fields[key])) {
+      if (!before.has(id) && id !== ctx.userId) added.add(id)
+    }
+  }
+  if (added.size === 0) return
+  const actor = await tx.selectFrom('users').select('display_name').where('id', '=', ctx.userId).executeTakeFirst()
+  const noun = type.labelSingular.toLowerCase()
+  const article = /^[aeiou]/.test(noun) ? 'an' : 'a'
+  await createNotification(tx, [...added].map(userId => ({
+    userId,
+    appId: type.app ?? 'records',
+    title: `${actor?.display_name || 'Someone'} assigned you ${article} ${noun}`,
+    body: record.name,
+    icon: 'i-lucide-user-check',
+    link: `/records/${type.key}/${record.id}`,
+    actorId: ctx.userId,
+    email: 'immediate' as const
+  })))
+}
+
 // ---------------------------------------------------------------------------
 // applyFieldPatch
 // ---------------------------------------------------------------------------
@@ -724,7 +835,8 @@ export interface ApplyFieldPatchOpts {
   /**
    * Set by writes a person makes: 'ask' refuses (409) a patch that names
    * someone in an access-granting people field who can't otherwise see the
-   * record, until resent as 'confirmed'. Absent for system writes.
+   * record, until resent as 'confirmed'. Absent for system writes. A person's
+   * write also notifies whoever it newly names in such a field.
    */
   sharing?: RecordsSharingMode
 }
@@ -807,6 +919,7 @@ export async function applyFieldPatch(
 
   if (isCreate) {
     closing = enforceClosingRules(closingRules, scalarOps, null)
+    await assertRefTargets(tx, ctx, defsByKey, scalarOps, null)
     const nameDef = defs.find(d => d.column === 'name')
     const statusDef = defs.find(d => d.column === 'status')
     const name = nameDef ? scalarOps.get(nameDef.key) : undefined
@@ -837,6 +950,7 @@ export async function applyFieldPatch(
 
     if (scalarOps.size === 0 && listOps.size === 0) return oldRecord
     closing = enforceClosingRules(closingRules, scalarOps, oldRecord.fields)
+    await assertRefTargets(tx, ctx, defsByKey, scalarOps, oldRecord)
 
     // Promoted columns, the jsonb merge, and the updated_at bump (no DB
     // trigger exists — the kernel owns it) in a single statement.
@@ -896,6 +1010,10 @@ export async function applyFieldPatch(
   }
 
   const record = await getRecord(tx, ctx, typeKey, id)
+
+  if (opts.sharing && [...listOps.keys()].some(key => grantKeys.includes(key))) {
+    await notifyNewAssignees(tx, ctx, { key: typeKey, labelSingular: type.labelSingular, app: type.manifest?.app }, record, oldRecord, grantKeys)
+  }
 
   if (isCreate) {
     await recordRecordsActivity(tx, ctx, id, 'created', { new: { name: record.name } })

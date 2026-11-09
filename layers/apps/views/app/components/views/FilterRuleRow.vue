@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // One rule of the filter builder: field, operator, and a value editor that
 // fits the field's kind — options for selects, people (with "Me") for user
-// fields, records for connections, dates, numbers, or free text. Changing
+// fields, records for connections, a ref source's targets for refs, dates,
+// numbers, or free text. Changing
 // the field or operator resets the value to that shape's empty value.
 import {
   RECORDS_FILTER_ME,
@@ -60,6 +61,7 @@ const optionItems = computed(() => {
     ]
   }
   if (f.kind === 'connection') return targetItems.value
+  if (f.kind === 'ref') return refItems.value
   return Object.entries(f.options ?? {})
     .filter(([, o]) => !o.deleted)
     .map(([key, o]) => ({ label: o.label, value: key }))
@@ -67,8 +69,32 @@ const optionItems = computed(() => {
 
 const usesOptions = computed(() => {
   const kind = field.value?.kind
-  return kind === 'key_select' || kind === 'multi_select' || kind === 'user_select' || kind === 'connection'
+  return kind === 'key_select' || kind === 'multi_select' || kind === 'user_select' || kind === 'connection' || kind === 'ref'
 })
+
+// Ref rules pick the source's targets; the chosen one keeps its label even
+// when the first page of targets doesn't include it.
+const refItems = ref<Array<{ label: string, value: string }>>([])
+watch(() => field.value?.kind === 'ref' ? field.value.source : null, async (source) => {
+  refItems.value = []
+  if (!source) return
+  try {
+    const chosen = typeof props.rule.value === 'string' && props.rule.value !== '' ? props.rule.value : null
+    const [page, current] = await Promise.all([
+      $fetch<{ items: Array<{ id: string, label: string }> }>(`/api/records/refs/${source}`, { query: { limit: 50 } }),
+      chosen
+        ? $fetch<{ items: Array<{ id: string, label: string, hidden?: true, missing?: true }> }>(`/api/records/refs/${source}`, { query: { ids: chosen } })
+        : Promise.resolve({ items: [] })
+    ])
+    const items = page.items.map(r => ({ label: r.label, value: r.id }))
+    for (const c of current.items) {
+      if (!items.some(i => i.value === c.id)) items.unshift({ label: c.hidden ? 'Hidden' : c.missing ? 'Deleted' : c.label, value: c.id })
+    }
+    refItems.value = items
+  } catch {
+    // The picker stays empty; the rule can still be removed.
+  }
+}, { immediate: true })
 
 // Connection rules pick records of the target type.
 const targetItems = ref<Array<{ label: string, value: string }>>([])

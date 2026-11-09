@@ -38,6 +38,8 @@ export interface AppCatalogEntry {
   installed: boolean
   // False for apps registered with `launcher: false` (no launcher tile or rail entry).
   launcher: boolean
+  // Org apps this one requires (see AppEntry.requires).
+  requires: string[]
   created_at: Date | string | null
   updated_at: Date | string | null
 }
@@ -74,6 +76,7 @@ export const getApps = defineSettings<AppEntry, AppRow, AppCatalogEntry>({
         permissions: app.permissions ?? [],
         installed: true,
         launcher: app.launcher !== false,
+        requires: app.requires ?? [],
         created_at: row?.created_at ?? null,
         updated_at: row?.updated_at ?? null
       }
@@ -93,6 +96,7 @@ export const getApps = defineSettings<AppEntry, AppRow, AppCatalogEntry>({
       permissions: [],
       installed: false,
       launcher: false,
+      requires: [],
       created_at: row!.created_at,
       updated_at: row!.updated_at
     }

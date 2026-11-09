@@ -1,12 +1,15 @@
 import { getRouterParam } from 'h3'
 import { adminDb as db } from '#tenant/admin-db'
 import { requireHostAdmin } from '#tenant/server'
+import { assertAppNotRequired } from '../../../../../../../utils/app-settings'
 
 export default defineEventHandler(async (event) => {
   await requireHostAdmin(event)
   const orgId = getRouterParam(event, 'orgId')
   const appId = getRouterParam(event, 'appId')
   if (!orgId || !appId) throw createError({ statusCode: 400, statusMessage: 'orgId and appId required' })
+
+  await assertAppNotRequired(db, orgId, appId)
 
   const now = new Date().toISOString()
   await db

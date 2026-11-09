@@ -5,7 +5,7 @@
 // page a registered field widget may take over (the crm layer's channel
 // widget for communication_channel).
 
-import type { RecordsAttachmentValue, RecordsFieldKind, RecordsFieldOption, RecordsLinkValue } from '#records'
+import type { RecordsAttachmentValue, RecordsFieldKind, RecordsFieldOption, RecordsLinkValue, RecordsRefValue } from '#records'
 
 /** A merged field definition as served by GET /api/records/schema/types/:type/fields. */
 export interface RecordsFieldSetting {
@@ -22,6 +22,8 @@ export interface RecordsFieldSetting {
   orphan: boolean
   channelType: string | null
   target: string | null
+  /** ref: the registered ref source its ids belong to. */
+  source?: string | null
   multiple: boolean
   /** Promoted-column flag — 'name'/'status' fields live on the record row. */
   column: 'name' | 'status' | null
@@ -162,6 +164,19 @@ export const RECORDS_FIELD_KINDS: Record<RecordsFieldKind, RecordsKindRenderer> 
     format: (value) => {
       const files = asArray(value) as Array<{ name?: string }>
       return files.length > 0 ? files.map(f => f.name ?? '').join(', ') : EMPTY
+    }
+  },
+  ref: {
+    component: 'RecordsFieldsRefField',
+    // Hydrated refs carry their label; a bare id (a list row's raw value)
+    // only says one is set.
+    format: (value) => {
+      if (typeof value === 'string' && value !== '') return 'Linked'
+      if (value === null || typeof value !== 'object' || !('id' in value)) return EMPTY
+      const ref = value as RecordsRefValue
+      if (ref.hidden) return 'Hidden'
+      if (ref.missing) return 'Deleted'
+      return ref.label || EMPTY
     }
   }
 }

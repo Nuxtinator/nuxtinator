@@ -20,7 +20,7 @@ const hooks = createTest({
   rootDir: HOST_DIR,
   server: true,
   browser: false,
-  env: { NODE_ENV: 'development' },
+  env: { NODE_ENV: 'development', NUXTINATOR_TEST_FIXTURES: '1' },
   nuxtConfig: {
     vite: {
       define: {

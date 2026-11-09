@@ -88,6 +88,8 @@ export interface ViewSummary {
   accessLevel: ViewsAccessLevel
   /** The teams a view with visibility 'teams' opens to. */
   teams: Array<{ id: string, name: string, icon: string | null, image: string | null, archived: boolean }>
+  /** Declared in code: nobody owns or changes it; copying it makes one of your own. */
+  builtIn: boolean
   createdAt: string
   updatedAt: string
 }

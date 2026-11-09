@@ -13,9 +13,10 @@
 //   3. Per-org override       — `org_apps.enabled` (set via /@<org>/settings/apps,
 //                               or by a host admin via /admin/apps)
 //
-// `getApps` resolves (1) and (2). `getOrgApps` adds (3). The downstream
-// helpers (`getOrgEnabledApps`, `isAppEnabledForOrg`) filter off its
-// result.
+// `getApps` resolves (1) and (2). `getOrgApps` adds (3), then turns on the
+// apps an enabled app requires (`registerApp({ requires })`) — derived on
+// read, never stored. The downstream helpers (`getOrgEnabledApps`,
+// `isAppEnabledForOrg`) filter off its result.
 
 import { defineSettings, type DbClient } from '#core/server/utils/settings'
 import { getApps, type AppCatalogEntry } from '#core/server/utils/app-settings'
@@ -33,6 +34,9 @@ export interface OrgAppEntry extends AppCatalogEntry {
   lockedByHost: boolean
   // Catalog-level status surfaced for UI tooltips ("Default: available").
   globalStatus: AppStatus
+  // Enabled apps that require this one: while any is on, so is this one,
+  // and the org can't turn it off.
+  requiredBy: string[]
 }
 
 interface OrgAppRow {
@@ -41,7 +45,7 @@ interface OrgAppRow {
   source: OrgAppSource
 }
 
-export const getOrgApps = defineSettings<AppCatalogEntry, OrgAppRow, OrgAppEntry>({
+const readOrgApps = defineSettings<AppCatalogEntry, OrgAppRow, Omit<OrgAppEntry, 'requiredBy'>>({
   // Defaults = the catalog merge, filtered to installed apps only. An
   // uninstalled orphan row can't be org-enabled, so it's not even worth
   // surfacing to org-level callers. Personal apps are turned on per user,
@@ -73,6 +77,39 @@ export const getOrgApps = defineSettings<AppCatalogEntry, OrgAppRow, OrgAppEntry
     }
   }
 })
+
+// The org's apps, with every app an enabled app requires turned on too
+// (transitively), unless the host disabled it catalog-wide.
+export async function getOrgApps(tx: DbClient, ctx: { orgId: string }): Promise<OrgAppEntry[]> {
+  const apps: OrgAppEntry[] = (await readOrgApps(tx, ctx)).map(a => ({ ...a, requiredBy: [] }))
+  const byId = new Map(apps.map(a => [a.id, a]))
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const app of apps) {
+      if (!app.enabled) continue
+      for (const id of app.requires) {
+        const required = byId.get(id)
+        if (!required || required.status === 'disabled' || required.status === 'admins') continue
+        if (!required.requiredBy.includes(app.id)) required.requiredBy.push(app.id)
+        if (!required.enabled) {
+          required.enabled = true
+          changed = true
+        }
+      }
+    }
+  }
+  return apps
+}
+
+// Refuses (409) turning off an app that an app still on for the org requires.
+export async function assertAppNotRequired(tx: DbClient, orgId: string, appId: string): Promise<void> {
+  const apps = await getOrgApps(tx, { orgId })
+  const app = apps.find(a => a.id === appId)
+  if (!app || app.requiredBy.length === 0) return
+  const titles = app.requiredBy.map(id => apps.find(a => a.id === id)?.title ?? id)
+  throw createError({ statusCode: 409, statusMessage: `${app.title} is required by ${titles.join(', ')}. Turn ${titles.length === 1 ? 'it' : 'them'} off first.` })
+}
 
 // Whether an org has an app on, given the catalog status and the org's row
 // (if any). A host-disabled app is off regardless of the row. 'admins' belongs

@@ -4,7 +4,7 @@
 // { sections: Record<key, { label, order? }>, statusField, closedReasonField
 // (null unless the type can be closed with a reason), fields: [{ key,
 //   kind, label, icon, section, required, hidden, order, options, custom,
-//   orphan, channelType, target, multiple, column }] } sorted by order. `column` and
+//   orphan, channelType, target, source, multiple, column }] } sorted by order. `column` and
 // `statusField` carry the promoted-column flags so clients never infer them
 // from key conventions. Hidden and stale (orphan) fields only appear for
 // schema managers. Permission: org membership.
@@ -34,6 +34,7 @@ export default defineEventHandler(async (event) => {
         orphan: f.orphan,
         channelType: f.channelType ?? null,
         target: f.target ?? null,
+        source: f.source ?? null,
         multiple: f.multiple ?? false,
         column: f.column ?? null,
         default: f.default ?? null

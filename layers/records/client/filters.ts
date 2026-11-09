@@ -121,6 +121,8 @@ export function recordsFilterOps(kind: string): RecordsFilterOp[] {
       return ['contains', 'empty', 'not_empty']
     case 'attachments':
       return ['empty', 'not_empty']
+    case 'ref':
+      return ['is', 'is_not', 'empty', 'not_empty']
     default:
       return []
   }

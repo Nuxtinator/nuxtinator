@@ -6,6 +6,7 @@ import { getOrgApps } from '../../../../../utils/app-settings'
 // A host-controlled app is listed only while it's on for the org. `groups`
 // names the org groups an app is limited to (the team gate); empty means open.
 // It's filled only for callers who manage the org's apps or groups.
+// `requiredBy` names the enabled apps that keep an app on.
 export default defineEventHandler((event) => {
   return withOrgContext(event, async (tx, ctx) => {
     const apps = await getOrgApps(tx, { orgId: ctx.orgId })
@@ -29,6 +30,7 @@ export default defineEventHandler((event) => {
         enabled: a.enabled,
         source: a.source,
         lockedByHost: a.lockedByHost,
+        requiredBy: a.requiredBy.map(id => apps.find(x => x.id === id)?.title ?? id),
         groups: limits.filter(l => l.app_id === a.id).map(l => l.name)
       }))
     }

@@ -207,6 +207,44 @@ export async function runRecordsPatchGuards(tx: Tx, args: { typeKey: string, rec
   for (const fn of _patchGuards) await fn(tx, args)
 }
 
+// --- Ref sources -----------------------------------------------------------
+//
+// What a `ref` field's ids point at: rows another layer owns (a meeting). The
+// source turns ids into labels and links for the caller and powers the
+// picker; the kernel stores only the id.
+
+/** A ref target as its source resolves it for one caller. */
+export interface RecordsRefTarget {
+  label: string
+  /** App-local path to the target, e.g. `/meetings/<id>`. */
+  url?: string
+}
+
+export interface RecordsRefSource {
+  /** The key ref fields name in `source`. */
+  source: string
+  /** What one target is called ('Meeting'). */
+  label: string
+  /**
+   * The given ids as the caller sees them: a target for each one they can
+   * see, 'hidden' for one that exists but they can't see. Ids left out no
+   * longer exist.
+   */
+  resolve: (tx: Tx, ctx: TenantContext, ids: string[]) => Promise<Map<string, RecordsRefTarget | 'hidden'>>
+  /** Targets the caller can see whose label matches `q` (all, for an empty q), at most `limit`. */
+  search: (tx: Tx, ctx: TenantContext, q: string, limit: number) => Promise<Array<{ id: string, label: string }>>
+}
+
+const _refSources = new Map<string, RecordsRefSource>()
+
+export function registerRecordsRefSource(source: RecordsRefSource): void {
+  _refSources.set(source.source, source)
+}
+
+export function getRecordsRefSource(source: string): RecordsRefSource | undefined {
+  return _refSources.get(source)
+}
+
 // --- Visibility sources ----------------------------------------------------
 //
 // Extra ways a caller without view_all may see a record, ORed into the
@@ -257,4 +295,5 @@ export function __resetRecordsRegistriesForTests(): void {
   _closingHooks.length = 0
   _patchGuards.length = 0
   _visibilitySources.clear()
+  _refSources.clear()
 }

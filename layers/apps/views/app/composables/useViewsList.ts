@@ -1,7 +1,7 @@
 // The accessible-views list (landing page + sidebar) and view creation.
 // Grouping is presentation, by audience: views open to a team or everyone
 // are the team's whoever owns them; private views are mine when I own them,
-// else shared with me by name.
+// else shared with me by name. Built-in views come as their own list.
 
 import type {
   ViewDetail,
@@ -29,6 +29,7 @@ export interface ViewsCreateInput {
 export function useViewsList() {
   const { user } = useAuth()
   const items = useState<ViewSummary[]>('views:views', () => [])
+  const builtIns = useState<ViewSummary[]>('views:builtins', () => [])
   const pending = ref(false)
   const error = ref<string | null>(null)
 
@@ -37,9 +38,10 @@ export function useViewsList() {
     const id = ++requestId
     pending.value = true
     try {
-      const res = await $fetch<{ items: ViewSummary[] }>('/api/views')
+      const res = await $fetch<{ items: ViewSummary[], builtIns: ViewSummary[] }>('/api/views')
       if (id !== requestId) return
       items.value = res.items
+      builtIns.value = res.builtIns
       error.value = null
     } catch (err) {
       if (id !== requestId) return
@@ -65,5 +67,5 @@ export function useViewsList() {
     return created
   }
 
-  return { items, pending, error, refresh, teamViews, mine, sharedWithMe, create }
+  return { items, builtIns, pending, error, refresh, teamViews, mine, sharedWithMe, create }
 }

@@ -184,6 +184,8 @@ Keys are package names, values are semver ranges (`"*"` = must be loaded, any ve
 
 Raise the minimum in the same change that starts using the new thing, so it ships with the release that needs it.
 
+`nuxtinator.requires` is about loading. When your app also can't work in an org unless another org app is on there (meetings stores its action items as records tasks and shows them through views), say so on the app too: `registerApp({ ..., requires: ['records', 'views'] })`. With tenancy loaded, an org that has your app on has those on as well (unless the host disabled one), and the org can't turn them off while your app is on; the org's Apps page shows "Required by …". Nothing is stored for it.
+
 Then add the layer to the workspace in the root [package.json](../package.json):
 
 ```json

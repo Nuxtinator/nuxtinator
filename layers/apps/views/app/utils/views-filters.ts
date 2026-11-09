@@ -21,6 +21,8 @@ export interface ViewsFilterField {
   kind: string
   options: RecordsFieldSetting['options']
   target: string | null
+  /** ref fields: the ref source their values come from. */
+  source?: string | null
 }
 
 const INTRINSIC_LABELS: Record<string, string> = {
@@ -46,7 +48,7 @@ export function viewsFilterFields(fields: RecordsFieldSetting[]): ViewsFilterFie
   for (const field of fields) {
     if (field.hidden || field.orphan || field.column || out.some(f => f.key === field.key)) continue
     if (recordsFilterOps(field.kind).length === 0) continue
-    out.push({ key: field.key, label: field.label, kind: field.kind, options: field.options, target: field.target })
+    out.push({ key: field.key, label: field.label, kind: field.kind, options: field.options, target: field.target, source: field.source ?? null })
   }
   return out
 }

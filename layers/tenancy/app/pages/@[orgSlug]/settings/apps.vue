@@ -16,6 +16,8 @@ interface OrgApp {
   enabled: boolean
   source: 'auto' | 'org_admin' | 'host' | null
   lockedByHost: boolean
+  /** Enabled apps that keep this one on. */
+  requiredBy: string[]
   groups: string[]
 }
 
@@ -40,7 +42,7 @@ const onTeamsSaved = async () => {
 }
 
 const onToggle = async (app: OrgApp) => {
-  if (app.lockedByHost) return
+  if (app.lockedByHost || app.requiredBy.length > 0) return
   const verb = app.enabled ? 'disable' : 'enable'
   try {
     await $fetch(`/api/o/${orgSlug.value}/apps/${app.appId}/${verb}`, { method: 'POST' })
@@ -104,13 +106,15 @@ const onToggle = async (app: OrgApp) => {
                 Only for {{ app.groups.join(', ') }}
               </div>
               <div class="text-xs text-(--ui-text-muted) mt-1">
-                {{ app.globalStatus === 'host_controlled'
-                  ? 'Managed by host'
-                  : app.lockedByHost
-                    ? 'Disabled by host'
-                    : app.source === 'host'
-                      ? 'Set by host'
-                      : `Default: ${app.globalStatus}`
+                {{ app.requiredBy.length > 0
+                  ? `Required by ${app.requiredBy.join(', ')}`
+                  : app.globalStatus === 'host_controlled'
+                    ? 'Managed by host'
+                    : app.lockedByHost
+                      ? 'Disabled by host'
+                      : app.source === 'host'
+                        ? 'Set by host'
+                        : `Default: ${app.globalStatus}`
                 }}
               </div>
             </div>
@@ -128,7 +132,7 @@ const onToggle = async (app: OrgApp) => {
             </UButton>
             <USwitch
               :model-value="app.enabled"
-              :disabled="app.lockedByHost"
+              :disabled="app.lockedByHost || app.requiredBy.length > 0"
               @update:model-value="() => onToggle(app)"
             />
           </div>

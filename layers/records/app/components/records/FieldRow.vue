@@ -18,6 +18,7 @@ import UserSelectField from './fields/UserSelectField.vue'
 import ConnectionField from './fields/ConnectionField.vue'
 import LinkField from './fields/LinkField.vue'
 import AttachmentsField from './fields/AttachmentsField.vue'
+import RefField from './fields/RefField.vue'
 
 const props = defineProps<{
   field: RecordsFieldSetting
@@ -49,7 +50,8 @@ const EDITORS: Record<string, Component> = {
   RecordsFieldsUserSelectField: UserSelectField,
   RecordsFieldsConnectionField: ConnectionField,
   RecordsFieldsLinkField: LinkField,
-  RecordsFieldsAttachmentsField: AttachmentsField
+  RecordsFieldsAttachmentsField: AttachmentsField,
+  RecordsFieldsRefField: RefField
 }
 
 const renderer = computed(() => recordsRendererFor(props.field.kind))
@@ -89,6 +91,12 @@ const formatted = computed(() => renderer.value.format(props.value, props.field,
       <RecordsAttachmentsList
         v-else-if="field.kind === 'attachments'"
         :value="value"
+      />
+      <RefField
+        v-else-if="field.kind === 'ref'"
+        :field="field"
+        :model-value="value"
+        readonly
       />
       <p
         v-else

@@ -31,6 +31,7 @@ import {
   type ViewTabRow
 } from '../server/utils/views'
 import { updateTab } from '../server/utils/tabs'
+import { listBuiltInViews } from '../server/utils/builtin-views'
 import { getViewRecords, requireRecordsReadScope, requireRecordsWriteScope, type ViewRecords } from '../server/utils/view-records'
 import { addViewsCard, assertInView, createViewsCard, dragMode, moveViewsCard } from '../server/utils/placements'
 import {
@@ -49,7 +50,8 @@ type Tx = Transaction<Database>
 const orgInput = z.string().min(1).max(64).optional()
   .describe('Org slug to operate in. Defaults to the X-Active-Org header sent by the client.')
 
-const viewIdInput = z.string().uuid().describe('View id, from views_list.')
+const viewIdInput = z.union([z.string().uuid(), z.string().regex(/^builtin\.[A-Za-z0-9.-]{1,140}$/)])
+  .describe('View id, from views_list.')
 const tabIdInput = z.string().uuid().optional().describe('Tab id, from views_list or views_get_board. Defaults to the view\'s first tab.')
 
 const FILTER_OPS = [
@@ -183,7 +185,7 @@ async function touchView(tx: Tx, viewId: string): Promise<void> {
 export const listViewsTool = defineMcpTool({
   name: 'views_list',
   title: 'List Views',
-  description: 'List the views you can open: your own, ones shared with you or your teams, and org-wide ones, with the record type each shows and its tabs (each tab is a board, list or table).',
+  description: 'List the views you can open: built-in ones everyone has (such as My tasks, which nobody can change), your own, ones shared with you or your teams, and org-wide ones, with the record type each shows and its tabs (each tab is a board, list or table).',
   appId: 'views',
   scope: 'views.use',
   readOnly: true,
@@ -199,16 +201,27 @@ export const listViewsTool = defineMcpTool({
             .where('view_id', 'in', views.map(v => v.id))
             .orderBy('position', 'asc')
             .execute()
-      return text(`${views.length} view(s)`, {
-        views: views.map(v => ({
-          id: v.id,
-          name: v.name,
-          recordType: v.recordTypeKey,
-          visibility: v.visibility,
-          access: v.accessLevel,
-          owner: v.ownerName,
-          tabs: tabs.filter(t => t.view_id === v.id).map(t => ({ id: t.id, name: t.name, layout: t.layout }))
-        }))
+      const builtIns = await listBuiltInViews(tx, tenant)
+      return text(`${views.length + builtIns.length} view(s)`, {
+        views: [
+          ...builtIns.map(b => ({
+            id: b.id,
+            name: b.view.name,
+            recordType: b.view.record_type_key,
+            builtIn: true,
+            access: 'view',
+            tabs: b.tabs.map(t => ({ id: t.id, name: t.name, layout: t.layout }))
+          })),
+          ...views.map(v => ({
+            id: v.id,
+            name: v.name,
+            recordType: v.recordTypeKey,
+            visibility: v.visibility,
+            access: v.accessLevel,
+            owner: v.ownerName,
+            tabs: tabs.filter(t => t.view_id === v.id).map(t => ({ id: t.id, name: t.name, layout: t.layout }))
+          }))
+        ]
       })
     })
   }
@@ -390,7 +403,7 @@ export const getBoardTool = defineMcpTool({
       const tabInfo = { id: tab.id, name: tab.name, layout: tab.layout }
       if (tab.layout === 'table') {
         return text(`${records.items.length} of ${records.total} row(s)`, {
-          view: { id: view.id, name: view.name },
+          view: { id: input.view, name: view.name },
           tab: tabInfo,
           rows: records.items.map(i => ({ id: i.id, name: i.name, status: i.status, ...(i.viewValues ? { values: i.viewValues } : {}) })),
           total: records.total
@@ -398,7 +411,7 @@ export const getBoardTool = defineMcpTool({
       }
       const columns = await boardColumns(tx, view, tab, records)
       return text(`${columns.length} column(s)`, {
-        view: { id: view.id, name: view.name },
+        view: { id: input.view, name: view.name },
         tab: tabInfo,
         dragMode: groupField ? dragMode(groupField) : 'move',
         columns,

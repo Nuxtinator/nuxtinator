@@ -46,6 +46,7 @@ A member makes a "My tasks" view with tabs such as "My open tasks" (a list) and 
 - A view owns the record type, the sharing, a base filter and its hand-picked records. Each tab owns its layout (board, list or table), grouping or custom columns, card fields, sort, and a filter that can only narrow the view.
 - Filters are a tree of all/any groups nested one level deep. `@me` resolves to whoever is viewing.
 - A card added from the view gets the values its filters pin down. On "Assigned to is Me", the new card is assigned to me, so it doesn't drop out of the view.
+- Everyone also has the built-in **My tasks** view (assigned to me: an Open list and a board by status), declared in code by the views layer. Nobody can change a built-in view; "Copy view" makes one of your own.
 - Status: built. Still to come: relative dates ("this week", "overdue"), and a personal filter layer for each viewer.
 
 ### 3. A team view with its own cards (onboarding, conversations)
@@ -132,7 +133,8 @@ A user wants to start recording events, and there's no event type. The agent cre
 The meetings layer creates todos for people. Those todos should be `task` records, so they appear on anyone's task views.
 
 - A producer layer writes a code-declared type and adds its own fields to it (`registerRecordFieldExtension`, for example a meeting link on `task`).
-- **Meetings:** `meetings_todos` is dropped, since it has no data. The todos tab and `/meetings/todos` read tasks, and the meetings layer deletes a meeting's tasks along with the meeting. Status: planned, not started (separate repo).
+- A producer layer links its records to its own rows with a `ref` field (a ref source it registers names them), and can show them through a parameterized built-in view (see the views layer).
+- **Meetings:** `meetings_todos` is dropped. A meeting's tasks are tasks whose `meeting` ref points at it; everyone who can see the meeting sees them (a visibility source). The meeting page embeds the built-in `meeting-tasks` view, the meetings sidebar links to My tasks, assigning notifies through records, and deleting a meeting deletes its tasks. Status: built (separate repo).
 - **Feedback:** its hard-coded kanban moves onto records and views as a later project, once the platform has proven itself on lower-stakes data.
 - **go-apps layers** (decisions, showcase and others) keep their own tables for now.
 

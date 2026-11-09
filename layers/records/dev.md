@@ -88,6 +88,10 @@ stored HTML/SVG never renders on the storage domain. Hydrated
 links are signed from the start of a six-hour window so they stay identical
 between polls (core's `generateSignedUrl` takes the `requestDate`).
 
+**Refs point at other layers' rows by id, resolved per caller.** A `ref` stores a bare id in `data`; its source (registered by the owning layer) labels it at read time, one `resolve` per source per page, so labels never go stale and a target the caller can't see stays unnamed. No foreign key exists, so a target deleted another way reads as `missing`. The owning layer deletes records it owns when their target goes (meetings deletes a meeting's tasks).
+
+**Assignment notifications ride the sharing signal.** `applyFieldPatch` notifies whoever a write newly names in an access-granting field only when `sharing` is set — the same marker that says a person, not the system, made the write.
+
 **Virtual fields in the list engine.** `RecordsListOpts.virtualFields` lets a layer
 that keeps per-record values outside the kernel (a view's own fields) have them
 filtered and sorted like type fields: each supplies a field def and a jsonb value

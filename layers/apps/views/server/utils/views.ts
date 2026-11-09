@@ -32,6 +32,7 @@ import {
 import { getContainerTeams, type ContainerTeam } from '#core/server/utils/team-access'
 import type { ViewsLayout, ViewsShareLevel, ViewsVisibility } from '../database/schema'
 import { clearViewFiles, sanitizeViewFields, viewFieldsWithType, type ViewFieldDef } from './view-fields'
+import { builtInOf, isBuiltInViewId, listBuiltInViews, resolveBuiltInView } from './builtin-views'
 
 type Tx = Transaction<Database>
 
@@ -305,7 +306,7 @@ export async function getViewAccess(
 /**
  * Loads a view and asserts the caller holds at least `level` on it. An
  * unreachable view 404s (existence is not disclosed); an insufficient level
- * 403s.
+ * 403s. Built-in views open at 'view' for everyone who can open them.
  */
 export async function requireView(
   tx: Tx,
@@ -313,6 +314,14 @@ export async function requireView(
   viewId: string,
   level: ViewsAccessLevel
 ): Promise<{ view: ViewRow, access: ViewsAccessLevel, viaShare: boolean }> {
+  if (isBuiltInViewId(viewId)) {
+    const builtIn = await resolveBuiltInView(tx, ctx, viewId)
+    if (!builtIn) throw createError({ statusCode: 404, statusMessage: 'View not found' })
+    if (level !== 'view') {
+      throw createError({ statusCode: 403, statusMessage: 'Built-in views can\'t be changed. Copy it to make one of your own.' })
+    }
+    return { view: builtIn.view, access: 'view', viaShare: false }
+  }
   const view = await tx
     .selectFrom('views_definitions')
     .selectAll()
@@ -343,6 +352,12 @@ export async function listTabs(tx: Tx, viewId: string): Promise<ViewTabRow[]> {
 
 /** The view's tab `tabId`, or its first tab when none is named. */
 export async function requireTab(tx: Tx, view: Pick<ViewRow, 'id'>, tabId?: string | null): Promise<ViewTabRow> {
+  const builtIn = builtInOf(view)
+  if (builtIn) {
+    const tab = tabId ? builtIn.tabs.find(t => t.id === tabId) : builtIn.tabs[0]
+    if (!tab) throw createError({ statusCode: 404, statusMessage: 'Tab not found' })
+    return tab
+  }
   let query = tx.selectFrom('views_tabs').selectAll().where('view_id', '=', view.id)
   query = tabId
     ? query.where('id', '=', tabId)
@@ -412,8 +427,30 @@ export interface ViewSummary {
   accessLevel: ViewsAccessLevel
   /** The teams a view with visibility 'teams' opens to. */
   teams: ContainerTeam[]
+  /** Declared in code: nobody owns or changes it (see builtin-views.ts). */
+  builtIn: boolean
   createdAt: Date
   updatedAt: Date
+}
+
+/** The built-in views the caller can open, as list rows. */
+export async function listBuiltInViewSummaries(tx: Tx, ctx: TenantContext): Promise<ViewSummary[]> {
+  return (await listBuiltInViews(tx, ctx)).map(b => ({
+    id: b.id,
+    name: b.view.name,
+    icon: b.view.icon,
+    recordTypeKey: b.view.record_type_key,
+    layout: b.tabs[0]!.layout,
+    tabCount: b.tabs.length,
+    visibility: 'private' as const,
+    ownerId: '',
+    ownerName: '',
+    accessLevel: 'view' as const,
+    teams: [],
+    builtIn: true,
+    createdAt: b.view.created_at,
+    updatedAt: b.view.updated_at
+  }))
 }
 
 export async function listViews(tx: Tx, ctx: TenantContext): Promise<ViewSummary[]> {
@@ -470,6 +507,7 @@ export async function listViews(tx: Tx, ctx: TenantContext): Promise<ViewSummary
       ownerName: row.owner_name,
       accessLevel,
       teams: teamsByView.get(row.id) ?? [],
+      builtIn: false,
       createdAt: row.created_at,
       updatedAt: row.updated_at
     }
@@ -487,8 +525,10 @@ export function toViewDetail(
   /** Records created on this hand-picked view and on no other — what deleting it deletes. */
   ownCardCount = 0
 ) {
+  const builtIn = builtInOf(view)
   return {
-    id: view.id,
+    id: builtIn?.id ?? view.id,
+    builtIn: !!builtIn,
     name: view.name,
     icon: view.icon,
     recordTypeKey: view.record_type_key,
@@ -516,6 +556,8 @@ export async function loadViewDetail(
   access: ViewsAccessLevel,
   viaShare: boolean
 ): Promise<ViewDetail> {
+  const builtIn = builtInOf(view)
+  if (builtIn) return toViewDetail(view, builtIn.tabs, access, '', false)
   const owner = await tx
     .selectFrom('users')
     .select('display_name')
@@ -677,7 +719,7 @@ export async function copyView(tx: Tx, ctx: TenantContext, source: ViewRow, name
     })
     .returningAll()
     .executeTakeFirstOrThrow()
-  for (const tab of await listTabs(tx, source.id)) {
+  for (const tab of builtInOf(source)?.tabs ?? await listTabs(tx, source.id)) {
     await tx
       .insertInto('views_tabs')
       .values({

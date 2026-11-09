@@ -11,6 +11,7 @@ import {
   VIEWS_DEFAULT_GRANTS
 } from '../../app/utils/permissions'
 import { boardVisibilitySource } from '../utils/board-visibility'
+import { builtInViewId, registerBuiltInView } from '../utils/builtin-views'
 
 export default defineNitroPlugin(() => {
   registerPermissions(VIEWS_PERMISSIONS, VIEWS_PERMISSION_META)
@@ -32,7 +33,8 @@ export default defineNitroPlugin(() => {
     icon: 'i-lucide-kanban',
     requiredPermission: 'views.use',
     defaultStatus: 'default',
-    order: 35
+    order: 35,
+    requires: ['records']
   })
 
   registerNavItem({
@@ -42,6 +44,36 @@ export default defineNitroPlugin(() => {
     icon: 'i-lucide-layout-dashboard',
     requiredPermission: 'views.use',
     order: 10
+  })
+
+  registerBuiltInView({
+    key: 'my-tasks',
+    name: 'My tasks',
+    icon: 'i-lucide-square-check',
+    recordTypeKey: 'task',
+    order: 10,
+    filter: () => ({ match: 'all', rules: [{ field: 'assignee', op: 'is', value: '@me' }] }),
+    tabs: [
+      {
+        key: 'open',
+        name: 'Open',
+        layout: 'list',
+        definition: {
+          filter: { match: 'all', rules: [{ field: 'status', op: 'none_of', value: ['done'] }] },
+          sort: { field: 'due_date', dir: 'asc' }
+        }
+      },
+      { key: 'board', name: 'Board', layout: 'kanban', definition: { groupField: 'status' } }
+    ]
+  })
+
+  registerNavItem({
+    appId: 'views',
+    title: 'My tasks',
+    path: `/views/${builtInViewId('my-tasks')}`,
+    icon: 'i-lucide-square-check',
+    requiredPermission: 'views.use',
+    order: 5
   })
 
   registerAdminSection({

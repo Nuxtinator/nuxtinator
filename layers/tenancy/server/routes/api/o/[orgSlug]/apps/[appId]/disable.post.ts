@@ -1,6 +1,7 @@
 import { getRouterParam } from 'h3'
 import { withOrgPermission } from '#tenant/server'
 import { getApp } from '#core/server/utils/app-settings'
+import { assertAppNotRequired } from '../../../../../../utils/app-settings'
 
 export default defineEventHandler(async (event) => {
   return await withOrgPermission(event, 'org.apps.manage', async (tx, ctx) => {
@@ -12,6 +13,7 @@ export default defineEventHandler(async (event) => {
     if (app.status === 'host_controlled') {
       throw createError({ statusCode: 409, statusMessage: 'App is managed by the host' })
     }
+    await assertAppNotRequired(tx, ctx.orgId, appId)
 
     const now = new Date().toISOString()
     await tx

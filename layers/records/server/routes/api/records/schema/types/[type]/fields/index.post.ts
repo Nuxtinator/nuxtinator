@@ -61,6 +61,7 @@ export default defineEventHandler(async (event) => {
         orphan: field.orphan,
         channelType: field.channelType ?? null,
         target: field.target ?? null,
+        source: field.source ?? null,
         multiple: field.multiple ?? false,
         column: field.column ?? null
       }
