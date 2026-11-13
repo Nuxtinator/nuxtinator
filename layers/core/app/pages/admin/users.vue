@@ -888,7 +888,7 @@ const handleDelete = async () => {
       <template #content>
         <div
           v-if="selectedUser"
-          class="p-6 space-y-6"
+          class="flex-1 min-h-0 overflow-y-auto p-6 space-y-6"
         >
           <header>
             <h2 class="text-xl font-semibold">
