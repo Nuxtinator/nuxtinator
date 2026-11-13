@@ -246,6 +246,25 @@ const isSelf = computed(() =>
 const openRow = (row: MemberRow) => {
   selectedMember.value = row
   editRoles.value = [...(row.roles ?? [])]
+  emailCopied.value = false
+  if (emailCopiedTimer) clearTimeout(emailCopiedTimer)
+}
+
+const emailCopied = ref(false)
+let emailCopiedTimer: ReturnType<typeof setTimeout> | null = null
+
+const copyEmail = async (email: string) => {
+  emailCopied.value = true
+  if (emailCopiedTimer) clearTimeout(emailCopiedTimer)
+  emailCopiedTimer = setTimeout(() => { emailCopied.value = false }, 2000)
+  try {
+    await navigator.clipboard.writeText(email)
+    toast.add({ title: 'Email copied', color: 'success' })
+  } catch {
+    emailCopied.value = false
+    if (emailCopiedTimer) clearTimeout(emailCopiedTimer)
+    toast.add({ title: 'Copy failed — select the address and copy it', color: 'warning' })
+  }
 }
 
 const handleRowSelect = (_event: Event, row: { original: MemberRow }) => {
@@ -712,17 +731,37 @@ const handleRemove = async () => {
                   {{ roleLabel(role) }}
                 </UBadge>
               </div>
-              <a
+              <div
                 v-if="selectedMember.email"
-                :href="`mailto:${selectedMember.email}`"
-                class="text-sm text-(--ui-text-muted) hover:text-(--ui-text) transition-colors inline-flex items-center gap-1.5 mt-0.5 truncate"
+                class="inline-flex items-center gap-1 mt-0.5 max-w-full"
               >
-                <UIcon
-                  name="i-lucide-mail"
-                  class="size-3.5 shrink-0"
-                />
-                <span class="truncate">{{ selectedMember.email }}</span>
-              </a>
+                <UButton
+                  variant="ghost"
+                  color="neutral"
+                  size="sm"
+                  class="-mx-2 max-w-full min-w-0"
+                  :aria-label="`Copy ${selectedMember.email}`"
+                  @click="copyEmail(selectedMember.email)"
+                >
+                  <UIcon
+                    name="i-lucide-mail"
+                    class="size-3.5 shrink-0"
+                  />
+                  <span class="truncate">{{ selectedMember.email }}</span>
+                </UButton>
+                <UTooltip
+                  :text="emailCopied ? 'Copied' : 'Copy email'"
+                >
+                  <UButton
+                    :icon="emailCopied ? 'i-lucide-check' : 'i-lucide-copy'"
+                    variant="ghost"
+                    color="success"
+                    size="xs"
+                    :aria-label="emailCopied ? 'Email copied' : `Copy ${selectedMember.email}`"
+                    @click="copyEmail(selectedMember.email)"
+                  />
+                </UTooltip>
+              </div>
               <div class="mt-2.5 flex items-center gap-2 flex-wrap">
                 <UBadge
                   :color="STATUS_META[selectedMember.status].color"
