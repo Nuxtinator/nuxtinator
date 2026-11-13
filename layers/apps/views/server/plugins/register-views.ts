@@ -54,6 +54,7 @@ export default defineNitroPlugin(() => {
     order: 10,
     filter: () => ({ match: 'all', rules: [{ field: 'assignee', op: 'is', value: '@me' }] }),
     tabs: [
+      { key: 'board', name: 'Board', layout: 'kanban', definition: { groupField: 'status' } },
       {
         key: 'open',
         name: 'Open',
@@ -62,8 +63,7 @@ export default defineNitroPlugin(() => {
           filter: { match: 'all', rules: [{ field: 'status', op: 'none_of', value: ['done'] }] },
           sort: { field: 'due_date', dir: 'asc' }
         }
-      },
-      { key: 'board', name: 'Board', layout: 'kanban', definition: { groupField: 'status' } }
+      }
     ]
   })
 

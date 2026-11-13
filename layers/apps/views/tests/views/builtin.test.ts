@@ -59,12 +59,12 @@ describe('built-in views', () => {
 
     const view = await $fetch<Detail>('/api/views/builtin.my-tasks', me)
     expect(view).toMatchObject({ id: 'builtin.my-tasks', builtIn: true, accessLevel: 'view' })
-    expect(view.tabs.map(t => t.layout)).toEqual(['list', 'kanban'])
+    expect(view.tabs.map(t => t.layout)).toEqual(['kanban', 'list'])
 
-    const open = await $fetch<Feed>('/api/views/builtin.my-tasks/records', me)
-    expect(open.items.map(i => i.id)).toEqual([mine.id])
-    const board = await $fetch<Feed>(`/api/views/builtin.my-tasks/records?tab=${view.tabs[1]!.id}`, me)
+    const board = await $fetch<Feed>('/api/views/builtin.my-tasks/records', me)
     expect(board.items.map(i => i.id).sort()).toEqual([mine.id, done.id].sort())
+    const open = await $fetch<Feed>(`/api/views/builtin.my-tasks/records?tab=${view.tabs[1]!.id}`, me)
+    expect(open.items.map(i => i.id)).toEqual([mine.id])
 
     // Same view, Sam's tasks.
     const samOpen = await $fetch<Feed>('/api/views/builtin.my-tasks/records', withOrgHeader(sam.auth, org.slug))
@@ -76,7 +76,7 @@ describe('built-in views', () => {
     const me = withOrgHeader(auth, org.slug)
     const task = await createTask(me, { name: 'test-views Move me', assignee: user.id })
     const view = await $fetch<Detail>('/api/views/builtin.my-tasks', me)
-    const boardTab = view.tabs[1]!.id
+    const boardTab = view.tabs[0]!.id
 
     await $fetch('/api/views/builtin.my-tasks/move', {
       method: 'POST',
@@ -103,7 +103,7 @@ describe('built-in views', () => {
 
     const copy = await $fetch<Detail>('/api/views/builtin.my-tasks/copy', { method: 'POST', body: {}, ...me })
     expect(copy).toMatchObject({ name: 'Copy of My tasks', builtIn: false, accessLevel: 'owner' })
-    expect(copy.tabs.map(t => t.name)).toEqual(['Open', 'Board'])
+    expect(copy.tabs.map(t => t.name)).toEqual(['Board', 'Open'])
     const feed = await $fetch<Feed>(`/api/views/${copy.id}/records`, me)
     expect(feed.items.map(i => i.id)).toEqual([task.id])
 
