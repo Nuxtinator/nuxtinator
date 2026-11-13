@@ -183,8 +183,8 @@ const onPickIcon = (name: string | null) => {
 }
 
 // A file dropped on or browsed from the Image tab's drop zone.
-const onChooseImage = (file: File | null | undefined) => {
-  if (file && setImage(file)) avatarOpen.value = false
+const onChooseImage = (file: File) => {
+  if (setImage(file)) avatarOpen.value = false
 }
 
 const isFileDrag = (event: DragEvent) =>
@@ -423,34 +423,13 @@ const onToggleMember = async (user: GroupsManagerUser, on: boolean) => {
                     :selected="formIcon"
                     @select="onPickIcon"
                   />
-                  <div
+                  <ImagePickerPanel
                     v-else
-                    class="p-3 space-y-2"
-                  >
-                    <UFileUpload
-                      v-if="imageInfo.can_upload"
-                      :model-value="null"
-                      :accept="imageInfo.types.join(',')"
-                      reset
-                      variant="area"
-                      icon="i-lucide-image-up"
-                      :label="imagePreview ? 'Drop a new image here or click to upload' : 'Drop an image here or click to upload'"
-                      :description="`${imageInfo.types_text}, up to ${imageInfo.max_mb} MB`"
-                      :preview="false"
-                      class="w-full"
-                      :ui="{ base: 'data-[dragging=true]:border-(--ui-primary)' }"
-                      @update:model-value="onChooseImage"
-                    />
-                    <UButton
-                      v-if="imagePreview"
-                      color="neutral"
-                      variant="ghost"
-                      icon="i-lucide-trash-2"
-                      @click="onRemoveImage(); avatarOpen = false"
-                    >
-                      Remove
-                    </UButton>
-                  </div>
+                    :info="imageInfo"
+                    :has-image="!!imagePreview"
+                    @choose="onChooseImage"
+                    @remove="onRemoveImage(); avatarOpen = false"
+                  />
                 </template>
               </UPopover>
               <UInput

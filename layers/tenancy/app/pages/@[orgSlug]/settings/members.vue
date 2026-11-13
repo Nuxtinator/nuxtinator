@@ -155,16 +155,6 @@ const relativeTime = (input: string | number | Date | null | undefined) => {
   return rtf.format(sign * Math.round(abs / year), 'year')
 }
 
-const initialsOf = (name: string | undefined | null, email: string | undefined | null) => {
-  const source = (name || email || '').trim()
-  if (!source) return '?'
-  const parts = source.split(/\s+/).filter(Boolean)
-  if (parts.length >= 2) {
-    return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase()
-  }
-  return source.slice(0, 2).toUpperCase()
-}
-
 const sortableHeader = (label: string, field: typeof sortField.value) => {
   return () => h(UButton, {
     variant: 'ghost',
@@ -324,13 +314,6 @@ const handleSaveRoles = async () => {
 }
 
 // ---------- avatar ----------
-const { data: avatarInfo } = useLazyFetch<{ can_upload: boolean, max_mb: number, types: string[], types_text: string }>('/api/profile/avatar', {
-  key: 'profile-avatar',
-  default: () => ({ can_upload: false, max_mb: 0, types: [], types_text: '' })
-})
-const avatarInput = ref<HTMLInputElement | null>(null)
-const avatarBusy = ref<'upload' | 'remove' | null>(null)
-
 const applyAvatar = async (userId: string, avatar: string | null) => {
   if (data.value) {
     data.value = {
@@ -342,48 +325,6 @@ const applyAvatar = async (userId: string, avatar: string | null) => {
     selectedMember.value = { ...selectedMember.value, avatar }
   }
   if (currentUser.value?.id === userId) await checkAuth()
-}
-
-const handleAvatarUpload = async (event: Event) => {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (avatarInput.value) avatarInput.value.value = ''
-  if (!file || !selectedMember.value) return
-  if (!avatarInfo.value.types.includes(file.type)) {
-    toast.add({ title: `Use a ${avatarInfo.value.types_text} image`, color: 'error' })
-    return
-  }
-  if (file.size > avatarInfo.value.max_mb * 1024 * 1024) {
-    toast.add({ title: `Image too large (max ${avatarInfo.value.max_mb} MB)`, color: 'error' })
-    return
-  }
-  const userId = selectedMember.value.user_id
-  avatarBusy.value = 'upload'
-  try {
-    const body = new FormData()
-    body.append('file', file)
-    const res = await $fetch<{ avatar: string }>(`/api/o/${orgSlug.value}/members/${userId}/avatar`, { method: 'POST', body })
-    await applyAvatar(userId, res.avatar)
-    toast.add({ title: 'Avatar updated', color: 'success' })
-  } catch (err: unknown) {
-    toast.add({ title: (err as { data?: { statusMessage?: string } })?.data?.statusMessage || 'Could not upload the image', color: 'error' })
-  } finally {
-    avatarBusy.value = null
-  }
-}
-
-const handleAvatarRemove = async () => {
-  if (!selectedMember.value) return
-  const userId = selectedMember.value.user_id
-  avatarBusy.value = 'remove'
-  try {
-    await $fetch(`/api/o/${orgSlug.value}/members/${userId}/avatar`, { method: 'DELETE' })
-    await applyAvatar(userId, null)
-    toast.add({ title: 'Avatar removed', color: 'success' })
-  } catch (err: unknown) {
-    toast.add({ title: (err as { data?: { statusMessage?: string } })?.data?.statusMessage || 'Could not remove the avatar', color: 'error' })
-  } finally {
-    avatarBusy.value = null
-  }
 }
 
 // ---------- pending invites ----------
@@ -699,18 +640,15 @@ const handleRemove = async () => {
         >
           <!-- Identity hero -->
           <section class="flex items-start gap-4">
-            <img
-              v-if="selectedMember.avatar"
-              :src="selectedMember.avatar"
-              :alt="selectedMember.display_name"
-              class="shrink-0 size-16 rounded-full object-cover ring-1 ring-(--ui-border) shadow-sm"
-            >
-            <div
-              v-else
-              class="shrink-0 size-16 rounded-full bg-gradient-to-br from-(--ui-primary) to-(--ui-primary)/60 text-white flex items-center justify-center text-xl font-semibold ring-1 ring-(--ui-border) shadow-sm"
-            >
-              {{ initialsOf(selectedMember.display_name, selectedMember.email) }}
-            </div>
+            <UserAvatarPicker
+              :user-id="selectedMember.user_id"
+              :endpoint="`/api/o/${orgSlug}/members/${selectedMember.user_id}/avatar`"
+              :avatar="selectedMember.avatar"
+              :name="selectedMember.display_name"
+              :email="selectedMember.email"
+              :editable="selectedMember.editable"
+              @update="applyAvatar"
+            />
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
                 <h2 class="text-xl font-semibold truncate">
@@ -774,43 +712,6 @@ const handleRemove = async () => {
                   />
                   {{ STATUS_META[selectedMember.status].label }}
                 </UBadge>
-              </div>
-              <div
-                v-if="selectedMember.editable && (avatarInfo.can_upload || selectedMember.avatar)"
-                class="mt-3 flex items-center gap-2 flex-wrap"
-              >
-                <template v-if="avatarInfo.can_upload">
-                  <input
-                    ref="avatarInput"
-                    type="file"
-                    :accept="avatarInfo.types.join(',')"
-                    class="hidden"
-                    @change="handleAvatarUpload"
-                  >
-                  <UButton
-                    size="xs"
-                    color="neutral"
-                    variant="outline"
-                    icon="i-lucide-upload"
-                    :loading="avatarBusy === 'upload'"
-                    :disabled="!!avatarBusy"
-                    @click="avatarInput?.click()"
-                  >
-                    {{ selectedMember.avatar ? 'Change avatar' : 'Upload avatar' }}
-                  </UButton>
-                </template>
-                <UButton
-                  v-if="selectedMember.avatar"
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  icon="i-lucide-trash-2"
-                  :loading="avatarBusy === 'remove'"
-                  :disabled="!!avatarBusy"
-                  @click="handleAvatarRemove"
-                >
-                  Remove avatar
-                </UButton>
               </div>
             </div>
           </section>

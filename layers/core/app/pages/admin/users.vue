@@ -14,6 +14,7 @@ interface AdminUserRow {
   display_name: string
   // Null for accounts created without an address (e.g. a host's app installs).
   email: string | null
+  avatar: string | null
   verified: boolean
   is_admin: boolean
   status: UserStatus
@@ -40,7 +41,7 @@ const UBadge = resolveComponent('UBadge')
 
 const toast = useToast()
 const confirmAction = useConfirm()
-const { user: currentUser } = useAuth()
+const { user: currentUser, checkAuth } = useAuth()
 
 const page = ref(1)
 const pageSize = ref(50)
@@ -450,6 +451,19 @@ const handleSave = async () => {
   } finally {
     saving.value = false
   }
+}
+
+const applyAvatar = async (userId: string, avatar: string | null) => {
+  if (data.value) {
+    data.value = {
+      ...data.value,
+      rows: data.value.rows.map(r => r.id === userId ? { ...r, avatar } : r)
+    }
+  }
+  if (selectedUser.value?.id === userId) {
+    selectedUser.value = { ...selectedUser.value, avatar }
+  }
+  if (currentUser.value?.id === userId) await checkAuth()
 }
 
 const markingVerified = ref(false)
@@ -890,47 +904,57 @@ const handleDelete = async () => {
           v-if="selectedUser"
           class="flex-1 min-h-0 overflow-y-auto p-6 space-y-6"
         >
-          <header>
-            <h2 class="text-xl font-semibold">
-              {{ selectedUser.display_name }}
-            </h2>
-            <div
-              v-if="selectedUser.email"
-              class="mt-0.5 inline-flex items-center gap-1"
-            >
-              <UButton
-                variant="ghost"
-                color="neutral"
-                size="sm"
-                class="-mx-2"
-                :aria-label="`Copy ${selectedUser.email}`"
-                @click="copyEmail(selectedUser.email)"
-              >
-                <UIcon
-                  name="i-lucide-mail"
-                  class="size-3.5 shrink-0"
-                />
-                <span class="truncate">{{ selectedUser.email }}</span>
-              </UButton>
-              <UTooltip
-                :text="emailCopied ? 'Copied' : 'Copy email'"
+          <header class="flex items-start gap-4">
+            <UserAvatarPicker
+              :user-id="selectedUser.id"
+              :endpoint="`/api/admin/users/${selectedUser.id}/avatar`"
+              :avatar="selectedUser.avatar || null"
+              :name="selectedUser.display_name"
+              :email="selectedUser.email"
+              @update="applyAvatar"
+            />
+            <div class="flex-1 min-w-0">
+              <h2 class="text-xl font-semibold">
+                {{ selectedUser.display_name }}
+              </h2>
+              <div
+                v-if="selectedUser.email"
+                class="mt-0.5 inline-flex items-center gap-1 max-w-full"
               >
                 <UButton
-                  :icon="emailCopied ? 'i-lucide-check' : 'i-lucide-copy'"
                   variant="ghost"
-                  color="success"
-                  size="xs"
-                  :aria-label="emailCopied ? 'Email copied' : `Copy ${selectedUser.email}`"
+                  color="neutral"
+                  size="sm"
+                  class="-mx-2 max-w-full min-w-0"
+                  :aria-label="`Copy ${selectedUser.email}`"
                   @click="copyEmail(selectedUser.email)"
-                />
-              </UTooltip>
+                >
+                  <UIcon
+                    name="i-lucide-mail"
+                    class="size-3.5 shrink-0"
+                  />
+                  <span class="truncate">{{ selectedUser.email }}</span>
+                </UButton>
+                <UTooltip
+                  :text="emailCopied ? 'Copied' : 'Copy email'"
+                >
+                  <UButton
+                    :icon="emailCopied ? 'i-lucide-check' : 'i-lucide-copy'"
+                    variant="ghost"
+                    color="success"
+                    size="xs"
+                    :aria-label="emailCopied ? 'Email copied' : `Copy ${selectedUser.email}`"
+                    @click="copyEmail(selectedUser.email)"
+                  />
+                </UTooltip>
+              </div>
+              <p
+                v-else
+                class="text-sm text-(--ui-text-muted)"
+              >
+                No email address
+              </p>
             </div>
-            <p
-              v-else
-              class="text-sm text-(--ui-text-muted)"
-            >
-              No email address
-            </p>
           </header>
 
           <UFormField label="Display name">

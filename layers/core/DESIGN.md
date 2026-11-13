@@ -22,6 +22,8 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 | Manage one scope's groups / limit an app to groups | `<GroupsManager>` / `<AppGroupsModal>` |
 | Show a group in a list or picker | `<GroupAvatar :name :icon :image>` beside its name; in a menu or select item, `avatar: groupAvatarProps(group)` |
 | Pick an icon | `<IconPicker v-model>`: a square button showing the icon. Beside a name field it goes before the input. When the thing already has an avatar, make the avatar the button and put `<IconPickerPanel>` in its popover |
+| Set a person's avatar | `<UserAvatarPicker :user-id :endpoint :avatar :name @update>`: the avatar is the button; its popover uploads or removes the image at once |
+| Upload or remove an image from a popover | `<ImagePickerPanel :info :has-image @choose @remove>`: a drop zone that also opens the file browser, and Remove |
 
 ## Keep pages uncluttered
 
