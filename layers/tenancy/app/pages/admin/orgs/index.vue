@@ -112,9 +112,12 @@ const handleDelete = async () => {
         class="flex items-center justify-between gap-3 p-4"
       >
         <div class="min-w-0">
-          <div class="font-medium">
+          <NuxtLink
+            :to="`/@${o.slug}/dashboard`"
+            class="font-medium hover:underline"
+          >
             {{ o.name }}
-          </div>
+          </NuxtLink>
           <div class="text-xs text-(--ui-text-muted)">
             /@{{ o.slug }} · {{ o.member_count }} member{{ o.member_count === 1 ? '' : 's' }} · {{ o.app_count }} app{{ o.app_count === 1 ? '' : 's' }}
           </div>
