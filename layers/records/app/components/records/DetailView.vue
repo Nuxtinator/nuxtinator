@@ -55,6 +55,15 @@ watch([typeKey, orgKey], async ([key, org]) => {
 const { record, pending, error, refresh, patchFields } = useRecordsRecord(typeKey, recordId)
 const shareConfirm = useRecordsShareConfirm()
 
+// The back link goes wherever the user came from (a meeting the task was
+// opened from, a contact's timeline, ...) — the router stashes the SPA
+// referrer in history.state.back. A record opened directly (fresh tab or
+// deep link) has none, so it falls back to its type's list, which the label
+// also reflects. SSR is off, so history is always readable.
+const referrer = computed(() => window.history.state?.back as string | null)
+const backTo = computed(() => referrer.value ?? typePath(typeKey.value))
+const backLabel = computed(() => referrer.value ? 'Back' : typeInfo.value?.label ?? 'Back')
+
 // Server-evaluated capability flags for this record (see RecordCapabilities).
 const canEdit = computed(() => record.value?.capabilities.canEdit ?? false)
 const canShare = computed(() => record.value?.capabilities.canShare ?? false)
@@ -221,8 +230,8 @@ async function removeRecord() {
       <RecordsHeader
         :record="record"
         :status-field="statusField"
-        :back-to="typePath(typeKey)"
-        :back-label="typeInfo?.label ?? 'Back'"
+        :back-to="backTo"
+        :back-label="backLabel"
         :can-edit="canEdit && !accountLinked"
         :can-share="canShare"
         :can-delete="canDelete"
