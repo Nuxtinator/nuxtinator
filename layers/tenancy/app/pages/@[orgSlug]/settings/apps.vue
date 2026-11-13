@@ -61,12 +61,10 @@ const onToggle = async (app: OrgApp) => {
 <template>
   <div class="max-w-4xl mx-auto">
     <div class="space-y-4">
-      <h1 class="text-3xl font-bold">
-        Apps
-      </h1>
-      <p class="text-sm text-(--ui-text-muted)">
-        Choose which apps are available to members of this organization.
-      </p>
+      <PageTitle
+        title="Apps"
+        help="Choose which apps are available to members of this organization."
+      />
 
       <div
         v-if="pending && apps.length === 0"

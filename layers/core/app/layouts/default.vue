@@ -166,17 +166,7 @@ watch(() => route.path, () => {
 
     <!-- Unauthenticated -->
     <template v-else>
-      <header class="bg-(--chrome-bg) border-b border-(--ui-border) py-4 sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 flex justify-between items-center">
-          <NuxtLink
-            to="/"
-            class="text-xl font-semibold hover:text-(--ui-text-muted) transition-colors"
-          >
-            {{ config.public.appName }}
-          </NuxtLink>
-          <ThemeToggle />
-        </div>
-      </header>
+      <SignedOutHeader class="sticky top-0 z-50" />
       <main class="max-w-7xl mx-auto px-4 py-8">
         <slot />
       </main>

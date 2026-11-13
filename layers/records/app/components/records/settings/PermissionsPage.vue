@@ -29,7 +29,7 @@ const canManage = admin.canManage
         aria-label="Back to records settings"
         :to="settingsPath()"
       />
-      <h1 class="flex-1 text-3xl font-bold truncate">
+      <h1 class="flex-1 text-2xl font-semibold tracking-tight text-(--ui-text-highlighted) truncate">
         Roles &amp; permissions
       </h1>
     </header>

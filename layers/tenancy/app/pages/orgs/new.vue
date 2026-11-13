@@ -67,9 +67,7 @@ async function onSubmit() {
 
 <template>
   <div class="max-w-xl mx-auto space-y-6">
-    <h1 class="text-3xl font-bold">
-      Create organization
-    </h1>
+    <PageTitle title="Create organization" />
 
     <UAlert
       v-if="!isOperatorAdmin"

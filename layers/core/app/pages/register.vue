@@ -3,7 +3,6 @@ definePageMeta({
   layout: 'auth'
 })
 
-const router = useRouter()
 const route = useRoute()
 const { register } = useAuth()
 const registrationOpen = await useRegistrationOpen()
@@ -88,30 +87,17 @@ async function handleRegister() {
   }
 }
 
-const redirectToLogin = () => {
-  const redirect = route.query.redirect as string
-  if (redirect) {
-    router.push(`/login?redirect=${encodeURIComponent(redirect)}`)
-  } else {
-    router.push('/login')
-  }
-}
+// The sign-in page, carrying along where to go after signing in.
+const loginLink = computed(() => ({
+  path: '/login',
+  query: redirectTarget.value ? { redirect: redirectTarget.value } : {}
+}))
 </script>
 
 <template>
   <div>
-    <!-- Logo/Header -->
-    <div class="text-center mb-8">
-      <h1 class="text-4xl font-bold text-(--ui-text) mb-2">
-        Create Account
-      </h1>
-      <p class="text-(--ui-text-muted)">
-        Join us today
-      </p>
-    </div>
-
     <!-- Register Card -->
-    <UCard :ui="{ body: 'p-6 sm:p-8' }">
+    <AuthCard title="Create account">
       <!-- Success Message -->
       <div
         v-if="success"
@@ -120,9 +106,9 @@ const redirectToLogin = () => {
         <UAlert
           color="success"
           variant="soft"
-          title="Registration Successful!"
+          icon="i-lucide-circle-check"
+          title="Registration successful"
           description="Please check your email to verify your account."
-          :ui="{ icon: 'i-lucide-check-circle' }"
         />
       </div>
 
@@ -142,9 +128,9 @@ const redirectToLogin = () => {
           variant="outline"
           size="lg"
           block
-          @click="redirectToLogin"
+          :to="loginLink"
         >
-          Back to Sign In
+          Back to sign in
         </UButton>
       </div>
 
@@ -159,9 +145,10 @@ const redirectToLogin = () => {
           v-if="error"
           color="error"
           variant="soft"
+          icon="i-lucide-circle-alert"
           :title="error"
-          :close-button="{ icon: 'i-lucide-x', color: 'gray', variant: 'ghost' }"
-          @close="error = ''"
+          close
+          @update:open="error = ''"
         />
 
         <AuthProviderButtons
@@ -173,7 +160,7 @@ const redirectToLogin = () => {
         <!-- Display Name Input -->
         <div class="space-y-2">
           <UFormField
-            label="Display Name"
+            label="Display name"
             name="display_name"
             required
           >
@@ -249,14 +236,13 @@ const redirectToLogin = () => {
         <!-- Confirm Password Input -->
         <div class="space-y-2">
           <UFormField
-            label="Confirm Password"
+            label="Confirm password"
             name="confirmPassword"
             required
           >
             <UInput
               v-model="state.confirmPassword"
               type="password"
-              placeholder="Confirm your password"
               size="lg"
               :disabled="loading"
               autocomplete="new-password"
@@ -266,7 +252,7 @@ const redirectToLogin = () => {
             />
             <p
               v-if="!passwordMatch"
-              class="text-xs text-red-600 mt-1"
+              class="text-xs text-(--ui-error) mt-1"
             >
               Passwords do not match
             </p>
@@ -282,32 +268,28 @@ const redirectToLogin = () => {
           :loading="loading"
           :disabled="loading || !state.email || !state.password || !state.display_name || !passwordMatch"
         >
-          Create Account
-        </UButton>
-
-        <!-- Divider -->
-        <USeparator
-          label="Already have an account?"
-          :ui="{ container: 'font-normal text-muted' }"
-        />
-
-        <!-- Login Link -->
-        <UButton
-          color="neutral"
-          variant="outline"
-          size="lg"
-          block
-          :disabled="loading"
-          @click="redirectToLogin"
-        >
-          Sign In
+          Create account
         </UButton>
       </form>
-    </UCard>
 
-    <!-- Footer -->
-    <p class="text-center text-sm text-(--ui-text-dimmed) mt-8">
-      By creating an account, you agree to our Terms of Service and Privacy Policy
-    </p>
+      <!-- Login Link -->
+      <template
+        v-if="!success && registrationOpen"
+        #footer
+      >
+        Already have an account?
+        <NuxtLink
+          :to="loginLink"
+          class="font-medium text-(--ui-text) underline underline-offset-4 decoration-(--ui-border-accented) hover:decoration-current transition-colors"
+        >
+          Sign in
+        </NuxtLink>
+      </template>
+
+      <!-- Footer -->
+      <template #note>
+        By creating an account, you agree to our Terms of Service and Privacy Policy
+      </template>
+    </AuthCard>
   </div>
 </template>

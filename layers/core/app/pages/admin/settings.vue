@@ -65,21 +65,20 @@ async function onSetGroupMode(groupMode: 'audiences' | 'teams') {
 
 <template>
   <div class="space-y-4">
-    <h1 class="text-2xl font-bold">
-      Settings
-    </h1>
+    <PageTitle title="Settings" />
 
-    <UCard v-if="data">
-      <div class="flex items-start justify-between gap-4">
-        <div>
-          <h2 class="font-medium">
-            {{ data.labels.selfRegistration }}
-          </h2>
-          <p class="text-sm text-(--ui-text-muted)">
-            Let anyone create an account from the sign-up page or by signing in with a provider.
-            When off, new people can join only through an invitation.
-          </p>
-        </div>
+    <UCard
+      v-if="data"
+      :ui="{ body: 'divide-y divide-(--ui-border) *:py-4 *:first:pt-0 *:last:pb-0' }"
+    >
+      <div class="flex items-center justify-between gap-4">
+        <h2 class="font-medium flex items-center gap-1">
+          {{ data.labels.selfRegistration }}
+          <InfoTip>
+            <p>Let anyone create an account from the sign-up page or by signing in with a provider.</p>
+            <p>When off, new people can join only through an invitation.</p>
+          </InfoTip>
+        </h2>
         <USwitch
           :model-value="data.selfRegistration"
           :disabled="saving"
@@ -87,9 +86,7 @@ async function onSetGroupMode(groupMode: 'audiences' | 'teams') {
           @update:model-value="onSetSelfRegistration"
         />
       </div>
-    </UCard>
 
-    <UCard v-if="data">
       <div class="flex items-center justify-between gap-4">
         <h2 class="font-medium flex items-center gap-1">
           {{ data.labels.groupMode }}

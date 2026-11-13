@@ -197,7 +197,7 @@ async function moveField(field: RecordsFieldSetting, dir: -1 | 1) {
         aria-label="Back to records settings"
         :to="settingsPath()"
       />
-      <h1 class="flex-1 text-3xl font-bold truncate flex items-center gap-2">
+      <h1 class="flex-1 text-2xl font-semibold tracking-tight text-(--ui-text-highlighted) truncate flex items-center gap-2">
         {{ typeInfo?.label ?? typeKey }}
         <UBadge
           v-if="typeInfo?.custom"

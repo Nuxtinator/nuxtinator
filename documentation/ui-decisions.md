@@ -55,6 +55,29 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
 - **Don't add a subtitle that repeats the page title.**
 - InfoTip sits at `vertical-align: -0.2em`, which centres the icon on the label's capital letters; `align-middle` made it sit low.
 
+## Titles, wording and tables
+
+- **Every page's title is one component, `PageTitle`**: the name at `text-2xl font-semibold`, an optional (i), and the page's buttons on the right. Pages that each wrote their own `<h1>` had drifted to three sizes and two weights (`text-3xl font-bold` on org settings, `text-2xl font-bold` on admin, `text-lg` on lists), and several had grown an intro paragraph under the title.
+  - Semibold was chosen over bold because the top bar and the sidebars already use semibold; bold titles were the only bold text on the page.
+  - The core component is not called `PageHeader`: the videos layer already ships a component by that name, and a later layer's component replaces an earlier one's.
+  - A record list keeps its own smaller title in its toolbar strip; that strip is an app's chrome, not a page title.
+- **Labels, buttons, headings and alert titles use sentence case, and the product says "sign in".** The signed-out pages were the only ones in Title Case ("Create Account", "Forgot Password?") and mixed "Sign In" with "Back to Login".
+- **Column headers are small, medium-weight labels whether or not the column sorts** (`ui.table.slots.th` in `app.config`). Nuxt UI's default header is larger and bolder than the ghost button a sortable header renders, so "Organizations" or "Assigned to" stood out from the sortable columns beside them. Enlarging the sort buttons was rejected: it means the same change in every table, and quiet headers leave the rows as the thing to read.
+- **Tables sit on the page without a card.** The members table had a filled card around it while the users and record tables had none.
+- **A table's first column is darker and medium weight**, so the eye finds the row's name before its details.
+- **Pagination is hidden while everything fits on one page.** A row of first / previous / 1 / next / last buttons under four rows offered nothing to press.
+- **Dates read "Nov 12, 2026, 8:44 PM"** through `formatDateTime`. `toLocaleString()` printed seconds on every row. Audit logs keep seconds.
+- **Alerts default to the tinted `subtle` variant** (`ui.alert.defaultVariants` in `app.config`). Most alerts already asked for `subtle` or `soft`; the rest fell back to Nuxt UI's solid fill, so the same kind of message looked different from page to page.
+
+## Signed-out pages
+
+- **Sign in, register, reset password and accept invitation share one frame**: the same top bar as the signed-out home page (`SignedOutHeader`: the app's name and the theme toggle), then `AuthCard` with the page's title inside the card, on the same left edge as the fields. Before, these pages had no top bar and never named the product, and a centred `text-4xl` "Welcome Back" was the loudest thing on the page.
+  - Subtitles such as "Sign in to your account" and "Join us today" were dropped: they repeated the title.
+- **The card is anchored from the top of the page, not centred vertically**, so its title stays in place when an error appears or the view switches between sign in and forgot password.
+- **The way to the neighbouring page is one line under the card** ("New here? Create an account"). A divider and a second full-width button inside the card gave signing up the same weight as signing in.
+- **"Forgot password?" sits in the password field's label row.** It follows the input in the DOM so Tab goes from email to password.
+- **A placeholder shows an example or a rule ("At least 6 characters"), never the label again** ("Enter your password").
+
 ## Settings pages
 
 - **Settings are rows grouped into a few cards, not one card per setting.** Each row shows a label, the current value and an action (see `SettingsGroup` / `SettingsRow`). A card holding a single button or field read as sparse and made the page long.

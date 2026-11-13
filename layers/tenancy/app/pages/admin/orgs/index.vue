@@ -78,22 +78,17 @@ const handleDelete = async () => {
 
 <template>
   <div class="space-y-4">
-    <header class="flex items-center justify-between gap-3">
-      <div>
-        <h1 class="text-2xl font-bold">
-          Organizations
-        </h1>
-        <p class="text-sm text-(--ui-text-muted)">
-          Every org in this deployment.
-        </p>
-      </div>
+    <PageTitle
+      title="Organizations"
+      help="Every org in this deployment."
+    >
       <UButton
         to="/orgs/new"
         icon="i-lucide-plus"
       >
         Create org
       </UButton>
-    </header>
+    </PageTitle>
 
     <div
       v-if="pending && orgs.length === 0"
