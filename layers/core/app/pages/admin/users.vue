@@ -391,6 +391,25 @@ const canSave = computed(() => nameValid.value && nameChanged.value && !saving.v
 const openRow = (row: AdminUserRow) => {
   selectedUser.value = row
   editName.value = row.display_name
+  emailCopied.value = false
+  if (emailCopiedTimer) clearTimeout(emailCopiedTimer)
+}
+
+const emailCopied = ref(false)
+let emailCopiedTimer: ReturnType<typeof setTimeout> | null = null
+
+const copyEmail = async (email: string) => {
+  emailCopied.value = true
+  if (emailCopiedTimer) clearTimeout(emailCopiedTimer)
+  emailCopiedTimer = setTimeout(() => { emailCopied.value = false }, 2000)
+  try {
+    await navigator.clipboard.writeText(email)
+    toast.add({ title: 'Email copied', color: 'success' })
+  } catch {
+    emailCopied.value = false
+    if (emailCopiedTimer) clearTimeout(emailCopiedTimer)
+    toast.add({ title: 'Copy failed — select the address and copy it', color: 'warning' })
+  }
 }
 
 const handleRowSelect = (_event: Event, row: { original: AdminUserRow }) => {
@@ -875,8 +894,42 @@ const handleDelete = async () => {
             <h2 class="text-xl font-semibold">
               {{ selectedUser.display_name }}
             </h2>
-            <p class="text-sm text-(--ui-text-muted)">
-              {{ selectedUser.email ?? 'No email address' }}
+            <div
+              v-if="selectedUser.email"
+              class="mt-0.5 inline-flex items-center gap-1"
+            >
+              <UButton
+                variant="ghost"
+                color="neutral"
+                size="sm"
+                class="-mx-2"
+                :aria-label="`Copy ${selectedUser.email}`"
+                @click="copyEmail(selectedUser.email)"
+              >
+                <UIcon
+                  name="i-lucide-mail"
+                  class="size-3.5 shrink-0"
+                />
+                <span class="truncate">{{ selectedUser.email }}</span>
+              </UButton>
+              <UTooltip
+                :text="emailCopied ? 'Copied' : 'Copy email'"
+              >
+                <UButton
+                  :icon="emailCopied ? 'i-lucide-check' : 'i-lucide-copy'"
+                  variant="ghost"
+                  color="success"
+                  size="xs"
+                  :aria-label="emailCopied ? 'Email copied' : `Copy ${selectedUser.email}`"
+                  @click="copyEmail(selectedUser.email)"
+                />
+              </UTooltip>
+            </div>
+            <p
+              v-else
+              class="text-sm text-(--ui-text-muted)"
+            >
+              No email address
             </p>
           </header>
 
