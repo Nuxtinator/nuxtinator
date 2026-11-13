@@ -297,6 +297,10 @@ async function submit() {
           required
         >
           <div class="flex gap-2">
+            <IconPicker
+              v-model="icon"
+              :disabled="creating"
+            />
             <UInput
               v-model="name"
               autofocus
@@ -304,13 +308,6 @@ async function submit() {
               :placeholder="starter.placeholder"
               :disabled="creating"
             />
-            <div class="w-36 shrink-0">
-              <IconPicker
-                v-model="icon"
-                placeholder="Icon…"
-                :disabled="creating"
-              />
-            </div>
           </div>
         </UFormField>
 

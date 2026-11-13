@@ -102,10 +102,13 @@ const saving = ref(false)
 
 // The picked image file is uploaded on save; `imagePreview` is what the
 // avatar shows meanwhile (the picked file, or the group's current image).
-const imageInput = ref<HTMLInputElement | null>(null)
 const imageFile = ref<File | null>(null)
 const imagePreview = ref<string | null>(null)
 const removeImage = ref(false)
+
+// An image file dropped anywhere on the form becomes the group's image.
+// dragenter and dragleave fire for every child crossed, hence a depth count.
+const dragDepth = ref(0)
 
 const resetImage = (current: string | null) => {
   if (imageFile.value && imagePreview.value) URL.revokeObjectURL(imagePreview.value)
@@ -132,29 +135,81 @@ const openEdit = (group: ScopeGroup) => {
 }
 
 watch(formOpen, (open) => {
-  if (!open) resetImage(null)
+  if (open) return
+  resetImage(null)
+  dragDepth.value = 0
 })
 
-const onPickImage = (event: Event) => {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (imageInput.value) imageInput.value.value = ''
-  if (!file) return
+// Returns whether the file was accepted.
+const setImage = (file: File): boolean => {
   if (!imageInfo.value.types.includes(file.type)) {
     toast.add({ title: `Use a ${imageInfo.value.types_text} image`, color: 'error' })
-    return
+    return false
   }
   if (file.size > imageInfo.value.max_mb * 1024 * 1024) {
     toast.add({ title: `Image too large (max ${imageInfo.value.max_mb} MB)`, color: 'error' })
-    return
+    return false
   }
   resetImage(URL.createObjectURL(file))
   imageFile.value = file
+  return true
 }
 
 const onRemoveImage = () => {
   const hadImage = !!editing.value?.image
   resetImage(null)
   removeImage.value = hadImage
+}
+
+// The avatar opens a popover with the icon grid and, where a group can have
+// an image, an Image tab.
+const AVATAR_TABS = [
+  { label: 'Icon', value: 'icon' },
+  { label: 'Image', value: 'image' }
+]
+const avatarOpen = ref(false)
+const avatarTab = ref<string>('icon')
+const imageAllowed = computed(() => imageInfo.value.can_upload || !!imagePreview.value)
+
+watch(avatarOpen, (open) => {
+  if (open) avatarTab.value = imagePreview.value ? 'image' : 'icon'
+})
+
+// An image shows instead of the icon, so picking an icon drops the image.
+const onPickIcon = (name: string | null) => {
+  formIcon.value = name
+  if (name && imagePreview.value) onRemoveImage()
+  avatarOpen.value = false
+}
+
+// A file dropped on or browsed from the Image tab's drop zone.
+const onChooseImage = (file: File | null | undefined) => {
+  if (file && setImage(file)) avatarOpen.value = false
+}
+
+const isFileDrag = (event: DragEvent) =>
+  imageInfo.value.can_upload && !!event.dataTransfer?.types.includes('Files')
+
+const onDragEnter = (event: DragEvent) => {
+  if (!isFileDrag(event)) return
+  event.preventDefault()
+  dragDepth.value++
+}
+
+const onDragOver = (event: DragEvent) => {
+  if (isFileDrag(event)) event.preventDefault()
+}
+
+const onDragLeave = (event: DragEvent) => {
+  if (isFileDrag(event)) dragDepth.value = Math.max(0, dragDepth.value - 1)
+}
+
+const onDrop = (event: DragEvent) => {
+  if (!isFileDrag(event)) return
+  event.preventDefault()
+  dragDepth.value = 0
+  const file = event.dataTransfer?.files[0]
+  if (file) setImage(file)
 }
 
 const saveImage = async (id: string) => {
@@ -318,56 +373,91 @@ const onToggleMember = async (user: GroupsManagerUser, on: boolean) => {
           id="groups-manager-form"
           class="space-y-4"
           @submit.prevent="onSave"
+          @dragenter="onDragEnter"
+          @dragover="onDragOver"
+          @dragleave="onDragLeave"
+          @drop="onDrop"
         >
           <UFormField label="Name">
-            <div class="flex items-center gap-3">
-              <GroupAvatar
-                :name="formName"
-                :icon="formIcon"
-                :image="imagePreview"
-                size="lg"
-              />
+            <div
+              class="flex items-center gap-3 rounded-md outline-2 outline-dashed outline-offset-4"
+              :class="dragDepth > 0 ? 'outline-(--ui-primary)' : 'outline-transparent'"
+            >
+              <UPopover
+                v-model:open="avatarOpen"
+                :ui="{ content: 'w-72' }"
+              >
+                <button
+                  type="button"
+                  class="relative shrink-0 rounded-full cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--ui-primary)"
+                  :aria-label="imageAllowed ? 'Choose an icon or image' : 'Choose an icon'"
+                  :title="imageAllowed ? 'Choose an icon or image' : 'Choose an icon'"
+                >
+                  <GroupAvatar
+                    :name="formName"
+                    :icon="formIcon"
+                    :image="imagePreview"
+                    size="lg"
+                  />
+                  <span class="absolute -bottom-1 -right-1 flex items-center justify-center size-4 rounded-full bg-(--ui-bg) ring ring-(--ui-border-accented) text-(--ui-text-muted)">
+                    <UIcon
+                      name="i-lucide-pencil"
+                      class="size-2.5"
+                    />
+                  </span>
+                </button>
+                <template #content>
+                  <div
+                    v-if="imageAllowed"
+                    class="px-3 pt-3"
+                  >
+                    <UTabs
+                      v-model="avatarTab"
+                      :items="AVATAR_TABS"
+                      :content="false"
+                      size="xs"
+                    />
+                  </div>
+                  <IconPickerPanel
+                    v-if="avatarTab === 'icon' || !imageAllowed"
+                    :selected="formIcon"
+                    @select="onPickIcon"
+                  />
+                  <div
+                    v-else
+                    class="p-3 space-y-2"
+                  >
+                    <UFileUpload
+                      v-if="imageInfo.can_upload"
+                      :model-value="null"
+                      :accept="imageInfo.types.join(',')"
+                      reset
+                      variant="area"
+                      icon="i-lucide-image-up"
+                      :label="imagePreview ? 'Drop a new image here or click to upload' : 'Drop an image here or click to upload'"
+                      :description="`${imageInfo.types_text}, up to ${imageInfo.max_mb} MB`"
+                      :preview="false"
+                      class="w-full"
+                      :ui="{ base: 'data-[dragging=true]:border-(--ui-primary)' }"
+                      @update:model-value="onChooseImage"
+                    />
+                    <UButton
+                      v-if="imagePreview"
+                      color="neutral"
+                      variant="ghost"
+                      icon="i-lucide-trash-2"
+                      @click="onRemoveImage(); avatarOpen = false"
+                    >
+                      Remove
+                    </UButton>
+                  </div>
+                </template>
+              </UPopover>
               <UInput
                 v-model="formName"
                 autofocus
                 class="flex-1"
               />
-            </div>
-          </UFormField>
-          <UFormField label="Icon">
-            <IconPicker v-model="formIcon" />
-          </UFormField>
-          <UFormField v-if="imageInfo.can_upload || imagePreview">
-            <template #label>
-              Image
-              <InfoTip text="An image shows instead of the icon." />
-            </template>
-            <div class="flex items-center gap-2">
-              <input
-                ref="imageInput"
-                type="file"
-                :accept="imageInfo.types.join(',')"
-                class="hidden"
-                @change="onPickImage"
-              >
-              <UButton
-                v-if="imageInfo.can_upload"
-                color="neutral"
-                variant="outline"
-                icon="i-lucide-upload"
-                @click="imageInput?.click()"
-              >
-                {{ imagePreview ? 'Replace' : 'Upload' }}
-              </UButton>
-              <UButton
-                v-if="imagePreview"
-                color="neutral"
-                variant="ghost"
-                icon="i-lucide-trash-2"
-                @click="onRemoveImage"
-              >
-                Remove
-              </UButton>
             </div>
           </UFormField>
           <UFormField

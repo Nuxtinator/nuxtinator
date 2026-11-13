@@ -8,7 +8,7 @@ interface IconCatalogResponse {
 }
 
 // App-wide cache of the icon-name catalog served by /api/_icons. Loaded
-// lazily — the IconPicker calls load() when its popover first opens — and
+// lazily — the IconPickerPanel calls load() when it first mounts — and
 // shared by every picker instance afterwards.
 export function useIconCatalog() {
   const collections = useState<IconCollection[] | null>('core:icon-catalog', () => null)
