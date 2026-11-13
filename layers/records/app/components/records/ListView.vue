@@ -152,6 +152,7 @@ const showEmpty = computed(() =>
               {{ total }} record{{ total === 1 ? '' : 's' }}
             </span>
             <UPagination
+              v-if="total > pageSize"
               v-model:page="page"
               :items-per-page="pageSize"
               :total="total"

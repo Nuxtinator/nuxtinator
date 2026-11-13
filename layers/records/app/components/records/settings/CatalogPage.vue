@@ -59,10 +59,7 @@ function openType(type: RecordsTypeSummary) {
 
 <template>
   <div class="max-w-4xl mx-auto space-y-6">
-    <header class="flex items-center gap-2">
-      <h1 class="flex-1 text-3xl font-bold truncate">
-        Records
-      </h1>
+    <PageTitle title="Records">
       <UButton
         v-if="canManage"
         icon="i-lucide-plus"
@@ -70,7 +67,7 @@ function openType(type: RecordsTypeSummary) {
       >
         New type
       </UButton>
-    </header>
+    </PageTitle>
 
     <div class="space-y-8">
       <div
