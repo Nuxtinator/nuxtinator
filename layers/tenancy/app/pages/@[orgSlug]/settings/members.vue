@@ -123,13 +123,6 @@ const sortIcon = (field: typeof sortField.value) => {
   return sortDir.value === 'asc' ? 'i-lucide-arrow-up' : 'i-lucide-arrow-down'
 }
 
-const formatDate = (value: string | Date | null | undefined) => {
-  if (!value) return '—'
-  const d = typeof value === 'string' ? new Date(value) : value
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString()
-}
-
 const relativeTime = (input: string | number | Date | null | undefined) => {
   if (!input) return null
   const d = input instanceof Date
@@ -173,7 +166,7 @@ const columns: TableColumn<MemberRow>[] = [
   {
     accessorKey: 'display_name',
     header: sortableHeader('Name', 'display_name'),
-    cell: ({ row }) => row.original.display_name || '—'
+    cell: ({ row }) => h('span', { class: 'font-medium text-(--ui-text-highlighted)' }, row.original.display_name || '—')
   },
   {
     accessorKey: 'email',
@@ -212,7 +205,7 @@ const columns: TableColumn<MemberRow>[] = [
   {
     accessorKey: 'joined_at',
     header: sortableHeader('Joined', 'joined_at'),
-    cell: ({ row }) => formatDate(row.original.joined_at)
+    cell: ({ row }) => formatDateTime(row.original.joined_at)
   }
 ]
 
@@ -232,6 +225,12 @@ const slideoverOpen = computed({
 const isSelf = computed(() =>
   !!(selectedMember.value && currentUser.value && selectedMember.value.user_id === currentUser.value.id)
 )
+
+// Focus the panel itself when it opens, not its first button (the remove action), whose tooltip would pop up.
+const focusPanel = (event: Event) => {
+  event.preventDefault()
+  ;(event.target as HTMLElement | null)?.focus()
+}
 
 const openRow = (row: MemberRow) => {
   selectedMember.value = row
@@ -500,27 +499,26 @@ const handleRemove = async () => {
 
 <template>
   <div>
-    <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-      <h1 class="text-3xl font-bold">
-        Members
-      </h1>
-      <div class="flex items-center gap-3 w-full sm:w-auto">
-        <UInput
-          v-model="search"
-          placeholder="Search name or email..."
-          icon="i-lucide-search"
-          class="flex-1 sm:w-80"
-        />
-        <UButton
-          v-if="canInvite"
-          icon="i-lucide-user-plus"
-          color="primary"
-          @click="openInviteModal"
-        >
-          Invite member
-        </UButton>
-      </div>
-    </div>
+    <PageTitle
+      title="Members"
+      class="mb-4"
+    >
+      <UButton
+        v-if="canInvite"
+        icon="i-lucide-user-plus"
+        color="primary"
+        @click="openInviteModal"
+      >
+        Invite member
+      </UButton>
+    </PageTitle>
+
+    <UInput
+      v-model="search"
+      placeholder="Search by name or email"
+      icon="i-lucide-search"
+      class="w-full sm:w-72 mb-4"
+    />
 
     <UAlert
       v-if="error"
@@ -529,23 +527,22 @@ const handleRemove = async () => {
       class="mb-4"
     />
 
-    <div class="border border-(--ui-border) rounded-lg overflow-hidden bg-(--ui-bg-elevated)">
-      <UTable
-        :data="rows"
-        :columns="columns"
-        :loading="pending"
-        :empty-state="{ icon: 'i-lucide-users', label: 'No members found' }"
-        :on-select="handleRowSelect"
-        :meta="tableMeta"
-        :ui="{ tr: canOpenMember ? 'transition-colors cursor-pointer' : 'transition-colors' }"
-      />
-    </div>
+    <UTable
+      :data="rows"
+      :columns="columns"
+      :loading="pending"
+      :empty-state="{ icon: 'i-lucide-users', label: 'No members found' }"
+      :on-select="handleRowSelect"
+      :meta="tableMeta"
+      :ui="{ tr: canOpenMember ? 'transition-colors cursor-pointer' : 'transition-colors' }"
+    />
 
     <div class="flex flex-wrap items-center justify-between gap-4 mt-4">
       <p class="text-sm text-(--ui-text-muted)">
         {{ total }} {{ total === 1 ? 'member' : 'members' }}
       </p>
       <UPagination
+        v-if="total > pageSize"
         v-model:page="page"
         :total="total"
         :items-per-page="pageSize"
@@ -581,7 +578,7 @@ const handleRemove = async () => {
             <div class="text-xs text-(--ui-text-muted) truncate">
               {{ inv.roles.map(roleLabel).join(', ') }}
               <span v-if="inv.inviter_name"> · by {{ inv.inviter_name }}</span>
-              · expires {{ formatDate(inv.expires_at) }}
+              · expires {{ formatDateTime(inv.expires_at) }}
             </div>
           </div>
           <div
@@ -616,6 +613,7 @@ const handleRemove = async () => {
       side="right"
       :title="selectedMember?.display_name || ''"
       :ui="{ content: 'w-screen max-w-full sm:max-w-none sm:w-[50vw]' }"
+      :content="{ onOpenAutoFocus: focusPanel }"
     >
       <template #actions>
         <UTooltip
@@ -727,7 +725,7 @@ const handleRemove = async () => {
                 <span>Joined</span>
               </div>
               <p class="mt-1.5 text-sm font-medium">
-                {{ formatDate(selectedMember.joined_at) }}
+                {{ formatDateTime(selectedMember.joined_at) }}
               </p>
               <p class="text-xs text-(--ui-text-muted) mt-0.5">
                 {{ relativeTime(selectedMember.joined_at) || '—' }}

@@ -13,15 +13,10 @@ const statusLabel = (org: { suspended: boolean }) => org.suspended ? 'Suspended'
 
 <template>
   <div class="max-w-3xl mx-auto space-y-6">
-    <header class="flex items-center justify-between gap-4 flex-wrap">
-      <div>
-        <h1 class="text-3xl font-bold">
-          Organizations
-        </h1>
-        <p class="text-sm text-(--ui-text-muted) mt-1">
-          Pick an organization to work in.
-        </p>
-      </div>
+    <PageTitle
+      title="Organizations"
+      help="Pick an organization to work in."
+    >
       <UButton
         v-if="isOperatorAdmin"
         to="/orgs/new"
@@ -30,7 +25,7 @@ const statusLabel = (org: { suspended: boolean }) => org.suspended ? 'Suspended'
       >
         Create organization
       </UButton>
-    </header>
+    </PageTitle>
 
     <div
       v-if="pending && orgs.length === 0"

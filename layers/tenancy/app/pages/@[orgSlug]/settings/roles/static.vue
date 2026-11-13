@@ -169,15 +169,10 @@ const labelFor = (s: CellState) => ({
 
 <template>
   <div class="max-w-5xl mx-auto space-y-6">
-    <header class="flex items-center justify-between gap-3 flex-wrap">
-      <div>
-        <h1 class="text-3xl font-bold">
-          Static role overrides
-        </h1>
-        <p class="text-sm text-(--ui-text-muted)">
-          Add or remove permissions on top of each static role's defaults — scoped to this organization.
-        </p>
-      </div>
+    <PageTitle
+      title="Static role overrides"
+      help="Add or remove permissions on top of each static role's defaults — scoped to this organization."
+    >
       <UButton
         variant="outline"
         :to="`/@${orgSlug}/settings/roles`"
@@ -185,7 +180,7 @@ const labelFor = (s: CellState) => ({
       >
         Back to roles
       </UButton>
-    </header>
+    </PageTitle>
 
     <div class="flex flex-wrap gap-2">
       <UButton

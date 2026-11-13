@@ -96,10 +96,7 @@ const onDelete = async () => {
 
 <template>
   <div class="max-w-3xl mx-auto space-y-6">
-    <header class="flex items-center justify-between gap-3">
-      <h1 class="text-3xl font-bold">
-        {{ role?.name || 'Role' }}
-      </h1>
+    <PageTitle :title="role?.name || 'Role'">
       <UButton
         variant="outline"
         :to="`/@${orgSlug}/settings/roles`"
@@ -107,7 +104,7 @@ const onDelete = async () => {
       >
         Back
       </UButton>
-    </header>
+    </PageTitle>
 
     <div
       v-if="!role"
