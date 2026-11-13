@@ -134,16 +134,7 @@ async function useDifferentAccount() {
 
 <template>
   <div>
-    <div class="text-center mb-8">
-      <h1 class="text-4xl font-bold text-(--ui-text) mb-2">
-        Accept Invitation
-      </h1>
-      <p class="text-(--ui-text-muted)">
-        Create your account, or join with one you already have
-      </p>
-    </div>
-
-    <UCard :ui="{ body: 'p-6 sm:p-8' }">
+    <AuthCard title="Accept invitation">
       <div
         v-if="inviteState === 'loading'"
         class="flex items-center justify-center py-8"
@@ -161,7 +152,8 @@ async function useDifferentAccount() {
         <UAlert
           color="error"
           variant="soft"
-          title="Invalid Invitation"
+          icon="i-lucide-circle-alert"
+          title="Invalid invitation"
         />
         <p class="text-(--ui-text-muted)">
           This invitation link is invalid. Please ask your administrator for a new invite.
@@ -172,7 +164,7 @@ async function useDifferentAccount() {
           block
           @click="router.push('/login')"
         >
-          Back to Login
+          Back to sign in
         </UButton>
       </div>
 
@@ -183,7 +175,8 @@ async function useDifferentAccount() {
         <UAlert
           color="error"
           variant="soft"
-          title="Invitation Expired"
+          icon="i-lucide-circle-alert"
+          title="Invitation expired"
         />
         <p class="text-(--ui-text-muted)">
           This invitation has expired. Please ask your administrator to send a new invite.
@@ -194,7 +187,7 @@ async function useDifferentAccount() {
           block
           @click="router.push('/login')"
         >
-          Back to Login
+          Back to sign in
         </UButton>
       </div>
 
@@ -205,6 +198,7 @@ async function useDifferentAccount() {
         <UAlert
           color="success"
           variant="soft"
+          icon="i-lucide-circle-check"
           title="Check your email"
           description="We sent a verification link to your address. Verify it, then sign in."
         />
@@ -214,7 +208,7 @@ async function useDifferentAccount() {
           block
           @click="router.push('/login')"
         >
-          Go to Sign In
+          Go to sign in
         </UButton>
       </div>
 
@@ -297,9 +291,10 @@ async function useDifferentAccount() {
           v-if="error"
           color="error"
           variant="soft"
+          icon="i-lucide-circle-alert"
           :title="error"
-          :close-button="{ icon: 'i-lucide-x', color: 'gray', variant: 'ghost' }"
-          @close="error = ''"
+          close
+          @update:open="error = ''"
         />
 
         <p
@@ -337,7 +332,7 @@ async function useDifferentAccount() {
         </UFormField>
 
         <UFormField
-          label="Display Name"
+          label="Display name"
           name="display_name"
           required
         >
@@ -368,7 +363,7 @@ async function useDifferentAccount() {
         </UFormField>
 
         <UFormField
-          label="Confirm Password"
+          label="Confirm password"
           name="confirmPassword"
           required
         >
@@ -383,7 +378,7 @@ async function useDifferentAccount() {
           />
           <p
             v-if="!passwordMatch"
-            class="text-xs text-red-600 mt-1"
+            class="text-xs text-(--ui-error) mt-1"
           >
             Passwords do not match
           </p>
@@ -397,7 +392,7 @@ async function useDifferentAccount() {
           :loading="submitting"
           :disabled="submitting || !state.password || !state.confirmPassword || !passwordMatch"
         >
-          Create Account
+          Create account
         </UButton>
 
         <p class="text-center text-sm text-(--ui-text-muted)">
@@ -411,6 +406,6 @@ async function useDifferentAccount() {
           to accept with it.
         </p>
       </form>
-    </UCard>
+    </AuthCard>
   </div>
 </template>

@@ -3,7 +3,6 @@ definePageMeta({
   layout: 'auth'
 })
 
-const router = useRouter()
 const route = useRoute()
 const { login } = useAuth()
 const registrationOpen = await useRegistrationOpen()
@@ -57,14 +56,11 @@ async function handleLogin() {
   }
 }
 
-const redirectToRegister = () => {
-  const redirect = route.query.redirect as string
-  if (redirect) {
-    router.push(`/register?redirect=${encodeURIComponent(redirect)}`)
-  } else {
-    router.push('/register')
-  }
-}
+// The register page, carrying along where to go after signing in.
+const registerLink = computed(() => ({
+  path: '/register',
+  query: redirectTarget.value ? { redirect: redirectTarget.value } : {}
+}))
 
 async function handleForgotPassword() {
   resetError.value = ''
@@ -103,73 +99,61 @@ function switchToReset() {
 </script>
 
 <template>
-  <div>
-    <!-- Logo/Header -->
-    <div class="text-center mb-8">
-      <h1 class="text-4xl font-bold text-(--ui-text) mb-2">
-        {{ view === 'login' ? 'Welcome Back' : 'Reset Password' }}
-      </h1>
-      <p class="text-(--ui-text-muted)">
-        {{ view === 'login' ? 'Sign in to your account' : 'Enter your email to receive reset instructions' }}
-      </p>
-    </div>
-
+  <AuthCard :title="view === 'login' ? 'Sign in' : 'Reset your password'">
     <!-- Login View -->
-    <UCard
+    <form
       v-if="view === 'login'"
-      :ui="{ body: 'p-6 sm:p-8' }"
+      class="space-y-6"
+      @submit.prevent="handleLogin"
     >
-      <form
-        class="space-y-6"
-        @submit.prevent="handleLogin"
-      >
-        <!-- Success Alert -->
-        <UAlert
-          v-if="successMessage"
-          color="success"
-          variant="soft"
-          :title="successMessage"
-          :close-button="{ icon: 'i-lucide-x', color: 'gray', variant: 'ghost' }"
-          @close="successMessage = ''"
-        />
+      <!-- Success Alert -->
+      <UAlert
+        v-if="successMessage"
+        color="success"
+        variant="soft"
+        icon="i-lucide-circle-check"
+        :title="successMessage"
+        close
+        @update:open="successMessage = ''"
+      />
 
-        <!-- Error Alert -->
-        <UAlert
-          v-if="error"
-          color="error"
-          variant="soft"
-          :title="error"
-          :close-button="{ icon: 'i-lucide-x', color: 'gray', variant: 'ghost' }"
-          @close="error = ''"
-        />
+      <!-- Error Alert -->
+      <UAlert
+        v-if="error"
+        color="error"
+        variant="soft"
+        icon="i-lucide-circle-alert"
+        :title="error"
+        close
+        @update:open="error = ''"
+      />
 
-        <AuthProviderButtons
-          intent="login"
-          :redirect="redirectTarget"
-          separator="or"
-        />
+      <AuthProviderButtons
+        intent="login"
+        :redirect="redirectTarget"
+        separator="or"
+      />
 
+      <div class="space-y-4">
         <!-- Email Input -->
-        <div class="space-y-2">
-          <UFormField
-            label="Email"
-            name="email"
-            required
-          >
-            <UInput
-              v-model="state.email"
-              type="email"
-              placeholder="you@example.com"
-              size="lg"
-              :disabled="loading"
-              autocomplete="email"
-              class="w-full"
-            />
-          </UFormField>
-        </div>
+        <UFormField
+          label="Email"
+          name="email"
+          required
+        >
+          <UInput
+            v-model="state.email"
+            type="email"
+            placeholder="you@example.com"
+            size="lg"
+            :disabled="loading"
+            autocomplete="email"
+            class="w-full"
+          />
+        </UFormField>
 
         <!-- Password Input -->
-        <div class="space-y-2">
+        <div class="relative">
           <UFormField
             label="Password"
             name="password"
@@ -178,26 +162,98 @@ function switchToReset() {
             <UInput
               v-model="state.password"
               type="password"
-              placeholder="Enter your password"
               size="lg"
               :disabled="loading"
               autocomplete="current-password"
               class="w-full"
             />
           </UFormField>
-        </div>
 
-        <!-- Forgot Password Link -->
-        <div class="text-right">
-          <button
-            type="button"
-            class="text-sm text-(--ui-text-muted) hover:text-(--ui-text) transition-colors"
+          <!-- Forgot Password Link: shown in the label row, placed after the input so Tab goes from email to password -->
+          <UButton
+            variant="link"
+            color="neutral"
+            class="absolute top-0 right-0 p-0"
             :disabled="loading"
             @click="switchToReset"
           >
-            Forgot Password?
-          </button>
+            Forgot password?
+          </UButton>
         </div>
+      </div>
+
+      <!-- Submit Button -->
+      <UButton
+        type="submit"
+        color="primary"
+        size="lg"
+        block
+        :loading="loading"
+        :disabled="loading || !state.email || !state.password"
+      >
+        Sign in
+      </UButton>
+    </form>
+
+    <!-- Forgot Password View -->
+    <form
+      v-else
+      class="space-y-6"
+      @submit.prevent="handleForgotPassword"
+    >
+      <!-- Success Message -->
+      <div
+        v-if="resetSuccess"
+        class="space-y-4"
+      >
+        <UAlert
+          color="success"
+          variant="soft"
+          icon="i-lucide-circle-check"
+          title="Email sent"
+          close
+          @update:open="resetSuccess = false"
+        />
+        <p class="text-(--ui-text-muted)">
+          If an account with <strong>{{ sentToEmail }}</strong> exists, you will receive password reset instructions shortly.
+        </p>
+        <p class="text-sm text-(--ui-text-dimmed)">
+          Check your email inbox and spam folder.
+        </p>
+      </div>
+
+      <!-- Reset Form -->
+      <div
+        v-else
+        class="space-y-6"
+      >
+        <!-- Error Alert -->
+        <UAlert
+          v-if="resetError"
+          color="error"
+          variant="soft"
+          icon="i-lucide-circle-alert"
+          :title="resetError"
+          close
+          @update:open="resetError = ''"
+        />
+
+        <!-- Email Input -->
+        <UFormField
+          label="Email"
+          name="email"
+          required
+        >
+          <UInput
+            v-model="resetEmail"
+            type="email"
+            placeholder="you@example.com"
+            size="lg"
+            :disabled="resetLoading"
+            autocomplete="email"
+            class="w-full"
+          />
+        </UFormField>
 
         <!-- Submit Button -->
         <UButton
@@ -205,127 +261,46 @@ function switchToReset() {
           color="primary"
           size="lg"
           block
-          :loading="loading"
-          :disabled="loading || !state.email || !state.password"
+          :loading="resetLoading"
+          :disabled="resetLoading || !resetEmail"
         >
-          Sign In
+          Send reset link
         </UButton>
+      </div>
+    </form>
 
-        <template v-if="registrationOpen">
-          <!-- Divider -->
-          <USeparator
-            label="Don't have an account?"
-            :ui="{ container: 'font-normal text-muted' }"
-          />
-
-          <!-- Register Link -->
-          <UButton
-            color="neutral"
-            variant="outline"
-            size="lg"
-            block
-            :disabled="loading"
-            @click="redirectToRegister"
-          >
-            Create Account
-          </UButton>
-        </template>
-      </form>
-    </UCard>
-
-    <!-- Forgot Password View -->
-    <UCard
-      v-else
-      :ui="{ body: 'p-6 sm:p-8' }"
+    <template
+      v-if="view === 'reset' || registrationOpen"
+      #footer
     >
-      <form
-        class="space-y-6"
-        @submit.prevent="handleForgotPassword"
+      <!-- Register Link -->
+      <template v-if="view === 'login'">
+        New here?
+        <NuxtLink
+          :to="registerLink"
+          class="font-medium text-(--ui-text) underline underline-offset-4 decoration-(--ui-border-accented) hover:decoration-current transition-colors"
+        >
+          Create an account
+        </NuxtLink>
+      </template>
+
+      <!-- Back to Login -->
+      <UButton
+        v-else
+        variant="link"
+        color="neutral"
+        icon="i-lucide-arrow-left"
+        class="p-0"
+        :disabled="resetLoading"
+        @click="switchToLogin"
       >
-        <!-- Success Message -->
-        <div
-          v-if="resetSuccess"
-          class="space-y-4"
-        >
-          <UAlert
-            color="success"
-            variant="soft"
-            title="Email Sent!"
-            :close-button="{ icon: 'i-lucide-x', color: 'gray', variant: 'ghost' }"
-            @close="resetSuccess = false"
-          />
-          <p class="text-(--ui-text-muted)">
-            If an account with <strong>{{ sentToEmail }}</strong> exists, you will receive password reset instructions shortly.
-          </p>
-          <p class="text-sm text-(--ui-text-dimmed)">
-            Check your email inbox and spam folder.
-          </p>
-        </div>
-
-        <!-- Reset Form -->
-        <div
-          v-else
-          class="space-y-6"
-        >
-          <!-- Error Alert -->
-          <UAlert
-            v-if="resetError"
-            color="error"
-            variant="soft"
-            :title="resetError"
-            :close-button="{ icon: 'i-lucide-x', color: 'gray', variant: 'ghost' }"
-            @close="resetError = ''"
-          />
-
-          <!-- Email Input -->
-          <div class="space-y-2">
-            <UFormField
-              label="Email"
-              name="email"
-              required
-            >
-              <UInput
-                v-model="resetEmail"
-                type="email"
-                placeholder="you@example.com"
-                size="lg"
-                :disabled="resetLoading"
-                autocomplete="email"
-                class="w-full"
-              />
-            </UFormField>
-          </div>
-
-          <!-- Submit Button -->
-          <UButton
-            type="submit"
-            color="primary"
-            size="lg"
-            block
-            :loading="resetLoading"
-            :disabled="resetLoading || !resetEmail"
-          >
-            Send Reset Link
-          </UButton>
-        </div>
-
-        <!-- Back to Login -->
-        <div class="text-center">
-          <button
-            type="button"
-            class="text-sm text-(--ui-text-muted) hover:text-(--ui-text) transition-colors"
-            :disabled="resetLoading"
-            @click="switchToLogin"
-          >
-            ← Back to Login
-          </button>
-        </div>
-      </form>
-    </UCard>
+        Back to sign in
+      </UButton>
+    </template>
 
     <!-- Footer -->
-    <p class="text-center text-sm text-(--ui-text-dimmed) mt-8">
+    <template #note>
       By signing in, you agree to our Terms of Service and Privacy Policy
-    </p>
-  </div>
+    </template>
+  </AuthCard>
 </template>

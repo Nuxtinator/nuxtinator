@@ -6,6 +6,6 @@ const { user } = useAuth()
 <template>
   <SettingsRow
     label="Member since"
-    :value="user?.created ? new Date(user.created).toLocaleDateString() : undefined"
+    :value="user?.created ? formatDateOnly(user.created) : undefined"
   />
 </template>
