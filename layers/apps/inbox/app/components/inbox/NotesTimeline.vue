@@ -14,7 +14,8 @@ const { user } = useAuth()
 const currentUserId = computed(() => (user.value as { id?: string } | null)?.id ?? null)
 const toast = useToast()
 
-const { entries, hasMore, pending, error, loadOlder, post, editNote, removeNote } = useInboxNotesTimeline(() => props.conversationId)
+const { entries, hasMore, pending, error, refresh, loadOlder, post, editNote, removeNote } = useInboxNotesTimeline(() => props.conversationId)
+defineExpose({ refresh })
 
 const noteBody = ref('')
 const posting = ref(false)

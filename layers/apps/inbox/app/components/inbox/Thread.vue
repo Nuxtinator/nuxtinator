@@ -9,6 +9,7 @@ import type { InboxTag, InboxTagColor } from '../../composables/useInboxTags'
 import type { InboxCannedResponse } from '../../composables/useInboxCanned'
 import type { InboxMe } from '../../composables/useInboxMe'
 import type { DropdownMenuItem } from '@nuxt/ui'
+import { getInboxThreadActions, type InboxThreadActionContext } from '#inbox'
 
 const props = defineProps<{
   thread: InboxThread
@@ -23,6 +24,8 @@ const props = defineProps<{
   // Reviewer-only AI pack for the loaded draft — shown above the composer, never
   // emailed.
   aiMeta?: InboxAiMetadata | null
+  // Reloads the thread payload; handed to registered menu actions.
+  refresh?: () => Promise<void>
 }>()
 
 const emit = defineEmits<{
@@ -311,8 +314,18 @@ const headerMenuItems = computed(() => {
   if (canAddKnowledge.value) {
     items.push({ label: 'Add to knowledge base', icon: 'i-lucide-book-plus', onSelect: () => emit('addKnowledge') })
   }
+  const ctx: InboxThreadActionContext = { conversation: props.thread.conversation, me: props.me, refresh: refreshAll }
+  for (const action of getInboxThreadActions(ctx)) {
+    items.push({ label: action.label, icon: action.icon, onSelect: () => { void action.onSelect(ctx) } })
+  }
   return items
 })
+
+const timeline = ref<{ refresh: () => Promise<void> } | null>(null)
+
+async function refreshAll(): Promise<void> {
+  await Promise.all([props.refresh?.(), timeline.value?.refresh()])
+}
 
 const viewTabs = [
   { key: 'conversation' as const, label: 'Conversation' },
@@ -623,7 +636,7 @@ const viewTabs = [
     </footer>
     </template>
 
-    <InboxNotesTimeline v-else :conversation-id="thread.conversation.id" :users="assignees" :can-moderate="me?.canModerate ?? false" />
+    <InboxNotesTimeline v-else ref="timeline" :conversation-id="thread.conversation.id" :users="assignees" :can-moderate="me?.canModerate ?? false" />
 
     <UModal v-model:open="confirmSpam" title="Mark as spam?">
       <template #body>
