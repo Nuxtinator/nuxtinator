@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // Inline user picker: async search over the org user directory. A single
 // field commits a user id (or null); a multiple field commits the full id
-// array (the server replaces the list). Selected users render as avatar
-// chips below the select.
+// array (the server replaces the list). A multiple field shows its users as
+// removable avatar chips followed by a "+" that opens the picker; a single
+// field's chip is itself the picker's trigger.
 import type { AvatarProps } from '@nuxt/ui'
 import type { RecordsFieldSetting } from '../../../utils/field-kinds'
 import type { RecordsUser } from '../../../composables/useRecordsUsers'
@@ -20,17 +21,13 @@ const { users, byId, ensureUsers, searchUsers } = useRecordsUsers()
 
 const searchTerm = ref('')
 const results = ref<RecordsUser[]>([])
-const loading = ref(false)
 
 onMounted(async () => {
-  loading.value = true
   try {
     await ensureUsers()
     results.value = users.value
   } catch {
     // An empty picker communicates the failure; commits validate server-side.
-  } finally {
-    loading.value = false
   }
 })
 
@@ -38,13 +35,10 @@ let timer: ReturnType<typeof setTimeout> | null = null
 watch(searchTerm, (q) => {
   if (timer) clearTimeout(timer)
   timer = setTimeout(async () => {
-    loading.value = true
     try {
       results.value = await searchUsers(q)
     } catch {
       // Keep the previous results on a failed search.
-    } finally {
-      loading.value = false
     }
   }, 250)
 })
@@ -95,6 +89,10 @@ function onMultiple(value: string[]) {
   emit('commit', value)
 }
 
+function remove(id: string) {
+  emit('commit', selectedIds.value.filter(v => v !== id))
+}
+
 function onSingle(value: string | null | undefined) {
   const next = typeof value === 'string' && value !== '' ? value : null
   if (next === (selectedIds.value[0] ?? null)) return
@@ -103,50 +101,100 @@ function onSingle(value: string | null | undefined) {
 </script>
 
 <template>
-  <div class="space-y-2">
+  <div
+    v-if="field.multiple"
+    class="flex flex-wrap items-center gap-1.5 min-h-8"
+  >
+    <UBadge
+      v-for="user in selectedUsers"
+      :key="user.id"
+      color="neutral"
+      variant="subtle"
+    >
+      <UAvatar
+        v-bind="userAvatarProps({ id: user.id, name: user.name, image: user.avatarUrl })"
+        size="3xs"
+      />
+      {{ user.name }}
+      <button
+        type="button"
+        :aria-label="`Remove ${user.name}`"
+        class="-me-0.5 rounded-sm text-(--ui-text-dimmed) hover:text-(--ui-text)"
+        @click="remove(user.id)"
+      >
+        <UIcon
+          name="i-lucide-x"
+          class="size-3.5 block"
+        />
+      </button>
+    </UBadge>
     <USelectMenu
-      v-if="field.multiple"
       v-model:search-term="searchTerm"
       :model-value="selectedIds"
       :items="items"
       multiple
       ignore-filter
-      :loading="loading"
       value-key="value"
       label-key="label"
-      placeholder="Select users..."
-      class="w-full sm:max-w-xs"
+      variant="ghost"
+      size="sm"
+      trailing-icon=""
+      :content="{ align: 'start' }"
+      :aria-label="`Add to ${field.label}`"
+      :class="{ '-ms-2.5': selectedUsers.length === 0 }"
+      :ui="{ base: selectedUsers.length === 0 ? undefined : 'p-1.5', content: 'w-64' }"
       @update:model-value="onMultiple"
-    />
+    >
+      <UIcon
+        name="i-lucide-plus"
+        class="size-4 text-(--ui-text-dimmed)"
+      />
+      <span
+        v-if="selectedUsers.length === 0"
+        class="text-(--ui-text-dimmed)"
+      >Add person</span>
+    </USelectMenu>
+  </div>
+  <div
+    v-else
+    class="flex items-center min-h-8"
+  >
     <USelectMenu
-      v-else
       v-model:search-term="searchTerm"
       :model-value="selectedIds[0] ?? null"
       :items="singleItems"
       ignore-filter
-      :loading="loading"
       value-key="value"
       label-key="label"
-      placeholder="Select user..."
-      class="w-full sm:max-w-xs"
+      variant="ghost"
+      size="sm"
+      trailing-icon=""
+      :content="{ align: 'start' }"
+      :ui="{ content: 'w-64' }"
+      :aria-label="field.label"
+      class="-ms-2.5"
       @update:model-value="onSingle"
-    />
-    <div
-      v-if="selectedUsers.length > 0"
-      class="flex flex-wrap gap-1.5"
     >
-      <UBadge
-        v-for="user in selectedUsers"
-        :key="user.id"
-        color="neutral"
-        variant="subtle"
+      <span
+        v-if="selectedUsers[0]"
+        class="flex items-center gap-1.5 min-w-0"
       >
         <UAvatar
-          v-bind="userAvatarProps({ id: user.id, name: user.name, image: user.avatarUrl })"
-          size="3xs"
+          v-bind="userAvatarProps({ id: selectedUsers[0].id, name: selectedUsers[0].name, image: selectedUsers[0].avatarUrl })"
+          size="2xs"
         />
-        {{ user.name }}
-      </UBadge>
-    </div>
+        <span class="truncate">{{ selectedUsers[0].name }}</span>
+      </span>
+      <span
+        v-else
+        class="flex items-center gap-1.5 text-(--ui-text-dimmed)"
+      >
+        <UIcon
+          name="i-lucide-plus"
+          class="size-4"
+        />
+        Add person
+      </span>
+    </USelectMenu>
   </div>
 </template>

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // Inline connection editor: async name typeahead over the target type's
 // records, committing the full id list (the server replaces the edge set).
-// Linked records render as chips that navigate to their detail pages; the
-// picker itself only says how many there are.
+// Linked records render as chips that navigate to their detail pages, each
+// with an × that unlinks it, followed by a "+" that opens the picker.
 import type { RecordsConnectedRecord } from '#records'
 import type { RecordsFieldSetting } from '../../../utils/field-kinds'
 
@@ -45,12 +45,10 @@ const labelOf = (item: RecordsConnectedRecord) => item.hidden ? 'Hidden record' 
 
 const searchTerm = ref('')
 const results = ref<RecordsConnectedRecord[]>([])
-const loading = ref(false)
 
 async function search(q: string): Promise<void> {
   const target = props.field.target
   if (!target) return
-  loading.value = true
   try {
     const res = await $fetch<{ items: RecordsConnectedRecord[] }>(`/api/records/entries/${target}/search`, {
       query: { q: q.trim() || undefined, limit: 10 }
@@ -59,8 +57,6 @@ async function search(q: string): Promise<void> {
     for (const item of res.items) knownNames.value.set(item.id, item.name)
   } catch {
     // Keep the previous results on a failed search.
-  } finally {
-    loading.value = false
   }
 }
 
@@ -100,47 +96,66 @@ const selectedIds = computed(() => current.value.map(c => c.id))
 function onChange(value: string[]) {
   emit('commit', props.field.hierarchy === 'parent' ? value.slice(-1) : value)
 }
+
+function remove(id: string) {
+  emit('commit', selectedIds.value.filter(v => v !== id))
+}
 </script>
 
 <template>
-  <div class="space-y-2">
+  <div class="flex flex-wrap items-center gap-1.5 min-h-8">
+    <span
+      v-for="item in current"
+      :key="item.id"
+      class="inline-flex items-center min-w-0 rounded-md bg-(--ui-bg-elevated) ring ring-inset ring-(--ui-border-accented)"
+    >
+      <UButton
+        :to="item.hidden ? undefined : typePath(field.target ?? '', item.id)"
+        color="neutral"
+        variant="link"
+        size="xs"
+        :icon="item.hidden ? 'i-lucide-lock' : 'i-lucide-link'"
+        class="min-w-0 pe-1"
+      >
+        <span class="truncate">{{ labelOf(item) }}</span>
+      </UButton>
+      <button
+        type="button"
+        :aria-label="`Unlink ${labelOf(item)}`"
+        class="me-1.5 rounded-sm text-(--ui-text-dimmed) hover:text-(--ui-text)"
+        @click="remove(item.id)"
+      >
+        <UIcon
+          name="i-lucide-x"
+          class="size-3.5 block"
+        />
+      </button>
+    </span>
     <USelectMenu
       v-model:search-term="searchTerm"
       :model-value="selectedIds"
       :items="items"
       multiple
       ignore-filter
-      :loading="loading"
       value-key="value"
       label-key="label"
-      placeholder="Link records..."
-      class="w-full sm:max-w-xs"
+      variant="ghost"
+      size="sm"
+      trailing-icon=""
+      :content="{ align: 'start' }"
+      :aria-label="`Link to ${field.label}`"
+      :class="{ '-ms-2.5': current.length === 0 }"
+      :ui="{ base: current.length === 0 ? undefined : 'p-1.5', content: 'w-64' }"
       @update:model-value="onChange"
     >
+      <UIcon
+        name="i-lucide-plus"
+        class="size-4 text-(--ui-text-dimmed)"
+      />
       <span
-        v-if="current.length > 0"
-        class="truncate"
-      >{{ current.length }} linked</span>
-      <span
-        v-else
-        class="truncate text-(--ui-text-dimmed)"
-      >Link records...</span>
+        v-if="current.length === 0"
+        class="text-(--ui-text-dimmed)"
+      >Link record</span>
     </USelectMenu>
-    <div
-      v-if="current.length > 0"
-      class="flex flex-wrap gap-1.5"
-    >
-      <UButton
-        v-for="item in current"
-        :key="item.id"
-        :to="item.hidden ? undefined : typePath(field.target ?? '', item.id)"
-        color="neutral"
-        variant="subtle"
-        size="xs"
-        :icon="item.hidden ? 'i-lucide-lock' : 'i-lucide-link'"
-      >
-        {{ labelOf(item) }}
-      </UButton>
-    </div>
   </div>
 </template>
