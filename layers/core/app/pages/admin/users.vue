@@ -38,6 +38,7 @@ interface UsersResponse {
 const UIcon = resolveComponent('UIcon')
 const UButton = resolveComponent('UButton')
 const UBadge = resolveComponent('UBadge')
+const UAvatar = resolveComponent('UAvatar')
 
 const toast = useToast()
 const confirmAction = useConfirm()
@@ -318,6 +319,10 @@ const columns: TableColumn<AdminUserRow>[] = [
     accessorKey: 'display_name',
     header: sortableHeader('Name', 'display_name'),
     cell: ({ row }) => h('div', { class: 'flex items-center gap-2' }, [
+      h(UAvatar, {
+        ...userAvatarProps({ id: row.original.id, name: row.original.display_name, email: row.original.email, image: row.original.avatar }),
+        size: 'xs'
+      }),
       h('span', {}, row.original.display_name || '—'),
       row.original.is_admin
         ? h(UBadge, { color: 'warning', variant: 'subtle', size: 'sm' }, () => 'Host admin')

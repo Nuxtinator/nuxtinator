@@ -74,6 +74,7 @@ const missingPermsForRole = (role: AssignableRole) =>
 const UIcon = resolveComponent('UIcon')
 const UButton = resolveComponent('UButton')
 const UBadge = resolveComponent('UBadge')
+const UAvatar = resolveComponent('UAvatar')
 
 const page = ref(1)
 const pageSize = ref(50)
@@ -173,7 +174,13 @@ const columns: TableColumn<MemberRow>[] = [
   {
     accessorKey: 'display_name',
     header: sortableHeader('Name', 'display_name'),
-    cell: ({ row }) => row.original.display_name || '—'
+    cell: ({ row }) => h('div', { class: 'flex items-center gap-2' }, [
+      h(UAvatar, {
+        ...userAvatarProps({ id: row.original.user_id, name: row.original.display_name, email: row.original.email, image: row.original.avatar }),
+        size: 'xs'
+      }),
+      h('span', {}, row.original.display_name || '—')
+    ])
   },
   {
     accessorKey: 'email',

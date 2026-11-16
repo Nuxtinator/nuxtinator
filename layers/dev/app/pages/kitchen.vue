@@ -619,6 +619,31 @@ const tableRows = [
       </UCard>
     </section>
 
+    <!-- User avatars Section -->
+    <section class="mb-12">
+      <h2 class="text-2xl font-semibold mb-4 pb-2 border-b border-(--ui-border)">
+        User Avatars
+      </h2>
+      <UCard>
+        <div class="flex flex-wrap gap-4">
+          <div
+            v-for="color in USER_AVATAR_COLORS"
+            :key="color.bg"
+            class="flex items-center gap-1.5"
+          >
+            <UAvatar
+              v-for="size in (['2xs', 'xs', 'md', 'xl'] as const)"
+              :key="size"
+              text="AB"
+              :size="size"
+              :class="color.bg"
+              :ui="{ fallback: color.text }"
+            />
+          </div>
+        </div>
+      </UCard>
+    </section>
+
     <!-- Lists Section -->
     <section class="mb-12">
       <h2 class="text-2xl font-semibold mb-4 pb-2 border-b border-(--ui-border)">

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// A person's avatar: their image, else their initials. When `editable`,
-// clicking it opens a popover to upload an image or remove the current one,
-// saved at once through `endpoint`:
+// A person's avatar: their image, else their initials on their color. When
+// `editable`, clicking it opens a popover to upload an image or remove the
+// current one, saved at once through `endpoint`:
 //   POST   {endpoint}   multipart `file` → { avatar }
 //   DELETE {endpoint}
 import { h } from 'vue'
@@ -37,6 +37,7 @@ const busy = ref(false)
 const canEdit = computed(() => props.editable && (info.value.can_upload || !!props.avatar))
 
 const initials = computed(() => userInitials(props.name, props.email))
+const color = computed(() => userAvatarColor(props.userId))
 
 const Face = () => props.avatar
   ? h('img', {
@@ -45,7 +46,7 @@ const Face = () => props.avatar
       class: 'size-16 rounded-full object-cover ring-1 ring-(--ui-border) shadow-sm'
     })
   : h('div', {
-      class: 'size-16 rounded-full bg-gradient-to-br from-(--ui-primary) to-(--ui-primary)/60 text-white flex items-center justify-center text-xl font-semibold ring-1 ring-(--ui-border) shadow-sm'
+      class: ['size-16 rounded-full flex items-center justify-center text-xl font-semibold ring-1 ring-(--ui-border) shadow-sm', color.value?.bg, color.value?.text]
     }, initials.value)
 
 const errorMessage = (err: unknown) => (err as { data?: { statusMessage?: string } } | null)?.data?.statusMessage

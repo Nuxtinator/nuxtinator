@@ -22,6 +22,7 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 | Manage one scope's groups / limit an app to groups | `<GroupsManager>` / `<AppGroupsModal>` |
 | Show a group in a list or picker | `<GroupAvatar :name :icon :image>` beside its name; in a menu or select item, `avatar: groupAvatarProps(group)` |
 | Pick an icon | `<IconPicker v-model>`: a square button showing the icon. Beside a name field it goes before the input. When the thing already has an avatar, make the avatar the button and put `<IconPickerPanel>` in its popover |
+| Show a person's avatar | `<UAvatar v-bind="userAvatarProps({ id, name, email, image })">`: their image, else two initials on their own color; in a menu or select item, `avatar: userAvatarProps(user)` |
 | Set a person's avatar | `<UserAvatarPicker :user-id :endpoint :avatar :name @update>`: the avatar is the button; its popover uploads or removes the image at once |
 | Upload or remove an image from a popover | `<ImagePickerPanel :info :has-image @choose @remove>`: a drop zone that also opens the file browser, and Remove |
 
@@ -57,7 +58,7 @@ Either way, destructive actions open behind an outlined error button and confirm
 - Items declared in code that nobody can change (a built-in view) sit in their own "Built-in" row above those columns and carry a "Built-in" badge in their header. They show no rename, sharing or settings controls; a "Copy" action makes an editable one.
 - A record with records under it (a task's subtasks) keeps them off its card: the card shows their progress, and that progress opens the record's own board. Clicking the rest of the card opens its details as usual. The board's header shows what leads to it as a trail (the view the person came from, then each record above) instead of a "Built-in" badge, and its back arrow goes up one level.
 - A board card shows each field as its icon, then the value; the label is the icon's tooltip. A field with no icon of its own gets its kind's (`recordsFieldIcon`).
-- People on a card or list row are avatars only, never names: the image, else two initials from `userInitials(name)` (first and last name, or the first two letters of a single name), with the name as the tooltip.
+- People on a card or list row are avatars only, never names (`userAvatarProps`), with the name as the tooltip.
 - To show another app's content inside your page (a meeting's tasks), embed that app's own panel without its back button and title, with an "Open in <App>" link. Don't build a second UI for the same data.
 - A modal with a form uses `UModal`'s `title`, `#body` and `#footer`: the title in the header, fields in the body with `space-y-5`, Cancel and the main action at the end of the footer (the submit button points at the form with `form="<id>"`).
 - A create modal whose right settings depend on what the thing is for opens on a grid of "What are you …?" tiles that preset them; the name follows, and the detailed choices sit under "More options".

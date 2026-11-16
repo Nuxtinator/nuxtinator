@@ -237,8 +237,7 @@ watch([visibility, teamIds, orgLevel, teamLevels], saveAccess, { deep: true })
             class="flex items-center gap-2 py-2"
           >
             <UAvatar
-              :src="share.avatar || undefined"
-              :alt="share.displayName"
+              v-bind="userAvatarProps({ id: share.userId, name: share.displayName, image: share.avatar })"
               size="2xs"
             />
             <span class="flex-1 text-sm truncate">{{ share.displayName }}</span>

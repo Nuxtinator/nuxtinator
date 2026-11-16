@@ -84,7 +84,7 @@ const people = computed(() => {
         @toggle="emit('toggle', u, $event)"
       >
         <UAvatar
-          :src="u.avatar || undefined"
+          v-bind="userAvatarProps({ id: u.id, name: u.display_name, email: u.email, image: u.avatar })"
           :alt="nameOf(u)"
           size="sm"
         />

@@ -90,9 +90,8 @@ const menuItems = computed(() => props.removable
           <UAvatar
             v-for="id in value.userIds.slice(0, 3)"
             :key="id"
-            :src="byId.get(id)?.avatarUrl ?? undefined"
+            v-bind="userAvatarProps({ id, name: byId.get(id)?.name, image: byId.get(id)?.avatarUrl })"
             :alt="displayName(id)"
-            :text="userInitials(byId.get(id)?.name)"
             size="2xs"
           />
         </span>

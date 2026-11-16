@@ -3,6 +3,7 @@
 // field commits a user id (or null); a multiple field commits the full id
 // array (the server replaces the list). Selected users render as avatar
 // chips below the select.
+import type { AvatarProps } from '@nuxt/ui'
 import type { RecordsFieldSetting } from '../../../utils/field-kinds'
 import type { RecordsUser } from '../../../composables/useRecordsUsers'
 
@@ -60,13 +61,13 @@ const selectedIds = computed<string[]>(() => {
 interface UserItem {
   label: string
   value: string
-  avatar?: { src?: string, alt: string }
+  avatar?: AvatarProps
 }
 
 type SingleUserItem = Omit<UserItem, 'value'> & { value: string | null }
 
 function toItem(u: RecordsUser): UserItem {
-  return { label: u.name, value: u.id, avatar: { src: u.avatarUrl || undefined, alt: u.name } }
+  return { label: u.name, value: u.id, avatar: userAvatarProps({ id: u.id, name: u.name, image: u.avatarUrl }) }
 }
 
 // Search results plus any current selections the search filtered out, so
@@ -141,8 +142,7 @@ function onSingle(value: string | null | undefined) {
         variant="subtle"
       >
         <UAvatar
-          :src="user.avatarUrl || undefined"
-          :alt="user.name"
+          v-bind="userAvatarProps({ id: user.id, name: user.name, image: user.avatarUrl })"
           size="3xs"
         />
         {{ user.name }}
