@@ -60,8 +60,12 @@ a Markdown string in `data`, capped at 100,000 characters. The editor
 it into its own node types, so nothing stored is ever rendered as markup and there is
 no sanitizer to keep in step. Plain text written by agents or older rows is already
 valid, and single newlines stay line breaks. A link to another record is the editor's
-mention node, written `[@ id="<type>/<record id>" label="Name" char="#"]`; the label is
-the name when the link was made. A person is the same node without `char`
+mention node, written `[@ id="<type>/<record id>" label="Name" char="#"]`. The label is
+the name when the text was last saved; the editor swaps in each record's current name
+(`GET /api/records/names`), for records the reader can open. Every write to a rich text
+field rewrites that field's rows in `records_mentions` (`syncRecordsRichTextLinks`),
+which is what `GET …/entries/:type/:id/mentions` reads for a record's "Mentioned in"
+list. A person is the same node without `char`
 (`[@ id="<user id>" label="Name"]`): a write that newly mentions someone tells them,
 in the app and by email, but only if they can already open the record
 (`notifyNewMentions`), since a mention shares nothing. An image is a file on the

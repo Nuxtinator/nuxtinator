@@ -305,6 +305,30 @@ export function getRecordsDetailPanels(recordType: string): RecordsDetailPanel[]
 }
 
 /**
+ * A control in the heading of a record's list of children (a task's
+ * subtasks), such as a link to another way of looking at them.
+ */
+export interface RecordsChildrenAction {
+  id: string
+  /** Record-type keys this control renders for; omit/empty = every type. */
+  recordTypes?: string[]
+  /** Receives `recordId` + `recordType` props, those of the parent record. */
+  component: Component
+  /** Ascending render order among controls (default 100). */
+  order?: number
+}
+
+const _childrenActions: RecordsChildrenAction[] = []
+
+export function registerRecordsChildrenAction(action: RecordsChildrenAction): void {
+  upsert(_childrenActions, action)
+}
+
+export function getRecordsChildrenActions(recordType: string): RecordsChildrenAction[] {
+  return forType(_childrenActions, recordType)
+}
+
+/**
  * Replaces the plain field row for one kind on the detail page. Receives
  * `field`, `value`, `record` and `editable` props, and emits `refresh` after
  * changing the record through its own routes.

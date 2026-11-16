@@ -1,7 +1,8 @@
 // Reading rich text values (Markdown) on the server. A person mentioned in
 // one is the editor's mention node, `[@ id="<user id>" label="Name"]`; a link
-// to a record is the same node with `char="#"` and is not a mention. An image
-// is a file on the record, `![name](attachment:<file id>)`.
+// to a record is the same node with `char="#"` and an id of
+// `<type key>/<record id>`, and is not a mention. An image is a file on the
+// record, `![name](attachment:<file id>)`.
 import { sql } from 'kysely'
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
@@ -20,6 +21,45 @@ export function recordsMentionedUserIds(value: unknown): string[] {
     if ((char === undefined || char === '@') && id && UUID_RE.test(id)) ids.add(id.toLowerCase())
   }
   return [...ids]
+}
+
+/** The ids of the records a rich text value links to ("#" chips), without repeats. */
+export function recordsLinkedRecordIds(value: unknown): string[] {
+  if (typeof value !== 'string') return []
+  const ids = new Set<string>()
+  for (const match of value.matchAll(MENTION_RE)) {
+    const attrs = match[1] ?? ''
+    if (/(?:^|\s)char="([^"]*)"/.exec(attrs)?.[1] !== '#') continue
+    const id = /(?:^|\s)id="[^"/]+\/([^"]*)"/.exec(attrs)?.[1]
+    if (id && UUID_RE.test(id)) ids.add(id.toLowerCase())
+  }
+  return [...ids]
+}
+
+/**
+ * Rewrites the links one rich text field of a record holds to other records
+ * (records_mentions) from the field's new value. Links to records that don't
+ * exist, or to the record itself, are dropped.
+ */
+export async function syncRecordsRichTextLinks(
+  tx: Transaction<Database>,
+  recordId: string,
+  fieldKey: string,
+  value: unknown
+): Promise<void> {
+  const linked = recordsLinkedRecordIds(value).filter(id => id !== recordId.toLowerCase())
+  const targets = linked.length > 0
+    ? (await tx.selectFrom('records_entries').select('id').where('id', 'in', linked).execute()).map(row => row.id)
+    : []
+  let stale = tx.deleteFrom('records_mentions').where('from_record_id', '=', recordId).where('field_key', '=', fieldKey)
+  if (targets.length > 0) stale = stale.where('to_record_id', 'not in', targets)
+  await stale.execute()
+  if (targets.length === 0) return
+  await tx
+    .insertInto('records_mentions')
+    .values(targets.map(to => ({ from_record_id: recordId, field_key: fieldKey, to_record_id: to })))
+    .onConflict(oc => oc.doNothing())
+    .execute()
 }
 
 const IMAGE_RE = /!\[[^\]]*\]\(attachment:([0-9a-f-]{36})\)/gi

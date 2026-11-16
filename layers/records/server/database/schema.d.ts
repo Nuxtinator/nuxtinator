@@ -133,6 +133,14 @@ export interface RecordAttachmentsTable {
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
+// A link from one record's rich text field to another record (see records_005).
+export interface RecordMentionsTable {
+  from_record_id: string
+  field_key: string
+  to_record_id: string
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
 // Object-storage keys of deleted attachments, waiting for the sweep.
 export interface RecordAttachmentTrashTable {
   storage_key: string
@@ -143,6 +151,7 @@ declare global {
   interface NuxtinatorDatabaseTables {
     records_attachments: RecordAttachmentsTable
     records_attachment_trash: RecordAttachmentTrashTable
+    records_mentions: RecordMentionsTable
     records_entries: RecordsEntriesTable
     records_field_entries: RecordFieldEntriesTable
     records_user_refs: RecordUserRefsTable

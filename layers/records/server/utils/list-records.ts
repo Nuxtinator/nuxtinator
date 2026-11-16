@@ -911,6 +911,23 @@ export async function visibleRecordIds(tx: Tx, ctx: TenantContext, ids: string[]
   return visible
 }
 
+/** Id, type and name of those of `ids` the caller may open, latest change first. */
+export async function recordsNamesOf(
+  tx: Tx,
+  ctx: TenantContext,
+  ids: string[]
+): Promise<Array<{ id: string, typeKey: string, name: string }>> {
+  const visible = await visibleRecordIds(tx, ctx, ids)
+  if (visible.size === 0) return []
+  const rows = await tx
+    .selectFrom('records_entries')
+    .select(['id', 'record_type', 'name'])
+    .where('id', 'in', [...visible])
+    .orderBy('updated_at', 'desc')
+    .execute()
+  return rows.map(row => ({ id: row.id, typeKey: row.record_type, name: row.name }))
+}
+
 // The list visibility rule applied to a single record. 404 both for missing
 // rows and for rows the caller may not see, so existence is never leaked.
 export async function assertRecordVisible(

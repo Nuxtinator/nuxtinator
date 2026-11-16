@@ -38,7 +38,7 @@ import { recordRecordsActivity } from './records-activity'
 import { closingRulesOf, enforceClosingRules } from './closing'
 import { visibleRecordIds } from './list-records'
 import { recordsUsersWhoSee, requireMoveConfirmation, requireShareConfirmation, type RecordsSharingMode } from './share-confirmation'
-import { recordsMentionedUserIds, syncRecordsRichTextImages } from './rich-text'
+import { recordsMentionedUserIds, syncRecordsRichTextImages, syncRecordsRichTextLinks } from './rich-text'
 import { applyAttachmentsPatch, listRecordAttachments } from './attachments'
 
 type Tx = Transaction<Database>
@@ -1078,6 +1078,9 @@ export async function applyFieldPatch(
     || [...listOps.keys()].some(key => defsByKey.get(key)!.storage === 'attachments')
   if (allRichTextKeys.length > 0 && touchesImages) {
     await syncRecordsRichTextImages(tx, id, allRichTextKeys, oldRecord?.fields ?? null)
+  }
+  for (const [key, value] of scalarOps) {
+    if (allRichTextKeys.includes(key)) await syncRecordsRichTextLinks(tx, id, key, value)
   }
 
   const record = await getRecord(tx, ctx, typeKey, id)

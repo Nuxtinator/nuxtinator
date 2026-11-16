@@ -2,7 +2,8 @@
 // Rich text editor for one field. The value is Markdown in and out: headings,
 // bulleted, numbered and checkbox lists, quotes, bold/italic/strike/code,
 // links, images, people ("@") and links to other records ("#" opens a
-// search; a pick becomes a chip that opens that record). It commits when
+// search; a pick becomes a chip that opens that record and shows its name of
+// the moment). "/" opens a menu of everything that can be inserted. It commits when
 // focus leaves the field and when it is torn down, and only if the text
 // changed. `readonly` shows the same rendering without the toolbar. Clicking
 // a link or a record chip opens it, in both modes.
@@ -16,7 +17,7 @@
 // an image has been saved in the text, the server keeps the two in step.
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import type { Editor } from '@tiptap/vue-3'
-import type { EditorCustomHandlers, EditorMentionMenuItem, EditorToolbarItem } from '@nuxt/ui'
+import type { EditorCustomHandlers, EditorMentionMenuItem, EditorSuggestionMenuItem, EditorToolbarItem } from '@nuxt/ui'
 import type { RecordsAttachmentValue } from '#records'
 import type { RecordsFieldSetting } from '../../../utils/field-kinds'
 
@@ -92,12 +93,16 @@ function rebase() {
     baseline = serialize()
   })
 }
-onMounted(rebase)
+onMounted(() => {
+  rebase()
+  refreshChipNames()
+})
 
 watch(current, (value) => {
   if (focused.value || value.trim() === serialize()) return
   draft.value = toEditor(value)
   rebase()
+  refreshChipNames()
 })
 
 // Files uploaded here and not yet saved as part of the text.
@@ -298,7 +303,46 @@ const peopleSearch = useChipSearch(async q =>
     avatar: userAvatarProps({ id: user.id, name: user.name, image: user.avatarUrl })
   })))
 
-// --- toolbar ----------------------------------------------------------------
+// A record chip stores the name the record had when it was linked. Once the
+// text is in the editor, each chip takes the record's current name; a chip
+// whose record the reader can't open keeps what it says. This is not an edit:
+// it stays out of undo, and text that was unchanged stays unchanged.
+const recordIdOf = (node: ClickedNode) =>
+  node.type.name === 'mention' && node.attrs.mentionSuggestionChar === '#' && typeof node.attrs.id === 'string'
+    ? node.attrs.id.split('/')[1] ?? null
+    : null
+
+async function refreshChipNames() {
+  await nextTick()
+  const ids = new Set<string>()
+  editorRef.value?.editor?.state.doc.descendants((node) => {
+    const id = recordIdOf(node)
+    if (id) ids.add(id)
+  })
+  if (ids.size === 0) return
+  let names: Map<string, string>
+  try {
+    const res = await $fetch<{ items: Array<{ id: string, name: string }> }>('/api/records/names', {
+      query: { ids: [...ids].slice(0, 100).join(',') }
+    })
+    names = new Map(res.items.map(item => [item.id, chipLabel(item.name)]))
+  } catch {
+    return
+  }
+  const editor = editorRef.value?.editor
+  if (!editor || editor.isDestroyed) return
+  const unchanged = serialize() === baseline
+  const tr = editor.state.tr
+  editor.state.doc.descendants((node, pos) => {
+    const name = names.get(recordIdOf(node) ?? '')
+    if (name && name !== node.attrs.label) tr.setNodeMarkup(pos, undefined, { ...node.attrs, label: name })
+  })
+  if (!tr.docChanged) return
+  editor.view.dispatch(tr.setMeta('addToHistory', false))
+  if (unchanged) baseline = serialize()
+}
+
+// --- toolbar and "/" menu ---------------------------------------------------
 
 // The "@" and "#" buttons type the character that opens their search.
 const typeTrigger = (char: string) => ({
@@ -312,8 +356,40 @@ const typeTrigger = (char: string) => ({
 })
 const handlers: EditorCustomHandlers = {
   personMention: typeTrigger('@'),
-  recordLink: typeTrigger('#')
+  recordLink: typeTrigger('#'),
+  pickImage: {
+    canExecute: () => true,
+    execute: (editor: Editor) => {
+      fileInput.value?.click()
+      return editor.chain().focus()
+    },
+    isActive: () => false
+  }
 }
+
+const slashItems = computed(() => [
+  [
+    { type: 'label', label: 'Text' },
+    { kind: 'heading', level: 1, label: 'Heading 1', icon: 'i-lucide-heading-1' },
+    { kind: 'heading', level: 2, label: 'Heading 2', icon: 'i-lucide-heading-2' },
+    { kind: 'heading', level: 3, label: 'Heading 3', icon: 'i-lucide-heading-3' },
+    { kind: 'blockquote', label: 'Quote', icon: 'i-lucide-text-quote' },
+    { kind: 'codeBlock', label: 'Code block', icon: 'i-lucide-square-code' },
+    { kind: 'horizontalRule', label: 'Divider', icon: 'i-lucide-minus' }
+  ],
+  [
+    { type: 'label', label: 'Lists' },
+    { kind: 'bulletList', label: 'Bulleted list', icon: 'i-lucide-list' },
+    { kind: 'orderedList', label: 'Numbered list', icon: 'i-lucide-list-ordered' },
+    { kind: 'taskList', label: 'Checklist', icon: 'i-lucide-list-checks' }
+  ],
+  [
+    { type: 'label', label: 'Insert' },
+    ...(props.imageUploadUrl ? [{ kind: 'pickImage', label: 'Image', icon: 'i-lucide-image' }] : []),
+    { kind: 'personMention', label: 'Mention someone', icon: 'i-lucide-at-sign' },
+    { kind: 'recordLink', label: 'Link a card', icon: 'i-lucide-hash' }
+  ]
+] as EditorSuggestionMenuItem[][])
 
 const tip = (text: string) => ({ 'tooltip': { text }, 'aria-label': text })
 const toolbarItems = computed(() => [
@@ -361,7 +437,7 @@ const toolbarItems = computed(() => [
       :extensions="extensions"
       :handlers="handlers"
       :editor-props="editorProps"
-      :placeholder="readonly ? undefined : 'Write something. @ mentions someone, # links a card…'"
+      :placeholder="readonly ? undefined : 'Write something, or type / for headings, lists and more…'"
       :ui="{ base: ['text-sm *:my-2 [&_p]:leading-6 [&_li]:my-0', readonly ? 'sm:px-0' : 'px-3 py-2.5 sm:px-3 min-h-32'] }"
     >
       <template v-if="!readonly">
@@ -395,6 +471,11 @@ const toolbarItems = computed(() => [
           class="hidden"
           @change="onPick"
         >
+        <UEditorSuggestionMenu
+          :editor="editor"
+          :items="slashItems"
+          plugin-key="insertMenu"
+        />
         <UEditorMentionMenu
           v-model:search-term="peopleSearch.term.value"
           :editor="editor"

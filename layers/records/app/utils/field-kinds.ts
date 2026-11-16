@@ -188,7 +188,7 @@ export const RECORDS_FIELD_KINDS: Record<RecordsFieldKind, RecordsKindRenderer> 
     icon: 'i-lucide-waypoints',
     component: 'RecordsFieldsConnectionField',
     // Count only — list rows never carry connection values, and the detail
-    // page renders names through the editor and the connections panel.
+    // page renders names through the editor.
     format: (value) => {
       const ids = asArray(value)
       if (ids.length === 0) return EMPTY

@@ -116,6 +116,43 @@ describe('rich text fields', () => {
   })
 })
 
+describe('rich text links to other records', () => {
+  it('lists where a record is mentioned, to those who can open the mentioning record, and serves current names', async () => {
+    const { org, auth } = await createRecordsOrgWith(sql, ['member'])
+    const owner = withOrgHeader(auth, org.slug)
+    const sam = await addRecordsMember(sql, org.id)
+    const samOpts = withOrgHeader(sam.auth, org.slug)
+    const task = (opts: typeof owner, fields: Record<string, unknown>, confirmShare = false) =>
+      $fetch<RecordDetail>('/api/records/entries/task', { method: 'POST', body: { fields, confirmShare }, ...opts })
+    const mentions = (opts: typeof owner, id: string) =>
+      $fetch<{ items: Array<{ id: string, typeKey: string, name: string }> }>(`/api/records/entries/task/${id}/mentions`, opts)
+
+    // Sam is assigned the target, so can open it; the card linking to it stays the owner's.
+    const target = await task(owner, { name: 'test-records Target', assignee: [sam.user.id] }, true)
+    const chip = `[@ id="task/${target.id}" label="An older name" char="#"]`
+    const source = await task(owner, { name: 'test-records Source', description: `See ${chip} and ${chip}` })
+
+    expect((await mentions(owner, target.id)).items).toEqual([{ id: source.id, typeKey: 'task', name: 'test-records Source' }])
+    expect((await mentions(samOpts, target.id)).items).toEqual([])
+    expect((await mentions(owner, source.id)).items).toEqual([])
+
+    const names = await $fetch<{ items: Array<{ id: string, name: string }> }>('/api/records/names', {
+      query: { ids: `${target.id},${source.id},not-an-id` },
+      ...samOpts
+    })
+    expect(names.items).toEqual([{ id: target.id, typeKey: 'task', name: 'test-records Target' }])
+
+    // A link to itself or to nothing isn't kept, and taking the link out forgets it.
+    await $fetch(`/api/records/entries/task/${source.id}`, {
+      method: 'PATCH',
+      body: { fields: { description: `Now only [@ id="task/${source.id}" label="me" char="#"]` } },
+      ...owner
+    })
+    expect((await mentions(owner, target.id)).items).toEqual([])
+    expect((await mentions(owner, source.id)).items).toEqual([])
+  })
+})
+
 describe('PATCH multi-value fields (entries)', () => {
   it('adds, removes, and force-replaces entry values', async () => {
     const { org, auth } = await createRecordsOrgWith(sql, ['admin'])

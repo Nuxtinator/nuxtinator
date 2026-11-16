@@ -2,11 +2,10 @@
 // Card click target: the record's details over the whole screen, rendered by
 // the records layer's own detail view, so fields, comments, sharing,
 // permissions and validation are exactly the record page's. The header adds
-// links to the record's page and, on types that have them, to the board of
-// its subtasks. At the end of the fields sidebar, a section named after the
+// a link to the record's page. At the end of the fields sidebar, a section named after the
 // view holds the view's own fields: everyone who opens the view sees them,
 // and its editors fill them in.
-import type { RecordsFieldSetting, RecordsTypeFields } from '#records/client'
+import type { RecordsFieldSetting } from '#records/client'
 
 const props = withDefaults(defineProps<{
   typeKey: string
@@ -35,37 +34,12 @@ const emit = defineEmits<{
 
 const toast = useToast()
 const typePath = useRecordsTypePath()
-const { getFields } = useRecordsTypes()
 
 const open = computed({
   get: () => recordId.value !== null,
   set: (v) => {
     if (!v) recordId.value = null
   }
-})
-
-const fieldSettings = ref<RecordsTypeFields | null>(null)
-watch(() => props.typeKey, async (key) => {
-  fieldSettings.value = null
-  if (!key) return
-  try {
-    const res = await getFields(key)
-    if (key === props.typeKey) fieldSettings.value = res
-  } catch {
-    // Only the subtasks board link depends on these.
-  }
-}, { immediate: true })
-
-// A task opens as a board of what sits under it, unless that board is the
-// page behind these details.
-const route = useRoute()
-const { boardRoute } = useViewsSubtasksBoard()
-const childrenField = computed(() =>
-  fieldSettings.value?.fields.find(f => viewsIsSubtasksField(f) && !f.hidden) ?? null)
-const boardLink = computed(() => {
-  const id = recordId.value
-  if (!id || !childrenField.value || route.params.id === viewsSubtasksViewId(id)) return null
-  return boardRoute(id)
 })
 
 function onDeleted() {
@@ -126,19 +100,6 @@ function viewUploadUrl(field: RecordsFieldSetting): string | undefined {
           @close="open = false"
         >
           <template #actions>
-            <UTooltip
-              v-if="boardLink && childrenField"
-              :text="`${childrenField.label} board`"
-            >
-              <UButton
-                icon="i-lucide-list-tree"
-                variant="ghost"
-                color="neutral"
-                size="sm"
-                :aria-label="`Open the ${childrenField.label.toLowerCase()} board`"
-                :to="boardLink"
-              />
-            </UTooltip>
             <UTooltip text="Open as a page">
               <UButton
                 icon="i-lucide-square-arrow-out-up-right"

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // Record detail in two columns: the main part holds the header (back link,
 // click-to-rename name, status badge, share popover, delete button), the
-// record's long text (its description), the connections panel and the merged
-// comment/activity timeline; a sidebar holds every other field, in the
-// sections' declared order. On a narrow screen the sidebar sits between the
-// long text and the rest. `embedded` is for a dialog: a close button stands
+// record's long text (its description), the records under it (a task's
+// subtasks, as a list to tick off and add to), the records that mention this
+// one, and the merged comment/activity timeline; a sidebar holds every other
+// field, in the sections' declared order. On a narrow screen the sidebar sits
+// between those first two and the rest. `embedded` is for a dialog: a close button stands
 // in for the back link, and deleting reports back instead of leaving the
 // page. The
 // server-evaluated capabilities on the detail response gate every write
@@ -133,6 +134,15 @@ const visibleFields = computed(() =>
 const isLongText = (f: RecordsFieldSetting) => (f.kind === 'textarea' || f.kind === 'rich_text') && !getRecordsFieldWidget(f.kind)
 const longTextFields = computed(() => visibleFields.value.filter(isLongText))
 
+// On a type whose records nest, the records under this one are a list in the
+// main column instead of a sidebar row. Each child points at its parent
+// through the hierarchy's parent field, hidden or not.
+const parentKey = computed(() =>
+  fieldSettings.value?.fields.find(f => f.hierarchy === 'parent' && f.target === typeKey.value && !f.orphan)?.key ?? null)
+const childrenField = computed(() => parentKey.value
+  ? visibleFields.value.find(f => f.hierarchy === 'children' && f.target === typeKey.value) ?? null
+  : null)
+
 // Images in rich text are files on the record's first attachments field.
 const imageField = computed(() => visibleFields.value.find(f => f.kind === 'attachments') ?? null)
 const imageFiles = computed(() => imageField.value ? recordsAttachmentList(record.value?.fields[imageField.value.key]) : [])
@@ -146,7 +156,7 @@ const imageUploadUrl = computed(() => imageField.value && canEdit.value
 const sectionGroups = computed<SectionGroup[]>(() => {
   const def = fieldSettings.value
   if (!def) return []
-  const visible = visibleFields.value.filter(f => !isLongText(f))
+  const visible = visibleFields.value.filter(f => !isLongText(f) && f.key !== childrenField.value?.key)
   const known = new Set(Object.keys(def.sections))
   const groups = Object.entries(def.sections)
     .sort((a, b) => (a[1].order ?? 0) - (b[1].order ?? 0))
@@ -160,7 +170,7 @@ const sectionGroups = computed<SectionGroup[]>(() => {
   return groups.filter(g => g.fields.length > 0)
 })
 
-// Detail panels other layers inject after the connections panel (e.g. inbox's
+// Detail panels other layers inject above the timeline (e.g. inbox's
 // conversations panel). Each self-gates on its own permission and renders
 // nothing when unauthorized, so the page just lists whatever matches the type.
 const detailPanels = computed(() => getRecordsDetailPanels(typeKey.value))
@@ -312,8 +322,8 @@ async function removeRecord() {
              grid items so the sidebar can sit between them. -->
         <div class="contents lg:block lg:min-w-0 lg:space-y-6">
           <div
-            v-if="longTextFields.length > 0"
-            class="order-1 min-w-0 space-y-4"
+            v-if="longTextFields.length > 0 || childrenField"
+            class="order-1 min-w-0 space-y-6"
           >
             <RecordsFieldRow
               v-for="field in longTextFields"
@@ -327,12 +337,23 @@ async function removeRecord() {
               @commit="(value: unknown, discardImages?: string[]) => commitField(field, value, discardImages)"
               @uploaded="onWidgetChanged"
             />
+            <RecordsChildrenList
+              v-if="childrenField && parentKey"
+              :type-key="typeKey"
+              :record-id="recordId"
+              :field="childrenField"
+              :parent-key="parentKey"
+              :status-field="statusField"
+              :needs-reason="!!reasonField"
+              :can-add="canEdit && (typeInfo?.canCreate ?? false)"
+              @changed="onWidgetChanged"
+            />
           </div>
 
           <div class="order-3 min-w-0 space-y-6">
-            <RecordsConnectionsPanel
-              :fields="fieldSettings?.fields ?? []"
-              :record="record"
+            <RecordsMentionedIn
+              :type-key="typeKey"
+              :record-id="recordId"
             />
 
             <component

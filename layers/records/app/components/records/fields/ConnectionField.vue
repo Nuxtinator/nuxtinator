@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Inline connection editor: async name typeahead over the target type's
 // records, committing the full id list (the server replaces the edge set).
-// Linked records render as chips that navigate to their detail pages.
+// Linked records render as chips that navigate to their detail pages; the
+// picker itself only says how many there are.
 import type { RecordsConnectedRecord } from '#records'
 import type { RecordsFieldSetting } from '../../../utils/field-kinds'
 
@@ -115,7 +116,16 @@ function onChange(value: string[]) {
       placeholder="Link records..."
       class="w-full sm:max-w-xs"
       @update:model-value="onChange"
-    />
+    >
+      <span
+        v-if="current.length > 0"
+        class="truncate"
+      >{{ current.length }} linked</span>
+      <span
+        v-else
+        class="truncate text-(--ui-text-dimmed)"
+      >Link records...</span>
+    </USelectMenu>
     <div
       v-if="current.length > 0"
       class="flex flex-wrap gap-1.5"

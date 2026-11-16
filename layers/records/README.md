@@ -56,7 +56,7 @@ Server, from a Nitro plugin, via `#records/server`:
 - `registerRecordsFieldFilter(phase, fn)` — rewrite a patch before validation.
 - `registerRecordsRefSource(source)` — what a `ref` field's ids point at (see Refs).
 
-Client, from a Nuxt app plugin, via `#records`: `registerRecordsDetailPanel`, `registerRecordsFieldWidget` (replace a kind's row on the detail page), `registerRecordsFieldKindSettings` (extra schema-builder inputs for a kind), `registerRecordsSettingsSection`, `registerRecordsTypeRoute` (give a type its own home, e.g. contacts under `/crm/contacts`). `#records/client` exports the client field settings, formatters and badge colors; `ListView` / `DetailView` components render any type.
+Client, from a Nuxt app plugin, via `#records`: `registerRecordsDetailPanel`, `registerRecordsChildrenAction` (a control in the heading of a record's list of children; views puts the subtasks board link there), `registerRecordsFieldWidget` (replace a kind's row on the detail page), `registerRecordsFieldKindSettings` (extra schema-builder inputs for a kind), `registerRecordsSettingsSection`, `registerRecordsTypeRoute` (give a type its own home, e.g. contacts under `/crm/contacts`). `#records/client` exports the client field settings, formatters and badge colors; `ListView` / `DetailView` components render any type.
 
 ## Visibility
 
