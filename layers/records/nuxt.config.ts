@@ -30,11 +30,12 @@ export default defineNuxtConfig({
   },
 
   // The rich text field takes checklist nodes from TipTap, which Nuxt UI's
-  // editor loads unbundled. A pre-bundled copy would bring a second
-  // ProseMirror, and every editor on the page would fail.
+  // editor loads unbundled. A pre-bundled copy of any of these (ProseMirror
+  // included, via @tiptap/pm) would bring a second ProseMirror, and every
+  // editor on the page would fail.
   vite: {
     optimizeDeps: {
-      exclude: ['@tiptap/core', '@tiptap/extension-list']
+      exclude: ['@tiptap/core', '@tiptap/extension-list', '@tiptap/pm']
     }
   },
 
