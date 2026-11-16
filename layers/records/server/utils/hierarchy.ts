@@ -1,15 +1,5 @@
-// Hierarchies: a type whose manifest marks a connection to itself as
-// `hierarchy: 'parent'` (a task's parent task) arranges its records in trees.
-// A link is one records_connections row from the child, keyed by the parent
-// field, whichever side wrote it, so a record has at most one parent. Each
-// record's ancestors, root first, sit in records_entries.ancestor_ids; every
-// move rewrites them for the record and everything under it, and a move that
-// would put a record under itself is refused.
-//
-// Whoever can see or edit a record can see or edit everything under it (see
-// list-records.ts and type-permissions.ts), so putting a record under a
-// parent shares it with the parent's audience. Linking a record from its
-// parent's side therefore takes the right to edit that record.
+// Trees of records for a type with a `hierarchy: 'parent'` field: one parent
+// each, ancestors (root first) in records_entries.ancestor_ids.
 
 import { sql } from 'kysely'
 import type { Transaction } from 'kysely'
@@ -26,8 +16,17 @@ type Tx = Transaction<Database>
 export interface RecordsHierarchyMove {
   recordId: string
   parentId: string
-  /** The record stayed in the tree it was in (same root before and after). */
-  sameTree: boolean
+  /** The ancestors the move put above the record: their audiences now see it. */
+  gained: string[]
+}
+
+/**
+ * Makes the transaction the only one changing the type's trees in this org
+ * until it ends, so a move checks loops and copies chains from settled rows.
+ */
+export async function lockRecordsHierarchy(tx: Tx, ctx: TenantContext, typeKey: string): Promise<void> {
+  const key = `records.hierarchy:${ctx.orgId ?? ''}:${typeKey}`
+  await sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`.execute(tx)
 }
 
 function bad(def: RecordsFieldSetting, message: string): never {
@@ -60,10 +59,10 @@ async function childrenOf(tx: Tx, hierarchy: RecordsHierarchy, id: string): Prom
 }
 
 // Moves `childId` under `parentId` (null makes it a root) and rewrites the
-// ancestor chain of the record and of everything under it. Resolves to
-// whether the record stayed in the same tree.
-async function setParent(tx: Tx, hierarchy: RecordsHierarchy, childId: string, parentId: string | null): Promise<boolean> {
-  const rootBefore = (await ancestorsOf(tx, childId))[0] ?? childId
+// ancestor chain of the record and of everything under it. Resolves to the
+// ancestors the record gained.
+async function setParent(tx: Tx, hierarchy: RecordsHierarchy, childId: string, parentId: string | null): Promise<string[]> {
+  const before = new Set(await ancestorsOf(tx, childId))
   await tx
     .deleteFrom('records_connections')
     .where('from_record_id', '=', childId)
@@ -84,7 +83,7 @@ async function setParent(tx: Tx, hierarchy: RecordsHierarchy, childId: string, p
     WHERE ancestor_ids @> ARRAY[${childId}::uuid]
   `.execute(tx)
   await sql`UPDATE records_entries SET ancestor_ids = ${chainSql} WHERE id = ${childId}::uuid`.execute(tx)
-  return (chain[0] ?? childId) === rootBefore
+  return chain.filter(id => !before.has(id))
 }
 
 async function assertNoLoop(tx: Tx, def: RecordsFieldSetting, childId: string, parentId: string): Promise<void> {
@@ -106,6 +105,7 @@ async function assertSeen(tx: Tx, ctx: TenantContext, def: RecordsFieldSetting, 
  * Applies a patch to one of a type's hierarchy fields on `recordId` and
  * returns the already-existing records it put under a new parent. `isCreate`
  * marks a record the same request created, which is never such a move itself.
+ * The caller holds `lockRecordsHierarchy`.
  */
 export async function applyHierarchyOp(
   tx: Tx,
@@ -129,8 +129,8 @@ export async function applyHierarchyOp(
       await assertNoLoop(tx, def, recordId, next)
       await assertSeen(tx, ctx, def, next)
     }
-    const sameTree = await setParent(tx, hierarchy, recordId, next)
-    return next && !isCreate ? [{ recordId, parentId: next, sameTree }] : []
+    const gained = await setParent(tx, hierarchy, recordId, next)
+    return next && !isCreate ? [{ recordId, parentId: next, gained }] : []
   }
 
   const current = await childrenOf(tx, hierarchy, recordId)
@@ -144,8 +144,8 @@ export async function applyHierarchyOp(
     if (!(await canUpdateRecord(tx, ctx, typeKey, childId))) {
       throw createError({ statusCode: 403, statusMessage: `${def.key}: you can't move a record you can't edit` })
     }
-    const sameTree = await setParent(tx, hierarchy, childId, recordId)
-    moves.push({ recordId: childId, parentId: recordId, sameTree })
+    const gained = await setParent(tx, hierarchy, childId, recordId)
+    moves.push({ recordId: childId, parentId: recordId, gained })
   }
   return moves
 }

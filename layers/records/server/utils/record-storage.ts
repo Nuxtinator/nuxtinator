@@ -25,15 +25,14 @@ import { createNotification } from '#core/server/utils/notifications'
 import {
   getRecordsRefSource,
   getRecordsStorageDriver,
-  getRegisteredRecordTypes,
   runRecordsClosingHooks,
   runRecordsFieldFilters,
   type RecordsFieldPatch,
   type RecordsListPatch,
   type RecordsRefTarget
 } from './records-registry'
-import { getRecordType, getRecordTypeFields, recordsAccessGrantingKeys, recordsHierarchy, recordsStatusDefault, type RecordsFieldSetting } from './definition-settings'
-import { applyHierarchyOp, type RecordsHierarchyMove } from './hierarchy'
+import { getRecordType, getRecordTypeFields, recordsAccessGrantingKeys, recordsConnectionReverseKeys, recordsHierarchy, recordsStatusDefault, type RecordsFieldSetting } from './definition-settings'
+import { applyHierarchyOp, lockRecordsHierarchy, type RecordsHierarchyMove } from './hierarchy'
 import { normalizeChannelValue } from './normalize'
 import { recordRecordsActivity } from './records-activity'
 import { closingRulesOf, enforceClosingRules } from './closing'
@@ -81,24 +80,6 @@ function emptyValueFor(def: RecordsFieldSetting): unknown {
 
 function pushUnique(list: string[], value: string): void {
   if (!list.includes(value)) list.push(value)
-}
-
-// Field keys (on any registered type) whose connection rows surface in
-// reverse under `fieldKey` of `typeKey` records: every field declared with
-// `target: typeKey, reverseKey: fieldKey`. Connection rows store only the
-// writing side's field_key, so a key shared by two types pointing at
-// different targets would be ambiguous — field keys are expected to be
-// distinct across connection vocabularies.
-function connectionReverseSources(typeKey: string, fieldKey: string): string[] {
-  const sources = new Set<string>()
-  for (const manifest of getRegisteredRecordTypes()) {
-    for (const [key, def] of Object.entries(manifest.fields)) {
-      if (def.kind === 'connection' && def.target === typeKey && def.reverseKey === fieldKey) {
-        sources.add(key)
-      }
-    }
-  }
-  return [...sources]
 }
 
 export async function hydrateRecords(
@@ -203,7 +184,7 @@ export async function hydrateRecords(
     // their writer's def named via reverseKey.
     const reverseMap = new Map<string, string[]>()
     for (const def of connDefs) {
-      for (const source of connectionReverseSources(typeKey, def.key)) {
+      for (const source of recordsConnectionReverseKeys(typeKey, def.key)) {
         const targets = reverseMap.get(source) ?? []
         targets.push(def.key)
         reverseMap.set(source, targets)
@@ -662,7 +643,7 @@ async function applyConnectionsOp(
 ): Promise<void> {
   // Rows surfaced in reverse under this field belong to the other side —
   // deletes must reach them too, or the UI could never remove them.
-  const reverseSources = connectionReverseSources(typeKey, def.key)
+  const reverseSources = recordsConnectionReverseKeys(typeKey, def.key)
   if (list.force) {
     await tx
       .deleteFrom('records_connections')
@@ -931,6 +912,12 @@ export async function applyFieldPatch(
   await assertUsersExist(tx, defsByKey, listOps)
   await assertConnectionTargetsExist(tx, defsByKey, listOps)
 
+  const hierarchy = recordsHierarchy(typeKey)
+  // Before the request writes any row, so two moves never wait on each other's rows.
+  if (hierarchy && [...listOps.keys()].some(key => defsByKey.get(key)!.hierarchy)) {
+    await lockRecordsHierarchy(tx, ctx, typeKey)
+  }
+
   let id: string
   let oldRecord: RecordsHydratedRecord | null = null
   const closingRules = closingRulesOf(type, defs)
@@ -1001,7 +988,6 @@ export async function applyFieldPatch(
       .execute()
   }
 
-  const hierarchy = recordsHierarchy(typeKey)
   const moves: RecordsHierarchyMove[] = []
   for (const [key, list] of listOps) {
     const def = defsByKey.get(key)!

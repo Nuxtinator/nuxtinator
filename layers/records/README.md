@@ -34,7 +34,9 @@ A type whose manifest marks a connection to itself with `hierarchy: 'parent'` (a
 
 - A record has one parent. Writing either field sets it, and a record can't be put under itself or under anything below it.
 - Whoever can see or edit a record can see or edit everything under it. Sharing a big task, assigning it, or putting it on a hand-picked view shares its whole breakdown; a task with no shared ancestor stays as private as before.
-- Moving an existing record into a tree other people can see asks first, like assigning someone does (`records.share_confirmation`, with a `title` and `confirmLabel` and no `users`). Creating a record under a parent doesn't ask, and neither does a move inside one tree.
+- Moving an existing record under one other people can see asks first, like assigning someone does (`records.share_confirmation`, with a `title` and `confirmLabel` and no `users`). It asks when any record the move puts above it is shared, assigned or on a shared view, so a move from a private branch to a shared branch of the same tree asks too. Creating a record under a parent doesn't ask, and neither does a move that puts nothing new above the record.
+- Moves of one type's records in an org run one at a time (`lockRecordsHierarchy`), so two at once can't make a loop or leave a record with two parents.
+- A record's share list (`GET …/shares`, `via`) also lists what shares each record above it that the caller can see: the people it's shared with or assigned to (`sourceId: 'records:ancestor'`) and the views holding it (`through` names the record).
 - Linking a record from its parent's side takes the right to see and edit that record.
 - Filters: "Parent is empty" keeps a list to the top level, "Subtasks is empty" to the leaves, and the parent field's "is anywhere under" (`op: 'under'`) matches at any depth.
 - Deleting a record leaves what was under it as roots.

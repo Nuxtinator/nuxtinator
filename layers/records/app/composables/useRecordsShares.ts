@@ -19,12 +19,17 @@ export interface RecordsShare {
   createdAt: string
 }
 
-/** A place besides direct shares that shares the record (a hand-picked view). */
+/**
+ * A place besides direct shares that shares the record: a hand-picked view, or
+ * a record above it (sourceId 'records:ancestor') that is shared or assigned.
+ */
 export interface RecordsShareVia {
   sourceId: string
   label: string
   path: string
   audience: Array<{ kind: 'user' | 'team' | 'everyone', name: string, level: RecordsShareLevel }>
+  /** The record above this one that the place holds. */
+  through?: string
 }
 
 export function useRecordsShares(typeKey: MaybeRefOrGetter<string>, recordId: MaybeRefOrGetter<string>) {

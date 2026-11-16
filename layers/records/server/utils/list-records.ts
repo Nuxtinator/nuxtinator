@@ -27,7 +27,7 @@ import { z } from 'zod'
 import type { Database } from '#core/server/database/schema'
 import { isAppEnabledForCurrentOrg, type TenantContext } from '#tenant/server'
 import { APP_TEAM_GATE_MESSAGE, isAppOpenToUser } from '#core/server/utils/groups'
-import { getRecordType, getRecordTypes, getRecordTypeFields, recordsAccessGrantingKeys, recordsHierarchy, recordsStatusDefault, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
+import { getRecordType, getRecordTypes, getRecordTypeFields, recordsAccessGrantingKeys, recordsConnectionReverseKeys, recordsHierarchy, recordsStatusDefault, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
 import { resolveTypePermission } from './type-permissions'
 import { anyAncestor } from './ancestors'
 import type { RecordRow } from './record-storage'
@@ -45,7 +45,6 @@ import {
   getRecordsStorageDriver,
   getRecordsStorageDrivers,
   getRecordsVisibilitySources,
-  getRegisteredRecordTypes,
   type RecordsFilterCond
 } from './records-registry'
 
@@ -280,19 +279,6 @@ function userRefsCond(eb: Eb, def: RecordsFieldSetting, cond: FilterCond): Expre
   }
 }
 
-// Field keys whose rows, written from the other side, read in reverse under
-// `fieldKey` of `typeKey` records (every field declared with that target and
-// reverseKey).
-function reverseConnectionKeys(typeKey: string, fieldKey: string): string[] {
-  const keys = new Set<string>()
-  for (const manifest of getRegisteredRecordTypes()) {
-    for (const [key, def] of Object.entries(manifest.fields)) {
-      if (def.kind === 'connection' && def.target === typeKey && def.reverseKey === fieldKey) keys.add(key)
-    }
-  }
-  return [...keys]
-}
-
 // "Records whose <field> includes record X", over the rows the field wrote
 // and the rows its reverse pair wrote from the other side.
 function connectionsCond(eb: Eb, typeKey: string, def: RecordsFieldSetting, cond: FilterCond): Expression<SqlBool> {
@@ -300,7 +286,7 @@ function connectionsCond(eb: Eb, typeKey: string, def: RecordsFieldSetting, cond
     .select('fcn.id')
     .whereRef('fcn.from_record_id', '=', 'records_entries.id')
     .where('fcn.field_key', '=', def.key)
-  const reverseKeys = reverseConnectionKeys(typeKey, def.key)
+  const reverseKeys = recordsConnectionReverseKeys(typeKey, def.key)
   const reverse = eb.selectFrom('records_connections as rcn')
     .select('rcn.id')
     .whereRef('rcn.to_record_id', '=', 'records_entries.id')

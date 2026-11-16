@@ -168,6 +168,72 @@ describe('task hierarchy', () => {
     expect(await ancestors(alsoMine.id)).toEqual([mine.id])
   })
 
+  it('a move between branches of one tree asks when the new branch is shared', async () => {
+    const { org, auth } = await createRecordsOrgWith(sql, ['member'])
+    const owner = withOrgHeader(auth, org.slug)
+    const sam = await addRecordsMember(sql, org.id)
+    const samOpts = withOrgHeader(sam.auth, org.slug)
+    const root = await create(owner, { name: 'test-records Root' })
+    const shared = await create(owner, { name: 'test-records Shared branch', parent: [root.id] })
+    const quiet = await create(owner, { name: 'test-records Quiet branch', parent: [root.id] })
+    const task = await create(owner, { name: 'test-records Quiet task', parent: [quiet.id] })
+    const below = await create(owner, { name: 'test-records Below it', parent: [task.id] })
+    await $fetch(`/api/records/entries/task/${shared.id}/shares`, { method: 'POST', body: { userId: sam.user.id }, ...owner })
+
+    const refused = await patch(owner, task.id, { parent: [shared.id] }).catch(e => e)
+    expect(refused.statusCode).toBe(409)
+    expect(refused.data.data).toMatchObject({ code: 'records.share_confirmation' })
+    expect(await canSee(samOpts, below.id)).toBe(false)
+    await patch(owner, task.id, { parent: [shared.id] }, true)
+    expect(await canSee(samOpts, below.id)).toBe(true)
+
+    // Up to a task already above it: nobody new sees it.
+    await patch(owner, below.id, { parent: [shared.id] })
+    expect(await ancestors(below.id)).toEqual([root.id, shared.id])
+  })
+
+  it('moves made at the same moment can\'t make a loop or a second parent', async () => {
+    const { org, auth } = await createRecordsOrgWith(sql, ['member'])
+    const me = withOrgHeader(auth, org.slug)
+    const a = await create(me, { name: 'test-records A' })
+    const b = await create(me, { name: 'test-records B' })
+    const loop = await Promise.allSettled([
+      patch(me, a.id, { parent: [b.id] }),
+      patch(me, b.id, { parent: [a.id] })
+    ])
+    expect(loop.filter(r => r.status === 'fulfilled')).toHaveLength(1)
+    expect([...await ancestors(a.id), ...await ancestors(b.id)]).toHaveLength(1)
+
+    const child = await create(me, { name: 'test-records Child' })
+    const one = await create(me, { name: 'test-records One' })
+    const two = await create(me, { name: 'test-records Two' })
+    await Promise.allSettled([
+      patch(me, child.id, { parent: [one.id] }),
+      patch(me, child.id, { parent: [two.id] })
+    ])
+    const parents = await sql<Array<{ to_record_id: string }>>`
+      SELECT to_record_id FROM records_connections WHERE from_record_id = ${child.id} AND field_key = 'parent'
+    `
+    expect(parents).toHaveLength(1)
+    expect(await ancestors(child.id)).toEqual([parents[0]!.to_record_id])
+  })
+
+  it('a subtask\'s share list shows the access that comes from above', async () => {
+    const { org, auth } = await createRecordsOrgWith(sql, ['member'])
+    const owner = withOrgHeader(auth, org.slug)
+    const sam = await addRecordsMember(sql, org.id)
+    const project = await create(owner, { name: 'test-records Shared project' })
+    const child = await create(owner, { name: 'test-records Child', parent: [project.id] })
+    await $fetch(`/api/records/entries/task/${project.id}/shares`, { method: 'POST', body: { userId: sam.user.id, level: 'edit' }, ...owner })
+
+    const list = await $fetch<{ items: unknown[], via: Array<{ sourceId: string, label: string, audience: Array<{ level: string }> }> }>(
+      `/api/records/entries/task/${child.id}/shares`, owner)
+    expect(list.items).toEqual([])
+    expect(list.via).toHaveLength(1)
+    expect(list.via[0]).toMatchObject({ sourceId: 'records:ancestor', label: 'test-records Shared project' })
+    expect(list.via[0]!.audience).toMatchObject([{ kind: 'user', level: 'edit' }])
+  })
+
   it('a task can\'t be pulled under another by someone who can\'t see it', async () => {
     const { org, auth } = await createRecordsOrgWith(sql, ['member'])
     const owner = withOrgHeader(auth, org.slug)

@@ -67,12 +67,12 @@ watch(recordId, (id) => {
 
 const canEdit = computed(() => record.value?.capabilities.canEdit ?? false)
 
-// A record of a type with a hierarchy (a task) opens as a board of what sits
-// under it, unless that board is the page behind this slideover.
+// A task opens as a board of what sits under it, unless that board is the
+// page behind this slideover.
 const route = useRoute()
 const { boardRoute } = useViewsSubtasksBoard()
 const childrenField = computed(() =>
-  fieldSettings.value?.fields.find(f => f.hierarchy === 'children' && !f.hidden) ?? null)
+  fieldSettings.value?.fields.find(f => viewsIsSubtasksField(f) && !f.hidden) ?? null)
 const boardLink = computed(() => {
   const id = recordId.value
   if (!id || !childrenField.value || route.params.id === viewsSubtasksViewId(id)) return null

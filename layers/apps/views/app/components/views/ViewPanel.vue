@@ -21,7 +21,7 @@ import type {
   ViewsTab,
   ViewsTabView
 } from '../../utils/views-types'
-import { VIEWS_LAYOUT_META, viewsDragMode } from '../../utils/views-types'
+import { VIEWS_LAYOUT_META, viewsDragMode, viewsIsViewId } from '../../utils/views-types'
 import type { ViewsMovePayload } from '../../composables/useViewsDetail'
 import type { ViewsTabChoice } from '../../components/views/TabModal.vue'
 
@@ -59,7 +59,7 @@ function selectTab(id: string) {
 // another view, named in ?from=; every board opened below keeps naming it, so
 // the header's trail starts where the person did.
 const fromViewId = computed(() =>
-  !props.embedded && typeof route.query.from === 'string' ? route.query.from : null)
+  !props.embedded && viewsIsViewId(route.query.from) ? route.query.from : null)
 const originId = computed<string | null>(() =>
   view.value?.recordId ? fromViewId.value : view.value?.id ?? null)
 provide(VIEWS_ORIGIN_KEY, originId)
@@ -190,8 +190,9 @@ const groupFieldDef = computed(() =>
     ? allFields.value.find(f => f.key === tab.value!.definition.groupField) ?? null
     : null)
 
-// Mirrors the server's drag rules (move for single-value and user fields,
-// add for multi-selects, tags and connections) so the tab shows the card
+// Mirrors the server's drag rules (move for single-value and user fields
+// and a record's parent, add for multi-selects, tags and other connections)
+// so the tab shows the card
 // where it was dropped before the API round-trip confirms it.
 function applyOptimisticMove(payload: ViewsMovePayload) {
   const recs = tabRecords.value
@@ -266,7 +267,8 @@ async function onQuickAdd({ columnKey, name }: { columnKey: string, name: string
     const field = groupFieldDef.value
     if (!isCustom.value && field) {
       const single = field.kind === 'key_select' || (field.kind === 'user_select' && !field.multiple)
-      const pinned = Array.isArray(pinnedValues[field.key]) ? pinnedValues[field.key] as unknown[] : []
+      // A record has one parent, so the column replaces the one the filters pinned.
+      const pinned = field.hierarchy !== 'parent' && Array.isArray(pinnedValues[field.key]) ? pinnedValues[field.key] as unknown[] : []
       // "No value" is a value: an explicit null keeps the type's default
       // (a task's "open") from putting the new record in another column.
       if (columnKey !== '') pinnedValues[field.key] = single ? columnKey : [...new Set([...pinned, columnKey])]

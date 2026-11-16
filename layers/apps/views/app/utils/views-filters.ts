@@ -90,7 +90,8 @@ const PREFILL_SKIP = new Set(['name', 'created_at', 'updated_at'])
  * each rule that pins its field (is, any of, all of, on, is empty, and
  * "anywhere under", which a direct child satisfies), read
  * through "all" groups and single-rule "any" groups. Later filters win on
- * single-value fields; list fields collect every pinned value.
+ * single-value fields and on a record's parent; other list fields collect
+ * every pinned value.
  */
 export function viewsFilterPrefill(
   filters: Array<RecordsFilterGroup | null | undefined>,
@@ -130,8 +131,8 @@ export function viewsFilterPrefill(
       out[def.key] = pinned[0]
       return
     }
-    const current = Array.isArray(out[def.key]) ? out[def.key] as unknown[] : []
-    out[def.key] = [...new Set([...current, ...pinned])]
+    const current = def.hierarchy !== 'parent' && Array.isArray(out[def.key]) ? out[def.key] as unknown[] : []
+    out[def.key] = [...new Set([...current, ...pinned.slice(0, def.hierarchy === 'parent' ? 1 : undefined)])]
   }
   const walk = (group: RecordsFilterGroup) => {
     if (group.match === 'any' && group.rules.length !== 1) return

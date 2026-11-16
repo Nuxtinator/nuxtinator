@@ -1,9 +1,5 @@
-// The built-in view of what sits under one task: `builtin.subtasks.<taskId>`.
-// Its Board tab holds the task's direct subtasks by status; its All levels tab
-// lists everything under the task at any depth. A subtask with subtasks of
-// its own opens the same way, so a big task is worked one level at a time.
-// Anyone who can open the task can open its view, and a card added on either
-// tab becomes a subtask of the task.
+// The built-in view of what sits under one task (`builtin.subtasks.<taskId>`),
+// open to anyone who can open the task.
 
 import { z } from 'zod'
 import type { Transaction } from 'kysely'

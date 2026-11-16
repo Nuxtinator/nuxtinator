@@ -123,6 +123,28 @@ describe('subtasks board', () => {
     expect(await feed(me, view.id, view.tabs[0]!.id)).toEqual(['test-views Small one', 'test-views Small two'])
   })
 
+  it('on a board grouped by parent, a drag moves the card to the new parent', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['member'])
+    const me = withOrgHeader(auth, org.slug)
+    const project = await createTask(me, { name: 'test-views Project' })
+    const a = await createTask(me, { name: 'test-views Phase A', parent: [project.id] })
+    const b = await createTask(me, { name: 'test-views Phase B', parent: [project.id] })
+    const card = await createTask(me, { name: 'test-views Card', parent: [a.id] })
+    const view = await $fetch<Detail>('/api/views', {
+      method: 'POST',
+      body: { name: 'test-views By parent', recordTypeKey: 'task', tab: { layout: 'kanban', definition: { groupField: 'parent' } } },
+      ...me
+    })
+
+    await $fetch(`/api/views/${view.id}/move`, {
+      method: 'POST',
+      body: { recordId: card.id, fromColumn: a.id, toColumn: b.id, columnOrder: [card.id] },
+      ...me
+    })
+    const moved = await $fetch<{ fields: { parent: Array<{ id: string }> } }>(`/api/records/entries/task/${card.id}`, me)
+    expect(moved.fields.parent.map(p => p.id)).toEqual([b.id])
+  })
+
   it('a copy keeps showing what sits under the task', async () => {
     const { org, auth } = await createViewsOrgWith(sql, ['member'])
     const me = withOrgHeader(auth, org.slug)

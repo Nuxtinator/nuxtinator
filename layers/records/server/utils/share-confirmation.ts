@@ -177,9 +177,9 @@ async function sharedBeyondCaller(tx: Tx, ctx: TenantContext, typeKey: string, i
 
 /**
  * Refuses (409, `RECORDS_SHARE_CONFIRMATION`) a write that moved an existing
- * record into a tree other people can see, unless it was confirmed: everyone
- * who sees the new parent then sees the record and everything under it. A
- * move inside one tree doesn't ask.
+ * record under a record other people can see, unless it was confirmed:
+ * everyone who sees the new parent then sees the record and everything under
+ * it. A move that puts nothing new above the record doesn't ask.
  */
 export async function requireMoveConfirmation(
   tx: Tx,
@@ -190,16 +190,16 @@ export async function requireMoveConfirmation(
 ): Promise<void> {
   if (sharing === 'confirmed') return
   for (const move of moves) {
-    if (move.sameTree) continue
+    if (move.gained.length === 0) continue
+    if (!(await sharedBeyondCaller(tx, ctx, typeKey, move.gained))) continue
     const rows = await tx
       .selectFrom('records_entries')
-      .select(['id', 'name', 'ancestor_ids'])
+      .select(['id', 'name'])
       .where('id', 'in', [move.recordId, move.parentId])
       .execute()
     const parent = rows.find(r => r.id === move.parentId)
     const record = rows.find(r => r.id === move.recordId)
     if (!parent || !record) continue
-    if (!(await sharedBeyondCaller(tx, ctx, typeKey, [...parent.ancestor_ids, parent.id]))) continue
     throw createError({
       statusCode: 409,
       statusMessage: `Everyone who can see "${parent.name}" will see "${record.name}" and everything under it.`,

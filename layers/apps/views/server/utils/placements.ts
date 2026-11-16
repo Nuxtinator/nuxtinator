@@ -5,11 +5,11 @@
 // - Field-grouped boards and grouped lists: the drag is a *record edit* — the
 //   grouping field changes through the records kernel's permission check and
 //   patch pipeline. What
-//   the edit is depends on the field (see dragMode): single-value fields and
-//   user fields *move* — the source column's value is swapped for the
+//   the edit is depends on the field (see dragMode): single-value fields,
+//   user fields and a record's parent *move* — the source column's value is swapped for the
 //   target's, other values survive, so a card in two user columns leaves the
 //   one it was dragged from and stays in the other; multi-selects, tags and
-//   connections *add* — the target value joins and the source value stays,
+//   other connections *add* — the target value joins and the source value stays,
 //   so carrying a deliverable into next quarter keeps this quarter too.
 //   Grouped by one of the view's own fields, the drag sets that field's
 //   value on the view instead (same move/add rule), which takes 'edit'.
@@ -71,25 +71,27 @@ async function resolveGroupField(tx: Tx, view: ViewRow, key: string): Promise<Re
 
 export type ViewsDragMode = 'move' | 'add'
 
-export function dragMode(field: Pick<RecordsFieldSetting, 'kind'>): ViewsDragMode {
-  return field.kind === 'key_select' || field.kind === 'user_select' ? 'move' : 'add'
+export function dragMode(field: Pick<RecordsFieldSetting, 'kind' | 'hierarchy'>): ViewsDragMode {
+  return field.kind === 'key_select' || field.kind === 'user_select' || field.hierarchy === 'parent' ? 'move' : 'add'
 }
 
 /**
  * The grouping field's value after a drag from `fromColumn` to `toColumn`.
- * Single-value kinds take the target value (or null for "No value"). Move
+ * Single-value kinds take the target value (or null for "No value"), and so
+ * does a record's parent, as a list of one. Move
  * kinds with several values swap the source value for the target. Add kinds
  * keep every value and add the target; dropping on "No value" removes just
  * the source value.
  */
 export function nextGroupValues(
-  field: Pick<RecordsFieldSetting, 'kind' | 'storage' | 'multiple'>,
+  field: Pick<RecordsFieldSetting, 'kind' | 'storage' | 'multiple' | 'hierarchy'>,
   current: string[],
   fromColumn: string | null,
   toColumn: string
 ): unknown {
   const single = field.kind === 'key_select' || (field.storage === 'user_refs' && !field.multiple)
   if (single) return toColumn === '' ? null : toColumn
+  if (field.hierarchy === 'parent') return toColumn === '' ? [] : [toColumn]
   if (dragMode(field) === 'move' || toColumn === '') {
     const next = current.filter(v => v !== fromColumn)
     if (toColumn !== '' && !next.includes(toColumn)) next.push(toColumn)

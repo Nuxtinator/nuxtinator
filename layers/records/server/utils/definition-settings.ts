@@ -414,6 +414,24 @@ export function recordsHierarchy(typeKey: string): RecordsHierarchy | null {
   }
 }
 
+// Field keys (on any registered type) whose connection rows surface in
+// reverse under `fieldKey` of `typeKey` records: every field declared with
+// `target: typeKey, reverseKey: fieldKey`. Connection rows store only the
+// writing side's field_key, so a key shared by two types pointing at
+// different targets would be ambiguous — field keys are expected to be
+// distinct across connection vocabularies.
+export function recordsConnectionReverseKeys(typeKey: string, fieldKey: string): string[] {
+  const sources = new Set<string>()
+  for (const manifest of getRegisteredRecordTypes()) {
+    for (const [key, def] of Object.entries(manifest.fields)) {
+      if (def.kind === 'connection' && def.target === typeKey && def.reverseKey === fieldKey) {
+        sources.add(key)
+      }
+    }
+  }
+  return [...sources]
+}
+
 /** The status an unset status column reads as: the status field's default. */
 export function recordsStatusDefault(defs: RecordsFieldSetting[]): string | null {
   const value = defs.find(d => d.column === 'status')?.default

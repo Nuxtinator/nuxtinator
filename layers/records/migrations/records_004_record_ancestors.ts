@@ -1,14 +1,7 @@
 import { type Kysely, sql } from 'kysely'
 
-// Hierarchies: a record of a type with a parent field (a task's parent task)
-// carries its chain of ancestors, root first, in records_entries.ancestor_ids.
-// The kernel rewrites the chain when a record moves; the trigger here cuts it
-// when an ancestor is deleted, whichever path deletes it.
-//
-// A hierarchy link is one records_connections row from the child, keyed by
-// the parent field. Task links written from the parent's side (`subtasks`)
-// are turned around here, a task with several parents keeps one, and loops
-// are cut, so every task ends with at most one parent.
+// Adds records_entries.ancestor_ids (a record's ancestors, root first) with a
+// trigger that cuts a deleted ancestor out, and leaves every task one parent.
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`ALTER TABLE records_entries ADD COLUMN ancestor_ids uuid[] NOT NULL DEFAULT '{}'`.execute(db)
   await sql`CREATE INDEX records_entries_ancestor_ids_idx ON records_entries USING gin (ancestor_ids)`.execute(db)
