@@ -106,6 +106,44 @@ user, labelled "via <client name>". Replies to a suppressed address, or sent
 while the inbox has no sending address, are refused with 409 here and in the
 composer route alike.
 
+## Adding actions to a conversation
+
+A host or another layer can add items to a conversation header's "More actions"
+menu without copying the inbox's components. Register them from a Nuxt app
+plugin with `registerInboxThreadAction` from the `#inbox` alias:
+
+```ts
+// app/plugins/inbox-actions.ts
+import { registerInboxThreadAction } from '#inbox'
+
+export default defineNuxtPlugin(() => {
+  registerInboxThreadAction({
+    id: 'ask-for-help',          // stable; registering the same id again replaces it
+    label: 'Ask for help',
+    icon: 'i-lucide-life-buoy',
+    order: 100,                  // ascending (default 100), after the built-in items
+    visible: ctx => ctx.conversation.status !== 'closed',  // optional; shown by default
+    onSelect: async (ctx) => {
+      await $fetch(`/api/my-app/help-requests`, { method: 'POST', body: { conversationId: ctx.conversation.id } })
+      await ctx.refresh()
+    }
+  })
+})
+```
+
+`ctx` holds the `conversation` (id, subject, status, assignee, review flag,
+tags, …), the current user as `me` (`InboxMe`, `null` while loading), and
+`refresh()`, which reloads the thread and its "Notes & activity" timeline. An
+event the action's route records with `inboxLogConversationEvent` from
+`#inbox/server` shows on the timeline after `refresh()`.
+
+The inbox checks no permission for a registered action: the registering layer
+decides in `visible` and enforces on its own route. To show a dialog, open it
+from `onSelect` with Nuxt UI's `useOverlay`. With nothing registered the menu
+holds only the built-in items.
+
+`#inbox` is for app code; server code imports from `#inbox/server`.
+
 ## Local development
 
 No Mailgun needed: outbound mail lands in Mailpit (http://localhost:8025). To

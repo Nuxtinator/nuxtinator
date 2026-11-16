@@ -487,6 +487,7 @@ async function onSaveIdentity(patch: { alias?: string | null, signature?: string
             :upload-inline-image="uploadInlineImage"
             :ai-available="aiAvailable"
             :ai-meta="aiMeta"
+            :refresh="refreshThread"
             @patch="onPatch"
             @reply="onReply"
             @save-draft="onSaveDraft"

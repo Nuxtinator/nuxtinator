@@ -9,6 +9,9 @@
 // duplicate runtimeConfig declarations merge harmlessly); the webhook signing
 // key and inbox addressing are inbox-specific.
 //
+// `#inbox` is the client registry for extra conversation menu actions
+// (app/utils/inbox-thread-actions.ts), for hosts and other layers.
+//
 // `#inbox/server` exposes the conversation-creation + channel-claim primitives
 // so a future forms layer can create inbox conversations without reaching into
 // this layer's file layout. The barrel lives in server/exports/ (not
@@ -26,6 +29,7 @@ export default defineNuxtConfig({
   ],
 
   alias: {
+    '#inbox': fileURLToPath(new URL('./app/utils/inbox-thread-actions.ts', import.meta.url)),
     '#inbox/server': fileURLToPath(new URL('./server/exports/index.ts', import.meta.url))
   },
 
