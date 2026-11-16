@@ -363,6 +363,12 @@ const columns: TableColumn<AdminUserRow>[] = [
 const total = computed(() => data.value?.total ?? 0)
 const rows = computed(() => data.value?.rows ?? [])
 
+// A page past the last one (its only row was just deleted) steps back to the last page.
+watch(total, (count) => {
+  const last = Math.max(1, Math.ceil(count / pageSize.value))
+  if (page.value > last) page.value = last
+})
+
 // Edit slideover state
 const selectedUser = ref<AdminUserRow | null>(null)
 const editName = ref('')
@@ -820,7 +826,7 @@ const handleDelete = async () => {
         {{ total }} user{{ total === 1 ? '' : 's' }}
       </span>
       <UPagination
-        v-if="total > pageSize"
+        v-if="total > pageSize || page > 1"
         v-model:page="page"
         :items-per-page="pageSize"
         :total="total"

@@ -36,7 +36,7 @@ const passwordStrength = computed(() => {
   if (/\d/.test(password)) strength++
   if (/[^a-zA-Z0-9]/.test(password)) strength++
 
-  const labels = ['Weak', 'Fair', 'Good', 'Strong', 'Very Strong']
+  const labels = ['Weak', 'Fair', 'Good', 'Strong', 'Very strong']
   const colors = ['red', 'orange', 'yellow', 'green', 'emerald']
 
   return {
@@ -105,7 +105,6 @@ const loginLink = computed(() => ({
       >
         <UAlert
           color="success"
-          variant="soft"
           icon="i-lucide-circle-check"
           title="Registration successful"
           description="Please check your email to verify your account."
@@ -118,7 +117,6 @@ const loginLink = computed(() => ({
       >
         <UAlert
           color="neutral"
-          variant="soft"
           icon="i-lucide-lock"
           title="Registration is closed"
           description="New accounts can only be created from an invitation."
@@ -144,7 +142,6 @@ const loginLink = computed(() => ({
         <UAlert
           v-if="error"
           color="error"
-          variant="soft"
           icon="i-lucide-circle-alert"
           :title="error"
           close

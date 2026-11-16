@@ -151,7 +151,6 @@ async function useDifferentAccount() {
       >
         <UAlert
           color="error"
-          variant="soft"
           icon="i-lucide-circle-alert"
           title="Invalid invitation"
         />
@@ -174,7 +173,6 @@ async function useDifferentAccount() {
       >
         <UAlert
           color="error"
-          variant="soft"
           icon="i-lucide-circle-alert"
           title="Invitation expired"
         />
@@ -197,7 +195,6 @@ async function useDifferentAccount() {
       >
         <UAlert
           color="success"
-          variant="soft"
           icon="i-lucide-circle-check"
           title="Check your email"
           description="We sent a verification link to your address. Verify it, then sign in."
@@ -219,7 +216,6 @@ async function useDifferentAccount() {
         <UAlert
           v-if="error"
           color="error"
-          variant="soft"
           :title="error"
         />
         <p
@@ -290,7 +286,6 @@ async function useDifferentAccount() {
         <UAlert
           v-if="error"
           color="error"
-          variant="soft"
           icon="i-lucide-circle-alert"
           :title="error"
           close

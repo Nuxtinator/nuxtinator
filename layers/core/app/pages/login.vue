@@ -46,11 +46,11 @@ async function handleLogin() {
     const result = await login(state.email, state.password)
 
     if (!result.success) {
-      error.value = result.message || 'Login failed. Please check your credentials.'
+      error.value = result.message || 'Sign in failed. Please check your credentials.'
     }
     // On success, useAuth composable will handle navigation
   } catch (err: any) {
-    error.value = err.data?.message || 'An error occurred during login. Please try again.'
+    error.value = err.data?.message || 'An error occurred while signing in. Please try again.'
   } finally {
     loading.value = false
   }
@@ -110,7 +110,6 @@ function switchToReset() {
       <UAlert
         v-if="successMessage"
         color="success"
-        variant="soft"
         icon="i-lucide-circle-check"
         :title="successMessage"
         close
@@ -121,7 +120,6 @@ function switchToReset() {
       <UAlert
         v-if="error"
         color="error"
-        variant="soft"
         icon="i-lucide-circle-alert"
         :title="error"
         close
@@ -208,7 +206,6 @@ function switchToReset() {
       >
         <UAlert
           color="success"
-          variant="soft"
           icon="i-lucide-circle-check"
           title="Email sent"
           close
@@ -231,7 +228,6 @@ function switchToReset() {
         <UAlert
           v-if="resetError"
           color="error"
-          variant="soft"
           icon="i-lucide-circle-alert"
           :title="resetError"
           close

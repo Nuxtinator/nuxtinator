@@ -1,11 +1,13 @@
 <script setup lang="ts">
-// The title row of a page: its name, an optional (i) explanation, and the page's actions on the right.
+// The title row of a page: an optional control before the title (a back button), its name,
+// an optional (i) explanation, and the page's actions on the right.
 defineProps<{ title: string, help?: string }>()
 </script>
 
 <template>
   <header class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
     <div class="flex items-center gap-1.5 min-w-0">
+      <slot name="leading" />
       <h1 class="text-2xl font-semibold tracking-tight text-(--ui-text-highlighted) truncate">
         {{ title }}
       </h1>

@@ -65,7 +65,7 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
 - **Column headers are small, medium-weight labels whether or not the column sorts** (`ui.table.slots.th` in `app.config`). Nuxt UI's default header is larger and bolder than the ghost button a sortable header renders, so "Organizations" or "Assigned to" stood out from the sortable columns beside them. Enlarging the sort buttons was rejected: it means the same change in every table, and quiet headers leave the rows as the thing to read.
 - **Tables sit on the page without a card.** The members table had a filled card around it while the users and record tables had none.
 - **A table's first column is darker and medium weight**, so the eye finds the row's name before its details.
-- **Pagination is hidden while everything fits on one page.** A row of first / previous / 1 / next / last buttons under four rows offered nothing to press.
+- **Pagination is hidden while everything fits on one page.** A row of first / previous / 1 / next / last buttons under four rows offered nothing to press. It stays while the person is past page one, so deleting the last row of page two, or opening a `?page=2` link after the list has shrunk, never leaves an empty list with no way back.
 - **Dates read "Nov 12, 2026, 8:44 PM"** through `formatDateTime`. `toLocaleString()` printed seconds on every row. Audit logs keep seconds.
 - **Alerts default to the tinted `subtle` variant** (`ui.alert.defaultVariants` in `app.config`). Most alerts already asked for `subtle` or `soft`; the rest fell back to Nuxt UI's solid fill, so the same kind of message looked different from page to page.
 

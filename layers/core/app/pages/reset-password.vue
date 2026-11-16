@@ -74,7 +74,6 @@ async function handleResetPassword() {
     >
       <UAlert
         color="error"
-        variant="soft"
         icon="i-lucide-circle-alert"
         title="Invalid reset link"
       />
@@ -98,7 +97,6 @@ async function handleResetPassword() {
     >
       <UAlert
         color="success"
-        variant="soft"
         icon="i-lucide-circle-check"
         title="Password reset"
       />
@@ -120,7 +118,6 @@ async function handleResetPassword() {
       <UAlert
         v-if="error"
         color="error"
-        variant="soft"
         icon="i-lucide-circle-alert"
         :title="error"
         close

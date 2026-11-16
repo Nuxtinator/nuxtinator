@@ -11,11 +11,11 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 | Need | Use |
 |---|---|
 | Help or explanation for a field or section | `<InfoTip text="…" />` |
-| Page title, with its help and its buttons | `<PageTitle title help>` with the page's buttons in its default slot; `#help` takes `<p>` paragraphs, `#badge` a badge beside the title |
+| Page title, with its help and its buttons | `<PageTitle title help>` with the page's buttons in its default slot; `#help` takes `<p>` paragraphs, `#badge` a badge beside the title, `#leading` a back button before it |
 | Signed-out page (sign in, register, reset, invite) | `layout: 'auth'` and `<AuthCard title>` around the form; `#footer` is the one line that leads to the neighbouring page, `#note` the small print |
 | Show a date and time | `formatDateTime(value)` or `formatDateOnly(value)` |
 | Sidebar | `<SidebarPanel>` with `<SidebarNav :items>` inside |
-| Settings page | `<SettingsGroup title>` cards of `<SettingsRow label value>` rows; `useSettingsRow(id)` keeps one row open at a time |
+| Settings page | `<SettingsGroup title>` cards of `<SettingsRow label value>` rows (a page with one group leaves `title` out; a row's `help` or `#help` puts an (i) beside its label); `useSettingsRow(id)` keeps one row open at a time |
 | Page or tab edited as one form | `<SaveBar :dirty :saving @save @discard>` at the end of the form, with `useUnsavedGuard(dirty, discard)` |
 | Confirm before a destructive action | `if (!await confirmAction({ title, confirmLabel })) return` with `const confirmAction = useConfirm()`; or `<ConfirmModal v-model:open @confirm :loading>` when the modal should stay open while the work runs |
 | Labelled divider | `<USeparator label="…">` |
@@ -40,7 +40,7 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 - Every page opens with `<PageTitle>`, so titles are one size everywhere. A page's explanation goes in its `help`, not in a paragraph under the title.
 - Write labels, buttons, headings and alert titles in sentence case: "Create account", not "Create Account". Say "sign in", not "log in".
 - A table is a plain `<UTable>` on the page, with no card around it. The first column names the row: `font-medium text-(--ui-text-highlighted)`. Core sets the column headers' size; a sortable header is a ghost `xs` button with `class="-mx-2"`.
-- Show `<UPagination>` only when there is a second page: `v-if="total > pageSize"`. The row count stays.
+- Show `<UPagination>` only when there is a second page, or the person is already past the first: `v-if="total > pageSize || page > 1"`. The row count stays.
 - Write dates with `formatDateTime` / `formatDateOnly`. An audit log, where seconds matter, may keep its own format.
 
 ## Settings pages

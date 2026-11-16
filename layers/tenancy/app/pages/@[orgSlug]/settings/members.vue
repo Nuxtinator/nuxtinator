@@ -212,6 +212,12 @@ const columns: TableColumn<MemberRow>[] = [
 const total = computed(() => data.value?.total ?? 0)
 const rows = computed(() => data.value?.rows ?? [])
 
+// A page past the last one (its only row was just removed) steps back to the last page.
+watch(total, (count) => {
+  const last = Math.max(1, Math.ceil(count / pageSize.value))
+  if (page.value > last) page.value = last
+})
+
 // ---------- slideover ----------
 const selectedMember = ref<MemberRow | null>(null)
 const editRoles = ref<string[]>([])
@@ -542,7 +548,7 @@ const handleRemove = async () => {
         {{ total }} {{ total === 1 ? 'member' : 'members' }}
       </p>
       <UPagination
-        v-if="total > pageSize"
+        v-if="total > pageSize || page > 1"
         v-model:page="page"
         :total="total"
         :items-per-page="pageSize"

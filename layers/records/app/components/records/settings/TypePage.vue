@@ -188,17 +188,18 @@ async function moveField(field: RecordsFieldSetting, dir: -1 | 1) {
 
 <template>
   <div class="max-w-4xl mx-auto space-y-6">
-    <header class="flex items-center gap-2">
-      <UButton
-        icon="i-lucide-arrow-left"
-        variant="ghost"
-        color="neutral"
-        size="sm"
-        aria-label="Back to records settings"
-        :to="settingsPath()"
-      />
-      <h1 class="flex-1 text-2xl font-semibold tracking-tight text-(--ui-text-highlighted) truncate flex items-center gap-2">
-        {{ typeInfo?.label ?? typeKey }}
+    <PageTitle :title="typeInfo?.label ?? typeKey">
+      <template #leading>
+        <UButton
+          icon="i-lucide-arrow-left"
+          variant="ghost"
+          color="neutral"
+          size="sm"
+          aria-label="Back to records settings"
+          :to="settingsPath()"
+        />
+      </template>
+      <template #badge>
         <UBadge
           v-if="typeInfo?.custom"
           variant="subtle"
@@ -215,8 +216,11 @@ async function moveField(field: RecordsFieldSetting, dir: -1 | 1) {
         >
           Stale
         </UBadge>
-      </h1>
-      <template v-if="canManage && typeInfo">
+      </template>
+      <template
+        v-if="canManage && typeInfo"
+        #default
+      >
         <UButton
           v-if="!isOrphan && !typeInfo.hidden && typeInfo.canRead"
           icon="i-lucide-table"
@@ -245,7 +249,7 @@ async function moveField(field: RecordsFieldSetting, dir: -1 | 1) {
           {{ confirmingDelete ? 'Really delete?' : 'Delete type' }}
         </UButton>
       </template>
-    </header>
+    </PageTitle>
 
     <div class="pb-24 space-y-8">
       <div

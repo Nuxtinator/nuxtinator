@@ -1,12 +1,16 @@
 <script setup lang="ts">
 // Settings card that stacks SettingsRow rows (e.g. the account page's
-// AccountDisplayName, AccountPassword) under a title.
-defineProps<{ title: string }>()
+// AccountDisplayName, AccountPassword), under a title when the page has
+// more than one group.
+defineProps<{ title?: string }>()
 </script>
 
 <template>
   <UCard>
-    <template #header>
+    <template
+      v-if="title"
+      #header
+    >
       <h2 class="text-xl font-semibold">
         {{ title }}
       </h2>
