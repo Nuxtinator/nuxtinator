@@ -4,7 +4,7 @@
 import type { ColumnType, Generated } from 'kysely'
 
 // Code-owned vocabularies (mirrored by CHECK constraints in the migrations).
-export type ViewsLayout = 'kanban' | 'table' | 'list'
+export type ViewsLayout = 'kanban' | 'table' | 'list' | 'calendar'
 export type ViewsVisibility = 'private' | 'org' | 'teams'
 export type ViewsShareLevel = 'view' | 'edit'
 

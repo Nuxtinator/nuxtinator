@@ -34,9 +34,9 @@ function onFilterSave(filter: RecordsFilterGroup | null) {
 // --- saved sort -------------------------------------------------------------
 // Edited through a local draft so the select reflects the click before the
 // PATCH round-trip lands; the definition stays the source of truth. Tables
-// sort from their column headers instead.
+// sort from their column headers instead, and calendars order by date.
 
-const showSort = computed(() => props.view.viewType !== 'table')
+const showSort = computed(() => props.view.viewType !== 'table' && props.view.viewType !== 'calendar')
 const sortDraft = ref(props.view.definition.sort ?? null)
 watch(() => props.view.definition.sort, (v) => {
   sortDraft.value = v ?? null

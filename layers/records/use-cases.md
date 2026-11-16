@@ -43,7 +43,7 @@ A member wants to track ways to bake a pizza: oven temperature, time, a rating, 
 
 A member makes a "My tasks" view with tabs such as "My open tasks" (a list) and a board grouped by status.
 
-- A view owns the record type, the sharing, a base filter and its hand-picked records. Each tab owns its layout (board, list or table), grouping or custom columns, card fields, sort, and a filter that can only narrow the view.
+- A view owns the record type, the sharing, a base filter and its hand-picked records. Each tab owns its layout (board, list, table or calendar), grouping or custom columns, card fields, sort, and a filter that can only narrow the view.
 - Filters are a tree of all/any groups nested one level deep. `@me` resolves to whoever is viewing.
 - A card added from the view gets the values its filters pin down. On "Assigned to is Me", the new card is assigned to me, so it doesn't drop out of the view.
 - Everyone also has the built-in **My tasks** view (assigned to me: an Open list and a board by status), declared in code by the views layer. Nobody can change a built-in view; "Copy view" makes one of your own.

@@ -86,15 +86,23 @@ export interface ViewTabDefinition {
   /** This tab's filter, ANDed with the view's base filter. */
   filter?: RecordsFilterGroup
   sort?: { field: string, dir: 'asc' | 'desc' }
+  /** Calendar: the date field that places each record on a day. */
+  dateField?: string
+  /** Calendar: a second date field; a record spans from `dateField` to it. */
+  endField?: string
 }
 
-export const VIEWS_LAYOUTS = ['kanban', 'table', 'list'] as const
+export const VIEWS_LAYOUTS = ['kanban', 'table', 'list', 'calendar'] as const
 
 export const VIEWS_LAYOUT_LABELS: Record<ViewsLayout, string> = {
   kanban: 'Board',
   table: 'Table',
-  list: 'List'
+  list: 'List',
+  calendar: 'Calendar'
 }
+
+// Kinds a calendar can place records by.
+export const VIEWS_DATE_KINDS = new Set(['date', 'datetime'])
 
 // Kinds a board or list can group by: single/multi selects (columns = options),
 // user references (columns = users with cards), tags (columns = tags in use)
@@ -103,6 +111,8 @@ export const VIEWS_GROUPABLE_KINDS = new Set(['key_select', 'multi_select', 'use
 
 // Intrinsic record columns — always addressable even without a field def.
 const INTRINSIC_KEYS = new Set(['name', 'status', 'created_at', 'updated_at'])
+// The record row's own timestamps; a calendar can place records by them but not move them.
+export const TIMESTAMP_KEYS = new Set(['created_at', 'updated_at'])
 
 const columnSchema = z.object({
   key: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
@@ -119,7 +129,9 @@ export const viewsTabDefinitionSchema = z.object({
   sort: z.object({
     field: z.string().min(1).max(80),
     dir: z.enum(['asc', 'desc'])
-  }).strict().optional()
+  }).strict().optional(),
+  dateField: z.string().min(1).max(80).optional(),
+  endField: z.string().min(1).max(80).optional()
 }).strict()
 
 const viewDefinitionSchema = z.object({
@@ -188,13 +200,26 @@ export async function sanitizeTabDefinition(
     }
   } else if (def.columns) {
     badDefinition('only boards have their own columns')
-  } else if (layout === 'table' && def.groupField) {
-    badDefinition('tables are not grouped')
+  } else if ((layout === 'table' || layout === 'calendar') && def.groupField) {
+    badDefinition(`${VIEWS_LAYOUT_LABELS[layout].toLowerCase()}s are not grouped`)
+  }
+  if (layout === 'calendar') {
+    if (!def.dateField) badDefinition('a calendar needs a dateField')
+    if (def.endField && def.endField === def.dateField) badDefinition('endField must differ from dateField')
+  } else if (def.dateField || def.endField) {
+    badDefinition('only calendars have date fields')
   }
 
   const fields = await viewFieldsWithType(tx, view)
   const byKey = new Map(fields.map(f => [f.key, f]))
   const known = (key: string) => byKey.has(key) || INTRINSIC_KEYS.has(key)
+
+  for (const key of [def.dateField, def.endField]) {
+    if (!key || TIMESTAMP_KEYS.has(key)) continue
+    const field = byKey.get(key)
+    if (!field) badDefinition(`unknown date field "${key}"`)
+    if (!VIEWS_DATE_KINDS.has(field.kind)) badDefinition(`field "${key}" (${field.kind}) is not a date`)
+  }
 
   if (def.groupField) {
     const field = byKey.get(def.groupField)

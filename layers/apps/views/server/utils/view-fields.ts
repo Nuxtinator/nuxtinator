@@ -471,8 +471,9 @@ function withoutField(group: RecordsFilterGroup | undefined, key: string): Recor
 
 /**
  * Deletes a field with its values and files, and takes it out of the view's
- * filter and every tab (filters, card fields, sort, list sections). A board
- * grouped by it shows the "grouping field missing" state until regrouped.
+ * filter and every tab (filters, card fields, sort, list sections, a
+ * calendar's end date). A board grouped by it, or a calendar placing records
+ * by it, shows the "field missing" state until changed.
  */
 export async function deleteViewField(tx: Tx, view: ViewRow, key: string): Promise<ViewRow> {
   const fields = viewFieldsOf(view)
@@ -496,6 +497,7 @@ export async function deleteViewField(tx: Tx, view: ViewRow, key: string): Promi
     if (def.cardFields) def.cardFields = def.cardFields.filter(f => f !== key)
     if (def.sort?.field === key) delete def.sort
     if (tab.layout === 'list' && def.groupField === key) delete def.groupField
+    if (def.endField === key) delete def.endField
     if (JSON.stringify(def) !== before) {
       await tx
         .updateTable('views_tabs')

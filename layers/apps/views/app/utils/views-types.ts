@@ -2,7 +2,7 @@
 // strings over JSON; the server DTOs are the source of truth for meaning.
 import type { RecordsFilterGroup } from '#records/client'
 
-export type ViewsLayout = 'kanban' | 'table' | 'list'
+export type ViewsLayout = 'kanban' | 'table' | 'list' | 'calendar'
 export type ViewsVisibility = 'private' | 'org' | 'teams'
 export type ViewsAccessLevel = 'view' | 'edit' | 'owner'
 export type ViewsShareLevel = 'view' | 'edit'
@@ -64,6 +64,10 @@ export interface ViewsDefinition {
   /** This tab's filter, ANDed with the view's base filter. */
   filter?: RecordsFilterGroup
   sort?: { field: string, dir: 'asc' | 'desc' }
+  /** Calendar: the date field that places each record on a day. */
+  dateField?: string
+  /** Calendar: a second date field; a record spans from `dateField` to it. */
+  endField?: string
 }
 
 export interface ViewsTab {
@@ -189,6 +193,10 @@ export interface ViewRecords {
   groupColumns?: Array<{ key: string, label: string }>
   card: ViewsCardLayout
   groupFieldMissing: boolean
+  /** Calendars: the date field placing records was deleted. */
+  dateFieldMissing?: boolean
+  /** Calendars: the first records with no date, and how many there are. */
+  unscheduled?: { items: ViewsBoardItem[], total: number }
 }
 
 export interface ViewsShareEntry {
@@ -212,8 +220,12 @@ export function viewsDragMode(field: { kind: string, hierarchy?: 'parent' | 'chi
 export const VIEWS_LAYOUT_META: Record<ViewsLayout, { label: string, icon: string }> = {
   kanban: { label: 'Board', icon: 'i-lucide-kanban' },
   list: { label: 'List', icon: 'i-lucide-list-checks' },
-  table: { label: 'Table', icon: 'i-lucide-table' }
+  table: { label: 'Table', icon: 'i-lucide-table' },
+  calendar: { label: 'Calendar', icon: 'i-lucide-calendar-days' }
 }
+
+/** Every layout, in the order pickers list them. */
+export const VIEWS_LAYOUT_ORDER: ViewsLayout[] = ['kanban', 'list', 'table', 'calendar']
 
 /** Kinds a board or list can group by (mirrors the server's VIEWS_GROUPABLE_KINDS). */
 export const VIEWS_GROUPABLE_KINDS = new Set(['key_select', 'multi_select', 'user_select', 'tags', 'connection'])

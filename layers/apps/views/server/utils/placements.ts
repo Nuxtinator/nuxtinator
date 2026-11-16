@@ -213,6 +213,7 @@ export async function moveViewsCard(
 ): Promise<void> {
   const def = tab.definition as ViewTabDefinition
   if (tab.layout === 'table') badMove('Tables are sorted, not ordered by hand')
+  if (tab.layout === 'calendar') badMove('Calendars place records by date: change the record\'s date instead')
   if (input.columnOrder.length > VIEWS_MOVE_ORDER_MAX) badMove('columnOrder too large')
 
   if (def.columns) {

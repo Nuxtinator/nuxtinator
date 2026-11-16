@@ -29,12 +29,17 @@ export interface ViewTabPatch {
   definition?: unknown
 }
 
-// A layout switch keeps what still applies: tables have no grouping, and
-// only boards have their own columns.
+// A layout switch keeps what still applies: tables and calendars have no
+// grouping, only boards have their own columns, and only calendars have
+// date fields.
 function adaptToLayout(definition: ViewTabDefinition, layout: ViewsLayout): ViewTabDefinition {
   const next = { ...definition }
   if (layout !== 'kanban') delete next.columns
-  if (layout === 'table') delete next.groupField
+  if (layout === 'table' || layout === 'calendar') delete next.groupField
+  if (layout !== 'calendar') {
+    delete next.dateField
+    delete next.endField
+  }
   return next
 }
 

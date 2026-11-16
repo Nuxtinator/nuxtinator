@@ -1,4 +1,4 @@
-// The tab data feed: what a board, table or list shows. Everything flows
+// The tab data feed: what a board, table, list or calendar shows. Everything flows
 // through the records kernel's listRecords, so record visibility and
 // filter/sort validation are the kernel's — this file only combines the
 // view's base filter with the tab's, pages past the kernel's per-call limit,
@@ -21,8 +21,8 @@ import {
   resolveTypePermission,
   visibleRecordIds
 } from '#records/server'
-import type { RecordsFieldSetting, RecordListItem, RecordsListOpts } from '#records/server'
-import { isSortableField, ownCardsQuery, ownsItsCards, type ViewDefinition, type ViewRow, type ViewTabDefinition, type ViewTabRow } from './views'
+import type { RecordsFieldSetting, RecordsFilterGroup, RecordListItem, RecordsListOpts } from '#records/server'
+import { isSortableField, ownCardsQuery, ownsItsCards, TIMESTAMP_KEYS, type ViewDefinition, type ViewRow, type ViewTabDefinition, type ViewTabRow } from './views'
 import { isViewFieldKey, readViewValues, viewFieldGroupValues, viewFieldsOf, viewFieldsWithType, viewVirtualFields } from './view-fields'
 
 type Tx = Transaction<Database>
@@ -38,6 +38,9 @@ export interface ViewsRecordsOverlay {
   /** Table mode only — boards always load the whole (capped) set. */
   limit?: number
   offset?: number
+  /** Calendar only: the first and last day on screen (YYYY-MM-DD). */
+  from?: string
+  to?: string
 }
 
 export interface ViewsPlacement {
@@ -79,7 +82,8 @@ export interface ViewsCardLayout {
 const DEFAULT_CARD_FIELDS: Record<ViewTabRow['layout'], string[]> = {
   kanban: ['status'],
   table: ['status', 'updated_at'],
-  list: ['status']
+  list: ['status'],
+  calendar: []
 }
 
 export async function effectiveCardLayout(tx: Tx, view: ViewRow, tab: ViewTabRow): Promise<ViewsCardLayout> {
@@ -363,6 +367,8 @@ export interface ViewRecords {
   groupColumns?: ViewsGroupColumn[]
   /** The card layout the cards, list rows and table columns render. */
   card: ViewsCardLayout
+  /** Calendars: the first records with no date, and how many there are. */
+  unscheduled?: { items: ViewsBoardItem[], total: number }
 }
 
 // A connected app reads a view's records only with the records.read scope;
@@ -407,6 +413,10 @@ export async function getViewRecords(
     if (opts.ids.length === 0) return { items: [], total: 0, truncated: false, placements: [], card }
   }
 
+  if (tab.layout === 'calendar') {
+    return await getCalendarRecords(tx, ctx, view, tab, opts, card, overlay)
+  }
+
   if (tab.layout === 'table') {
     const page = await listRecords(tx, ctx, view.record_type_key, {
       ...opts,
@@ -445,6 +455,76 @@ export async function getViewRecords(
   await markOwnCards(tx, view, items)
 
   return { items, total, truncated: items.length < total, placements, groupColumns, card }
+}
+
+// How many records with no date a calendar's Unscheduled tray lists.
+export const VIEWS_UNSCHEDULED_CAP = 50
+
+function shiftDay(day: string, by: number): string {
+  const d = new Date(`${day}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + by)
+  return d.toISOString().slice(0, 10)
+}
+
+// The records on the days a calendar shows. The range widens by a day each
+// side so the client can place datetimes on its own timezone's days. With an
+// end field a record shows on every day from its start to its end. With no
+// range (an MCP read) it loads every dated record, capped.
+async function getCalendarRecords(
+  tx: Tx,
+  ctx: TenantContext,
+  view: ViewRow,
+  tab: ViewTabRow,
+  opts: RecordsListOpts,
+  card: ViewsCardLayout,
+  overlay: ViewsRecordsOverlay
+): Promise<ViewRecords> {
+  const def = tab.definition as ViewTabDefinition
+  const fields = await viewFieldsWithType(tx, view)
+  const start = def.dateField!
+  const end = def.endField && fields.some(f => f.key === def.endField && !f.orphan) ? def.endField : undefined
+  type Rule = RecordsFilterGroup['rules'][number]
+  let range: RecordsFilterGroup
+  if (overlay.from && overlay.to) {
+    const from = shiftDay(overlay.from, -1)
+    const to = shiftDay(overlay.to, 1)
+    const startsIn: Rule = { field: start, op: 'between', value: [from, to] }
+    range = end
+      ? {
+          match: 'any',
+          rules: [startsIn, {
+            match: 'all',
+            rules: [{ field: start, op: 'before', value: to }, { field: end, op: 'after', value: from }]
+          }]
+        }
+      : { match: 'all', rules: [startsIn] }
+  } else {
+    range = { match: 'all', rules: [{ field: start, op: 'not_empty' }] }
+  }
+  const sorted: RecordsListOpts = !opts.sort && isSortableField(fields, start)
+    ? { ...opts, sort: start, dir: 'asc' }
+    : opts
+  const { items: rows, total } = await loadBoardRecords(tx, ctx, view.record_type_key, {
+    ...sorted,
+    where: [...(opts.where ?? []), range]
+  })
+  const items = withTimestamps(rows)
+
+  let unscheduled: ViewRecords['unscheduled']
+  if (!TIMESTAMP_KEYS.has(start)) {
+    const page = await listRecords(tx, ctx, view.record_type_key, {
+      ...opts,
+      where: [...(opts.where ?? []), { match: 'all', rules: [{ field: start, op: 'empty' }] }],
+      limit: VIEWS_UNSCHEDULED_CAP,
+      offset: 0
+    })
+    unscheduled = { items: withTimestamps(page.items), total: page.total }
+  }
+
+  const all = [...items, ...(unscheduled?.items ?? [])]
+  await attachViewValues(tx, view, all)
+  await markOwnCards(tx, view, all)
+  return { items, total, truncated: items.length < total, placements: [], card, unscheduled }
 }
 
 async function markOwnCards(tx: Tx, view: ViewRow, items: ViewsBoardItem[]): Promise<void> {

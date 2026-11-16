@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // One open view: header (name, its tabs, share, view menu), the active
 // tab's toolbar and renderer, and the interaction plumbing — optimistic moves
-// with the poll loop suspended while a drag settles, quick-add (through the
+// (and calendar reschedules) with the poll loop suspended while a drag
+// settles, quick-add (through the
 // records create route, or as one of a hand-picked view's own cards), the
 // list's done checkbox, tab and definition updates, and the view's own
 // fields (managed by its owner, filled in by its editors). The active tab
@@ -42,11 +43,17 @@ const requestedTab = computed(() => {
   return typeof route.query.tab === 'string' ? route.query.tab : null
 })
 
+// The month a calendar tab shows, kept across tab switches for the session.
+const calendarMonth = ref(viewsDayKey(new Date()).slice(0, 7))
+const weekStart = viewsWeekStart()
+const calendarDays = computed(() => viewsMonthGrid(calendarMonth.value, weekStart))
+const calendarRange = computed(() => ({ from: calendarDays.value[0]!, to: calendarDays.value[calendarDays.value.length - 1]! }))
+
 const {
   view, tab, records, pending, error,
   q, sort, dir, page, pageSize,
   refresh, refreshRecords, beginDrag, endDrag, move
-} = useViewsDetail(viewId, requestedTab)
+} = useViewsDetail(viewId, requestedTab, calendarRange)
 
 function selectTab(id: string) {
   if (props.embedded) embeddedTab.value = id
@@ -271,7 +278,7 @@ async function onMove(payload: ViewsMovePayload) {
 
 // --- quick add --------------------------------------------------------------
 
-async function onQuickAdd({ columnKey, name }: { columnKey: string, name: string }) {
+async function onQuickAdd({ columnKey, name, values }: { columnKey: string, name: string, values?: Record<string, unknown> }) {
   const v = view.value
   const t = tab.value
   if (!v || !t) return
@@ -280,6 +287,7 @@ async function onQuickAdd({ columnKey, name }: { columnKey: string, name: string
     // shows up on the tab it was added from.
     const pinnedValues: Record<string, unknown> = {
       ...viewsFilterPrefill([v.definition.filter, t.definition.filter], allFields.value, myUserId.value),
+      ...values,
       name
     }
     const field = groupFieldDef.value
@@ -375,6 +383,52 @@ async function onToggleDone({ recordId, done }: { recordId: string, done: boolea
     if (item) item.status = previous
     toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to update the record') })
   } finally {
+    refreshRecords()
+  }
+}
+
+// --- calendar ---------------------------------------------------------------
+
+// A record dragged to another day (or out of the Unscheduled tray) takes its
+// new dates at once; the record's own fields go to the record, the view's
+// own to the view.
+async function onReschedule({ recordId, values }: { recordId: string, values: Record<string, unknown> }) {
+  const v = view.value
+  const recs = tabRecords.value
+  if (!v || !recs) return
+  const recordFields: Record<string, unknown> = {}
+  const viewValues: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(values)) {
+    if (key.startsWith(VIEWS_FIELD_KEY_PREFIX)) viewValues[key] = value
+    else recordFields[key] = value
+  }
+  if (Object.keys(viewValues).length > 0 && !canEditDefinition.value) {
+    toast.add({ color: 'error', title: 'You can\'t change this view\'s own fields' })
+    return
+  }
+  const fromTray = recs.unscheduled?.items.find(i => i.id === recordId)
+  const item = recs.items.find(i => i.id === recordId) ?? fromTray
+  if (item) {
+    item.data = { ...item.data, ...recordFields }
+    if (Object.keys(viewValues).length > 0) item.viewValues = { ...item.viewValues, ...viewValues }
+  }
+  if (fromTray && recs.unscheduled) {
+    recs.unscheduled.items = recs.unscheduled.items.filter(i => i.id !== recordId)
+    recs.unscheduled.total = Math.max(0, recs.unscheduled.total - 1)
+    recs.items.push(fromTray)
+  }
+  beginDrag()
+  try {
+    if (Object.keys(recordFields).length > 0) {
+      await $fetch(`/api/records/entries/${v.recordTypeKey}/${recordId}`, { method: 'PATCH', body: { fields: recordFields } })
+    }
+    if (Object.keys(viewValues).length > 0) {
+      await $fetch(`/api/views/${v.id}/values/${recordId}`, { method: 'PATCH', body: { values: viewValues } })
+    }
+  } catch (err) {
+    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to change the date') })
+  } finally {
+    endDrag()
     refreshRecords()
   }
 }
@@ -542,9 +596,13 @@ const DEFAULT_COLUMNS: ViewsColumnDef[] = [
 function definitionFor(choice: ViewsTabChoice, base: ViewsDefinition): ViewsDefinition {
   const definition: ViewsDefinition = structuredClone(toRaw(base))
   delete definition.groupField
+  delete definition.dateField
+  delete definition.endField
   if (!choice.ownColumns) delete definition.columns
   if (choice.ownColumns && !definition.columns) definition.columns = picked.value ? DEFAULT_COLUMNS : []
   if (choice.groupField) definition.groupField = choice.groupField
+  if (choice.dateField) definition.dateField = choice.dateField
+  if (choice.endField) definition.endField = choice.endField
   return definition
 }
 
@@ -613,17 +671,20 @@ async function shiftTab(t: ViewsTab, by: -1 | 1) {
 function tabMenu(t: ViewsTab) {
   const tabs = view.value?.tabs ?? []
   const index = tabs.findIndex(x => x.id === t.id)
-  const items: Array<Array<Record<string, unknown>>> = [[
-    { label: 'Tab settings', icon: 'i-lucide-settings-2', onSelect: () => openTabSettings(t) },
-    {
+  const main: Array<Record<string, unknown>> = [
+    { label: 'Tab settings', icon: 'i-lucide-settings-2', onSelect: () => openTabSettings(t) }
+  ]
+  if (t.layout !== 'calendar') {
+    main.push({
       label: t.layout === 'table' ? 'Table columns' : t.layout === 'list' ? 'Row fields' : 'Card fields',
       icon: 'i-lucide-list-checks',
       onSelect: () => {
         selectTab(t.id)
         cardFieldsOpen.value = true
       }
-    }
-  ]]
+    })
+  }
+  const items: Array<Array<Record<string, unknown>>> = [main]
   const moves: Array<Record<string, unknown>> = []
   if (index > 0) moves.push({ label: 'Move left', icon: 'i-lucide-arrow-left', onSelect: () => shiftTab(t, -1) })
   if (index < tabs.length - 1) moves.push({ label: 'Move right', icon: 'i-lucide-arrow-right', onSelect: () => shiftTab(t, 1) })
@@ -951,6 +1012,31 @@ const menuItems = computed(() => {
     </div>
 
     <div
+      v-else-if="tabRecords?.dateFieldMissing"
+      class="grid place-items-center flex-1 text-(--ui-text-muted)"
+    >
+      <div class="text-center max-w-sm space-y-3">
+        <UIcon
+          name="i-lucide-calendar-x"
+          class="size-10 opacity-50"
+        />
+        <p class="text-sm">
+          This calendar's date field no longer exists.
+          <template v-if="canEditDefinition">
+            Pick another date field to bring it back.
+          </template>
+        </p>
+        <UButton
+          v-if="canEditDefinition && tab"
+          icon="i-lucide-calendar"
+          @click="openTabSettings(tab)"
+        >
+          Choose a date field
+        </UButton>
+      </div>
+    </div>
+
+    <div
       v-else
       class="flex-1 min-h-0 p-4"
     >
@@ -1035,6 +1121,22 @@ const menuItems = computed(() => {
         @open="openRecordId = $event"
         @quick-add="onQuickAdd({ columnKey: '', name: $event })"
       />
+
+      <ViewsCalendarView
+        v-else-if="layout === 'calendar' && tabView && tabRecords"
+        v-model:month="calendarMonth"
+        :view="tabView"
+        :records="tabRecords"
+        :fields="allFields"
+        :days="calendarDays"
+        :can-create="canCreate"
+        :done-status="doneStatus"
+        @open="openRecordId = $event"
+        @quick-add="onQuickAdd({ columnKey: '', ...$event })"
+        @reschedule="onReschedule"
+        @dragstart="beginDrag"
+        @dragend="endDrag"
+      />
     </div>
 
     <ViewsRecordDetails
@@ -1044,7 +1146,7 @@ const menuItems = computed(() => {
       :view-id="view.id"
       :view-name="view.name"
       :view-fields="viewFields"
-      :view-values="tabRecords?.items.find(i => i.id === openRecordId)?.viewValues"
+      :view-values="(tabRecords?.items.find(i => i.id === openRecordId) ?? tabRecords?.unscheduled?.items.find(i => i.id === openRecordId))?.viewValues"
       :can-edit-view="canEditDefinition"
       @changed="refreshRecords"
     />

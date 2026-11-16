@@ -6,9 +6,10 @@
 // layout; the name and who can see it follow, with everything else under
 // "More options": the record type, what the view holds — its own cards (it
 // starts empty and holds only records added or created on it) or every
-// matching record of the type — and the layout: a board, a list or a table.
-// A board groups by a field (columns = its values) or has its own columns. A
-// list may group into sections by a field. What the view holds can't change
+// matching record of the type — and the layout: a board, a list, a table or
+// a calendar. A board groups by a field (columns = its values) or has its own
+// columns. A list may group into sections by a field. A calendar places
+// records by a date field. What the view holds can't change
 // later. On success it navigates straight to the new view. `audience` sets
 // who it starts open to: 'mine' starts private; 'teams' starts on the
 // caller's team (they pick when they have several), or Everyone when they
@@ -90,6 +91,7 @@ const kind = ref<'picked' | 'matching'>('picked')
 const viewType = ref<ViewsLayout>('kanban')
 const kanbanMode = ref<'field' | 'custom'>('field')
 const groupField = ref<string | undefined>(undefined)
+const dateField = ref<string | undefined>(undefined)
 const visibility = ref<string>('private')
 const teamIds = ref<string[]>([])
 const orgLevel = ref<'view' | 'edit'>('view')
@@ -112,6 +114,7 @@ watch(open, (v) => {
   viewType.value = 'kanban'
   kanbanMode.value = 'field'
   groupField.value = undefined
+  dateField.value = undefined
   visibility.value = 'private'
   teamIds.value = []
   orgLevel.value = 'view'
@@ -139,6 +142,7 @@ watch([open, teamsPending], () => {
 
 watch(typeKey, async (key) => {
   groupField.value = undefined
+  dateField.value = undefined
   fields.value = []
   if (!key) return
   kind.value = starter.value?.kind ?? (visibleTypes.value.find(t => t.key === key)?.canViewAll ? 'matching' : 'picked')
@@ -148,6 +152,7 @@ watch(typeKey, async (key) => {
     if (key === typeKey.value) {
       fields.value = res.fields
       if (viewType.value === 'kanban') groupField.value = statusGroupKey()
+      dateField.value = viewsDateFields(res.fields)[0]?.key
     }
   } catch {
     // No groupable fields — the field-mode select stays empty; custom
@@ -163,6 +168,8 @@ const typeIcon = computed(() => typeItems.value.find(t => t.value === typeKey.va
 
 const groupFieldItems = computed(() =>
   viewsGroupableFields(fields.value).map(f => ({ label: f.label, value: f.key })))
+const dateFieldItems = computed(() =>
+  viewsDateFields(fields.value).map(f => ({ label: f.label, value: f.key })))
 
 // Boards start grouped by status; lists start ungrouped.
 function statusGroupKey(): string | undefined {
@@ -180,7 +187,7 @@ const KIND_ITEMS = computed(() => [
   { value: 'matching' as const, label: `All ${typeLabel.value.toLowerCase()}`, icon: 'i-lucide-layers' }
 ])
 
-const VIEW_TYPE_ITEMS = (['kanban', 'list', 'table'] as const).map(value => ({ value, ...VIEWS_LAYOUT_META[value] }))
+const VIEW_TYPE_ITEMS = VIEWS_LAYOUT_ORDER.map(value => ({ value, ...VIEWS_LAYOUT_META[value] }))
 const KANBAN_MODE_ITEMS = [
   { value: 'field' as const, label: 'Group by a field', icon: 'i-lucide-tag' },
   { value: 'custom' as const, label: 'Custom columns', icon: 'i-lucide-columns-3' }
@@ -190,6 +197,7 @@ const canSubmit = computed(() => {
   if (!name.value.trim() || !typeKey.value) return false
   if (visibility.value === 'teams' && teamIds.value.length === 0) return false
   if (viewType.value === 'kanban' && kanbanMode.value === 'field' && !groupField.value) return false
+  if (viewType.value === 'calendar' && !dateField.value) return false
   return true
 })
 
@@ -209,6 +217,8 @@ async function submit() {
       }
     } else if (viewType.value === 'list' && groupField.value) {
       tabDefinition.groupField = groupField.value
+    } else if (viewType.value === 'calendar') {
+      tabDefinition.dateField = dateField.value
     }
     const created = await create({
       name: name.value.trim(),
@@ -414,6 +424,22 @@ async function submit() {
                 @click="groupField = undefined"
               />
             </div>
+          </UFormField>
+
+          <UFormField
+            v-else-if="viewType === 'calendar'"
+            label="Date"
+            required
+          >
+            <USelectMenu
+              v-model="dateField"
+              :items="dateFieldItems"
+              value-key="value"
+              label-key="label"
+              :placeholder="fieldsPending ? 'Loading fields...' : 'Select a date field...'"
+              class="w-full"
+              :disabled="creating || !typeKey"
+            />
           </UFormField>
         </template>
 

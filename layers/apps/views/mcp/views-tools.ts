@@ -80,7 +80,9 @@ const filterInput = z.object({
 const shareInput = z.boolean().optional()
   .describe('Set true to assign someone who can\'t see the card yet, or to move an existing task under one other people can see; either shares it. Without it the call is refused and says who it would be shared with, so confirm with the user first.')
 
-const layoutInput = z.enum(VIEWS_LAYOUTS).describe('kanban = a board of columns, list = rows with a done checkbox, table = a sortable grid.')
+const layoutInput = z.enum(VIEWS_LAYOUTS).describe('kanban = a board of columns, list = rows with a done checkbox, table = a sortable grid, calendar = records on the days of a date field (pass dateField).')
+const dateFieldInput = z.string().max(80).describe('Calendars only: the date field that places each record on a day (a date field, or created_at / updated_at).')
+const endFieldInput = z.string().max(80).describe('Calendars only: a second date field; each record spans from dateField to it.')
 
 function run<T>(
   ctx: McpToolContext,
@@ -173,7 +175,7 @@ async function boardColumns(tx: Tx, view: ViewRow, tab: ViewTabRow, records: Vie
 
 async function groupFieldOf(tx: Tx, view: ViewRow, tab: ViewTabRow) {
   const def = tab.definition as ViewTabDefinition
-  if (tab.layout === 'table' || !def.groupField) return null
+  if (tab.layout === 'table' || tab.layout === 'calendar' || !def.groupField) return null
   const fields = await viewFieldsWithType(tx, view)
   return fields.find(f => f.key === def.groupField && !f.orphan) ?? null
 }
@@ -185,7 +187,7 @@ async function touchView(tx: Tx, viewId: string): Promise<void> {
 export const listViewsTool = defineMcpTool({
   name: 'views_list',
   title: 'List Views',
-  description: 'List the views you can open: built-in ones everyone has (such as My tasks, which nobody can change), your own, ones shared with you or your teams, and org-wide ones, with the record type each shows and its tabs (each tab is a board, list or table).',
+  description: 'List the views you can open: built-in ones everyone has (such as My tasks, which nobody can change), your own, ones shared with you or your teams, and org-wide ones, with the record type each shows and its tabs (each tab is a board, list, table or calendar).',
   appId: 'views',
   scope: 'views.use',
   readOnly: true,
@@ -242,6 +244,8 @@ export const createViewTool = defineMcpTool({
     groupField: z.string().max(80).optional().describe('Boards and lists: the field whose values make the columns or sections.'),
     columns: z.array(z.string().trim().min(1).max(80)).min(1).max(50).optional().describe('Boards only: column names for a board with its own columns.'),
     cardFields: z.array(z.string().max(80)).max(20).optional().describe('Fields shown on each card, list row or as table columns; defaults to the type\'s card layout.'),
+    dateField: dateFieldInput.optional(),
+    endField: endFieldInput.optional(),
     filter: filterInput.optional(),
     visibility: z.enum(['private', 'org']).optional()
   }).strict(),
@@ -251,6 +255,8 @@ export const createViewTool = defineMcpTool({
       if (input.groupField) tabDefinition.groupField = input.groupField
       if (input.columns) tabDefinition.columns = columnsFrom(input.columns)
       if (input.cardFields) tabDefinition.cardFields = input.cardFields
+      if (input.dateField) tabDefinition.dateField = input.dateField
+      if (input.endField) tabDefinition.endField = input.endField
       const definition: Record<string, unknown> = {}
       if (input.filter) definition.filter = input.filter
       if (input.columns) definition.picked = true
@@ -282,6 +288,8 @@ export const addTabTool = defineMcpTool({
     groupField: z.string().max(80).optional().describe('Boards and lists: the field whose values make the columns or sections.'),
     columns: z.array(z.string().trim().min(1).max(80)).max(50).optional().describe('Boards only, instead of groupField: the board\'s own columns. Moving a card between them never changes the record. In a view that shows every matching record, cards start in a "No column" lane (key ""), and [] gives a board with just that lane; a view of hand-picked records needs at least one column.'),
     cardFields: z.array(z.string().max(80)).max(20).optional(),
+    dateField: dateFieldInput.optional(),
+    endField: endFieldInput.optional(),
     sort: z.object({ field: z.string().max(80), dir: z.enum(['asc', 'desc']) }).strict().optional(),
     filter: filterInput.optional()
   }).strict(),
@@ -292,6 +300,8 @@ export const addTabTool = defineMcpTool({
       if (input.groupField) definition.groupField = input.groupField
       if (input.columns) definition.columns = columnsFrom(input.columns)
       if (input.cardFields) definition.cardFields = input.cardFields
+      if (input.dateField) definition.dateField = input.dateField
+      if (input.endField) definition.endField = input.endField
       if (input.sort) definition.sort = input.sort
       if (input.filter) definition.filter = input.filter
       const tab = await insertTab(tx, view, { name: input.name, layout: input.layout, definition })
@@ -304,7 +314,7 @@ export const addTabTool = defineMcpTool({
 export const updateTabTool = defineMcpTool({
   name: 'views_update_tab',
   title: 'Update Tab',
-  description: 'Rename a tab, switch its layout, or change its grouping, card fields or sort. Only the fields you pass change. Use views_set_filter for filters. Needs edit access to the view.',
+  description: 'Rename a tab, switch its layout, or change its grouping, date fields, card fields or sort. Only the fields you pass change. Use views_set_filter for filters. Needs edit access to the view.',
   appId: 'views',
   scope: 'views.use',
   input: z.object({
@@ -315,6 +325,8 @@ export const updateTabTool = defineMcpTool({
     layout: layoutInput.optional(),
     groupField: z.string().max(80).nullable().optional().describe('null removes the grouping (lists only).'),
     cardFields: z.array(z.string().max(80)).max(20).nullable().optional().describe('null goes back to the type\'s card layout.'),
+    dateField: dateFieldInput.optional(),
+    endField: endFieldInput.nullable().optional().describe('null removes the end date (calendars only).'),
     sort: z.object({ field: z.string().max(80), dir: z.enum(['asc', 'desc']) }).strict().nullable().optional()
   }).strict(),
   handler: async (input, ctx) => {
@@ -324,7 +336,16 @@ export const updateTabTool = defineMcpTool({
       const layout = input.layout ?? tab.layout
       const definition: ViewTabDefinition = { ...(tab.definition as ViewTabDefinition) }
       if (layout !== 'kanban') delete definition.columns
-      if (layout === 'table') delete definition.groupField
+      if (layout === 'table' || layout === 'calendar') delete definition.groupField
+      if (layout !== 'calendar') {
+        delete definition.dateField
+        delete definition.endField
+      }
+      if (input.dateField !== undefined) definition.dateField = input.dateField
+      if (input.endField !== undefined) {
+        if (input.endField === null) delete definition.endField
+        else definition.endField = input.endField
+      }
       if (input.groupField !== undefined) {
         if (input.groupField === null) delete definition.groupField
         else definition.groupField = input.groupField
@@ -384,7 +405,7 @@ export const setFilterTool = defineMcpTool({
 export const getBoardTool = defineMcpTool({
   name: 'views_get_board',
   title: 'Get Tab',
-  description: 'Read one tab of a view: a board or list column by column (column keys, labels, and the cards in each, in order), or a table\'s rows. Use the column keys with views_move_card.',
+  description: 'Read one tab of a view: a board or list column by column (column keys, labels, and the cards in each, in order), a table\'s rows, or a calendar\'s dated records with their dates. Use the column keys with views_move_card; a calendar record moves to another day by changing its date field (records_update).',
   appId: 'views',
   scope: 'views.use',
   readOnly: true,
@@ -401,6 +422,29 @@ export const getBoardTool = defineMcpTool({
       }
       const records = await getViewRecords(tx, tenant, view, tab, groupField, { limit: 100 })
       const tabInfo = { id: tab.id, name: tab.name, layout: tab.layout }
+      if (tab.layout === 'calendar') {
+        const valueOf = (i: typeof records.items[number], key: string | undefined) => {
+          if (!key) return undefined
+          if (key === 'created_at') return i.createdAt
+          if (key === 'updated_at') return i.updatedAt
+          return (i.viewValues?.[key] ?? (i.data as Record<string, unknown>)[key]) ?? null
+        }
+        return text(`${records.items.length} of ${records.total} dated record(s)`, {
+          view: { id: input.view, name: view.name },
+          tab: tabInfo,
+          dateField: def.dateField,
+          endField: def.endField ?? null,
+          records: records.items.map(i => ({
+            id: i.id,
+            name: i.name,
+            status: i.status,
+            date: valueOf(i, def.dateField),
+            ...(def.endField ? { end: valueOf(i, def.endField) } : {})
+          })),
+          truncated: records.truncated,
+          unscheduled: records.unscheduled?.total ?? 0
+        })
+      }
       if (tab.layout === 'table') {
         return text(`${records.items.length} of ${records.total} row(s)`, {
           view: { id: input.view, name: view.name },

@@ -44,7 +44,8 @@ export function viewsFieldStorage(field: Pick<RecordsFieldSetting, 'kind' | 'col
 export const VIEWS_DEFAULT_CARD_FIELDS: Record<ViewsLayout, string[]> = {
   kanban: ['status'],
   table: ['status', 'updated_at'],
-  list: ['status']
+  list: ['status'],
+  calendar: []
 }
 
 /** How records order when a view saves no sort — the list engine's own fallback. */
@@ -61,6 +62,16 @@ export interface ViewsCardFieldChoice {
 // Record columns addressable without a field definition — the server
 // accepts these keys in a definition whether or not the type declares them.
 const INTRINSIC_KEYS = new Set(['name', 'status', 'created_at', 'updated_at'])
+
+/** Date fields a calendar can place records by: the type's and view's dates, then Created and Updated. */
+export function viewsDateFields(fields: RecordsFieldSetting[]): Array<{ key: string, label: string, kind: string }> {
+  return [
+    ...fields.filter(f => (f.kind === 'date' || f.kind === 'datetime') && !f.hidden && !f.orphan)
+      .map(f => ({ key: f.key, label: f.label, kind: f.kind })),
+    { key: 'created_at', label: 'Created', kind: 'datetime' },
+    { key: 'updated_at', label: 'Updated', kind: 'datetime' }
+  ]
+}
 
 /** Fields a kanban may group by, in the type's field order. */
 export function viewsGroupableFields(fields: RecordsFieldSetting[]): RecordsFieldSetting[] {

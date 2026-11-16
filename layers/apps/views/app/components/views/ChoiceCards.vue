@@ -20,7 +20,11 @@ const value = computed<string>({
   set: (v) => { model.value = v as T }
 })
 
-const columns = computed(() => props.items.length === 3 ? 'grid-cols-3' : 'grid-cols-2')
+const columns = computed(() => {
+  if (props.items.length === 3) return 'grid-cols-3'
+  if (props.items.length === 4) return 'grid-cols-2 sm:grid-cols-4'
+  return 'grid-cols-2'
+})
 </script>
 
 <template>

@@ -22,7 +22,12 @@ export interface ViewsMovePayload {
   confirmShare?: boolean
 }
 
-export function useViewsDetail(viewId: MaybeRefOrGetter<string>, tabId: MaybeRefOrGetter<string | null>) {
+export function useViewsDetail(
+  viewId: MaybeRefOrGetter<string>,
+  tabId: MaybeRefOrGetter<string | null>,
+  /** The days a calendar tab shows; its feed holds the records on them. */
+  calendarRange: MaybeRefOrGetter<{ from: string, to: string } | null> = null
+) {
   const view = ref<ViewDetail | null>(null)
   const records = ref<ViewRecords | null>(null)
   const pending = ref(false)
@@ -58,6 +63,7 @@ export function useViewsDetail(viewId: MaybeRefOrGetter<string>, tabId: MaybeRef
     pending.value = true
     try {
       const isTable = tab.value?.layout === 'table'
+      const range = tab.value?.layout === 'calendar' ? toValue(calendarRange) : null
       const res = await $fetch<ViewRecords>(`/api/views/${id}/records`, {
         query: {
           tab: tab.value?.id,
@@ -65,7 +71,9 @@ export function useViewsDetail(viewId: MaybeRefOrGetter<string>, tabId: MaybeRef
           sort: isTable ? sort.value || undefined : undefined,
           dir: isTable ? dir.value || undefined : undefined,
           limit: isTable ? pageSize : undefined,
-          offset: isTable ? (page.value - 1) * pageSize : undefined
+          offset: isTable ? (page.value - 1) * pageSize : undefined,
+          from: range?.from,
+          to: range?.to
         }
       })
       if (reqId !== requestId) return
@@ -137,6 +145,13 @@ export function useViewsDetail(viewId: MaybeRefOrGetter<string>, tabId: MaybeRef
 
   watch([q, sort, dir, page], () => {
     refreshRecords()
+  })
+
+  watch(() => {
+    const range = toValue(calendarRange)
+    return range ? `${range.from}:${range.to}` : null
+  }, (next, prev) => {
+    if (next !== prev && tab.value?.layout === 'calendar') refreshRecords()
   })
 
   // A different tab starts from its own saved sort, page one and no stale feed.
