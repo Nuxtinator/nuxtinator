@@ -4,7 +4,7 @@ The record kernel: record types and their fields, the records themselves, and ev
 
 ## Data model
 
-Eleven tables: `records_entries` (one row per record of any type, with promoted `name`/`status` columns and a jsonb `data` bag), the multi-value storage classes `records_field_entries`, `records_user_refs`, `records_connections`, `records_attachments` (files on attachments fields, bytes in private object storage), plus `records_shares`, `records_activity`, `records_comments`, the schema-builder override tables `records_types` / `records_fields`, and `records_attachment_trash` (storage keys of deleted files, emptied by a background sweep). The first nine were created as `crm_*` by `crm_001`–`crm_012` (kept under their original names in [migrations/](migrations/)) and renamed by `records_001`; `records_T001` scopes them per org on hosts without the crm layer. `records_003` / `records_T002` add the attachment tables.
+Twelve tables: `records_entries` (one row per record of any type, with promoted `name`/`status` columns and a jsonb `data` bag), the multi-value storage classes `records_field_entries`, `records_user_refs`, `records_connections`, `records_attachments` (files on attachments fields, bytes in private object storage), plus `records_shares`, `records_activity`, `records_comments`, the schema-builder override tables `records_types` / `records_fields`, `records_attachment_trash` (storage keys of deleted files, emptied by a background sweep), and `records_reminders` (the reminder queue, see Reminders). The first nine were created as `crm_*` by `crm_001`–`crm_012` (kept under their original names in [migrations/](migrations/)) and renamed by `records_001`; `records_T001` scopes them per org on hosts without the crm layer. `records_003` / `records_T002` add the attachment tables, `records_006` / `records_T004` the reminder queue.
 
 A record can carry `user_id`, the user account of the person it describes (one record per type per user).
 
@@ -22,11 +22,25 @@ An `attachments` field holds uploaded files. They arrive through `POST /api/reco
 
 Every record type has a status field, so every record can be closed. A type whose code declares no status column (items, admin-created types) gets the default one, Open / Done with Done closed ([definition-settings.ts](server/utils/definition-settings.ts) → `RECORDS_DEFAULT_STATUS_FIELD`). Admins rename it and add, relabel, recolor or remove options in the schema builder; the field can't be hidden, and a status always keeps at least one open and one closed option. A record with no stored status reads, filters and sorts as the field's default.
 
+## Due dates
+
+A type names its due-date field with `dueField` (a manifest key, or picked in the schema builder; tasks use `due_date`). A type with one also has a `reminder` field and a `repeat` field; other types have neither. Both count from the due date, so setting either without one is refused, and clearing the due date clears them ([due-date.ts](server/utils/due-date.ts)).
+
+## Reminders
+
+The `reminder` field (`RECORDS_REMINDER_FIELD`) says how long before the due date to remind: on the due date, 1 or 3 days, 1 or 2 weeks, or 1 or 3 months before. The day it falls on goes into `records_reminders`, and moves whenever the due date or the option changes; a day already past isn't queued. A sweep that runs every minute ([reminders.ts](server/utils/reminders.ts)) sends the reminders whose day has come (UTC): "Reminder: ‹name›", in the app and by email, to the record's assignees (its access-granting people fields), or to whoever set the reminder when it has none, among those who can open the record. A closed record's reminder is dropped unsent. Under tests the sweep runs through `POST /api/_test/records-reminders`.
+
+## Repeat
+
+The `repeat` field (`RECORDS_REPEAT_FIELD`) is every week, month, 3 months or year.
+
+Closing a record that repeats makes the next one ([repeat.ts](server/utils/repeat.ts)): a copy with the type's default status, its due date moved forward by whole intervals from the old one until it isn't past (a report due 15 Jan comes back 15 Apr, 15 Jul, …), and its other dates moved by the same amount. Its reminder counts from the new due date. The copy keeps the creator, field values, assignees, links, tags, parent and shares, takes copies of the files (rich text images point at the copies), and its subtasks are copied the same way, back to their default status. Comments and activity start fresh. The closed record stops repeating, and both records note the other in their activity. `registerRecordsRepeatHook` lets other layers carry their own per-record state over (the views layer puts the copy on the same hand-picked views).
+
 ## Built-in types
 
 `item` — a freeform card: name, notes, tags, link, date, people, priority (low / medium / high), attachments (its first image is the card cover) and the default Open / Done status. People only records who's involved: naming someone doesn't share the item.
 
-`task` — name, status (To do / In progress / Done, keyed `open` / `in_progress` / `done`; done is closed), assignees (one or more people; a write may give a single user id in place of the list), priority (low to urgent), start and due dates, tags, parent task with subtasks (cards show subtask progress), description (rich text) and attachments. Tasks nest to any depth; see Hierarchies.
+`task` — name, status (To do / In progress / Done, keyed `open` / `in_progress` / `done`; done is closed), assignees (one or more people; a write may give a single user id in place of the list), priority (low to urgent), start and due dates, repeat, reminder, tags, parent task with subtasks (cards show subtask progress), description (rich text) and attachments. Tasks nest to any depth; see Hierarchies.
 
 ## Hierarchies
 
@@ -51,6 +65,7 @@ Server, from a Nitro plugin, via `#records/server`:
 - `registerRecordFieldExtension(typeKey, owner, fields)` — add fields to a type another layer owns.
 - `registerRecordsStorageDriver(driver)` — implement a storage class (hydrate, filter, search, validate, write).
 - `registerRecordsClosingHook(fn)` — run when a record closes.
+- `registerRecordsRepeatHook(fn)` — run for each record a repeat copies (see Repeat).
 - `registerRecordsPatchGuard(fn)` — refuse a PATCH through the record route.
 - `registerRecordsVisibilitySource(source)` — another way a caller may see a record; with `editPredicate` it also lets them edit it, and `describe` lists it on the record's share list.
 - `registerRecordsFieldFilter(phase, fn)` — rewrite a patch before validation.

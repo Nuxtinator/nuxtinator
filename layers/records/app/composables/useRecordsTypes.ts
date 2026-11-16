@@ -20,6 +20,8 @@ export interface RecordsTypeSummary {
   statusField: string | null
   /** Field key picked to hold why a closed record was closed, or null. */
   closedReasonField: string | null
+  /** Date field holding when a record is due (which lets records repeat), or null. */
+  dueField: string | null
   /** Whether a record on a shared board becomes visible to the board's viewers. */
   boardsGrantVisibility: boolean
   /** Default card layout boards and tables over this type start from. */
@@ -37,6 +39,8 @@ export interface RecordsTypeFields {
   statusField: string | null
   /** Reason field asked for when closing; null unless the type can be closed with a reason. */
   closedReasonField: string | null
+  /** Date field holding when a record is due, or null when its records can't repeat. */
+  dueField: string | null
   fields: RecordsFieldSetting[]
 }
 

@@ -157,7 +157,7 @@ async function lastActivity(tx: Tx, ids: string[]): Promise<Map<string, string>>
 export const listRecordTypesTool = defineMcpTool({
   name: 'records_list_types',
   title: 'List Record Types',
-  description: 'List the record types you can read (tasks, items, contacts when the CRM is on, and any the org created), with their fields, options, which statuses mean closed and the reasons for closing. A field of kind rich_text (the description of a task) holds Markdown. Call this before creating or updating records so you know the field keys and allowed values — and before creating a record type, so you reuse or extend one that already fits.',
+  description: 'List the record types you can read (tasks, items, contacts when the CRM is on, and any the org created), with their fields, options, which statuses mean closed and the reasons for closing. A field of kind rich_text (the description of a task) holds Markdown. A type with a due date (dueField) also has reminder (how long before the due date the record\'s assignees, or whoever set it, get a reminder) and repeat (closing a record that repeats makes the next one, due one interval later); both need the record to have a due date. Call this before creating or updating records so you know the field keys and allowed values — and before creating a record type, so you reuse or extend one that already fits.',
   appId: 'records',
   scope: 'records.read',
   readOnly: true,
@@ -180,6 +180,7 @@ export const listRecordTypesTool = defineMcpTool({
           statusField: rules.statusKey,
           closedStatuses: rules.closedStatuses,
           closedReasonField: rules.reasonKey,
+          dueField: defs.find(d => d.due)?.key ?? null,
           fields: defs.map(d => ({
             key: d.key,
             label: d.label,

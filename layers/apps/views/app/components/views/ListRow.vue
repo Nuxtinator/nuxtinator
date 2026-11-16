@@ -119,7 +119,7 @@ const menuItems = computed(() => props.removable
         <UBadge
           v-else
           variant="subtle"
-          color="neutral"
+          :color="value.tone ?? 'neutral'"
           size="sm"
           class="truncate"
           :title="value.label"

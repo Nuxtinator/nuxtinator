@@ -141,6 +141,15 @@ export interface RecordMentionsTable {
   created_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
+// A record's pending reminder (see records_006): the day it falls on
+// (YYYY-MM-DD), who set it, and when it was sent (null until then).
+export interface RecordRemindersTable {
+  record_id: string
+  remind_on: string
+  set_by: string | null
+  sent_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
+}
+
 // Object-storage keys of deleted attachments, waiting for the sweep.
 export interface RecordAttachmentTrashTable {
   storage_key: string
@@ -152,6 +161,7 @@ declare global {
     records_attachments: RecordAttachmentsTable
     records_attachment_trash: RecordAttachmentTrashTable
     records_mentions: RecordMentionsTable
+    records_reminders: RecordRemindersTable
     records_entries: RecordsEntriesTable
     records_field_entries: RecordFieldEntriesTable
     records_user_refs: RecordUserRefsTable

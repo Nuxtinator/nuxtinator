@@ -13,7 +13,7 @@
 import type { Selectable } from 'kysely'
 import { defineSettings, type DbClient } from '#core/server/utils/settings'
 import type { Database } from '#core/server/database/schema'
-import { storageOf } from '#records'
+import { RECORDS_REMINDER_FIELD, RECORDS_REMINDER_KEY, RECORDS_REPEAT_FIELD, RECORDS_REPEAT_KEY, storageOf } from '#records'
 import type {
   RecordsCardConnectionDisplay,
   RecordsCardLayout,
@@ -39,6 +39,8 @@ export interface RecordTypeSetting {
   statusField?: string
   /** Closed-reason field: config.closedReasonField ⊳ the manifest's. */
   closedReasonField?: string
+  /** Due-date field: config.dueField ⊳ the manifest's. */
+  dueField?: string
   sections: Record<string, { label: string, order?: number }>
   hidden: boolean
   config: Record<string, unknown>
@@ -123,6 +125,14 @@ function closedReasonFieldOf(config: Record<string, unknown> | undefined, fallba
   return typeof raw === 'string' && raw.length > 0 ? raw : undefined
 }
 
+// config.dueField: a date field picked in the schema builder, or null to drop
+// the code-declared one. Absent means the manifest's.
+function dueFieldOf(config: Record<string, unknown> | undefined, fallback: string | undefined): string | undefined {
+  if (!config || !('dueField' in config)) return fallback
+  const raw = config.dueField
+  return typeof raw === 'string' && raw.length > 0 ? raw : undefined
+}
+
 export const getRecordTypes = defineSettings<RecordTypeManifest, RecordTypeRow, RecordTypeSetting>({
   loadDefaults: () => getRegisteredRecordTypes(),
   loadOverrides: async (tx) => {
@@ -139,6 +149,7 @@ export const getRecordTypes = defineSettings<RecordTypeManifest, RecordTypeRow, 
         icon: row?.icon_override ?? manifest.icon,
         statusField: manifest.statusField ?? statusFieldKeyOf(recordTypeCodeFields(manifest)),
         closedReasonField: closedReasonFieldOf(row?.config, manifest.closedReasonField),
+        dueField: dueFieldOf(row?.config, manifest.dueField),
         sections: manifest.sections ?? {},
         hidden: row?.hidden ?? false,
         config: row?.config ?? {},
@@ -162,6 +173,7 @@ export const getRecordTypes = defineSettings<RecordTypeManifest, RecordTypeRow, 
       icon: r.icon_override ?? undefined,
       statusField: r.is_custom ? statusFieldKeyOf(recordTypeCodeFields(undefined)) : undefined,
       closedReasonField: r.is_custom ? closedReasonFieldOf(r.config, undefined) : undefined,
+      dueField: r.is_custom ? dueFieldOf(r.config, undefined) : undefined,
       sections: {},
       hidden: r.hidden,
       config: r.config,
@@ -210,6 +222,8 @@ export interface RecordsFieldSetting {
   /** ref: the registered ref source (code-declared only). */
   source?: string
   settings?: Record<string, unknown>
+  /** The type's due-date field (see RecordTypeSetting.dueField). */
+  due?: boolean
   /** True for admin-created custom fields (a row with `kind` set). */
   custom: boolean
   /** True for stale rows: no manifest field and no `kind` either. */
@@ -347,12 +361,16 @@ export const RECORDS_DEFAULT_STATUS_FIELD: RecordsFieldDef = {
 /**
  * The code-owned field defs of a type: its manifest's fields (extensions
  * included), or the intrinsic name field for a type without a manifest, plus
- * the default status field when none of them is the status column.
+ * the default status field when none of them is the status column, and the
+ * reminder and repeat fields unless it declares its own (they show only on a
+ * type with a due date; see getRecordTypeFields).
  */
 export function recordTypeCodeFields(manifest: RecordTypeManifest | undefined): Record<string, RecordsFieldDef> {
   const fields: Record<string, RecordsFieldDef> = manifest ? { ...manifest.fields } : { name: RECORDS_INTRINSIC_NAME_FIELD }
   const hasStatus = Object.values(fields).some(def => def.column === 'status')
   if (!hasStatus && !('status' in fields)) fields.status = RECORDS_DEFAULT_STATUS_FIELD
+  if (!(RECORDS_REMINDER_KEY in fields)) fields[RECORDS_REMINDER_KEY] = RECORDS_REMINDER_FIELD
+  if (!(RECORDS_REPEAT_KEY in fields)) fields[RECORDS_REPEAT_KEY] = RECORDS_REPEAT_FIELD
   return fields
 }
 
@@ -377,7 +395,14 @@ export async function getRecordTypeFields(tx: DbClient, typeKey: string): Promis
     includeOrphans: true
   })
   const fields = await reader(tx)
-  return fields.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
+  // Repeat and reminder count from the due date: they exist on no other type.
+  const row = await tx.selectFrom('records_types').select('config').where('type_key', '=', typeKey).executeTakeFirst()
+  const dueKey = dueFieldOf(row?.config, getRegisteredRecordType(typeKey)?.dueField)
+  const due = dueKey ? fields.find(f => f.key === dueKey && !f.orphan && (f.kind === 'date' || f.kind === 'datetime')) : undefined
+  if (due) due.due = true
+  return fields
+    .filter(f => due || (f.key !== RECORDS_REPEAT_KEY && f.key !== RECORDS_REMINDER_KEY))
+    .sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
 }
 
 /**

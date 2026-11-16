@@ -23,7 +23,9 @@ const ACTION_ICONS: Record<string, string> = {
   consent_changed: 'i-lucide-shield-check',
   shared: 'i-lucide-user-plus',
   unshared: 'i-lucide-user-minus',
-  deleted: 'i-lucide-trash-2'
+  deleted: 'i-lucide-trash-2',
+  repeated: 'i-lucide-repeat',
+  repeat_created: 'i-lucide-repeat'
 }
 
 const icon = computed(() => ACTION_ICONS[props.activity.action] ?? 'i-lucide-activity')
@@ -75,6 +77,10 @@ const sentence = computed(() => {
       return 'removed a share'
     case 'deleted':
       return 'deleted this record'
+    case 'repeated':
+      return 'finished this, and the next one was made'
+    case 'repeat_created':
+      return 'made this as the next repeat'
     default:
       // Freeform system actions read as words; their detail lives in `note`.
       return a.action.replaceAll('_', ' ')

@@ -26,6 +26,7 @@ export interface RecordsUpdateTypePatch {
   hidden?: boolean
   sectionOrder?: string[] | null
   closedReasonField?: string | null
+  dueField?: string | null
   boardsGrantVisibility?: boolean | null
   card?: RecordsCardLayout | null
 }

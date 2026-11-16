@@ -166,6 +166,11 @@ export interface UpdateRecordTypePatch {
    * null reverts to the code default. Types with a status field only.
    */
   closedReasonField?: string | null
+  /**
+   * Field key of the date or datetime field holding when a record is due,
+   * which lets records repeat; null reverts to the code default.
+   */
+  dueField?: string | null
   /** Whether shared boards grant visibility; null reverts to the code default. */
   boardsGrantVisibility?: boolean | null
   /** Default card layout boards and tables start from; null reverts to the code default. */
@@ -299,6 +304,19 @@ export async function updateRecordType(
         bad(`${patch.closedReasonField} is not a single-choice field of ${typeKey}`)
       }
       config.closedReasonField = patch.closedReasonField
+    }
+  }
+  if (patch.dueField !== undefined) {
+    const fallback = manifest?.dueField ?? null
+    if (patch.dueField === null || patch.dueField === fallback) {
+      delete config.dueField
+    } else {
+      const fields = await getRecordTypeFields(tx, typeKey)
+      const field = fields.find(f => f.key === patch.dueField && !f.orphan)
+      if (!field || (field.kind !== 'date' && field.kind !== 'datetime')) {
+        bad(`${patch.dueField} is not a date field of ${typeKey}`)
+      }
+      config.dueField = patch.dueField
     }
   }
   if (patch.boardsGrantVisibility !== undefined) {

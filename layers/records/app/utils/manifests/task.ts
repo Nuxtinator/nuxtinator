@@ -1,4 +1,4 @@
-import { defineRecordType } from '#records'
+import { defineRecordType, RECORDS_REMINDER_FIELD, RECORDS_REPEAT_FIELD } from '#records'
 import type { InferRecordShape } from '#records'
 
 // The built-in task type: something to do, optionally assigned to one or
@@ -6,14 +6,16 @@ import type { InferRecordShape } from '#records'
 // leaves default lists the way any closed record does. The assignees field is
 // the one people field that shares the task with everyone it names. Subtasks
 // are tasks linked through `parent`, to any depth, so a card can show their
-// progress and whoever can see a task sees everything under it. Producer
-// layers (meetings) write their action items as tasks.
+// progress and whoever can see a task sees everything under it. A task with
+// a due date can repeat and remind. Producer layers (meetings) write their
+// action items as tasks.
 export const taskManifest = defineRecordType({
   key: 'task',
   label: 'Tasks',
   labelSingular: 'Task',
   icon: 'i-lucide-square-check',
   statusField: 'status',
+  dueField: 'due_date',
   sections: {
     details: { label: 'Details', order: 1 }
   },
@@ -48,14 +50,16 @@ export const taskManifest = defineRecordType({
     },
     start_date: { kind: 'date', label: 'Start date', icon: 'i-lucide-calendar-arrow-up', section: 'details', order: 5 },
     due_date: { kind: 'date', label: 'Due date', icon: 'i-lucide-calendar', section: 'details', order: 6 },
-    tags: { kind: 'tags', label: 'Tags', section: 'details', order: 7 },
-    parent: { kind: 'connection', label: 'Parent task', target: 'task', reverseKey: 'subtasks', hierarchy: 'parent', section: 'details', order: 8 },
-    subtasks: { kind: 'connection', label: 'Subtasks', target: 'task', reverseKey: 'parent', hierarchy: 'children', section: 'details', order: 9 },
-    description: { kind: 'rich_text', label: 'Description', section: 'details', order: 10 },
-    attachments: { kind: 'attachments', label: 'Attachments', icon: 'i-lucide-paperclip', section: 'details', order: 11 }
+    reminder: { ...RECORDS_REMINDER_FIELD, section: 'details', order: 7 },
+    repeat: { ...RECORDS_REPEAT_FIELD, section: 'details', order: 8 },
+    tags: { kind: 'tags', label: 'Tags', section: 'details', order: 9 },
+    parent: { kind: 'connection', label: 'Parent task', target: 'task', reverseKey: 'subtasks', hierarchy: 'parent', section: 'details', order: 10 },
+    subtasks: { kind: 'connection', label: 'Subtasks', target: 'task', reverseKey: 'parent', hierarchy: 'children', section: 'details', order: 11 },
+    description: { kind: 'rich_text', label: 'Description', section: 'details', order: 12 },
+    attachments: { kind: 'attachments', label: 'Attachments', icon: 'i-lucide-paperclip', section: 'details', order: 13 }
   },
   card: {
-    fields: ['status', 'assignee', 'due_date', 'priority', 'subtasks', 'attachments'],
+    fields: ['status', 'assignee', 'due_date', 'reminder', 'priority', 'subtasks', 'attachments'],
     connections: { subtasks: 'progress' }
   }
 })

@@ -2,9 +2,10 @@
 // Merged field definitions for one record type — everything the client needs
 // to render list columns and detail sections. Returns
 // { sections: Record<key, { label, order? }>, statusField, closedReasonField
-// (null unless the type can be closed with a reason), fields: [{ key,
-//   kind, label, icon, section, required, hidden, order, options, custom,
-//   orphan, channelType, target, hierarchy, source, multiple, column }] } sorted by order. `column` and
+// (null unless the type can be closed with a reason), dueField (null unless
+// the type has a due date), fields: [{ key, kind, label, icon, section,
+//   required, hidden, order, options, custom, orphan, channelType, target,
+//   hierarchy, source, multiple, column, due }] } sorted by order. `column` and
 // `statusField` carry the promoted-column flags so clients never infer them
 // from key conventions. Hidden and stale (orphan) fields only appear for
 // schema managers. Permission: org membership.
@@ -38,12 +39,14 @@ export default defineEventHandler(async (event) => {
         source: f.source ?? null,
         multiple: f.multiple ?? false,
         column: f.column ?? null,
-        default: f.default ?? null
+        default: f.default ?? null,
+        due: f.due ?? false
       }))
     return {
       sections: type.sections,
       statusField: type.statusField ?? null,
       closedReasonField: closingRulesOf(type, all).reasonKey,
+      dueField: all.find(f => f.due)?.key ?? null,
       fields
     }
   })

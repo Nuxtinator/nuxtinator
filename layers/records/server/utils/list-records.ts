@@ -374,7 +374,7 @@ const filterRuleSchema = z.object({
   field: z.string().min(1).max(80),
   op: z.enum([
     'is', 'is_not', 'any_of', 'none_of', 'all_of', 'contains', 'empty', 'not_empty',
-    'before', 'after', 'on', 'between', 'eq', 'lt', 'gt', 'under'
+    'before', 'after', 'on', 'between', 'past', 'today', 'this_week', 'next_days', 'eq', 'lt', 'gt', 'under'
   ]),
   value: z.unknown().optional()
 }).strict()
@@ -466,6 +466,13 @@ function treeScalarLhs(def: RecordsFieldSetting): RawBuilder<unknown> {
 
 const DATE_KINDS = new Set(['date', 'datetime'])
 
+// next_days counts today, so "the next 7 days" is today and the six after it.
+function nextDays(def: RecordsFieldSetting, raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isInteger(n) || n < 1 || n > 366) badFilter(def.key, 'expected a number of days from 1 to 366')
+  return n
+}
+
 function scalarRule(
   eb: Eb,
   def: RecordsFieldSetting,
@@ -497,6 +504,17 @@ function scalarRule(
     case 'on': return eb(dayLhs, '=', day(rule.value))
     case 'before': return eb(dayLhs, '<', day(rule.value))
     case 'after': return eb(dayLhs, '>', day(rule.value))
+    // Relative to today; weeks start on Monday.
+    case 'past': return eb(dayLhs, '<', sql`current_date`)
+    case 'today': return eb(dayLhs, '=', sql`current_date`)
+    case 'this_week': return eb.and([
+      eb(dayLhs, '>=', sql`date_trunc('week', current_date)::date`),
+      eb(dayLhs, '<', sql`(date_trunc('week', current_date) + interval '7 days')::date`)
+    ])
+    case 'next_days': return eb.and([
+      eb(dayLhs, '>=', sql`current_date`),
+      eb(dayLhs, '<', sql`current_date + ${nextDays(def, rule.value)}::int`)
+    ])
     case 'lt': return eb(lhs, '<', coerceComparable(def, rule.value))
     case 'gt': return eb(lhs, '>', coerceComparable(def, rule.value))
     case 'between': {

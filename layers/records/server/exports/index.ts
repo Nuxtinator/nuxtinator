@@ -12,6 +12,7 @@ export {
   registerRecordsStorageDriver,
   getRecordsStorageDriver,
   registerRecordsClosingHook,
+  registerRecordsRepeatHook,
   registerRecordsPatchGuard,
   runRecordsPatchGuards,
   registerRecordsVisibilitySource,
@@ -29,6 +30,8 @@ export type {
   RecordsFilterHelpers,
   RecordsClosingEvent,
   RecordsClosingHook,
+  RecordsRepeatEvent,
+  RecordsRepeatHook,
   RecordsPatchGuard,
   RecordsVisibilitySource,
   RecordsShareVia,
@@ -56,6 +59,7 @@ export type { RecordsRefValue } from '#records'
 export {
   addRecordAttachment,
   applyAttachmentsPatch,
+  copyRecordAttachments,
   deleteRecordAttachments,
   listRecordAttachments,
   RECORDS_ATTACHMENT_MAX_MB,
@@ -95,6 +99,9 @@ export { RECORDS_FILTER_ME, recordsFilterRuleCount } from '../../client/filters'
 export type { RecordsFilterGroup, RecordsFilterNode, RecordsFilterRule, RecordsFilterOp } from '../../client/filters'
 
 export { closingRulesOf, isClosedStatus } from '../utils/closing'
+
+export { sendDueRecordsReminders } from '../utils/reminders'
+export { recordsRepeatShift } from '../utils/repeat'
 export type { RecordsClosingRules } from '../utils/closing'
 
 export { recordRecordsActivity } from '../utils/records-activity'

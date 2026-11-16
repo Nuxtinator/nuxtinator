@@ -5,7 +5,8 @@
 // field of the type or the view can be shown. Each value carries the icon
 // that stands for its field. Files show as a count. User
 // fields carry ids to render as people; connection fields shown as a count
-// or progress carry the totals. Refs show their resolved label.
+// or progress carry the totals. Refs show their resolved label. The due date
+// of an open record is marked when it is near or past.
 import type { RecordsFieldSetting } from '#records/client'
 import { viewsIsSubtasksField, type ViewsBoardItem, type ViewsConnectionDisplay } from '../utils/views-types'
 
@@ -33,6 +34,25 @@ export interface ViewsCardValue {
   progress?: { done: number, total: number }
   /** Set for a task's subtasks: the value opens the record's own board. */
   drill?: true
+  /** Set on an open record's due date: 'error' once past, 'warning' within two days. */
+  tone?: 'warning' | 'error'
+}
+
+const DUE_SOON_DAYS = 2
+
+function localDay(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function dueTone(raw: unknown): 'warning' | 'error' | undefined {
+  if (typeof raw !== 'string' || raw === '') return undefined
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : localDay(new Date(raw))
+  const now = new Date()
+  if (day < localDay(now)) return 'error'
+  const soon = new Date(now)
+  soon.setDate(soon.getDate() + DUE_SOON_DAYS)
+  return day <= localDay(soon) ? 'warning' : undefined
 }
 
 const INTRINSIC_DEFS: Record<string, Pick<RecordsFieldSetting, 'key' | 'kind' | 'label'> & { icon: string }> = {
@@ -52,6 +72,8 @@ export function useViewsCardValues(source: () => ViewsCardValueSource) {
   return computed<ViewsCardValue[]>(() => {
     const { item, fields, cardFields, cardConnections, groupFieldKey, coverKey } = source()
     const fieldMap = new Map(fields.map(f => [f.key, f]))
+    const statusField = fields.find(f => f.column === 'status')
+    const closed = !!(item.status && statusField?.options?.[item.status]?.closed)
     const out: ViewsCardValue[] = []
     for (const key of cardFields) {
       if (key === 'name' || key === coverKey) continue
@@ -95,7 +117,9 @@ export function useViewsCardValues(source: () => ViewsCardValueSource) {
         continue
       }
       const text = formatRecordsValue(raw, field, { userName })
-      if (text && text !== '—') out.push({ key, label: field.label, icon, text })
+      if (!text || text === '—') continue
+      const tone = field.due && !closed ? dueTone(raw) : undefined
+      out.push({ key, label: field.label, icon, text, ...(tone ? { tone } : {}) })
     }
     return out
   })

@@ -18,7 +18,7 @@
 // a refetch. Any action that writes activity rows refreshes the timeline so it
 // stays in step without a full reload. Setting a closed status asks for the
 // reason first (RecordsCloseRecordModal).
-import { getRecordsDetailPanels, getRecordsFieldWidget } from '#records'
+import { getRecordsDetailPanels, getRecordsFieldWidget, RECORDS_REMINDER_KEY, RECORDS_REPEAT_KEY } from '#records'
 import type { RecordsTypeFields } from '../../composables/useRecordsTypes'
 import type { RecordsFieldSetting } from '../../utils/field-kinds'
 
@@ -177,6 +177,13 @@ const detailPanels = computed(() => getRecordsDetailPanels(typeKey.value))
 
 function fieldValue(field: RecordsFieldSetting): unknown {
   return record.value?.fields[field.key] ?? null
+}
+
+// Repeat and reminder count from the due date, so they wait for one.
+function fieldEditable(field: RecordsFieldSetting): boolean {
+  if (field.key !== RECORDS_REPEAT_KEY && field.key !== RECORDS_REMINDER_KEY) return true
+  const due = fieldSettings.value?.fields.find(f => f.due)
+  return !!due && fieldValue(due) !== null && fieldValue(due) !== ''
 }
 
 // Field widgets change the record through their own routes; the record
@@ -418,7 +425,7 @@ async function removeRecord() {
                 layout="compact"
                 :field="field"
                 :value="fieldValue(field)"
-                :editable="canEdit"
+                :editable="canEdit && fieldEditable(field)"
                 :upload-url="field.kind === 'attachments' ? `/api/records/entries/${typeKey}/${recordId}/attachments?field=${field.key}` : undefined"
                 @commit="commitField(field, $event)"
                 @uploaded="onWidgetChanged"

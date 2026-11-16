@@ -9,8 +9,9 @@
 // over records); `applyFieldPatch` routes writes the other way:
 //
 //   merged defs → field-filter hook chain → per-kind validation →
-//   closing rules (./closing) → storage-routed writes → updated_at bump →
-//   activity rows per changed field → closing hooks on close
+//   closing and due-date rules (./closing, ./due-date) → storage-routed writes →
+//   updated_at bump → reminder queue → activity rows per changed field →
+//   closing hooks and the next repeat on close
 //
 // Every function takes the caller's tenant transaction — org context (the RLS
 // GUC in multi mode) exists only inside it, so nothing here opens connections.
@@ -20,6 +21,7 @@ import type { RawBuilder, Selectable, Transaction } from 'kysely'
 import { z } from 'zod'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
+import { RECORDS_REMINDER_KEY } from '#records'
 import type { RecordsAttachmentValue, RecordsConnectedRecord, RecordsLinkValue, RecordsRefValue } from '#records'
 import { createNotification } from '#core/server/utils/notifications'
 import {
@@ -40,6 +42,9 @@ import { visibleRecordIds } from './list-records'
 import { recordsUsersWhoSee, requireMoveConfirmation, requireShareConfirmation, type RecordsSharingMode } from './share-confirmation'
 import { recordsMentionedUserIds, syncRecordsRichTextImages, syncRecordsRichTextLinks } from './rich-text'
 import { applyAttachmentsPatch, listRecordAttachments } from './attachments'
+import { syncRecordsReminder } from './reminders'
+import { repeatClosedRecord } from './repeat'
+import { enforceDueDateRules, recordsDueField, recordsReminderDay } from './due-date'
 
 type Tx = Transaction<Database>
 
@@ -971,6 +976,7 @@ export async function applyFieldPatch(
   let closing = { closes: false }
 
   if (isCreate) {
+    enforceDueDateRules(defs, scalarOps, null)
     closing = enforceClosingRules(closingRules, scalarOps, null)
     await assertRefTargets(tx, ctx, defsByKey, scalarOps, null)
     const nameDef = defs.find(d => d.column === 'name')
@@ -1002,6 +1008,7 @@ export async function applyFieldPatch(
     oldRecord = await getRecord(tx, ctx, typeKey, id)
 
     if (scalarOps.size === 0 && listOps.size === 0) return oldRecord
+    enforceDueDateRules(defs, scalarOps, oldRecord.fields)
     closing = enforceClosingRules(closingRules, scalarOps, oldRecord.fields)
     await assertRefTargets(tx, ctx, defsByKey, scalarOps, oldRecord)
 
@@ -1061,6 +1068,15 @@ export async function applyFieldPatch(
     }
   }
 
+  // The reminder's day counts back from the due date, so either one moves it.
+  const dueKey = recordsDueField(defs)?.key
+  if (dueKey && defsByKey.has(RECORDS_REMINDER_KEY) && (scalarOps.has(dueKey) || scalarOps.has(RECORDS_REMINDER_KEY))) {
+    const next = (key: string) => scalarOps.has(key) ? scalarOps.get(key) : oldRecord?.fields[key] ?? null
+    const remindOn = recordsReminderDay(next(dueKey), next(RECORDS_REMINDER_KEY))
+    const before = oldRecord ? recordsReminderDay(oldRecord.fields[dueKey], oldRecord.fields[RECORDS_REMINDER_KEY]) : null
+    if (isCreate || remindOn !== before) await syncRecordsReminder(tx, id, remindOn, ctx.userId)
+  }
+
   // Only a write to an access-granting people field can share the record.
   const grantKeys = recordsAccessGrantingKeys(typeKey)
   if (opts.sharing && [...listOps.keys()].some(key => grantKeys.includes(key))) {
@@ -1114,6 +1130,8 @@ export async function applyFieldPatch(
       ? defsByKey.get(closingRules.reasonKey)?.options?.[reason] ?? null
       : null
     await runRecordsClosingHooks(tx, ctx, { typeKey, recordId: id, reason, reasonOption })
+    // The closed record no longer repeats once it has made the next one.
+    if (await repeatClosedRecord(tx, ctx, type, defs, record)) return await getRecord(tx, ctx, typeKey, id)
   }
 
   return record

@@ -140,7 +140,8 @@ function onDrill(event: MouseEvent) {
         </dd>
         <dd
           v-else
-          class="text-(--ui-text-muted) truncate"
+          class="truncate"
+          :class="value.tone === 'error' ? 'text-(--ui-error) font-medium' : value.tone === 'warning' ? 'text-(--ui-warning) font-medium' : 'text-(--ui-text-muted)'"
         >
           {{ value.text }}
         </dd>

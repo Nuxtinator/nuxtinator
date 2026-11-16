@@ -61,7 +61,7 @@ export function viewsEmptyRule(field: string, op: RecordsFilterOp, kind: string)
     case 'none': return { field, op }
     case 'list': return { field, op, value: [] }
     case 'range': return { field, op, value: ['', ''] }
-    default: return { field, op, value: kind === 'boolean' ? true : '' }
+    default: return { field, op, value: kind === 'boolean' ? true : op === 'next_days' ? 7 : '' }
   }
 }
 

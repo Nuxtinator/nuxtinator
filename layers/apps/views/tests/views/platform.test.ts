@@ -261,7 +261,7 @@ describe('card layouts', () => {
 
     let res = await feed(opts, view.id)
     expect(res.card).toEqual({
-      fields: ['status', 'assignee', 'due_date', 'priority', 'subtasks', 'attachments'],
+      fields: ['status', 'assignee', 'due_date', 'reminder', 'priority', 'subtasks', 'attachments'],
       connections: { subtasks: 'progress' },
       custom: false
     })

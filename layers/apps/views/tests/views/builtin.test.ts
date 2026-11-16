@@ -59,7 +59,7 @@ describe('built-in views', () => {
 
     const view = await $fetch<Detail>('/api/views/builtin.my-tasks', me)
     expect(view).toMatchObject({ id: 'builtin.my-tasks', builtIn: true, accessLevel: 'view' })
-    expect(view.tabs.map(t => t.layout)).toEqual(['kanban', 'list'])
+    expect(view.tabs.map(t => t.layout)).toEqual(['kanban', 'list', 'list'])
 
     const board = await $fetch<Feed>('/api/views/builtin.my-tasks/records', me)
     expect(board.items.map(i => i.id).sort()).toEqual([mine.id, done.id].sort())
@@ -103,7 +103,7 @@ describe('built-in views', () => {
 
     const copy = await $fetch<Detail>('/api/views/builtin.my-tasks/copy', { method: 'POST', body: {}, ...me })
     expect(copy).toMatchObject({ name: 'Copy of My tasks', builtIn: false, accessLevel: 'owner' })
-    expect(copy.tabs.map(t => t.name)).toEqual(['Board', 'Open'])
+    expect(copy.tabs.map(t => t.name)).toEqual(['Board', 'Open', 'Due soon'])
     const feed = await $fetch<Feed>(`/api/views/${copy.id}/records`, me)
     expect(feed.items.map(i => i.id)).toEqual([task.id])
 

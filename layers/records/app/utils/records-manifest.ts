@@ -139,6 +139,11 @@ export interface RecordTypeManifest {
   statusField?: string
   /** Field key of the key_select holding why a closed record was closed. */
   closedReasonField?: string
+  /**
+   * Field key of the date or datetime field holding when a record is due.
+   * Records of a type with one can repeat: closing one makes the next.
+   */
+  dueField?: string
   /** Code-owned sections; RecordsFieldDef.section references these keys. */
   sections?: Record<string, { label: string, order?: number }>
   fields: Record<string, RecordsFieldDef>
@@ -160,6 +165,62 @@ export interface RecordTypeManifest {
   /** Default card layout boards and tables over this type start from. */
   card?: RecordsCardLayout
 }
+
+// A type with a due date has a reminder and a repeat. A manifest may declare
+// these fields itself (to place them) by spreading the defs below under the
+// same keys.
+export const RECORDS_REMINDER_KEY = 'reminder'
+export const RECORDS_REPEAT_KEY = 'repeat'
+
+/** How long before the due date each reminder option reminds. */
+export const RECORDS_REMINDER_OFFSETS: Record<string, { days?: number, months?: number }> = {
+  due_day: {},
+  day_1: { days: 1 },
+  days_3: { days: 3 },
+  week_1: { days: 7 },
+  weeks_2: { days: 14 },
+  month_1: { months: 1 },
+  months_3: { months: 3 }
+}
+
+/** On its day, the record's assignees (else whoever set it) get a reminder. */
+export const RECORDS_REMINDER_FIELD = {
+  kind: 'key_select',
+  label: 'Reminder',
+  icon: 'i-lucide-bell',
+  order: 90,
+  options: {
+    due_day: { label: 'On the due date' },
+    day_1: { label: '1 day before' },
+    days_3: { label: '3 days before' },
+    week_1: { label: '1 week before' },
+    weeks_2: { label: '2 weeks before' },
+    month_1: { label: '1 month before' },
+    months_3: { label: '3 months before' }
+  }
+} as const satisfies RecordsFieldDef
+
+/** How far each repeat option moves a record's dates. */
+export const RECORDS_REPEAT_INTERVALS: Record<string, { days?: number, months?: number }> = {
+  weekly: { days: 7 },
+  monthly: { months: 1 },
+  quarterly: { months: 3 },
+  yearly: { months: 12 }
+}
+
+/** Closing a record that repeats makes the next one, due one interval later. */
+export const RECORDS_REPEAT_FIELD = {
+  kind: 'key_select',
+  label: 'Repeat',
+  icon: 'i-lucide-repeat',
+  order: 91,
+  options: {
+    weekly: { label: 'Every week' },
+    monthly: { label: 'Every month' },
+    quarterly: { label: 'Every 3 months' },
+    yearly: { label: 'Every year' }
+  }
+} as const satisfies RecordsFieldDef
 
 /** Identity helper that preserves literal types (option keys stay literal). */
 // Type keys that would collide with the records app's own pages

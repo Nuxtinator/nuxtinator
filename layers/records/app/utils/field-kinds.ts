@@ -32,6 +32,8 @@ export interface RecordsFieldSetting {
   column: 'name' | 'status' | null
   /** The value a new record starts with, when the type declares one. */
   default?: unknown
+  /** The type's due-date field: records with a value in it can repeat. */
+  due?: boolean
 }
 
 /** Section map as served alongside the fields (`sections` in the response). */

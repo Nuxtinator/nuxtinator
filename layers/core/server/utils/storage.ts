@@ -171,6 +171,24 @@ export async function deleteFromS3(key: string, visibility: 'public' | 'private'
 }
 
 /**
+ * Copy an object in the private bucket to a new random key under `folder`,
+ * keeping its extension and metadata. Returns the new key.
+ */
+export async function copyS3Object(sourceKey: string, folder: string = 'uploads'): Promise<string> {
+  try {
+    const client = getS3Client()
+    const ext = sourceKey.includes('.') ? `.${sourceKey.split('.').pop()}` : ''
+    const prefix = folder.replace(/^\/+|\/+$/g, '') || 'uploads'
+    const key = `${prefix}/${randomBytes(16).toString('hex')}${ext}`
+    await client.copyObject({ sourceKey }, key)
+    return key
+  } catch (error: any) {
+    console.error('S3 copy error:', error)
+    throw new Error(`Failed to copy file in storage: ${error.message}`)
+  }
+}
+
+/**
  * Generate a signed URL for accessing a file in private bucket.
  * `responseParams` (e.g. `response-content-disposition`) are signed into the
  * URL and override the headers S3 sends back for that request. `requestDate`

@@ -190,6 +190,32 @@ export async function runRecordsClosingHooks(tx: Tx, ctx: TenantContext, event: 
   for (const fn of _closingHooks) await fn(tx, ctx, event)
 }
 
+// --- Repeat hooks ----------------------------------------------------------
+//
+// Run inside applyFieldPatch after closing a repeating record made the next
+// one, once per copied record (the record itself and each copied subtask), so
+// a layer can carry its own per-record state over.
+
+export interface RecordsRepeatEvent {
+  typeKey: string
+  /** The record that was copied. */
+  fromRecordId: string
+  /** Its copy. */
+  toRecordId: string
+}
+
+export type RecordsRepeatHook = (tx: Tx, ctx: TenantContext, event: RecordsRepeatEvent) => Promise<void>
+
+const _repeatHooks: RecordsRepeatHook[] = []
+
+export function registerRecordsRepeatHook(fn: RecordsRepeatHook): void {
+  if (!_repeatHooks.includes(fn)) _repeatHooks.push(fn)
+}
+
+export async function runRecordsRepeatHooks(tx: Tx, ctx: TenantContext, event: RecordsRepeatEvent): Promise<void> {
+  for (const fn of _repeatHooks) await fn(tx, ctx, event)
+}
+
 // --- Patch guards ----------------------------------------------------------
 //
 // Run by the record PATCH route (not applyFieldPatch, so host code can still
@@ -295,6 +321,7 @@ export function __resetRecordsRegistriesForTests(): void {
   _fieldFilters.update = []
   _storageDrivers.clear()
   _closingHooks.length = 0
+  _repeatHooks.length = 0
   _patchGuards.length = 0
   _visibilitySources.clear()
   _refSources.clear()

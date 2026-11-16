@@ -4,13 +4,14 @@ import { registerApp } from '#core/server/utils/app-registry'
 import { registerNavItem } from '#core/server/utils/nav-registry'
 import { registerAdminSection } from '#core/server/utils/admin-section-registry'
 import { registerTeamContainer } from '#core/server/utils/team-access'
-import { registerRecordsVisibilitySource } from '#records/server'
+import { registerRecordsRepeatHook, registerRecordsVisibilitySource } from '#records/server'
 import {
   VIEWS_PERMISSIONS,
   VIEWS_PERMISSION_META,
   VIEWS_DEFAULT_GRANTS
 } from '../../app/utils/permissions'
 import { boardVisibilitySource } from '../utils/board-visibility'
+import { carryViewsCardsOnRepeat } from '../utils/repeat-cards'
 import { builtInViewId, registerBuiltInView } from '../utils/builtin-views'
 import { subtasksBuiltInView } from '../utils/subtasks-view'
 
@@ -64,6 +65,21 @@ export default defineNitroPlugin(() => {
           filter: { match: 'all', rules: [{ field: 'status', op: 'none_of', value: ['done'] }] },
           sort: { field: 'due_date', dir: 'asc' }
         }
+      },
+      {
+        key: 'due-soon',
+        name: 'Due soon',
+        layout: 'list',
+        definition: {
+          filter: {
+            match: 'all',
+            rules: [
+              { field: 'status', op: 'none_of', value: ['done'] },
+              { match: 'any', rules: [{ field: 'due_date', op: 'past' }, { field: 'due_date', op: 'next_days', value: 7 }] }
+            ]
+          },
+          sort: { field: 'due_date', dir: 'asc' }
+        }
       }
     ]
   })
@@ -88,4 +104,5 @@ export default defineNitroPlugin(() => {
   })
 
   registerRecordsVisibilitySource(boardVisibilitySource)
+  registerRecordsRepeatHook(carryViewsCardsOnRepeat)
 })

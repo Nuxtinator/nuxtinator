@@ -1,8 +1,9 @@
 // Attachments fields: files uploaded onto a record's field. Rows live in
 // records_attachments (one per file, ordered by sort_order); the bytes live
 // in private object storage. Files arrive one upload at a time through
-// `addRecordAttachment` (the attachments route), never through a field patch;
-// a patch can only reorder or remove them. Deleting a row — directly or with
+// `addRecordAttachment` (the attachments route), or as copies of another
+// record's files (`copyRecordAttachments`), never through a field patch; a
+// patch can only reorder or remove them. Deleting a row — directly or with
 // its record — queues its object in records_attachment_trash (a trigger), and
 // `sweepAttachmentTrash` deletes queued objects from storage. A fresh upload
 // is queued too, outside the request's transaction, and taken off the queue
@@ -17,7 +18,7 @@ import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
 import { db } from '#core/server/utils/database'
-import { deleteFromS3, generateSignedUrl, uploadToS3, validateFileSize } from '#core/server/utils/storage'
+import { copyS3Object, deleteFromS3, generateSignedUrl, uploadToS3, validateFileSize } from '#core/server/utils/storage'
 import type { RecordsAttachmentValue } from '#records'
 import type { RecordsListPatch } from './records-registry'
 
@@ -212,6 +213,57 @@ export async function deleteRecordAttachments(
     query = query.where('record_id', 'in', opts.recordIds)
   }
   await query.execute()
+}
+
+/**
+ * Copies the files on the given fields of one record onto another, each into
+ * its own new object in storage, keeping field and order. Returns old file id
+ * → new file id. Like an upload, each copy is queued for the sweep until the
+ * transaction takes it off the queue.
+ */
+export async function copyRecordAttachments(
+  tx: Tx,
+  ctx: TenantContext,
+  fromRecordId: string,
+  toRecordId: string,
+  opts: { fieldKeys?: string[], fieldKeyPrefix?: string }
+): Promise<Map<string, string>> {
+  const ids = new Map<string, string>()
+  if (!opts.fieldKeys && !opts.fieldKeyPrefix) return ids
+  let query = tx
+    .selectFrom('records_attachments')
+    .select(['id', 'field_key', 'storage_key', 'filename', 'mime', 'size_bytes', 'sort_order'])
+    .where('record_id', '=', fromRecordId)
+  if (opts.fieldKeys) {
+    if (opts.fieldKeys.length === 0) return ids
+    query = query.where('field_key', 'in', opts.fieldKeys)
+  }
+  if (opts.fieldKeyPrefix) {
+    const escaped = opts.fieldKeyPrefix.replace(/[\\%_]/g, m => `\\${m}`)
+    query = query.where('field_key', 'like', `${escaped}%`)
+  }
+  const rows = await query.orderBy('sort_order', 'asc').orderBy('created_at', 'asc').execute()
+  for (const row of rows) {
+    const key = await copyS3Object(row.storage_key, 'records')
+    await db.insertInto('records_attachment_trash').values({ storage_key: key }).execute()
+    await tx.deleteFrom('records_attachment_trash').where('storage_key', '=', key).execute()
+    const copy = await tx
+      .insertInto('records_attachments')
+      .values({
+        record_id: toRecordId,
+        field_key: row.field_key,
+        storage_key: key,
+        filename: row.filename,
+        mime: row.mime,
+        size_bytes: row.size_bytes,
+        sort_order: row.sort_order,
+        created_by: ctx.userId
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    ids.set(row.id, copy.id)
+  }
+  return ids
 }
 
 /**

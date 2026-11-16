@@ -47,7 +47,8 @@ A member makes a "My tasks" view with tabs such as "My open tasks" (a list) and 
 - Filters are a tree of all/any groups nested one level deep. `@me` resolves to whoever is viewing.
 - A card added from the view gets the values its filters pin down. On "Assigned to is Me", the new card is assigned to me, so it doesn't drop out of the view.
 - Everyone also has the built-in **My tasks** view (assigned to me: an Open list and a board by status), declared in code by the views layer. Nobody can change a built-in view; "Copy view" makes one of your own.
-- Status: built. Still to come: relative dates ("this week", "overdue"), and a personal filter layer for each viewer.
+- Dates also filter relative to today: in the past, today, this week, and in the next N days. My tasks has a "Due soon" tab: open tasks overdue or due in the next 7 days.
+- Status: built. Still to come: a personal filter layer for each viewer.
 
 ### 3. A team view with its own cards (onboarding, conversations)
 
@@ -149,6 +150,15 @@ The meetings layer creates todos for people. Those todos should be `task` record
 - **Meetings:** `meetings_todos` is dropped. A meeting's tasks are tasks whose `meeting` ref points at it; everyone who can see the meeting sees them (a visibility source). The meeting page embeds the built-in `meeting-tasks` view, the meetings sidebar links to My tasks, assigning notifies through records, and deleting a meeting deletes its tasks. Status: built (separate repo).
 - **Feedback:** its hard-coded kanban moves onto records and views as a later project, once the platform has proven itself on lower-stakes data.
 - **go-apps layers** (decisions, showcase and others) keep their own tables for now.
+
+### 12. Reminders and repeating work
+
+A member keeps grant reports as tasks: each holds the links and files for one report, is due on the report date, and pings them a week before. A quarterly report repeats every 3 months, so they never keep a separate list of reminders elsewhere.
+
+- A card with a due date can remind on the day or some time before it (1 or 3 days, 1 or 2 weeks, 1 or 3 months). It goes to the card's assignees, or to whoever set it, in the app and by email, and moves with the due date.
+- A card with a due date can repeat (every week, month, 3 months or year). Marking it done makes the next card, due one interval later on a fixed schedule, with its fields, files, subtasks and boards carried over, and its reminder counting from the new due date.
+- Boards mark an open card's due date amber when it's within two days and red when it's past.
+- Status: built.
 
 ## Deferred
 

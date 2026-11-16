@@ -115,6 +115,29 @@ async function setReasonField(key: string | null) {
   }
 }
 
+// --- Repeating --------------------------------------------------------------
+
+// Date fields that can hold when a record is due.
+const dueFieldItems = computed(() =>
+  (fieldSettings.value?.fields ?? [])
+    .filter(f => (f.kind === 'date' || f.kind === 'datetime') && !f.orphan)
+    .map(f => ({ label: f.label, value: f.key }))
+)
+
+async function setDueField(key: string | null) {
+  busy.value = true
+  pageError.value = null
+  try {
+    await admin.updateType(typeKey.value, { dueField: key })
+    // The repeat field comes and goes with the due date field.
+    await reload()
+  } catch (err) {
+    pageError.value = recordsErrorMessage(err, 'Failed to update the due date field')
+  } finally {
+    busy.value = false
+  }
+}
+
 // --- Type deletion (custom/stale only) --------------------------------------
 
 const confirmingDelete = ref(false)
@@ -344,6 +367,42 @@ async function moveField(field: RecordsFieldSetting, dir: -1 | 1) {
                 title="Reset to the default"
                 :disabled="busy"
                 @click="setReasonField(null)"
+              />
+            </div>
+          </UFormField>
+        </section>
+
+        <section
+          v-if="!isOrphan && typeInfo.statusField"
+          class="space-y-3"
+        >
+          <h2 class="text-base font-semibold">
+            Repeating
+            <InfoTip text="Pick the date field that says when a record is due. Records with a due date can then remind (on the day or some time before) and repeat: closing one makes the next, due one interval later." />
+          </h2>
+          <UFormField label="Due date field">
+            <div class="flex items-center gap-2">
+              <USelectMenu
+                :model-value="typeInfo.dueField ?? undefined"
+                :items="dueFieldItems"
+                value-key="value"
+                label-key="label"
+                placeholder="No due date field"
+                :search-input="false"
+                class="w-full sm:w-72"
+                :disabled="busy"
+                @update:model-value="setDueField(String($event))"
+              />
+              <UButton
+                v-if="typeInfo.dueField"
+                icon="i-lucide-x"
+                variant="ghost"
+                color="neutral"
+                size="sm"
+                aria-label="Reset the due date field to the default"
+                title="Reset to the default"
+                :disabled="busy"
+                @click="setDueField(null)"
               />
             </div>
           </UFormField>

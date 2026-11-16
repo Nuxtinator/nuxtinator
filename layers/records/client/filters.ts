@@ -18,6 +18,10 @@ export type RecordsFilterOp =
   | 'after'
   | 'on'
   | 'between'
+  | 'past'
+  | 'today'
+  | 'this_week'
+  | 'next_days'
   | 'eq'
   | 'lt'
   | 'gt'
@@ -26,7 +30,10 @@ export type RecordsFilterOp =
 export interface RecordsFilterRule {
   field: string
   op: RecordsFilterOp
-  /** A scalar for single-value ops, a list for any/none/all of, [from, to] for between. */
+  /**
+   * A scalar for single-value ops, a list for any/none/all of, [from, to] for
+   * between, a number of days for next_days.
+   */
   value?: unknown
 }
 
@@ -60,6 +67,10 @@ export const RECORDS_FILTER_OP_LABELS: Record<RecordsFilterOp, string> = {
   after: 'is after',
   on: 'is on',
   between: 'is between',
+  past: 'is in the past',
+  today: 'is today',
+  this_week: 'is this week',
+  next_days: 'is in the next … days',
   eq: 'equals',
   lt: 'is less than',
   gt: 'is greater than',
@@ -82,6 +93,10 @@ export const RECORDS_FILTER_VALUE_SHAPE: Record<RecordsFilterOp, RecordsFilterVa
   after: 'single',
   on: 'single',
   between: 'range',
+  past: 'none',
+  today: 'none',
+  this_week: 'none',
+  next_days: 'single',
   eq: 'single',
   lt: 'single',
   gt: 'single',
@@ -115,7 +130,7 @@ export function recordsFilterOps(kind: string): RecordsFilterOp[] {
       return ['is', 'any_of', 'none_of', 'empty', 'not_empty']
     case 'date':
     case 'datetime':
-      return ['on', 'before', 'after', 'between', 'empty', 'not_empty']
+      return ['on', 'before', 'after', 'between', 'past', 'today', 'this_week', 'next_days', 'empty', 'not_empty']
     case 'number':
       return ['eq', 'lt', 'gt', 'between', 'empty', 'not_empty']
     case 'boolean':

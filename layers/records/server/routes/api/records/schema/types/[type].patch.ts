@@ -3,7 +3,8 @@
 // reverts a code type to its manifest value), hidden, and sectionOrder
 // (stored in config; null clears), and closedReasonField (the key_select
 // that holds why a closed record was closed; null reverts to the code
-// default), boardsGrantVisibility (whether shared boards make their records
+// default), dueField (the date field holding when a record is due, which lets
+// records repeat; null reverts), boardsGrantVisibility (whether shared boards make their records
 // visible; null reverts) and card (the default card layout boards and tables
 // start from; null reverts). For code-declared types only actual
 // overrides are persisted; for custom types the row is the definition.
@@ -20,6 +21,7 @@ const Body = z.object({
   hidden: z.boolean().optional(),
   sectionOrder: z.array(z.string().trim().min(1).max(60)).max(50).nullish(),
   closedReasonField: z.string().trim().min(1).max(41).nullish(),
+  dueField: z.string().trim().min(1).max(41).nullish(),
   boardsGrantVisibility: z.boolean().nullish(),
   card: z.object({
     fields: z.array(z.string().trim().min(1).max(41)).max(20),
@@ -48,6 +50,7 @@ export default defineEventHandler(async (event) => {
         orphan: type.orphan,
         statusField: type.statusField ?? null,
         closedReasonField: type.closedReasonField ?? null,
+        dueField: type.dueField ?? null,
         boardsGrantVisibility: type.boardsGrantVisibility,
         card: type.card
       }

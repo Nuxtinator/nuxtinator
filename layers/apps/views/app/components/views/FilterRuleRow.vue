@@ -45,7 +45,8 @@ function onField(key: string) {
 
 function onOp(op: RecordsFilterOp) {
   if (!field.value) return
-  const keep = RECORDS_FILTER_VALUE_SHAPE[op] === shape.value
+  // A number of days and a date are both one value, but not the same kind.
+  const keep = RECORDS_FILTER_VALUE_SHAPE[op] === shape.value && (op === 'next_days') === (props.rule.op === 'next_days')
   emit('update:rule', keep ? { ...props.rule, op } : viewsEmptyRule(props.rule.field, op, field.value.kind))
 }
 
@@ -152,6 +153,7 @@ watch(() => field.value?.kind, (kind) => {
 
 const inputType = computed(() => {
   const kind = field.value?.kind
+  if (props.rule.op === 'next_days') return 'number'
   if (kind === 'date' || kind === 'datetime') return 'date'
   if (kind === 'number') return 'number'
   return 'text'

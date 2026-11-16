@@ -1,7 +1,7 @@
 // GET /api/records/schema/types
 // Merged record-type catalog (code manifests ⊳ DB overrides). Returns
 // { canManage, types: [{ key, label, labelSingular, icon, hidden, custom,
-//   orphan, statusField, closedReasonField, boardsGrantVisibility, card,
+//   orphan, statusField, closedReasonField, dueField, boardsGrantVisibility, card,
 //   canRead, canCreate, canViewAll }] }. canManage says whether the caller holds
 // records.schema.manage — the settings UI's access signal. canRead/canCreate/canViewAll are the caller's
 // type-evaluator answers — per-type role-grant rows make client-side slug
@@ -34,6 +34,7 @@ export default defineEventHandler(async (event) => {
         orphan: t.orphan,
         statusField: t.statusField ?? null,
         closedReasonField: t.closedReasonField ?? null,
+        dueField: t.dueField ?? null,
         boardsGrantVisibility: t.boardsGrantVisibility,
         card: t.card,
         canRead: caps.read,

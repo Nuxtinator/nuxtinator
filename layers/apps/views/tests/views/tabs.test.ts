@@ -183,6 +183,36 @@ describe('the filter tree', () => {
   })
 })
 
+describe('relative dates', () => {
+  it('match the past, today, this week and the next few days', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    const day = (offset: number) => {
+      const d = new Date()
+      d.setUTCDate(d.getUTCDate() + offset)
+      return d.toISOString().slice(0, 10)
+    }
+    const overdue = await createTask(opts, { name: 'test-views Overdue', due_date: day(-3) })
+    const today = await createTask(opts, { name: 'test-views Today', due_date: day(0) })
+    const soon = await createTask(opts, { name: 'test-views Soon', due_date: day(5) })
+    const later = await createTask(opts, { name: 'test-views Later', due_date: day(30) })
+    const view = await createView(opts, { tab: { layout: 'table' } })
+    const scope = [overdue.id, today.id, soon.id, later.id]
+
+    const withFilter = async (filter: unknown) => {
+      await $fetch(`/api/views/${view.id}/tabs/${view.tabs[0]!.id}`, { method: 'PATCH', body: { definition: { filter } }, ...opts })
+      return (await ids(opts, view.id)).filter(id => scope.includes(id))
+    }
+    expect(await withFilter({ match: 'all', rules: [{ field: 'due_date', op: 'past' }] })).toEqual([overdue.id])
+    expect(await withFilter({ match: 'all', rules: [{ field: 'due_date', op: 'today' }] })).toEqual([today.id])
+    expect(await withFilter({ match: 'all', rules: [{ field: 'due_date', op: 'next_days', value: 7 }] }))
+      .toEqual([today.id, soon.id].sort())
+    expect(await withFilter({ match: 'all', rules: [{ field: 'due_date', op: 'this_week' }] })).toContain(today.id)
+    const bad = await withFilter({ match: 'all', rules: [{ field: 'due_date', op: 'next_days', value: 0 }] }).catch(e => e)
+    expect(bad.statusCode).toBe(400)
+  })
+})
+
 describe('lists', () => {
   it('an ungrouped list keeps its own manual order, separate from other tabs', async () => {
     const { org, auth } = await createViewsOrgWith(sql, ['admin'])
@@ -294,5 +324,29 @@ describe('hand-picked views', () => {
     const all = await createView(opts, { recordTypeKey: 'item', tab: { layout: 'list' } })
     await expect($fetch(`/api/views/${all.id}/cards`, { method: 'POST', body: { recordId: pizza.id }, ...opts }))
       .rejects.toMatchObject({ statusCode: 400 })
+  })
+})
+
+describe('repeating cards', () => {
+  it('put the next card on the hand-picked views the closed one was on', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    const view = await createView(opts, {
+      definition: { picked: true },
+      tab: { layout: 'kanban', definition: { groupField: 'status' } }
+    })
+    const card = await $fetch<{ id: string }>(`/api/views/${view.id}/cards`, {
+      method: 'POST',
+      body: { fields: { name: 'test-views Monthly report', due_date: '2030-01-15', repeat: 'monthly' } },
+      ...opts
+    })
+    await $fetch(`/api/records/entries/task/${card.id}`, { method: 'PATCH', body: { fields: { status: 'done' } }, ...opts })
+
+    const onView = await feed(opts, view.id)
+    const next = onView.items.find(i => i.id !== card.id && i.name === 'test-views Monthly report')
+    expect(next).toBeTruthy()
+    expect(next!.status).toBe('open')
+    const [item] = await sql`select created_here from views_items where view_id = ${view.id} and record_id = ${next!.id}`
+    expect(item!.created_here).toBe(true)
   })
 })
