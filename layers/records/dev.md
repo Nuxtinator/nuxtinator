@@ -49,8 +49,9 @@ overridable, never deletable — and the default Open / Done status. Admin field
 exclude `user_select` (code-owned assignment semantics); `connection` is allowed but
 forward-only, since reverse keys pair two code manifests.
 
-**assigned_to is multi-user**, stored in `records_user_refs` (composite PK
-record/field/user) — never a column. Any future user-reference field reuses that table;
+**assigned_to is multi-user**, and so is a task's assignee, stored in
+`records_user_refs` (composite PK record/field/user) — never a column. A write
+may give any people field one bare user id; the list becomes that person. Any future user-reference field reuses that table;
 "assigned to me" is an indexed EXISTS.
 
 **Only fields that hand a record to someone grant access.** A `user_select` field

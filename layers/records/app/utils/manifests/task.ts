@@ -1,13 +1,13 @@
 import { defineRecordType } from '#records'
 import type { InferRecordShape } from '#records'
 
-// The built-in task type: something to do, optionally owned by one person
-// and due on a date. Done is the closed status, so a done task leaves default
-// lists the way any closed record does. The assignee is the one people field
-// that shares the task with whoever it names. Subtasks are tasks linked
-// through `parent`, to any depth, so a card can show their progress and
-// whoever can see a task sees everything under it. Producer layers
-// (meetings) write their action items as tasks.
+// The built-in task type: something to do, optionally assigned to one or
+// more people and due on a date. Done is the closed status, so a done task
+// leaves default lists the way any closed record does. The assignees field is
+// the one people field that shares the task with everyone it names. Subtasks
+// are tasks linked through `parent`, to any depth, so a card can show their
+// progress and whoever can see a task sees everything under it. Producer
+// layers (meetings) write their action items as tasks.
 export const taskManifest = defineRecordType({
   key: 'task',
   label: 'Tasks',
@@ -32,7 +32,7 @@ export const taskManifest = defineRecordType({
         done: { label: 'Done', color: 'success', closed: true }
       }
     },
-    assignee: { kind: 'user_select', label: 'Assignee', grantsAccess: true, section: 'details', order: 3 },
+    assignee: { kind: 'user_select', label: 'Assignees', multiple: true, grantsAccess: true, section: 'details', order: 3 },
     priority: {
       kind: 'key_select',
       label: 'Priority',

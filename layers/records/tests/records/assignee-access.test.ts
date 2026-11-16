@@ -68,6 +68,22 @@ describe('people fields and access', () => {
     expect(await canSee(samOpts, 'task', task.id)).toBe(true)
   })
 
+  it('a task takes several assignees, who all see it', async () => {
+    const { org, auth, user } = await createRecordsOrgWith(sql, ['member'])
+    const owner = withOrgHeader(auth, org.slug)
+    const sam = await addRecordsMember(sql, org.id)
+    const kim = await addRecordsMember(sql, org.id)
+
+    const task = await create(owner, 'task', { name: 'test-records Paint the hall', assignee: [sam.user.id, kim.user.id] }, true)
+    expect(task.fields.assignee).toEqual([sam.user.id, kim.user.id])
+    expect(await canSee(withOrgHeader(sam.auth, org.slug), 'task', task.id)).toBe(true)
+    expect(await canSee(withOrgHeader(kim.auth, org.slug), 'task', task.id)).toBe(true)
+
+    // One bare id stands for a list of one.
+    expect((await patch(owner, 'task', task.id, { assignee: user.id })).fields.assignee).toEqual([user.id])
+    expect((await patch(owner, 'task', task.id, { assignee: null })).fields.assignee).toEqual([])
+  })
+
   it('asks before assigning someone who can\'t see the record, and not otherwise', async () => {
     const { org, auth, user } = await createRecordsOrgWith(sql, ['member'])
     const owner = withOrgHeader(auth, org.slug)
@@ -77,14 +93,14 @@ describe('people fields and access', () => {
     const refused = await patch(owner, 'task', task.id, { assignee: sam.user.id }).catch(e => e)
     expect(refused.statusCode).toBe(409)
     expect(refused.data.data).toMatchObject({ code: 'records.share_confirmation', users: [{ id: sam.user.id }] })
-    expect((await $fetch<RecordDetail>(`/api/records/entries/task/${task.id}`, owner)).fields.assignee).toBeNull()
+    expect((await $fetch<RecordDetail>(`/api/records/entries/task/${task.id}`, owner)).fields.assignee).toEqual([])
 
-    expect((await patch(owner, 'task', task.id, { assignee: sam.user.id }, true)).fields.assignee).toBe(sam.user.id)
+    expect((await patch(owner, 'task', task.id, { assignee: sam.user.id }, true)).fields.assignee).toEqual([sam.user.id])
     // Assigning yourself, or someone the record is already shared with, just saves.
-    expect((await patch(owner, 'task', task.id, { assignee: user.id })).fields.assignee).toBe(user.id)
+    expect((await patch(owner, 'task', task.id, { assignee: user.id })).fields.assignee).toEqual([user.id])
     const other = await addRecordsMember(sql, org.id)
     await $fetch(`/api/records/entries/task/${task.id}/shares`, { method: 'POST', body: { userId: other.user.id }, ...owner })
-    expect((await patch(owner, 'task', task.id, { assignee: other.user.id })).fields.assignee).toBe(other.user.id)
+    expect((await patch(owner, 'task', task.id, { assignee: other.user.id })).fields.assignee).toEqual([other.user.id])
   })
 
   it('an MCP write that would share needs share: true', async () => {

@@ -26,7 +26,7 @@ Every record type has a status field, so every record can be closed. A type whos
 
 `item` — a freeform card: name, notes, tags, link, date, people, priority (low / medium / high), attachments (its first image is the card cover) and the default Open / Done status. People only records who's involved: naming someone doesn't share the item.
 
-`task` — name, status (To do / In progress / Done, keyed `open` / `in_progress` / `done`; done is closed), assignee, priority (low to urgent), start and due dates, tags, parent task with subtasks (cards show subtask progress), description and attachments. Tasks nest to any depth; see Hierarchies.
+`task` — name, status (To do / In progress / Done, keyed `open` / `in_progress` / `done`; done is closed), assignees (one or more people; a write may give a single user id in place of the list), priority (low to urgent), start and due dates, tags, parent task with subtasks (cards show subtask progress), description and attachments. Tasks nest to any depth; see Hierarchies.
 
 ## Hierarchies
 

@@ -23,7 +23,7 @@ The goal in one line: **a dynamic PocketBase with views**. Records hold any shap
 
 A member creates a board such as "ways to bake a pizza" from generic `item` cards, or "person 1 todos" from `task` cards. Nobody else sees those cards until the member shares the view.
 
-- `item` (the freeform card: notes, tags, link, date, people, priority, files with a cover image) and `task` (assignee, priority, start and due dates, tags, subtasks, files, To do / In progress / Done) ship as built-in types that orgs can hide, field by field or whole. A generic item covers most needs.
+- `item` (the freeform card: notes, tags, link, date, people, priority, files with a cover image) and `task` (one or more assignees, priority, start and due dates, tags, subtasks, files, To do / In progress / Done) ship as built-in types that orgs can hide, field by field or whole. A generic item covers most needs.
 - Members don't hold `view_all` on items or tasks, so they're personal by default. A member sees what they created, what was shared with them, the tasks assigned to them, and the cards on hand-picked views they can open.
 - Access only comes from sharing. Naming someone in a people field doesn't share a card with them; the exceptions are a task's assignee and a contact's Assigned to, which hand the record over. Assigning someone who can't see the record yet asks first, everywhere: the record page, a view, a board drag, a new card and MCP (which needs `share: true`).
 - Status: built.

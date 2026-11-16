@@ -468,12 +468,13 @@ function validateScalar(def: RecordsFieldSetting, raw: unknown): unknown {
 }
 
 function parseValueList(def: RecordsFieldSetting, raw: unknown): ParsedList {
-  // Shorthands: a plain array replaces the whole list; a single user_select
-  // additionally accepts a bare user id or null.
+  // Shorthands: a plain array replaces the whole list; a user_select
+  // additionally accepts a bare user id (the list becomes that one person)
+  // or null.
   if (Array.isArray(raw)) {
     return { items: raw.map(value => ({ value, delete: false })), force: true }
   }
-  if (def.storage === 'user_refs' && !def.multiple && (raw === null || typeof raw === 'string')) {
+  if (def.storage === 'user_refs' && (raw === null || typeof raw === 'string')) {
     return { items: raw === null ? [] : [{ value: raw, delete: false }], force: true }
   }
   const parsed = valueListSchema.safeParse(raw)

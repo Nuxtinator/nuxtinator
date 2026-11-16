@@ -36,13 +36,7 @@ const busy = ref(false)
 // Without uploads and without an image to remove there is nothing to offer.
 const canEdit = computed(() => props.editable && (info.value.can_upload || !!props.avatar))
 
-const initials = computed(() => {
-  const source = (props.name || props.email || '').trim()
-  if (!source) return '?'
-  const parts = source.split(/\s+/).filter(Boolean)
-  if (parts.length >= 2) return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase()
-  return source.slice(0, 2).toUpperCase()
-})
+const initials = computed(() => userInitials(props.name, props.email))
 
 const Face = () => props.avatar
   ? h('img', {

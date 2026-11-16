@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // One card: record name plus the view's chosen card fields, in the order the
-// view chose. Values come from the record row (status, timestamps, jsonb
+// view chose, each led by its field's icon with the label on hover. Values
+// come from the record row (status, timestamps, jsonb
 // fields), from the board's grouping values, or from the side-table values
 // the feed attaches for the chosen keys — so any field of the type can be
-// shown. User fields render as each person's avatar beside their name;
+// shown. User fields render as each person's avatar, named on hover;
 // connection fields as names, a count, or done-progress, per the layout. A
 // cover field's first image tops the card. Clicking the card opens its
 // slideover; clicking its subtasks value opens the board of those subtasks.
@@ -34,11 +35,9 @@ onMounted(() => {
     // Avatars fall back to ids; nothing to surface on a card.
   })
 })
-// People are named, not just pictured: an image avatar is often missing and
-// initials alone can't tell two same-initial colleagues apart.
 const displayName = (id: string) => byId.value.get(id)?.name ?? 'Unknown user'
 
-// Beyond a handful the names stop fitting; the rest show as a count.
+// Beyond a handful the avatars crowd the card; the rest show as a count.
 const USER_CAP = 3
 
 const values = useViewsCardValues(() => props)
@@ -87,36 +86,38 @@ function onDrill(event: MouseEvent) {
       <div
         v-for="value in values"
         :key="value.key"
-        class="flex gap-1.5 text-xs"
-        :class="[
-          value.userIds ? 'items-start' : 'items-baseline',
-          value.drill ? '-mx-1 px-1 rounded cursor-pointer hover:bg-(--ui-bg-elevated)' : ''
-        ]"
+        class="flex items-center gap-1.5 text-xs"
+        :class="value.drill ? '-mx-1 px-1 rounded cursor-pointer hover:bg-(--ui-bg-elevated)' : ''"
         :title="value.drill ? `Open the ${value.label.toLowerCase()} board` : undefined"
         @click="value.drill && onDrill($event)"
       >
-        <dt class="text-(--ui-text-dimmed) shrink-0">
-          {{ value.label }}
+        <dt
+          class="flex shrink-0 text-(--ui-text-dimmed)"
+          :title="value.label"
+        >
+          <UIcon
+            :name="value.icon"
+            class="size-3.5"
+          />
+          <span class="sr-only">{{ value.label }}</span>
         </dt>
         <dd
           v-if="value.userIds"
-          class="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0"
+          class="flex items-center gap-1 min-w-0"
         >
-          <span
+          <UAvatar
             v-for="id in value.userIds.slice(0, USER_CAP)"
             :key="id"
-            class="inline-flex items-center gap-1 min-w-0"
-          >
-            <UAvatar
-              :src="byId.get(id)?.avatarUrl ?? undefined"
-              :alt="displayName(id)"
-              size="3xs"
-            />
-            <span class="text-(--ui-text-muted) truncate">{{ displayName(id) }}</span>
-          </span>
+            :src="byId.get(id)?.avatarUrl ?? undefined"
+            :alt="displayName(id)"
+            :text="userInitials(byId.get(id)?.name)"
+            :title="displayName(id)"
+            size="2xs"
+          />
           <span
             v-if="value.userIds.length > USER_CAP"
             class="text-(--ui-text-dimmed)"
+            :title="value.userIds.slice(USER_CAP).map(displayName).join(', ')"
           >
             +{{ value.userIds.length - USER_CAP }}
           </span>

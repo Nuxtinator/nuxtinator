@@ -2,7 +2,8 @@
 // tab chose. Values come from the record row (status, timestamps, jsonb
 // fields), from the grouping values, from the side-table values the feed
 // attaches for the chosen keys, or from the view's own field values — so any
-// field of the type or the view can be shown. Files show as a count. User
+// field of the type or the view can be shown. Each value carries the icon
+// that stands for its field. Files show as a count. User
 // fields carry ids to render as people; connection fields shown as a count
 // or progress carry the totals. Refs show their resolved label.
 import type { RecordsFieldSetting } from '#records/client'
@@ -23,6 +24,8 @@ export interface ViewsCardValueSource {
 export interface ViewsCardValue {
   key: string
   label: string
+  /** Shown in place of the label where space is tight (board cards). */
+  icon: string
   text: string
   /** Set for user fields — rendered as people in place of the text. */
   userIds?: string[]
@@ -32,9 +35,9 @@ export interface ViewsCardValue {
   drill?: true
 }
 
-const INTRINSIC_DEFS: Record<string, Pick<RecordsFieldSetting, 'key' | 'kind' | 'label'>> = {
-  created_at: { key: 'created_at', kind: 'datetime', label: 'Created' },
-  updated_at: { key: 'updated_at', kind: 'datetime', label: 'Updated' }
+const INTRINSIC_DEFS: Record<string, Pick<RecordsFieldSetting, 'key' | 'kind' | 'label'> & { icon: string }> = {
+  created_at: { key: 'created_at', kind: 'datetime', label: 'Created', icon: 'i-lucide-calendar-plus' },
+  updated_at: { key: 'updated_at', kind: 'datetime', label: 'Updated', icon: 'i-lucide-history' }
 }
 
 function userIdsOf(raw: unknown): string[] {
@@ -56,12 +59,13 @@ export function useViewsCardValues(source: () => ViewsCardValueSource) {
       if (intrinsic) {
         const raw = key === 'created_at' ? item.createdAt : item.updatedAt
         const text = formatRecordsValue(raw, intrinsic as RecordsFieldSetting)
-        if (text && text !== '—') out.push({ key, label: intrinsic.label, text })
+        if (text && text !== '—') out.push({ key, label: intrinsic.label, icon: intrinsic.icon, text })
         continue
       }
       const field = fieldMap.get(key)
         ?? (key === 'status' ? fields.find(f => f.column === 'status') : undefined)
       if (!field) continue
+      const icon = recordsFieldIcon(field)
       let raw: unknown = null
       if (viewsIsViewField(field)) raw = item.viewValues?.[field.key] ?? null
       else if (field.column === 'status' || key === 'status') raw = item.status
@@ -74,24 +78,24 @@ export function useViewsCardValues(source: () => ViewsCardValueSource) {
       if (field.kind === 'connection' && progress && (display === 'count' || display === 'progress')) {
         if (progress.total === 0) continue
         const drill = viewsIsSubtasksField(field) ? { drill: true as const } : {}
-        if (display === 'count') out.push({ key, label: field.label, text: String(progress.total), ...drill })
-        else out.push({ key, label: field.label, text: `${progress.done}/${progress.total}`, progress, ...drill })
+        if (display === 'count') out.push({ key, label: field.label, icon, text: String(progress.total), ...drill })
+        else out.push({ key, label: field.label, icon, text: `${progress.done}/${progress.total}`, progress, ...drill })
         continue
       }
 
       if (field.kind === 'attachments') {
         const count = recordsAttachmentList(raw).length
-        if (count > 0) out.push({ key, label: field.label, text: String(count) })
+        if (count > 0) out.push({ key, label: field.label, icon, text: String(count) })
         continue
       }
 
       if (field.kind === 'user_select') {
         const userIds = userIdsOf(raw)
-        if (userIds.length > 0) out.push({ key, label: field.label, text: '', userIds })
+        if (userIds.length > 0) out.push({ key, label: field.label, icon, text: '', userIds })
         continue
       }
       const text = formatRecordsValue(raw, field, { userName })
-      if (text && text !== '—') out.push({ key, label: field.label, text })
+      if (text && text !== '—') out.push({ key, label: field.label, icon, text })
     }
     return out
   })

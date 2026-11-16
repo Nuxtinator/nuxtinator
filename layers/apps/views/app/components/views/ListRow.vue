@@ -92,7 +92,8 @@ const menuItems = computed(() => props.removable
             :key="id"
             :src="byId.get(id)?.avatarUrl ?? undefined"
             :alt="displayName(id)"
-            size="3xs"
+            :text="userInitials(byId.get(id)?.name)"
+            size="2xs"
           />
         </span>
         <component

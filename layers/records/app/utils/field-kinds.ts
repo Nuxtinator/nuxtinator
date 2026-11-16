@@ -1,6 +1,7 @@
 // Client-side field-kind dispatcher — the single registry mapping each
-// RecordsFieldKind to how it renders: an optional inline editor component and a
-// plain-text formatter used by table cells and read-only detail rows.
+// RecordsFieldKind to how it renders: a default icon, an optional inline
+// editor component and a plain-text formatter used by table cells and
+// read-only detail rows.
 // Kinds without an editor component render read-only here; on the detail
 // page a registered field widget may take over (the crm layer's channel
 // widget for communication_channel).
@@ -43,6 +44,8 @@ export interface RecordsFormatContext {
 }
 
 export interface RecordsKindRenderer {
+  /** Stands for a field of this kind that has no icon of its own. */
+  icon: string
   /** Inline editor component (auto-named Records*); absent = read-only display. */
   component?: string
   /** Plain-text rendering for table cells and read-only rows. */
@@ -82,35 +85,43 @@ function formatDateValue(value: unknown, withTime: boolean): string {
 
 export const RECORDS_FIELD_KINDS: Record<RecordsFieldKind, RecordsKindRenderer> = {
   text: {
+    icon: 'i-lucide-type',
     component: 'RecordsFieldsTextField',
     format: formatText
   },
   textarea: {
+    icon: 'i-lucide-align-left',
     component: 'RecordsFieldsTextareaField',
     format: formatText
   },
   number: {
+    icon: 'i-lucide-hash',
     component: 'RecordsFieldsNumberField',
     format: value => typeof value === 'number' ? value.toLocaleString() : formatText(value)
   },
   boolean: {
+    icon: 'i-lucide-square-check',
     component: 'RecordsFieldsBooleanField',
     format: value => value === null || value === undefined ? EMPTY : (value ? 'Yes' : 'No')
   },
   date: {
+    icon: 'i-lucide-calendar',
     component: 'RecordsFieldsDateField',
     format: value => formatDateValue(value, false)
   },
   datetime: {
+    icon: 'i-lucide-clock',
     component: 'RecordsFieldsDatetimeField',
     format: value => formatDateValue(value, true)
   },
   key_select: {
+    icon: 'i-lucide-circle-chevron-down',
     component: 'RecordsFieldsKeySelectField',
     format: (value, field) =>
       typeof value === 'string' && value !== '' ? recordsOptionLabel(field, value) : EMPTY
   },
   multi_select: {
+    icon: 'i-lucide-list-checks',
     component: 'RecordsFieldsMultiSelectField',
     format: (value, field) => {
       const keys = asArray(value)
@@ -119,6 +130,7 @@ export const RECORDS_FIELD_KINDS: Record<RecordsFieldKind, RecordsKindRenderer> 
     }
   },
   tags: {
+    icon: 'i-lucide-tags',
     component: 'RecordsFieldsTagsField',
     format: (value) => {
       const tags = asArray(value)
@@ -126,6 +138,7 @@ export const RECORDS_FIELD_KINDS: Record<RecordsFieldKind, RecordsKindRenderer> 
     }
   },
   user_select: {
+    icon: 'i-lucide-users',
     component: 'RecordsFieldsUserSelectField',
     format: (value, _field, ctx) => {
       const ids = Array.isArray(value)
@@ -137,6 +150,7 @@ export const RECORDS_FIELD_KINDS: Record<RecordsFieldKind, RecordsKindRenderer> 
     }
   },
   communication_channel: {
+    icon: 'i-lucide-at-sign',
     // Driver-shaped entries; every shape carries the address as `value`.
     format: (value) => {
       const entries = asArray(value) as Array<{ value?: unknown }>
@@ -144,6 +158,7 @@ export const RECORDS_FIELD_KINDS: Record<RecordsFieldKind, RecordsKindRenderer> 
     }
   },
   connection: {
+    icon: 'i-lucide-waypoints',
     component: 'RecordsFieldsConnectionField',
     // Count only — list rows never carry connection values, and the detail
     // page renders names through the editor and the connections panel.
@@ -154,6 +169,7 @@ export const RECORDS_FIELD_KINDS: Record<RecordsFieldKind, RecordsKindRenderer> 
     }
   },
   link: {
+    icon: 'i-lucide-link',
     component: 'RecordsFieldsLinkField',
     format: (value) => {
       const links = asArray(value) as RecordsLinkValue[]
@@ -161,6 +177,7 @@ export const RECORDS_FIELD_KINDS: Record<RecordsFieldKind, RecordsKindRenderer> 
     }
   },
   attachments: {
+    icon: 'i-lucide-paperclip',
     component: 'RecordsFieldsAttachmentsField',
     // Hydrated files and timeline entries both carry the file name.
     format: (value) => {
@@ -169,6 +186,7 @@ export const RECORDS_FIELD_KINDS: Record<RecordsFieldKind, RecordsKindRenderer> 
     }
   },
   ref: {
+    icon: 'i-lucide-link',
     component: 'RecordsFieldsRefField',
     // Hydrated refs carry their label; a bare id (a list row's raw value)
     // only says one is set.
@@ -207,7 +225,19 @@ export function recordsFileSize(bytes: number): string {
 
 /** Unknown kinds (stale orphan fields) fall back to plain-text display. */
 export function recordsRendererFor(kind: string): RecordsKindRenderer {
-  return RECORDS_FIELD_KINDS[kind as RecordsFieldKind] ?? { format: formatText }
+  return RECORDS_FIELD_KINDS[kind as RecordsFieldKind] ?? { icon: 'i-lucide-type', format: formatText }
+}
+
+/**
+ * The icon that stands for a field where its label isn't shown: its own,
+ * else the status, parent or children icon, else its kind's.
+ */
+export function recordsFieldIcon(field: Pick<RecordsFieldSetting, 'kind'> & Partial<Pick<RecordsFieldSetting, 'icon' | 'column' | 'hierarchy'>>): string {
+  if (field.icon) return field.icon
+  if (field.column === 'status') return 'i-lucide-circle-dot'
+  if (field.hierarchy === 'children') return 'i-lucide-list-tree'
+  if (field.hierarchy === 'parent') return 'i-lucide-corner-left-up'
+  return recordsRendererFor(field.kind).icon
 }
 
 export function formatRecordsValue(value: unknown, field: RecordsFieldSetting, ctx?: RecordsFormatContext): string {
