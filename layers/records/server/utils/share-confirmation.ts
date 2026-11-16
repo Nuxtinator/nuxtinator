@@ -73,6 +73,34 @@ async function seesWithoutAssignment(tx: Tx, ctx: TenantContext, typeKey: string
   return !!row
 }
 
+/** Those of `userIds` who can open the record, by any route. */
+export async function recordsUsersWhoSee(
+  tx: Tx,
+  ctx: TenantContext,
+  typeKey: string,
+  recordId: string,
+  userIds: string[]
+): Promise<string[]> {
+  const scope = await recordsVisibilityScope(tx, typeKey)
+  const seeing: string[] = []
+  for (const userId of userIds) {
+    const memberCtx = await memberContext(tx, ctx, userId)
+    if (!(await resolveTypePermission(tx, memberCtx, typeKey, 'read'))) continue
+    if (await resolveTypePermission(tx, memberCtx, typeKey, 'view_all')) {
+      seeing.push(userId)
+      continue
+    }
+    const row = await tx
+      .selectFrom('records_entries')
+      .select('id')
+      .where('id', '=', recordId)
+      .where(eb => visibilityPredicate(eb, userId, scope))
+      .executeTakeFirst()
+    if (row) seeing.push(userId)
+  }
+  return seeing
+}
+
 /**
  * The people a write newly named in the record's access-granting fields (other
  * than the caller) who can't otherwise see it. `before` is the record's field

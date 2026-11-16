@@ -37,7 +37,8 @@ import { normalizeChannelValue } from './normalize'
 import { recordRecordsActivity } from './records-activity'
 import { closingRulesOf, enforceClosingRules } from './closing'
 import { visibleRecordIds } from './list-records'
-import { requireMoveConfirmation, requireShareConfirmation, type RecordsSharingMode } from './share-confirmation'
+import { recordsUsersWhoSee, requireMoveConfirmation, requireShareConfirmation, type RecordsSharingMode } from './share-confirmation'
+import { recordsMentionedUserIds, syncRecordsRichTextImages } from './rich-text'
 import { applyAttachmentsPatch, listRecordAttachments } from './attachments'
 
 type Tx = Transaction<Database>
@@ -428,6 +429,10 @@ function coerceLinkValue(def: RecordsFieldSetting, value: unknown): RecordsLinkV
   return parsed.data
 }
 
+// A rich text value is Markdown, never HTML: readers parse it into the
+// editor's own node types, so nothing in it is rendered as markup.
+const RICH_TEXT_MAX = 100_000
+
 function validateScalar(def: RecordsFieldSetting, raw: unknown): unknown {
   if (raw === null) {
     if (def.column === 'name') badValue(def, 'cannot be empty')
@@ -440,6 +445,11 @@ function validateScalar(def: RecordsFieldSetting, raw: unknown): unknown {
       if (!parsed.success) badValue(def, 'expected a string')
       if (def.column === 'name' && parsed.data.trim() === '') badValue(def, 'cannot be empty')
       return parsed.data
+    }
+    case 'rich_text': {
+      const parsed = z.string().max(RICH_TEXT_MAX).safeParse(raw)
+      if (!parsed.success) badValue(def, `expected Markdown text of at most ${RICH_TEXT_MAX} characters`)
+      return parsed.data.trim() === '' ? null : parsed.data
     }
     case 'number': {
       const parsed = z.number().finite().safeParse(raw)
@@ -819,6 +829,42 @@ async function notifyNewAssignees(
   })))
 }
 
+// Tells the people a write newly mentions in a rich text field, in the app
+// and by email. Only people who can open the record are told: a mention
+// shares nothing, and a notice would give away the record's name.
+async function notifyNewMentions(
+  tx: Tx,
+  ctx: TenantContext,
+  type: { key: string, labelSingular: string, app?: string },
+  record: RecordsHydratedRecord,
+  old: RecordsHydratedRecord | null,
+  richTextKeys: string[]
+): Promise<void> {
+  const added = new Set<string>()
+  for (const key of richTextKeys) {
+    const before = new Set(recordsMentionedUserIds(old?.fields[key]))
+    for (const id of recordsMentionedUserIds(record.fields[key])) {
+      if (!before.has(id) && id !== ctx.userId) added.add(id)
+    }
+  }
+  if (added.size === 0) return
+  const recipients = await recordsUsersWhoSee(tx, ctx, type.key, record.id, [...added])
+  if (recipients.length === 0) return
+  const actor = await tx.selectFrom('users').select('display_name').where('id', '=', ctx.userId).executeTakeFirst()
+  const noun = type.labelSingular.toLowerCase()
+  const article = /^[aeiou]/.test(noun) ? 'an' : 'a'
+  await createNotification(tx, recipients.map(userId => ({
+    userId,
+    appId: type.app ?? 'records',
+    title: `${actor?.display_name || 'Someone'} mentioned you on ${article} ${noun}`,
+    body: record.name,
+    icon: 'i-lucide-at-sign',
+    link: `/records/${type.key}/${record.id}`,
+    actorId: ctx.userId,
+    email: 'immediate' as const
+  })))
+}
+
 // ---------------------------------------------------------------------------
 // applyFieldPatch
 // ---------------------------------------------------------------------------
@@ -1025,10 +1071,23 @@ export async function applyFieldPatch(
     await requireMoveConfirmation(tx, ctx, typeKey, moves, opts.sharing)
   }
 
+  // Images in rich text are files on the record, so a write to either side
+  // is followed through on the other.
+  const allRichTextKeys = defs.filter(d => d.kind === 'rich_text' && !d.orphan).map(d => d.key)
+  const touchesImages = [...scalarOps.keys()].some(key => allRichTextKeys.includes(key))
+    || [...listOps.keys()].some(key => defsByKey.get(key)!.storage === 'attachments')
+  if (allRichTextKeys.length > 0 && touchesImages) {
+    await syncRecordsRichTextImages(tx, id, allRichTextKeys, oldRecord?.fields ?? null)
+  }
+
   const record = await getRecord(tx, ctx, typeKey, id)
 
   if (opts.sharing && [...listOps.keys()].some(key => grantKeys.includes(key))) {
     await notifyNewAssignees(tx, ctx, { key: typeKey, labelSingular: type.labelSingular, app: type.manifest?.app }, record, oldRecord, grantKeys)
+  }
+  const richTextKeys = [...scalarOps.keys()].filter(key => defsByKey.get(key)?.kind === 'rich_text')
+  if (opts.sharing && richTextKeys.length > 0) {
+    await notifyNewMentions(tx, ctx, { key: typeKey, labelSingular: type.labelSingular, app: type.manifest?.app }, record, oldRecord, richTextKeys)
   }
 
   if (isCreate) {

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-// Detail-page header: back link to the list, click-to-rename name (only when
-// the caller can edit this record), a status badge colored from the status
-// field's option settings, the share popover (share/unshare land on the
-// record's timeline, hence the shareChanged re-emit), and a confirm-gated
-// delete button. `canEdit`/`canShare`/`canDelete` are the record detail's
+// Detail header: back link to the list (a page) or a close button (a
+// dialog), click-to-rename name (only when the caller can edit this record),
+// a status badge colored from the status field's option settings, the
+// caller's extra buttons (`actions` slot), the share popover (share/unshare
+// land on the record's timeline, hence the shareChanged re-emit), and a
+// confirm-gated delete button. `canEdit`/`canShare`/`canDelete` are the record detail's
 // server-evaluated capabilities; the page owns the actual delete call, so
 // `deleting` keeps the confirm modal's button spinning until it navigates
 // away (or fails and closes via the page resetting the flag).
@@ -13,8 +14,11 @@ import type { RecordDetail } from '../../composables/useRecordsRecord'
 const props = defineProps<{
   record: RecordDetail
   statusField: RecordsFieldSetting | null
-  backTo: string
-  backLabel: string
+  /** Where the back link goes; without it there is no back link. */
+  backTo?: string | null
+  backLabel?: string
+  /** Shows a close button, for a header inside a dialog. */
+  closable?: boolean
   canEdit: boolean
   canShare: boolean
   canDelete: boolean
@@ -25,6 +29,7 @@ const emit = defineEmits<{
   rename: [name: string]
   shareChanged: []
   delete: []
+  close: []
 }>()
 
 const confirmOpen = ref(false)
@@ -59,6 +64,7 @@ function blurTarget(event: Event) {
 <template>
   <div class="space-y-2">
     <NuxtLink
+      v-if="backTo"
       :to="backTo"
       class="inline-flex items-center gap-1 text-sm text-(--ui-text-muted) hover:text-(--ui-text) transition-colors"
     >
@@ -97,8 +103,10 @@ function blurTarget(event: Event) {
       >
         {{ recordsOptionLabel(statusField, record.status) }}
       </UBadge>
+      <div class="ml-auto flex items-center gap-1">
+        <slot name="actions" />
+      </div>
       <RecordsSharePopover
-        class="ml-auto"
         :record-id="record.id"
         :type-key="record.typeKey"
         :can-share="canShare"
@@ -112,6 +120,15 @@ function blurTarget(event: Event) {
         size="sm"
         aria-label="Delete record"
         @click="confirmOpen = true"
+      />
+      <UButton
+        v-if="closable"
+        icon="i-lucide-x"
+        color="neutral"
+        variant="ghost"
+        size="sm"
+        aria-label="Close"
+        @click="emit('close')"
       />
     </div>
 

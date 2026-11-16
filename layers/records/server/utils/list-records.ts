@@ -95,7 +95,7 @@ export interface RecordsVirtualField {
 }
 
 /** Kinds a virtual field stores as one jsonb scalar; the rest store a jsonb array. */
-export const RECORDS_VIRTUAL_SCALAR_KINDS = new Set(['text', 'textarea', 'number', 'boolean', 'date', 'datetime', 'key_select'])
+export const RECORDS_VIRTUAL_SCALAR_KINDS = new Set(['text', 'textarea', 'rich_text', 'number', 'boolean', 'date', 'datetime', 'key_select'])
 
 export type RecordListItem = RecordRow & {
   /** User ids referenced through user fields — the assignment summary. */
@@ -203,7 +203,7 @@ function scalarExpr(def: RecordsFieldSetting): RawBuilder<unknown> {
   }
 }
 
-const TEXT_KINDS = new Set(['text', 'textarea', 'key_select'])
+const TEXT_KINDS = new Set(['text', 'textarea', 'rich_text', 'key_select'])
 const RANGE_KINDS = new Set(['number', 'date', 'datetime'])
 
 function scalarCond(eb: Eb, def: RecordsFieldSetting, cond: FilterCond): Expression<SqlBool> {
@@ -473,7 +473,7 @@ function scalarRule(
   override?: { lhs: RawBuilder<unknown>, text: RawBuilder<unknown> }
 ): Expression<SqlBool> {
   const lhs = override?.lhs ?? treeScalarLhs(def)
-  const textLike = def.kind === 'text' || def.kind === 'textarea'
+  const textLike = def.kind === 'text' || def.kind === 'textarea' || def.kind === 'rich_text'
   const empty = (): Expression<SqlBool> => textLike
     ? eb.or([eb(lhs, 'is', null), eb(lhs, '=', '')])
     : eb(lhs, 'is', null)

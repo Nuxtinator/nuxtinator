@@ -30,6 +30,8 @@ export {
 export type RecordsFieldKind =
   | 'text'
   | 'textarea'
+  /** Formatted long text, stored as Markdown. */
+  | 'rich_text'
   | 'number'
   | 'boolean'
   | 'date'
@@ -230,7 +232,7 @@ export interface RecordsConnectedRecord {
 }
 
 type FieldValue<F extends RecordsFieldDef> =
-  F['kind'] extends 'text' | 'textarea' ? string | null
+  F['kind'] extends 'text' | 'textarea' | 'rich_text' ? string | null
     : F['kind'] extends 'number' ? number | null
       : F['kind'] extends 'boolean' ? boolean | null
         : F['kind'] extends 'date' | 'datetime' ? string | null

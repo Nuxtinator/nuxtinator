@@ -175,12 +175,30 @@ const isCustom = computed(() => !!tab.value?.definition.columns)
 const tabRecords = computed(() =>
   records.value && records.value.tabId === tab.value?.id ? records.value : null)
 
-// --- slideover --------------------------------------------------------------
+// --- record details ---------------------------------------------------------
 
-const openRecordId = ref<string | null>(null)
-// Opening another view from the slideover (a card's subtasks board) closes it.
+// The open card rides in the URL (?card=), so coming back to the view (from
+// a record its description links to, say) shows it again. An embedded panel
+// keeps it to itself, like its tab.
+const CARD_ID_RE = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
+const embeddedRecordId = ref<string | null>(null)
+const routeRecordId = computed(() =>
+  typeof route.query.card === 'string' && CARD_ID_RE.test(route.query.card) ? route.query.card : null)
+const openRecordId = computed<string | null>({
+  get: () => props.embedded ? embeddedRecordId.value : routeRecordId.value,
+  set: (id) => {
+    if (props.embedded) {
+      embeddedRecordId.value = id
+    } else if (id !== routeRecordId.value) {
+      const query = { ...route.query }
+      delete query.card
+      router.replace({ query: id ? { ...query, card: id } : query })
+    }
+  }
+})
+// Opening another view from the details (a card's subtasks board) closes them.
 watch(viewId, () => {
-  openRecordId.value = null
+  embeddedRecordId.value = null
 })
 
 // --- moves ------------------------------------------------------------------
@@ -1019,7 +1037,7 @@ const menuItems = computed(() => {
       />
     </div>
 
-    <ViewsRecordSlideover
+    <ViewsRecordDetails
       v-if="view"
       v-model:record-id="openRecordId"
       :type-key="view.recordTypeKey"

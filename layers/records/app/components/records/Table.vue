@@ -29,7 +29,7 @@ const UButton = resolveComponent('UButton')
 const UBadge = resolveComponent('UBadge')
 
 // Kinds whose values live in records_entries.data and render from a list row.
-const JSONB_LIST_KINDS = new Set(['text', 'textarea', 'number', 'boolean', 'date', 'datetime', 'key_select'])
+const JSONB_LIST_KINDS = new Set(['text', 'textarea', 'rich_text', 'number', 'boolean', 'date', 'datetime', 'key_select'])
 
 const statusField = computed(() =>
   props.fields.find(f => f.column === 'status') ?? null

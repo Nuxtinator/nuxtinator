@@ -7,7 +7,7 @@
 // shown. User fields render as each person's avatar, named on hover;
 // connection fields as names, a count, or done-progress, per the layout. A
 // cover field's first image tops the card. Clicking the card opens its
-// slideover; clicking its subtasks value opens the board of those subtasks.
+// details; clicking its subtasks value opens the board of those subtasks.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsBoardItem, ViewsConnectionDisplay } from '../../utils/views-types'
 
@@ -52,7 +52,7 @@ function onDragStart(event: DragEvent) {
   emit('dragstart', event)
 }
 
-// The subtasks value opens the card's own board instead of its slideover.
+// The subtasks value opens the card's own board instead of its details.
 const { openBoard } = useViewsSubtasksBoard()
 function onDrill(event: MouseEvent) {
   event.stopPropagation()

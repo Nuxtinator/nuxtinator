@@ -81,7 +81,8 @@ const sentence = computed(() => {
   }
 })
 
-const showValues = computed(() => props.activity.action === 'field_changed')
+// A rich text change shows no before and after: whole documents on one line each say nothing.
+const showValues = computed(() => props.activity.action === 'field_changed' && fieldDef.value?.kind !== 'rich_text')
 </script>
 
 <template>

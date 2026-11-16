@@ -55,6 +55,7 @@ export const RECORDS_OPTION_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/
 export const RECORDS_ADMIN_FIELD_KINDS = [
   'text',
   'textarea',
+  'rich_text',
   'number',
   'boolean',
   'date',

@@ -29,6 +29,15 @@ export default defineNuxtConfig({
     '#records/server': fileURLToPath(new URL('./server/exports/index.ts', import.meta.url))
   },
 
+  // The rich text field takes checklist nodes from TipTap, which Nuxt UI's
+  // editor loads unbundled. A pre-bundled copy would bring a second
+  // ProseMirror, and every editor on the page would fail.
+  vite: {
+    optimizeDeps: {
+      exclude: ['@tiptap/core', '@tiptap/extension-list']
+    }
+  },
+
   nitro: {
     typescript: {
       tsConfig: {

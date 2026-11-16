@@ -3,10 +3,14 @@
 // An empty draft commits null (clears the value).
 import type { RecordsFieldSetting } from '../../../utils/field-kinds'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   field: RecordsFieldSetting
   modelValue: unknown
-}>()
+  /** The editor's height before it grows with its text. */
+  rows?: number
+}>(), {
+  rows: 3
+})
 
 const emit = defineEmits<{
   commit: [value: string | null]
@@ -29,7 +33,7 @@ function commit() {
   <UTextarea
     v-model="draft"
     class="w-full"
-    :rows="3"
+    :rows="rows"
     autoresize
     @blur="commit"
   />

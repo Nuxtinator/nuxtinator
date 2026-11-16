@@ -34,7 +34,7 @@ A member wants to track ways to bake a pizza: oven temperature, time, a rating, 
 
 - Creating a view starts with "What are you tracking?": To-dos (a task board by status), an ideas board (items in their own columns), a list of anything (items), or one of the org's record types the member can create. Everything else (record type, what the view holds, layout, grouping) waits under "More options".
 - Any view, hand-picked or "All ‹type›", can have **fields of its own**. The owner adds, renames and deletes them; anyone with Can edit fills them in; everyone who opens the view sees the same values. Kinds: text, long text, number, yes/no, date, dropdown, multi-select, tags, links, people and files.
-- View fields work like type fields on that view: card fields, table columns, filters, sorts, grouping (a drag between columns sets the value), and the values a new card's filters pin. In the slideover they sit in a section named after the view.
+- View fields work like type fields on that view: card fields, table columns, filters, sorts, grouping (a drag between columns sets the value), and the values a new card's filters pin. In the card's details they sit in a section named after the view.
 - Values stay inside their view: the record page doesn't show them, and a person named in a view's people field gains no access. Taking a card off a hand-picked view drops its values there; deleting a field or the view drops them all.
 - "Copy view" makes a private copy of any view's structure (fields, tabs, columns, filters) with no cards, so a board someone likes becomes the template for the next one.
 - Status: built. Still to come: owners letting editors manage fields, showing a record's view values on its record page, and promoting a view field to a field of the type.
@@ -69,7 +69,7 @@ The planning team has a `deliverable` type that everyone sees. They work in quar
   - single-value fields and user fields **move** the card (dragging to someone's column hands the card to them);
   - multi-select, tags and connections **add** the new value and keep the old one, so a deliverable keeps every quarter it passed through.
 - Adding a milestone from the card itself is the main way to carry a deliverable forward. The drag is a convenience on top.
-- A card can show connected records as names, a count or progress ("3/5 tasks done"). Child records (a deliverable's tasks) are listed in the slideover.
+- A card can show connected records as names, a count or progress ("3/5 tasks done"). Child records (a deliverable's tasks) are listed in the card's details.
 - Status: built. Still to come: selecting several cards and moving them at once (the end-of-quarter bulk move).
 
 ### 4a. A big card broken down, a level at a time

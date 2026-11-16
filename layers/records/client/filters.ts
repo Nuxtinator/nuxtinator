@@ -102,6 +102,8 @@ export function recordsFilterOps(kind: string): RecordsFilterOp[] {
     case 'text':
     case 'textarea':
       return ['contains', 'is', 'empty', 'not_empty']
+    case 'rich_text':
+      return ['contains', 'empty', 'not_empty']
     case 'key_select':
       return ['is', 'is_not', 'any_of', 'none_of', 'empty', 'not_empty']
     case 'multi_select':

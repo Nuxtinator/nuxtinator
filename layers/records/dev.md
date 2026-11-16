@@ -54,6 +54,29 @@ forward-only, since reverse keys pair two code manifests.
 may give any people field one bare user id; the list becomes that person. Any future user-reference field reuses that table;
 "assigned to me" is an indexed EXISTS.
 
+**Rich text is Markdown, not HTML.** A `rich_text` field (a task's description) stores
+a Markdown string in `data`, capped at 100,000 characters. The editor
+(`fields/RichTextField.vue`, Nuxt UI's `UEditor` with `content-type="markdown"`) parses
+it into its own node types, so nothing stored is ever rendered as markup and there is
+no sanitizer to keep in step. Plain text written by agents or older rows is already
+valid, and single newlines stay line breaks. A link to another record is the editor's
+mention node, written `[@ id="<type>/<record id>" label="Name" char="#"]`; the label is
+the name when the link was made. A person is the same node without `char`
+(`[@ id="<user id>" label="Name"]`): a write that newly mentions someone tells them,
+in the app and by email, but only if they can already open the record
+(`notifyNewMentions`), since a mention shares nothing. An image is a file on the
+record's first attachments field, written `![name](attachment:<file id>)`; the editor
+swaps in the file's current signed link to show it and swaps the id back to save.
+After a write to a rich text field or to files, `syncRecordsRichTextImages` deletes a
+file whose image the write took out of the text and strips an image whose file is gone;
+a file the text never showed is left alone. The editor also names, with its commit, the
+images it uploaded that the text doesn't show, so they go in the same write.
+Checkbox lists are GFM (`- [ ]`, `- [x]`). `recordsPlainText` flattens a value for
+cards, tables and exports. A `@tiptap/*` package imported at runtime from layer code
+must be listed in `vite.optimizeDeps.exclude` ([nuxt.config.ts](nuxt.config.ts)): Nuxt
+UI loads TipTap unbundled, and a pre-bundled copy brings a second ProseMirror that
+breaks every editor on the page.
+
 **Only fields that hand a record to someone grant access.** A `user_select` field
 lets the people it names see the record only when its def says `grantsAccess`
 (task's assignee, contacts' assigned to); every other people field (an item's

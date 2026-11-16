@@ -136,6 +136,36 @@ describe('attachments fields', () => {
     return id
   }
 
+  it('keeps the images in a description and the record\'s files in step', async () => {
+    const { org, auth } = await createRecordsOrgWith(sql, ['member'])
+    const owner = withOrgHeader(auth, org.slug)
+    const task = await create(owner, 'task', { name: 'test-records Illustrated' })
+    const shot = await seedFile(org.id, task.id, 'shot.png', 0)
+    const chart = await seedFile(org.id, task.id, 'chart.png', 1)
+    const contract = await seedFile(org.id, task.id, 'contract.png', 2)
+    const image = (id: string) => `![x](attachment:${id})`
+    const fileIds = (rec: RecordDetail) => (rec.fields.attachments as Array<{ id: string }>).map(f => f.id)
+
+    // A file the text never shows is left alone throughout.
+    const both = await patch(owner, 'task', task.id, { description: `Before ${image(shot)} between ${image(chart)} after` })
+    expect(fileIds(both)).toEqual([shot, chart, contract])
+
+    // Taking an image out of the text deletes its file.
+    const oneLeft = await patch(owner, 'task', task.id, { description: `Before between ${image(chart)} after` })
+    expect(fileIds(oneLeft)).toEqual([chart, contract])
+
+    // Removing a file takes its image out of the text.
+    const noImages = await patch(owner, 'task', task.id, { attachments: { values: [{ value: chart, delete: true }] } })
+    expect(fileIds(noImages)).toEqual([contract])
+    expect(noImages.fields.description).toBe('Before between  after')
+
+    // An image whose file doesn't exist is never stored.
+    const dangling = await patch(owner, 'task', task.id, { description: `Gone ${image(randomUUID())}` })
+    expect(dangling.fields.description).toBe('Gone ')
+    expect(fileIds(dangling)).toEqual([contract])
+    await sql`DELETE FROM records_attachment_trash WHERE storage_key LIKE 'records/test-records-%'`
+  })
+
   it('hydrates files in order, removes them through a patch, and filters by presence', async () => {
     const { org, auth } = await createRecordsOrgWith(sql, ['member'])
     const owner = withOrgHeader(auth, org.slug)

@@ -172,6 +172,35 @@ describe('assignment notifications', () => {
     expect(await notificationsFor(sam.user.id)).toHaveLength(2)
   })
 
+  it('tells someone newly mentioned in a description, only when they can open the record', async () => {
+    const { org, auth, user } = await createRecordsOrgWith(sql, ['member'])
+    const owner = withOrgHeader(auth, org.slug)
+    const sam = await addRecordsMember(sql, org.id)
+    const kim = await addRecordsMember(sql, org.id)
+    const at = (id: string, name: string) => `[@ id="${id}" label="${name}"]`
+
+    // Sam is assigned, so can open the task; Kim can't.
+    const task = await create(owner, 'task', { name: 'test-records Plan the launch', assignee: [sam.user.id] }, true)
+    expect(await notificationsFor(sam.user.id)).toHaveLength(1)
+
+    const description = `Ask ${at(sam.user.id, 'Sam')} and ${at(kim.user.id, 'Kim')}, cc ${at(user.id, 'Me')}. See [@ id="task/${task.id}" label="Plan" char="#"]`
+    await patch(owner, 'task', task.id, { description })
+    const sent = await notificationsFor(sam.user.id)
+    expect(sent).toHaveLength(2)
+    expect(sent[1]).toMatchObject({
+      title: `${user.display_name} mentioned you on a task`,
+      body: 'test-records Plan the launch',
+      link: `/records/task/${task.id}`,
+      email_mode: 'immediate'
+    })
+    expect(await notificationsFor(kim.user.id)).toHaveLength(0)
+    expect(await notificationsFor(user.id)).toHaveLength(0)
+
+    // An edit that keeps the mention tells nobody again.
+    await patch(owner, 'task', task.id, { description: `${description} Thanks.` })
+    expect(await notificationsFor(sam.user.id)).toHaveLength(2)
+  })
+
   it('doesn\'t notify for people fields that don\'t hand the record over', async () => {
     const { org, auth } = await createRecordsOrgWith(sql, ['member'])
     const owner = withOrgHeader(auth, org.slug)

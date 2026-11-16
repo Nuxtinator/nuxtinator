@@ -87,6 +87,35 @@ describe('PATCH /api/records/entries/contacts/:id (jsonb)', () => {
   })
 })
 
+describe('rich text fields', () => {
+  it('stores Markdown as written, clears on empty text, and refuses non-strings and oversized text', async () => {
+    const { org, auth } = await createRecordsOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    const patch = (id: string, description: unknown) => $fetch<RecordDetail>(`/api/records/entries/task/${id}`, {
+      method: 'PATCH',
+      body: { fields: { description } },
+      ...opts
+    })
+    const markdown = '# Plan\n\n- one\n- **two**\n\nSee [@ id="task/00000000-0000-4000-8000-000000000000" label="Other" char="#"]'
+    const task = await $fetch<RecordDetail>('/api/records/entries/task', {
+      method: 'POST',
+      body: { fields: { name: 'test-records Write the plan', description: markdown } },
+      ...opts
+    })
+    expect(task.fields.description).toBe(markdown)
+
+    expect((await patch(task.id, '   ')).fields.description).toBeNull()
+    expect((await patch(task.id, { html: '<b>x</b>' }).catch(e => e)).statusCode).toBe(400)
+    expect((await patch(task.id, 'x'.repeat(100_001)).catch(e => e)).statusCode).toBe(400)
+
+    const found = await $fetch<{ items: Array<{ id: string }> }>('/api/records/entries/task', {
+      query: { filters: JSON.stringify({ description: { contains: 'nothing like this' } }) },
+      ...opts
+    })
+    expect(found.items).toEqual([])
+  })
+})
+
 describe('PATCH multi-value fields (entries)', () => {
   it('adds, removes, and force-replaces entry values', async () => {
     const { org, auth } = await createRecordsOrgWith(sql, ['admin'])

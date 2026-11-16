@@ -51,7 +51,7 @@ export const taskManifest = defineRecordType({
     tags: { kind: 'tags', label: 'Tags', section: 'details', order: 7 },
     parent: { kind: 'connection', label: 'Parent task', target: 'task', reverseKey: 'subtasks', hierarchy: 'parent', section: 'details', order: 8 },
     subtasks: { kind: 'connection', label: 'Subtasks', target: 'task', reverseKey: 'parent', hierarchy: 'children', section: 'details', order: 9 },
-    description: { kind: 'textarea', label: 'Description', section: 'details', order: 10 },
+    description: { kind: 'rich_text', label: 'Description', section: 'details', order: 10 },
     attachments: { kind: 'attachments', label: 'Attachments', icon: 'i-lucide-paperclip', section: 'details', order: 11 }
   },
   card: {

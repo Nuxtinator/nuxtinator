@@ -83,6 +83,28 @@ function formatDateValue(value: unknown, withTime: boolean): string {
   return withTime ? d.toLocaleString() : d.toLocaleDateString()
 }
 
+/** A record link (`char="#"`) or a person as rich text stores them: `[@ id="…" label="Name"]`. */
+const RICH_TEXT_MENTION_RE = /\[@\s+([^\]]*)\]/g
+
+/**
+ * A rich text value (Markdown) as one run of plain text, for table cells,
+ * cards and activity rows: links, images, record links and people keep their
+ * text, and heading, list, checkbox, quote and emphasis marks are dropped.
+ */
+export function recordsPlainText(markdown: string): string {
+  return markdown
+    .replace(RICH_TEXT_MENTION_RE, (_m, attrs: string) => {
+      const label = /label="([^"]*)"/.exec(attrs)?.[1]
+      const char = /char="([^"]*)"/.exec(attrs)?.[1] ?? '@'
+      return label ? `${char}${label}` : ''
+    })
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s*(?:#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)(?:\[[ xX]\]\s+)?/gm, '')
+    .replace(/(\*\*|__|~~|`)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export const RECORDS_FIELD_KINDS: Record<RecordsFieldKind, RecordsKindRenderer> = {
   text: {
     icon: 'i-lucide-type',
@@ -93,6 +115,11 @@ export const RECORDS_FIELD_KINDS: Record<RecordsFieldKind, RecordsKindRenderer> 
     icon: 'i-lucide-align-left',
     component: 'RecordsFieldsTextareaField',
     format: formatText
+  },
+  rich_text: {
+    icon: 'i-lucide-align-left',
+    component: 'RecordsFieldsRichTextField',
+    format: value => typeof value === 'string' && value.trim() !== '' ? recordsPlainText(value) || EMPTY : EMPTY
   },
   number: {
     icon: 'i-lucide-hash',

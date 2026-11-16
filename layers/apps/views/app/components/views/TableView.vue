@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Table renderer: name + the view's card fields as columns, read-only —
-// clicking a row opens the slideover. Values come from the record row
+// clicking a row opens its details. Values come from the record row
 // (status, timestamps, jsonb fields), from the side-table values the feed
 // attaches for the chosen keys, or from the view's own field values, so any
 // field of the type or the view can be a column.

@@ -157,7 +157,7 @@ async function lastActivity(tx: Tx, ids: string[]): Promise<Map<string, string>>
 export const listRecordTypesTool = defineMcpTool({
   name: 'records_list_types',
   title: 'List Record Types',
-  description: 'List the record types you can read (tasks, items, contacts when the CRM is on, and any the org created), with their fields, options, which statuses mean closed and the reasons for closing. Call this before creating or updating records so you know the field keys and allowed values — and before creating a record type, so you reuse or extend one that already fits.',
+  description: 'List the record types you can read (tasks, items, contacts when the CRM is on, and any the org created), with their fields, options, which statuses mean closed and the reasons for closing. A field of kind rich_text (the description of a task) holds Markdown. Call this before creating or updating records so you know the field keys and allowed values — and before creating a record type, so you reuse or extend one that already fits.',
   appId: 'records',
   scope: 'records.read',
   readOnly: true,

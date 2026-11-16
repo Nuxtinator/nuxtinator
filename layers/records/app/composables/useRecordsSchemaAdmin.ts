@@ -60,6 +60,7 @@ export interface RecordsUpdateFieldPatch {
 export const RECORDS_ADMIN_KIND_OPTIONS: Array<{ value: string, label: string }> = [
   { value: 'text', label: 'Text' },
   { value: 'textarea', label: 'Long text' },
+  { value: 'rich_text', label: 'Rich text' },
   { value: 'number', label: 'Number' },
   { value: 'boolean', label: 'Yes / no' },
   { value: 'date', label: 'Date' },

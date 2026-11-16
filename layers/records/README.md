@@ -26,7 +26,7 @@ Every record type has a status field, so every record can be closed. A type whos
 
 `item` — a freeform card: name, notes, tags, link, date, people, priority (low / medium / high), attachments (its first image is the card cover) and the default Open / Done status. People only records who's involved: naming someone doesn't share the item.
 
-`task` — name, status (To do / In progress / Done, keyed `open` / `in_progress` / `done`; done is closed), assignees (one or more people; a write may give a single user id in place of the list), priority (low to urgent), start and due dates, tags, parent task with subtasks (cards show subtask progress), description and attachments. Tasks nest to any depth; see Hierarchies.
+`task` — name, status (To do / In progress / Done, keyed `open` / `in_progress` / `done`; done is closed), assignees (one or more people; a write may give a single user id in place of the list), priority (low to urgent), start and due dates, tags, parent task with subtasks (cards show subtask progress), description (rich text) and attachments. Tasks nest to any depth; see Hierarchies.
 
 ## Hierarchies
 
@@ -66,7 +66,7 @@ Naming someone in an access-granting field who can't otherwise see the record sh
 
 ## Notifications
 
-A person's write that newly names someone in an access-granting people field (a task's assignee, a contact's assigned to) tells them, in the app and by email: "Jane assigned you a task", linking to the record. The writer is never told about their own change, and system writes (no `sharing` option) send nothing.
+A person's write that newly mentions someone in a rich text field ("@" in a task's description) tells them the same way ("Jane mentioned you on a task"), but only if they can already open the record: a mention never shares it. A person's write that newly names someone in an access-granting people field (a task's assignee, a contact's assigned to) tells them, in the app and by email: "Jane assigned you a task", linking to the record. The writer is never told about their own change, and system writes (no `sharing` option) send nothing.
 
 ## Permissions
 
