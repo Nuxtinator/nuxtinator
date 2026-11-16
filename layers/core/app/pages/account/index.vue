@@ -6,9 +6,7 @@ definePageMeta({
 
 <template>
   <div class="max-w-2xl mx-auto space-y-6">
-    <h1 class="text-3xl font-bold">
-      Account Settings
-    </h1>
+    <PageTitle title="Account settings" />
 
     <SettingsGroup title="Profile">
       <AccountAvatar />

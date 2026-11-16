@@ -61,12 +61,10 @@ const formatWhen = (ts: string) => {
 <template>
   <div class="max-w-5xl mx-auto">
     <div class="space-y-4">
-      <h1 class="text-3xl font-bold">
-        Activity log
-      </h1>
-      <p class="text-sm text-(--ui-text-muted)">
-        Audit events scoped to this organization. Host-wide events (login, registration) are not visible here.
-      </p>
+      <PageTitle
+        title="Activity log"
+        help="Audit events scoped to this organization. Host-wide events (login, registration) are not visible here."
+      />
 
       <div
         v-if="logs.length === 0 && !loading"

@@ -26,23 +26,20 @@ const allAutoUpdating = computed(() => rows.value.length > 0 && rows.value.every
 
 <template>
   <div class="space-y-4">
-    <header class="flex items-start justify-between gap-3">
-      <div>
-        <h1 class="text-2xl font-bold flex items-center gap-2">
-          Updates
-          <UBadge
-            v-if="availableCount > 0"
-            color="primary"
-            variant="subtle"
-            size="sm"
-          >
-            {{ availableCount }} available
-          </UBadge>
-        </h1>
-        <p class="text-sm text-(--ui-text-muted)">
-          Versions available for the layers this app runs. Updates take effect on your next deploy.
-        </p>
-      </div>
+    <PageTitle
+      title="Updates"
+      help="Versions available for the layers this app runs. Updates take effect on your next deploy."
+    >
+      <template #badge>
+        <UBadge
+          v-if="availableCount > 0"
+          color="primary"
+          variant="subtle"
+          size="sm"
+        >
+          {{ availableCount }} available
+        </UBadge>
+      </template>
       <UButton
         icon="i-lucide-refresh-cw"
         color="neutral"
@@ -53,7 +50,7 @@ const allAutoUpdating = computed(() => rows.value.length > 0 && rows.value.every
       >
         Check now
       </UButton>
-    </header>
+    </PageTitle>
 
     <div
       v-if="rows.length === 0"

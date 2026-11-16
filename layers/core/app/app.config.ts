@@ -18,6 +18,18 @@ export default defineAppConfig({
         close: 'toast-countdown rounded-full'
       }
     },
+    // An alert is a tinted panel with coloured text unless it asks for another variant.
+    alert: {
+      defaultVariants: {
+        variant: 'subtle'
+      }
+    },
+    // Column headers are quiet labels, the same size whether or not the column sorts.
+    table: {
+      slots: {
+        th: 'text-xs font-medium text-default'
+      }
+    },
     card: {
       defaultVariants: {
         variant: 'subtle'

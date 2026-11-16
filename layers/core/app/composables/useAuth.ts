@@ -63,11 +63,11 @@ export const useAuth = () => {
         return { success: true }
       }
 
-      return { success: false, message: 'Login failed' }
+      return { success: false, message: 'Sign in failed' }
     } catch (error: any) {
       return {
         success: false,
-        message: error.data?.message || 'An error occurred during login'
+        message: error.data?.message || 'An error occurred while signing in'
       }
     }
   }

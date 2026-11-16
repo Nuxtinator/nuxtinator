@@ -20,11 +20,8 @@ const searchUsers = async (q: string): Promise<GroupsManagerUser[]> => {
     :search-users="searchUsers"
   >
     <template #header="{ mode }">
-      <header class="flex items-center gap-1">
-        <h1 class="text-2xl font-bold">
-          Groups
-        </h1>
-        <InfoTip>
+      <PageTitle title="Groups">
+        <template #help>
           <p v-if="tenancyOn">
             Groups are named sets of users. List a group on a personal app's access to open the app for its members.
           </p>
@@ -37,8 +34,8 @@ const searchUsers = async (q: string): Promise<GroupsManagerUser[]> => {
           <p v-else>
             Groups run as audiences: members don't see the group's other members. Change this under Settings.
           </p>
-        </InfoTip>
-      </header>
+        </template>
+      </PageTitle>
     </template>
   </GroupsManager>
 </template>

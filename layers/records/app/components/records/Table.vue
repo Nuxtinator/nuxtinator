@@ -81,7 +81,7 @@ const columns = computed<TableColumn<RecordListItem>[]>(() => [
   {
     accessorKey: 'name',
     header: sortableHeader('Name', 'name'),
-    cell: ({ row }) => h('span', { class: 'font-medium' }, row.original.name || '—')
+    cell: ({ row }) => h('span', { class: 'font-medium text-(--ui-text-highlighted)' }, row.original.name || '—')
   },
   ...(statusField.value
     ? [{
@@ -119,7 +119,7 @@ const columns = computed<TableColumn<RecordListItem>[]>(() => [
   {
     accessorKey: 'updatedAt',
     header: sortableHeader('Updated', 'updated_at'),
-    cell: ({ row }) => new Date(row.original.updatedAt).toLocaleString()
+    cell: ({ row }) => formatDateTime(row.original.updatedAt)
   }
 ])
 

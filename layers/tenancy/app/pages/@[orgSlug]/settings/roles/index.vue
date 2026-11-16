@@ -58,22 +58,17 @@ const onDeleteCustom = async (r: CustomRole) => {
 <template>
   <div class="max-w-4xl mx-auto">
     <div class="space-y-8">
-      <header class="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1 class="text-3xl font-bold">
-            Roles
-          </h1>
-          <p class="text-sm text-(--ui-text-muted)">
-            Edit static-role overrides or create custom roles for this organization.
-          </p>
-        </div>
+      <PageTitle
+        title="Roles"
+        help="Edit static-role overrides or create custom roles for this organization."
+      >
         <UButton
           :to="`/@${orgSlug}/settings/roles/new`"
           icon="i-lucide-plus"
         >
           New custom role
         </UButton>
-      </header>
+      </PageTitle>
 
       <section class="space-y-3">
         <div class="flex items-end justify-between">

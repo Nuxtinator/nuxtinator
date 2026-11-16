@@ -325,8 +325,8 @@ async function removeRecord() {
       />
 
       <p class="text-xs text-(--ui-text-muted)">
-        Created {{ new Date(record.createdAt).toLocaleString() }}
-        · Updated {{ new Date(record.updatedAt).toLocaleString() }}
+        Created {{ formatDateTime(record.createdAt) }}
+        · Updated {{ formatDateTime(record.updatedAt) }}
       </p>
     </template>
 

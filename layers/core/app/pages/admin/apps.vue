@@ -270,19 +270,12 @@ const onRemove = async () => {
 
 <template>
   <div class="space-y-4">
-    <header>
-      <h1 class="text-2xl font-bold">
-        Apps
-      </h1>
-      <p class="text-sm text-(--ui-text-muted)">
-        <template v-if="tenancyEnabled">
-          Set the global availability for each app. Each option is described in the dropdown.
-        </template>
-        <template v-else>
-          Enable or disable each app for this instance.
-        </template>
-      </p>
-    </header>
+    <PageTitle
+      title="Apps"
+      :help="tenancyEnabled
+        ? 'Set the global availability for each app. Each option is described in the dropdown.'
+        : 'Enable or disable each app for this instance.'"
+    />
 
     <div
       v-if="pending && apps.length === 0"

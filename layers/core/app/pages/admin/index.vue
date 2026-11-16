@@ -10,9 +10,10 @@ const links = computed(() => sections.value.filter(s => s.path !== '/admin'))
 
 <template>
   <div>
-    <h1 class="text-3xl font-bold mb-6">
-      Dashboard
-    </h1>
+    <PageTitle
+      title="Dashboard"
+      class="mb-6"
+    />
     <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
       <NuxtLink
         v-for="section in links"

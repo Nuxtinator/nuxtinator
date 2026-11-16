@@ -25,15 +25,12 @@ const searchUsers = async (q: string): Promise<GroupsManagerUser[]> => {
       mode-editable
     >
       <template #header>
-        <header class="flex items-center gap-1">
-          <h1 class="text-3xl font-bold">
-            Groups
-          </h1>
-          <InfoTip>
+        <PageTitle title="Groups">
+          <template #help>
             <p>Groups are named sets of this organization's members. List a group on an app's access, under Apps, to open the app only for its members.</p>
             <p>When groups run as teams, a project or portfolio can be limited to teams too.</p>
-          </InfoTip>
-        </header>
+          </template>
+        </PageTitle>
       </template>
     </GroupsManager>
   </div>

@@ -103,7 +103,7 @@ async function revokeOthers() {
                 </UBadge>
               </div>
               <div class="text-sm text-(--ui-text-muted)">
-                Last active {{ new Date(s.last_used_at).toLocaleString() }}<span v-if="s.ip"> · {{ s.ip }}</span>
+                Last active {{ formatDateTime(s.last_used_at) }}<span v-if="s.ip"> · {{ s.ip }}</span>
               </div>
             </div>
             <UButton

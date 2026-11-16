@@ -293,13 +293,6 @@ const sortIcon = (field: typeof sortField.value) => {
   return sortDir.value === 'asc' ? 'i-lucide-arrow-up' : 'i-lucide-arrow-down'
 }
 
-const formatDate = (value: string | Date | null | undefined) => {
-  if (!value) return '—'
-  const d = typeof value === 'string' ? new Date(value) : value
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString()
-}
-
 const sortableHeader = (label: string, field: typeof sortField.value) => () =>
   h(UButton, {
     variant: 'ghost',
@@ -318,7 +311,7 @@ const columns: TableColumn<AdminUserRow>[] = [
     accessorKey: 'display_name',
     header: sortableHeader('Name', 'display_name'),
     cell: ({ row }) => h('div', { class: 'flex items-center gap-2' }, [
-      h('span', {}, row.original.display_name || '—'),
+      h('span', { class: 'font-medium text-(--ui-text-highlighted)' }, row.original.display_name || '—'),
       row.original.is_admin
         ? h(UBadge, { color: 'warning', variant: 'subtle', size: 'sm' }, () => 'Host admin')
         : null
@@ -358,17 +351,23 @@ const columns: TableColumn<AdminUserRow>[] = [
   {
     accessorKey: 'created',
     header: sortableHeader('Created', 'created'),
-    cell: ({ row }) => formatDate(row.original.created)
+    cell: ({ row }) => formatDateTime(row.original.created)
   },
   {
     accessorKey: 'last_login',
     header: sortableHeader('Last login', 'last_login'),
-    cell: ({ row }) => formatDate(row.original.last_login)
+    cell: ({ row }) => formatDateTime(row.original.last_login)
   }
 ]
 
 const total = computed(() => data.value?.total ?? 0)
 const rows = computed(() => data.value?.rows ?? [])
+
+// A page past the last one (its only row was just deleted) steps back to the last page.
+watch(total, (count) => {
+  const last = Math.max(1, Math.ceil(count / pageSize.value))
+  if (page.value > last) page.value = last
+})
 
 // Edit slideover state
 const selectedUser = ref<AdminUserRow | null>(null)
@@ -787,28 +786,24 @@ const handleDelete = async () => {
 
 <template>
   <div class="space-y-4">
-    <header class="flex items-center justify-between gap-3">
-      <div>
-        <h1 class="text-2xl font-bold">
-          Users
-        </h1>
-        <p class="text-sm text-(--ui-text-muted)">
-          Global user accounts. Org membership is managed under each org's settings.
-        </p>
-      </div>
+    <PageTitle
+      title="Users"
+      help="Global user accounts. Org membership is managed under each org's settings."
+    >
       <UButton
         icon="i-lucide-user-plus"
         @click="openInvite"
       >
         Invite user
       </UButton>
-    </header>
+    </PageTitle>
 
     <UInput
       v-model="search"
       icon="i-lucide-search"
       placeholder="Search by name or email"
       size="md"
+      class="w-full sm:w-72"
     />
 
     <UAlert
@@ -831,6 +826,7 @@ const handleDelete = async () => {
         {{ total }} user{{ total === 1 ? '' : 's' }}
       </span>
       <UPagination
+        v-if="total > pageSize || page > 1"
         v-model:page="page"
         :items-per-page="pageSize"
         :total="total"
@@ -867,7 +863,7 @@ const handleDelete = async () => {
               <span v-if="inv.orgs.length">{{ inv.orgs.map(o => o.name).join(', ') }} · </span>
               <span v-if="inv.apps?.length">{{ inv.apps.map(a => a.title).join(', ') }} · </span>
               <span v-if="inv.inviter_name">by {{ inv.inviter_name }} · </span>
-              expires {{ formatDate(inv.expires_at) }}
+              expires {{ formatDateTime(inv.expires_at) }}
             </div>
           </div>
           <div class="flex gap-2 shrink-0">

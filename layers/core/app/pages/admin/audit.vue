@@ -91,9 +91,7 @@ const formatWhen = (ts: string) => {
 
 <template>
   <div class="space-y-4">
-    <h1 class="text-2xl font-bold">
-      Activity log
-    </h1>
+    <PageTitle title="Activity log" />
 
     <div
       v-if="tenancyEnabled"

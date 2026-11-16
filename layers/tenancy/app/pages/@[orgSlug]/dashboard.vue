@@ -67,7 +67,7 @@ const isSuspended = computed(() => (error.value as { statusCode?: number } | nul
     <template v-else-if="org">
       <header class="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 class="text-3xl font-bold">
+          <h1 class="text-2xl font-semibold tracking-tight text-(--ui-text-highlighted)">
             {{ org.name }}
           </h1>
           <p class="text-sm text-(--ui-text-muted)">

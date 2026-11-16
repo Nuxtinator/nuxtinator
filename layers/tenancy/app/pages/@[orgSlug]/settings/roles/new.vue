@@ -53,10 +53,7 @@ const submit = async () => {
 
 <template>
   <div class="max-w-3xl mx-auto space-y-6">
-    <header class="flex items-center justify-between gap-3">
-      <h1 class="text-3xl font-bold">
-        New custom role
-      </h1>
+    <PageTitle title="New custom role">
       <UButton
         variant="outline"
         :to="`/@${orgSlug}/settings/roles`"
@@ -64,7 +61,7 @@ const submit = async () => {
       >
         Cancel
       </UButton>
-    </header>
+    </PageTitle>
 
     <form
       class="space-y-4"

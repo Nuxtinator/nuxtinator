@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// One row of a SettingsGroup card: label and current value on the left,
-// actions on the right, and a panel underneath that shows while `open`.
-defineProps<{ label: string, value?: string, open?: boolean }>()
+// One row of a SettingsGroup card: label, an optional (i) explanation and
+// current value on the left, actions on the right, and a panel underneath
+// that shows while `open`.
+defineProps<{ label: string, help?: string, value?: string, open?: boolean }>()
 </script>
 
 <template>
@@ -10,8 +11,17 @@ defineProps<{ label: string, value?: string, open?: boolean }>()
       <div class="flex items-center gap-3 min-w-0">
         <slot name="leading" />
         <div class="min-w-0">
-          <div class="font-medium">
+          <div class="font-medium flex items-center gap-1">
             {{ label }}
+            <InfoTip
+              v-if="help || $slots.help"
+              :text="help"
+            >
+              <slot
+                v-if="$slots.help"
+                name="help"
+              />
+            </InfoTip>
           </div>
           <div
             v-if="value || $slots.default"

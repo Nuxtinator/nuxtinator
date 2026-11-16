@@ -65,47 +65,39 @@ async function onSetGroupMode(groupMode: 'audiences' | 'teams') {
 
 <template>
   <div class="space-y-4">
-    <h1 class="text-2xl font-bold">
-      Settings
-    </h1>
+    <PageTitle title="Settings" />
 
-    <UCard v-if="data">
-      <div class="flex items-start justify-between gap-4">
-        <div>
-          <h2 class="font-medium">
-            {{ data.labels.selfRegistration }}
-          </h2>
-          <p class="text-sm text-(--ui-text-muted)">
-            Let anyone create an account from the sign-up page or by signing in with a provider.
-            When off, new people can join only through an invitation.
-          </p>
-        </div>
-        <USwitch
-          :model-value="data.selfRegistration"
-          :disabled="saving"
-          size="lg"
-          @update:model-value="onSetSelfRegistration"
-        />
-      </div>
-    </UCard>
+    <SettingsGroup v-if="data">
+      <SettingsRow :label="data.labels.selfRegistration">
+        <template #help>
+          <p>Let anyone create an account from the sign-up page or by signing in with a provider.</p>
+          <p>When off, new people can join only through an invitation.</p>
+        </template>
+        <template #actions>
+          <USwitch
+            :model-value="data.selfRegistration"
+            :disabled="saving"
+            size="lg"
+            @update:model-value="onSetSelfRegistration"
+          />
+        </template>
+      </SettingsRow>
 
-    <UCard v-if="data">
-      <div class="flex items-center justify-between gap-4">
-        <h2 class="font-medium flex items-center gap-1">
-          {{ data.labels.groupMode }}
-          <InfoTip>
-            <p>Audiences: groups only decide who can open apps. Members don't see the group's other members.</p>
-            <p>Teams: members see their groups and each other.</p>
-          </InfoTip>
-        </h2>
-        <USelect
-          :model-value="data.groupMode"
-          :items="GROUP_MODE_OPTIONS"
-          :disabled="saving"
-          class="w-40"
-          @update:model-value="(v: string) => onSetGroupMode(v as 'audiences' | 'teams')"
-        />
-      </div>
-    </UCard>
+      <SettingsRow :label="data.labels.groupMode">
+        <template #help>
+          <p>Audiences: groups only decide who can open apps. Members don't see the group's other members.</p>
+          <p>Teams: members see their groups and each other.</p>
+        </template>
+        <template #actions>
+          <USelect
+            :model-value="data.groupMode"
+            :items="GROUP_MODE_OPTIONS"
+            :disabled="saving"
+            class="w-40"
+            @update:model-value="(v: string) => onSetGroupMode(v as 'audiences' | 'teams')"
+          />
+        </template>
+      </SettingsRow>
+    </SettingsGroup>
   </div>
 </template>

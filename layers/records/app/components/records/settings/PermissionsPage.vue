@@ -20,19 +20,18 @@ const canManage = admin.canManage
 
 <template>
   <div class="max-w-4xl mx-auto space-y-6">
-    <header class="flex items-center gap-2">
-      <UButton
-        icon="i-lucide-arrow-left"
-        variant="ghost"
-        color="neutral"
-        size="sm"
-        aria-label="Back to records settings"
-        :to="settingsPath()"
-      />
-      <h1 class="flex-1 text-3xl font-bold truncate">
-        Roles &amp; permissions
-      </h1>
-    </header>
+    <PageTitle title="Roles & permissions">
+      <template #leading>
+        <UButton
+          icon="i-lucide-arrow-left"
+          variant="ghost"
+          color="neutral"
+          size="sm"
+          aria-label="Back to records settings"
+          :to="settingsPath()"
+        />
+      </template>
+    </PageTitle>
 
     <div class="space-y-8">
       <div
