@@ -364,7 +364,7 @@ export const listTimelineTool = defineMcpTool({
 
 // ─── Write tools ────────────────────────────────────────────────────────────
 
-const shareInput = z.boolean().optional().describe('Set true to assign someone (an assignee or other access-granting people field) who can\'t see the record yet; doing so shares it with them. Without it the call is refused and names those people, so confirm with the user first.')
+const shareInput = z.boolean().optional().describe('Set true to assign someone (an assignee or other access-granting people field) who can\'t see the record yet, or to move an existing task under a parent other people can see; either shares it (a task under a parent is seen by everyone who sees the parent). Without it the call is refused and says who it would be shared with, so confirm with the user first.')
 
 export const createRecordTool = defineMcpTool({
   name: 'records_create',

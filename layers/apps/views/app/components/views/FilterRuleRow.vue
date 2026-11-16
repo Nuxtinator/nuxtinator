@@ -8,7 +8,8 @@ import {
   RECORDS_FILTER_ME,
   RECORDS_FILTER_OP_LABELS,
   RECORDS_FILTER_VALUE_SHAPE,
-  recordsFilterOps
+  recordsFilterOps,
+  recordsFilterOpsFor
 } from '#records'
 import type { RecordsFilterOp, RecordsFilterRule } from '#records/client'
 import type { ViewsFilterField } from '../../utils/views-filters'
@@ -25,7 +26,7 @@ const emit = defineEmits<{
 }>()
 
 const field = computed(() => props.fields.find(f => f.key === props.rule.field) ?? null)
-const ops = computed(() => field.value ? recordsFilterOps(field.value.kind) : [])
+const ops = computed(() => field.value ? recordsFilterOpsFor(field.value) : [])
 const shape = computed(() => RECORDS_FILTER_VALUE_SHAPE[props.rule.op])
 
 const fieldItems = computed(() => props.fields.map(f => ({ label: f.label, value: f.key })))

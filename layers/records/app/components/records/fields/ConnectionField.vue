@@ -95,8 +95,9 @@ const items = computed<RecordItem[]>(() => {
 
 const selectedIds = computed(() => current.value.map(c => c.id))
 
+// A record has one parent: picking another replaces it.
 function onChange(value: string[]) {
-  emit('commit', value)
+  emit('commit', props.field.hierarchy === 'parent' ? value.slice(-1) : value)
 }
 </script>
 

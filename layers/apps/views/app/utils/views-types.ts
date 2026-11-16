@@ -105,6 +105,18 @@ export interface ViewDetail extends Omit<ViewSummary, 'layout' | 'tabCount' | 't
   orgLevel: ViewsShareLevel
   /** Records created on this hand-picked view and on no other — deleted with it. */
   ownCardCount: number
+  /** The record a built-in view stands for (a task's subtasks board), else null. */
+  recordId: string | null
+  /** The views above a built-in that stands for a record, outermost first. */
+  trail: Array<{ id: string, name: string }>
+}
+
+/** The built-in view that shows one task's subtasks as a board. */
+export const VIEWS_SUBTASKS_KEY = 'subtasks'
+
+/** The id of the view showing what sits under record `recordId`. */
+export function viewsSubtasksViewId(recordId: string): string {
+  return `builtin.${VIEWS_SUBTASKS_KEY}.${recordId}`
 }
 
 /**

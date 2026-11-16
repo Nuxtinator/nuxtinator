@@ -16,7 +16,8 @@
 // records naming them in an access-granting people field (an assignee,
 // records_user_refs), plus
 // whatever registered visibility sources grant (records on boards they can
-// open) for types that allow it.
+// open) for types that allow it. On a type with a hierarchy, a caller who
+// sees a record by any of those also sees every record under it.
 // Routes never inline these clauses — they go through `listRecords` /
 // `assertRecordVisible`.
 
@@ -26,12 +27,13 @@ import { z } from 'zod'
 import type { Database } from '#core/server/database/schema'
 import { isAppEnabledForCurrentOrg, type TenantContext } from '#tenant/server'
 import { APP_TEAM_GATE_MESSAGE, isAppOpenToUser } from '#core/server/utils/groups'
-import { getRecordType, getRecordTypes, getRecordTypeFields, recordsAccessGrantingKeys, recordsStatusDefault, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
+import { getRecordType, getRecordTypes, getRecordTypeFields, recordsAccessGrantingKeys, recordsHierarchy, recordsStatusDefault, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
 import { resolveTypePermission } from './type-permissions'
+import { anyAncestor } from './ancestors'
 import type { RecordRow } from './record-storage'
 import {
   isRecordsFilterGroup,
-  recordsFilterOps,
+  recordsFilterOpsFor,
   RECORDS_FILTER_INTRINSIC_KINDS,
   RECORDS_FILTER_MAX_DEPTH,
   RECORDS_FILTER_ME,
@@ -43,6 +45,7 @@ import {
   getRecordsStorageDriver,
   getRecordsStorageDrivers,
   getRecordsVisibilitySources,
+  getRegisteredRecordTypes,
   type RecordsFilterCond
 } from './records-registry'
 
@@ -277,28 +280,65 @@ function userRefsCond(eb: Eb, def: RecordsFieldSetting, cond: FilterCond): Expre
   }
 }
 
-// Forward edges only: "records whose <field> includes record X".
-function connectionsCond(eb: Eb, def: RecordsFieldSetting, cond: FilterCond): Expression<SqlBool> {
-  const base = eb.selectFrom('records_connections as fcn')
+// Field keys whose rows, written from the other side, read in reverse under
+// `fieldKey` of `typeKey` records (every field declared with that target and
+// reverseKey).
+function reverseConnectionKeys(typeKey: string, fieldKey: string): string[] {
+  const keys = new Set<string>()
+  for (const manifest of getRegisteredRecordTypes()) {
+    for (const [key, def] of Object.entries(manifest.fields)) {
+      if (def.kind === 'connection' && def.target === typeKey && def.reverseKey === fieldKey) keys.add(key)
+    }
+  }
+  return [...keys]
+}
+
+// "Records whose <field> includes record X", over the rows the field wrote
+// and the rows its reverse pair wrote from the other side.
+function connectionsCond(eb: Eb, typeKey: string, def: RecordsFieldSetting, cond: FilterCond): Expression<SqlBool> {
+  const forward = eb.selectFrom('records_connections as fcn')
     .select('fcn.id')
     .whereRef('fcn.from_record_id', '=', 'records_entries.id')
     .where('fcn.field_key', '=', def.key)
+  const reverseKeys = reverseConnectionKeys(typeKey, def.key)
+  const reverse = eb.selectFrom('records_connections as rcn')
+    .select('rcn.id')
+    .whereRef('rcn.to_record_id', '=', 'records_entries.id')
+    .where('rcn.field_key', 'in', reverseKeys)
+  const either = (f: Expression<SqlBool>, r: () => Expression<SqlBool>): Expression<SqlBool> =>
+    reverseKeys.length > 0 ? eb.or([f, r()]) : f
   const asRecordId = (v: unknown): string => {
     const parsed = uuidSchema.safeParse(v)
     if (!parsed.success) badFilter(def.key, 'expected a record id')
     return parsed.data
   }
   switch (cond.op) {
-    case 'eq':
-      if (cond.value === null) return eb.not(eb.exists(base))
-      return eb.exists(base.where('fcn.to_record_id', '=', asRecordId(cond.value)))
+    case 'eq': {
+      if (cond.value === null) return eb.not(either(eb.exists(forward), () => eb.exists(reverse)))
+      const id = asRecordId(cond.value)
+      return either(
+        eb.exists(forward.where('fcn.to_record_id', '=', id)),
+        () => eb.exists(reverse.where('rcn.from_record_id', '=', id))
+      )
+    }
     case 'in': {
       if (cond.values.length === 0) return sql<SqlBool>`false`
-      return eb.exists(base.where('fcn.to_record_id', 'in', cond.values.map(asRecordId)))
+      const ids = cond.values.map(asRecordId)
+      return either(
+        eb.exists(forward.where('fcn.to_record_id', 'in', ids)),
+        () => eb.exists(reverse.where('rcn.from_record_id', 'in', ids))
+      )
     }
     default:
       badFilter(def.key, `'${cond.op}' is not supported for connection fields`)
   }
+}
+
+// "Anywhere under record X": X is one of the record's ancestors.
+function underCond(def: RecordsFieldSetting, value: unknown): Expression<SqlBool> {
+  const parsed = uuidSchema.safeParse(value)
+  if (!parsed.success) badFilter(def.key, 'expected a record id')
+  return sql<SqlBool>`records_entries.ancestor_ids @> ARRAY[${parsed.data}::uuid]`
 }
 
 // Attachments filter by presence only: "has files" / "has none".
@@ -317,7 +357,7 @@ function driverCond(eb: Eb, def: RecordsFieldSetting, cond: FilterCond): Express
   return driver.filter(eb, def, cond, { likePattern, badFilter })
 }
 
-function filterPredicate(eb: Eb, def: RecordsFieldSetting, raw: unknown): Expression<SqlBool> {
+function filterPredicate(eb: Eb, typeKey: string, def: RecordsFieldSetting, raw: unknown): Expression<SqlBool> {
   const conds = parseFilterConds(def.key, raw).map((cond) => {
     switch (def.storage) {
       case 'promoted':
@@ -328,7 +368,7 @@ function filterPredicate(eb: Eb, def: RecordsFieldSetting, raw: unknown): Expres
       case 'user_refs':
         return userRefsCond(eb, def, cond)
       case 'connections':
-        return connectionsCond(eb, def, cond)
+        return connectionsCond(eb, typeKey, def, cond)
       case 'channels':
         return driverCond(eb, def, cond)
       case 'attachments':
@@ -348,7 +388,7 @@ const filterRuleSchema = z.object({
   field: z.string().min(1).max(80),
   op: z.enum([
     'is', 'is_not', 'any_of', 'none_of', 'all_of', 'contains', 'empty', 'not_empty',
-    'before', 'after', 'on', 'between', 'eq', 'lt', 'gt'
+    'before', 'after', 'on', 'between', 'eq', 'lt', 'gt', 'under'
   ]),
   value: z.unknown().optional()
 }).strict()
@@ -408,7 +448,7 @@ export function parseRecordsFilterGroup(
       if (++count > MAX_TREE_RULES) badTree(`at most ${MAX_TREE_RULES} rules`)
       const def = resolveTreeDef(defsByKey, node.field)
       if (!def) badTree(`unknown field "${node.field}"`)
-      if (!recordsFilterOps(def.kind).includes(node.op)) {
+      if (!recordsFilterOpsFor(def).includes(node.op)) {
         badTree(`${node.field}: '${node.op}' is not available for ${def.kind} fields`)
       }
       const shape = RECORDS_FILTER_VALUE_SHAPE[node.op]
@@ -549,7 +589,8 @@ function compileVirtualRule(eb: Eb, vf: RecordsVirtualField, rule: RecordsFilter
   return multiRule(eb, vf.def, rule, c => virtualListCond(eb, vf, c), v => v === RECORDS_FILTER_ME ? userId : v)
 }
 
-function compileRule(eb: Eb, def: RecordsFieldSetting, rule: RecordsFilterRule, userId: string): Expression<SqlBool> {
+function compileRule(eb: Eb, typeKey: string, def: RecordsFieldSetting, rule: RecordsFilterRule, userId: string): Expression<SqlBool> {
+  if (rule.op === 'under') return underCond(def, rule.value)
   switch (def.storage) {
     case 'promoted':
     case 'jsonb':
@@ -559,7 +600,7 @@ function compileRule(eb: Eb, def: RecordsFieldSetting, rule: RecordsFilterRule, 
     case 'user_refs':
       return multiRule(eb, def, rule, c => userRefsCond(eb, def, c), v => v === RECORDS_FILTER_ME ? userId : v)
     case 'connections':
-      return multiRule(eb, def, rule, c => connectionsCond(eb, def, c))
+      return multiRule(eb, def, rule, c => connectionsCond(eb, typeKey, def, c))
     case 'channels':
       return multiRule(eb, def, rule, c => driverCond(eb, def, c))
     case 'attachments':
@@ -569,18 +610,19 @@ function compileRule(eb: Eb, def: RecordsFieldSetting, rule: RecordsFilterRule, 
 
 function compileFilterGroup(
   eb: Eb,
+  typeKey: string,
   group: RecordsFilterGroup,
   defsByKey: Map<string, RecordsFieldSetting>,
   userId: string,
   virtual: Map<string, RecordsVirtualField> = new Map()
 ): Expression<SqlBool> {
   const parts = group.rules.map((node) => {
-    if (isRecordsFilterGroup(node)) return compileFilterGroup(eb, node, defsByKey, userId, virtual)
+    if (isRecordsFilterGroup(node)) return compileFilterGroup(eb, typeKey, node, defsByKey, userId, virtual)
     const vf = virtual.get(node.field)
     if (vf) return compileVirtualRule(eb, vf, node, userId)
     const def = resolveTreeDef(defsByKey, node.field)
     if (!def) badTree(`unknown field "${node.field}"`)
-    return compileRule(eb, def, node, userId)
+    return compileRule(eb, typeKey, def, node, userId)
   })
   if (parts.length === 0) return sql<SqlBool>`true`
   return group.match === 'all' ? eb.and(parts) : eb.or(parts)
@@ -604,12 +646,18 @@ export interface RecordsVisibilityScope {
   boardsGrantVisibility: boolean
   /** People fields whose named users see the record (see recordsAccessGrantingKeys). */
   grantKeys: string[]
+  /** The type has a hierarchy: whoever sees a record sees every record under it. */
+  inherits?: boolean
+  /** The people fields that count on a record's ancestors, when not `grantKeys`. */
+  inheritedGrantKeys?: string[]
 }
 
-export function visibilityPredicate(
+// The ways `userId` sees the `records_entries` row in scope without view_all.
+function directVisibility(
   eb: Eb,
   userId: string,
-  type: RecordsVisibilityScope
+  type: RecordsVisibilityScope,
+  grantKeys: string[]
 ): Expression<SqlBool> {
   const sources = type.boardsGrantVisibility
     ? getRecordsVisibilitySources().map(s => s.predicate(eb, { userId, typeKey: type.key }))
@@ -626,25 +674,39 @@ export function visibilityPredicate(
         .where('vs.user_id', '=', userId)
     )
   ]
-  if (type.grantKeys.length > 0) {
+  if (grantKeys.length > 0) {
     legs.push(eb.exists(
       eb.selectFrom('records_user_refs as vu')
         .select('vu.record_id')
         .whereRef('vu.record_id', '=', 'records_entries.id')
         .where('vu.user_id', '=', userId)
-        .where('vu.field_key', 'in', type.grantKeys)
+        .where('vu.field_key', 'in', grantKeys)
     ))
   }
   return eb.or([...legs, ...sources])
 }
 
-/** The visibility scope of `typeKey` (its board rule and access-granting people fields). */
+export function visibilityPredicate(
+  eb: Eb,
+  userId: string,
+  type: RecordsVisibilityScope
+): Expression<SqlBool> {
+  const direct = directVisibility(eb, userId, type, type.grantKeys)
+  if (!type.inherits) return direct
+  return eb.or([
+    direct,
+    anyAncestor(directVisibility(eb, userId, type, type.inheritedGrantKeys ?? type.grantKeys))
+  ])
+}
+
+/** The visibility scope of `typeKey` (its board rule, access-granting people fields and hierarchy). */
 export async function recordsVisibilityScope(tx: Tx, typeKey: string): Promise<RecordsVisibilityScope> {
   const type = await getRecordType(tx, typeKey)
   return {
     key: typeKey,
     boardsGrantVisibility: type?.boardsGrantVisibility ?? true,
-    grantKeys: recordsAccessGrantingKeys(typeKey)
+    grantKeys: recordsAccessGrantingKeys(typeKey),
+    inherits: recordsHierarchy(typeKey) !== null
   }
 }
 
@@ -696,13 +758,13 @@ export async function listRecords(
   for (const [key, raw] of Object.entries(opts.filters ?? {})) {
     const def = resolveFieldDef(defsByKey, key)
     if (!def) throw createError({ statusCode: 400, statusMessage: `Unknown filter field: ${key}` })
-    preds.push(eb => filterPredicate(eb, def, raw))
+    preds.push(eb => filterPredicate(eb, typeKey, def, raw))
   }
   const virtual = new Map((opts.virtualFields ?? []).map(vf => [vf.def.key, vf]))
   const treeDefs = [...defs, ...(opts.virtualFields ?? []).map(vf => vf.def)]
   for (const raw of opts.where ?? []) {
     const group = parseRecordsFilterGroup(raw, treeDefs)
-    preds.push(eb => compileFilterGroup(eb, group, defsByKey, ctx.userId, virtual))
+    preds.push(eb => compileFilterGroup(eb, typeKey, group, defsByKey, ctx.userId, virtual))
   }
   if (opts.ids) {
     if (opts.ids.length === 0) return { items: [], total: 0 }

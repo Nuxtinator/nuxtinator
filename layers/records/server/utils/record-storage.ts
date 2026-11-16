@@ -32,12 +32,13 @@ import {
   type RecordsListPatch,
   type RecordsRefTarget
 } from './records-registry'
-import { getRecordType, getRecordTypeFields, recordsAccessGrantingKeys, recordsStatusDefault, type RecordsFieldSetting } from './definition-settings'
+import { getRecordType, getRecordTypeFields, recordsAccessGrantingKeys, recordsHierarchy, recordsStatusDefault, type RecordsFieldSetting } from './definition-settings'
+import { applyHierarchyOp, type RecordsHierarchyMove } from './hierarchy'
 import { normalizeChannelValue } from './normalize'
 import { recordRecordsActivity } from './records-activity'
 import { closingRulesOf, enforceClosingRules } from './closing'
 import { visibleRecordIds } from './list-records'
-import { requireShareConfirmation, type RecordsSharingMode } from './share-confirmation'
+import { requireMoveConfirmation, requireShareConfirmation, type RecordsSharingMode } from './share-confirmation'
 import { applyAttachmentsPatch, listRecordAttachments } from './attachments'
 
 type Tx = Transaction<Database>
@@ -852,7 +853,8 @@ export interface ApplyFieldPatchOpts {
   /**
    * Set by writes a person makes: 'ask' refuses (409) a patch that names
    * someone in an access-granting people field who can't otherwise see the
-   * record, until resent as 'confirmed'. Absent for system writes. A person's
+   * record, or that moves a record under a parent other people can see,
+   * until resent as 'confirmed'. Absent for system writes. A person's
    * write also notifies whoever it newly names in such a field.
    */
   sharing?: RecordsSharingMode
@@ -999,6 +1001,8 @@ export async function applyFieldPatch(
       .execute()
   }
 
+  const hierarchy = recordsHierarchy(typeKey)
+  const moves: RecordsHierarchyMove[] = []
   for (const [key, list] of listOps) {
     const def = defsByKey.get(key)!
     switch (def.storage) {
@@ -1009,7 +1013,11 @@ export async function applyFieldPatch(
         await applyUserRefsOp(tx, ctx, id, def, list)
         break
       case 'connections':
-        await applyConnectionsOp(tx, typeKey, id, def, list)
+        if (hierarchy && def.hierarchy) {
+          moves.push(...await applyHierarchyOp(tx, ctx, typeKey, hierarchy, id, def, list, isCreate))
+        } else {
+          await applyConnectionsOp(tx, typeKey, id, def, list)
+        }
         break
       case 'channels':
         await getRecordsStorageDriver(def.storage)!.apply(tx, ctx, id, def, list)
@@ -1024,6 +1032,10 @@ export async function applyFieldPatch(
   const grantKeys = recordsAccessGrantingKeys(typeKey)
   if (opts.sharing && [...listOps.keys()].some(key => grantKeys.includes(key))) {
     await requireShareConfirmation(tx, ctx, typeKey, id, oldRecord?.fields ?? null, opts.sharing)
+  }
+  // Putting a record under a parent shares it with whoever sees the parent.
+  if (opts.sharing && moves.length > 0) {
+    await requireMoveConfirmation(tx, ctx, typeKey, moves, opts.sharing)
   }
 
   const record = await getRecord(tx, ctx, typeKey, id)

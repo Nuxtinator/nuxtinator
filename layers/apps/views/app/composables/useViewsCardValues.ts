@@ -28,6 +28,8 @@ export interface ViewsCardValue {
   userIds?: string[]
   /** Set for connection fields shown as progress — rendered as a bar. */
   progress?: { done: number, total: number }
+  /** Set for a hierarchy's children field (subtasks): the value opens the record's own board. */
+  drill?: true
 }
 
 const INTRINSIC_DEFS: Record<string, Pick<RecordsFieldSetting, 'key' | 'kind' | 'label'>> = {
@@ -71,8 +73,9 @@ export function useViewsCardValues(source: () => ViewsCardValueSource) {
       const progress = item.progress?.[field.key]
       if (field.kind === 'connection' && progress && (display === 'count' || display === 'progress')) {
         if (progress.total === 0) continue
-        if (display === 'count') out.push({ key, label: field.label, text: String(progress.total) })
-        else out.push({ key, label: field.label, text: `${progress.done}/${progress.total}`, progress })
+        const drill = field.hierarchy === 'children' ? { drill: true as const } : {}
+        if (display === 'count') out.push({ key, label: field.label, text: String(progress.total), ...drill })
+        else out.push({ key, label: field.label, text: `${progress.done}/${progress.total}`, progress, ...drill })
         continue
       }
 

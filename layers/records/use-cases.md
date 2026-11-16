@@ -72,6 +72,18 @@ The planning team has a `deliverable` type that everyone sees. They work in quar
 - A card can show connected records as names, a count or progress ("3/5 tasks done"). Child records (a deliverable's tasks) are listed in the slideover.
 - Status: built. Still to come: selecting several cards and moving them at once (the end-of-quarter bulk move).
 
+### 4a. A big card broken down, a level at a time
+
+The org's overview holds big cards such as "Prayer Tools v3 rewrite". Most people only read that overview. Developers and the project manager break a card into subtasks, and those into their own, and work each level as a board.
+
+- Everything is a `task`. A big card and a small one differ only in where they sit: a task has one parent and any number of subtasks, to any depth. There is no second type for the levels below.
+- The overview is a view of the top-level tasks only: a hand-picked "Roadmap" holding the big cards, or any view filtered on "Parent task is empty". Each card shows its subtasks' progress and none of the subtasks.
+- A card's subtasks progress opens that card's own board (`builtin.subtasks.<taskId>`): a Board tab of its direct subtasks by status and an All levels tab listing everything under it. A subtask with subtasks opens the same way. The header shows the view the person started from and each task above, and a card added on the board becomes a subtask.
+- Whoever can see a task sees everything under it, so sharing the Roadmap with everyone shares every breakdown, and stakeholders' progress bars count the real subtasks. Tasks outside any shared tree stay personal.
+- Moving an existing task under a shared one asks first, since it shares the task with everyone who sees the parent.
+- Assigned subtasks show up in each person's My tasks.
+- Status: built. Still to come: progress that counts every level rather than direct subtasks, and dragging a card onto another to nest it.
+
 ### 5. A window onto shared data
 
 Someone creates "Q3 deliverables by status" over all deliverables and shares it with a team.

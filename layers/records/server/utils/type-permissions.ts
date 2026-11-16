@@ -30,7 +30,8 @@ import type { TenantContext } from '#tenant/server'
 import { getRolePermissions } from '#core/server/utils/rbac'
 import { getUserGrantedPermissions } from '#core/server/utils/permission-grants'
 import { getUserGroups } from '#core/server/utils/groups'
-import { getRecordTypes, type RecordTypeSetting } from './definition-settings'
+import { getRecordTypes, recordsHierarchy, type RecordTypeSetting } from './definition-settings'
+import { anyAncestor } from './ancestors'
 import { RECORD_ACTIONS, permFor, type RecordAction, type RecordsTypeRoleGrants, type RecordsTypeTeamGrants } from './records-perms'
 import { hasEditShare } from './shares'
 import { getRecordsVisibilitySources } from './records-registry'
@@ -167,8 +168,9 @@ export async function requireTypePermission(
 // The record-scoped update capability: the type-level update answer OR an
 // edit-level share on this specific record OR a visibility source that lets
 // the caller edit it (a hand-picked view at 'edit'), on types whose boards
-// grant visibility. Delete has no share-level equivalent — it stays
-// type-level only.
+// grant visibility. On a type with a hierarchy, either of the record-scoped
+// ways on a record above this one counts too. Delete has no share-level
+// equivalent — it stays type-level only.
 export async function canUpdateRecord(
   tx: Tx,
   ctx: TenantContext,
@@ -177,16 +179,29 @@ export async function canUpdateRecord(
 ): Promise<boolean> {
   if (await resolveTypePermission(tx, ctx, typeKey, 'update')) return true
   if (await hasEditShare(tx, recordId, ctx.userId)) return true
-  const sources = getRecordsVisibilitySources().filter(s => s.editPredicate)
-  if (sources.length === 0) return false
   const types = await (memoFor(ctx).types ??= getRecordTypes(tx))
-  if (types.find(t => t.key === typeKey)?.boardsGrantVisibility === false) return false
+  const boards = types.find(t => t.key === typeKey)?.boardsGrantVisibility !== false
+  const sources = boards ? getRecordsVisibilitySources().filter(s => s.editPredicate) : []
+  const inherits = recordsHierarchy(typeKey) !== null
+  if (sources.length === 0 && !inherits) return false
   const row = await tx
     .selectFrom('records_entries')
     .select('id')
     .where('id', '=', recordId)
     .where('record_type', '=', typeKey)
-    .where(eb => eb.or(sources.map(s => s.editPredicate!(eb, { userId: ctx.userId, typeKey }))))
+    .where((eb) => {
+      const direct = eb.or([
+        eb.exists(
+          eb.selectFrom('records_shares as es')
+            .select('es.record_id')
+            .whereRef('es.record_id', '=', 'records_entries.id')
+            .where('es.user_id', '=', ctx.userId)
+            .where('es.level', '=', 'edit')
+        ),
+        ...sources.map(s => s.editPredicate!(eb, { userId: ctx.userId, typeKey }))
+      ])
+      return inherits ? eb.or([direct, anyAncestor(direct)]) : direct
+    })
     .executeTakeFirst()
   return !!row
 }

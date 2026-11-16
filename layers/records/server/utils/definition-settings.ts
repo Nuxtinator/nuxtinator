@@ -204,6 +204,8 @@ export interface RecordsFieldSetting {
   grantsAccess?: boolean
   target?: string
   reverseKey?: string
+  /** connection: the parent or children side of the type's hierarchy (code-declared only). */
+  hierarchy?: 'parent' | 'children'
   channelType?: string
   /** ref: the registered ref source (code-declared only). */
   source?: string
@@ -273,6 +275,7 @@ function mergeManifestField(key: string, def: RecordsFieldDef, row: RecordFieldR
     grantsAccess: def.kind === 'user_select' && def.grantsAccess === true ? true : undefined,
     target: def.target,
     reverseKey: def.reverseKey,
+    hierarchy: def.kind === 'connection' ? def.hierarchy : undefined,
     channelType: def.channelType,
     source: def.kind === 'ref' ? def.source : undefined,
     settings: def.settings,
@@ -386,6 +389,29 @@ export function recordsAccessGrantingKeys(typeKey: string): string[] {
   return Object.entries(recordTypeCodeFields(getRegisteredRecordType(typeKey)))
     .filter(([, def]) => def.kind === 'user_select' && def.grantsAccess === true && !def.column)
     .map(([key]) => key)
+}
+
+/** The field keys of a type's hierarchy: the one naming a record's parent and its children pair. */
+export interface RecordsHierarchy {
+  parentKey: string
+  childrenKey: string | null
+}
+
+/**
+ * The type's hierarchy fields, or null for a flat type. Declared in code
+ * only, so this reads the registry, never the database.
+ */
+export function recordsHierarchy(typeKey: string): RecordsHierarchy | null {
+  const fields = recordTypeCodeFields(getRegisteredRecordType(typeKey))
+  const parent = Object.entries(fields)
+    .find(([, def]) => def.kind === 'connection' && def.hierarchy === 'parent' && def.target === typeKey)
+  if (!parent) return null
+  const childrenKey = parent[1].reverseKey
+  const children = childrenKey ? fields[childrenKey] : undefined
+  return {
+    parentKey: parent[0],
+    childrenKey: children?.kind === 'connection' && children.hierarchy === 'children' ? childrenKey! : null
+  }
 }
 
 /** The status an unset status column reads as: the status field's default. */

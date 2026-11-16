@@ -6,7 +6,9 @@
 // list's done checkbox, tab and definition updates, and the view's own
 // fields (managed by its owner, filled in by its editors). The active tab
 // rides in ?tab= so a tab can be linked to. Writes that would hand a card to
-// someone who can't see it ask first (useRecordsShareConfirm). Embedded in
+// someone who can't see it ask first (useRecordsShareConfirm). A view that
+// stands for a record (a task's subtasks board) shows what leads to it as a
+// trail in place of the Built-in badge, and its name opens the record. Embedded in
 // another app's page, it takes the height its parent gives it, keeps the
 // active tab to itself and links out to the full view.
 import { generateNKeysBetween } from 'fractional-indexing'
@@ -50,6 +52,41 @@ function selectTab(id: string) {
   if (props.embedded) embeddedTab.value = id
   else router.replace({ query: { ...route.query, tab: id } })
 }
+
+// --- drilling into a record's own board ---------------------------------------
+
+// A view that stands for a record (a task's subtasks board) was reached from
+// another view, named in ?from=; every board opened below keeps naming it, so
+// the header's trail starts where the person did.
+const fromViewId = computed(() =>
+  !props.embedded && typeof route.query.from === 'string' ? route.query.from : null)
+const originId = computed<string | null>(() =>
+  view.value?.recordId ? fromViewId.value : view.value?.id ?? null)
+provide(VIEWS_ORIGIN_KEY, originId)
+const { viewRoute } = useViewsSubtasksBoard(originId)
+
+const originView = ref<{ id: string, name: string } | null>(null)
+watch(() => view.value?.recordId ? fromViewId.value : null, async (id) => {
+  originView.value = null
+  if (!id) return
+  try {
+    const origin = await $fetch<{ id: string, name: string }>(`/api/views/${id}`)
+    if (fromViewId.value === id) originView.value = { id: origin.id, name: origin.name }
+  } catch {
+    // The trail starts at the first record instead.
+  }
+}, { immediate: true })
+
+/** What leads to this view: the view the person started from, then the records above. */
+const trail = computed(() => {
+  const v = view.value
+  if (!v?.recordId) return []
+  return [...(originView.value ? [originView.value] : []), ...v.trail]
+})
+const backTo = computed(() => {
+  const up = trail.value[trail.value.length - 1]
+  return up ? viewRoute(up.id) : viewsPath('')
+})
 
 // --- record type fields (renderers + filter vocabulary) ---------------------
 
@@ -141,6 +178,10 @@ const tabRecords = computed(() =>
 // --- slideover --------------------------------------------------------------
 
 const openRecordId = ref<string | null>(null)
+// Opening another view from the slideover (a card's subtasks board) closes it.
+watch(viewId, () => {
+  openRecordId.value = null
+})
 
 // --- moves ------------------------------------------------------------------
 
@@ -717,18 +758,50 @@ const menuItems = computed(() => {
           variant="ghost"
           color="neutral"
           size="sm"
-          aria-label="Back to views"
-          :to="viewsPath('')"
+          :aria-label="trail.length > 0 ? `Back to ${trail[trail.length - 1]!.name}` : 'Back to views'"
+          :to="backTo"
         />
         <UIcon
           :name="view?.icon || VIEWS_LAYOUT_META[view?.tabs[0]?.layout ?? 'list'].icon"
           class="size-5 text-(--ui-text-muted) shrink-0"
         />
+        <nav
+          v-if="trail.length > 0"
+          class="flex items-center gap-1 min-w-0 shrink text-sm text-(--ui-text-muted)"
+          aria-label="Above this board"
+        >
+          <template
+            v-for="crumb in trail"
+            :key="crumb.id"
+          >
+            <NuxtLink
+              :to="viewRoute(crumb.id)"
+              class="truncate max-w-40 hover:text-(--ui-text) hover:underline"
+            >
+              {{ crumb.name }}
+            </NuxtLink>
+            <UIcon
+              name="i-lucide-chevron-right"
+              class="size-4 shrink-0 text-(--ui-text-dimmed)"
+            />
+          </template>
+        </nav>
         <h1 class="text-lg font-semibold truncate shrink-0 max-w-[30%]">
-          {{ view?.name ?? '…' }}
+          <button
+            v-if="view?.recordId"
+            type="button"
+            class="truncate max-w-full hover:underline"
+            :title="`Open ${view.name}`"
+            @click="openRecordId = view.recordId"
+          >
+            {{ view.name }}
+          </button>
+          <template v-else>
+            {{ view?.name ?? '…' }}
+          </template>
         </h1>
         <UBadge
-          v-if="view?.builtIn"
+          v-if="view?.builtIn && !view.recordId"
           variant="subtle"
           color="neutral"
           size="sm"

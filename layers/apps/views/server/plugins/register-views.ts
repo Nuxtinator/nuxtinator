@@ -12,6 +12,7 @@ import {
 } from '../../app/utils/permissions'
 import { boardVisibilitySource } from '../utils/board-visibility'
 import { builtInViewId, registerBuiltInView } from '../utils/builtin-views'
+import { subtasksBuiltInView } from '../utils/subtasks-view'
 
 export default defineNitroPlugin(() => {
   registerPermissions(VIEWS_PERMISSIONS, VIEWS_PERMISSION_META)
@@ -66,6 +67,8 @@ export default defineNitroPlugin(() => {
       }
     ]
   })
+
+  registerBuiltInView(subtasksBuiltInView)
 
   registerNavItem({
     appId: 'views',

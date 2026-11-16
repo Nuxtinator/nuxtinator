@@ -3,4 +3,4 @@
 // scan doesn't register these names twice.
 
 export { registerBuiltInView, builtInViewId } from '../utils/builtin-views'
-export type { ViewsBuiltInView, ViewsBuiltInTab } from '../utils/builtin-views'
+export type { ViewsBuiltInView, ViewsBuiltInTab, ViewsBuiltInTarget } from '../utils/builtin-views'

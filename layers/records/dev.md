@@ -72,6 +72,29 @@ answered by building their tenant context (`memberContext` in
 [server/utils/share-confirmation.ts](server/utils/share-confirmation.ts)). System
 writes (producer layers, inbound mail) omit `sharing` and never ask.
 
+**Hierarchies: one parent link, a stored ancestor chain, access flowing down.**
+A manifest connection to its own type marked `hierarchy: 'parent'` (task's
+`parent`, paired with `subtasks` as `hierarchy: 'children'`) makes the type a
+tree ([server/utils/hierarchy.ts](server/utils/hierarchy.ts)). A link is one
+`records_connections` row from the child keyed by the parent field, whichever
+side wrote it, so "one parent" is a property of storage and `parent`
+filters see every link. `records_entries.ancestor_ids` holds each record's
+ancestors root first; a move rewrites it for the record and everything under
+it, and an AFTER DELETE trigger cuts it, so no delete path can leave a stale
+chain. It exists so "who sees this" is one indexed lookup instead of a
+recursive walk in every list query, and it's what the "is anywhere under"
+filter reads. Whoever sees or edits a record sees or edits everything under
+it: `visibilityPredicate` and `canUpdateRecord` rerun their record-scoped
+checks over the ancestors (`anyAncestor`, which shadows `records_entries`
+inside its subquery so visibility sources apply to ancestors unchanged).
+Type-wide `view_all` was rejected as the way to show a team a project's
+breakdown, since it opens everyone's personal tasks too; so was a separate
+project-work type, which admins can't give an assignee or reverse links.
+Because a parent shares, a person's move of an existing record into a tree
+others can see asks first (`requireMoveConfirmation`), and linking a record
+from the parent's side needs edit access to it, or anyone could pull a
+record they can't see under one of their own.
+
 **Attachments: their own table, objects deleted by a trash queue.** Files on an
 `attachments` field are `records_attachments` rows (bytes in private object
 storage under `records/`). They arrive one upload at a time through the
@@ -104,7 +127,8 @@ for them.
 contacts use `crm.contacts.*`. `records.schema.manage` gates the builder.
 `permFor(typeKey, action)` resolves the slug. Visibility — `view_all` OR creator
 (`records_entries.created_by`) OR shared (`records_shares`) OR referenced via a user
-field OR a registered visibility source — is compiled into every list/detail query in
+field OR a registered visibility source, on the record or (for a type with a
+hierarchy) on a record above it — is compiled into every list/detail query in
 [server/utils/list-records.ts](server/utils/list-records.ts). The type's `app`
 (default `records`) gates its records the way a route's `appId` would
 (`requireRecordType`).
@@ -162,7 +186,7 @@ server/utils/                    ← kernel: records-registry, definition-settin
                                    (hydrateRecords/applyFieldPatch), list-records, closing, comments,
                                    activity, shares, schema-admin, records-perms, type-permissions,
                                    role-grants-admin, user-grants, normalize, attachments,
-                                   share-confirmation
+                                   share-confirmation, hierarchy, ancestors
 server/exports/index.ts          ← #records/server barrel — lives OUTSIDE server/utils so nitro's
                                    auto-import scan doesn't double-register its re-exports
 server/routes/api/records/       ← entries/[type]/…, schema/…, comments/…, users

@@ -5,7 +5,8 @@ import type { InferRecordShape } from '#records'
 // and due on a date. Done is the closed status, so a done task leaves default
 // lists the way any closed record does. The assignee is the one people field
 // that shares the task with whoever it names. Subtasks are tasks linked
-// through `parent`, so a card can show their progress. Producer layers
+// through `parent`, to any depth, so a card can show their progress and
+// whoever can see a task sees everything under it. Producer layers
 // (meetings) write their action items as tasks.
 export const taskManifest = defineRecordType({
   key: 'task',
@@ -48,8 +49,8 @@ export const taskManifest = defineRecordType({
     start_date: { kind: 'date', label: 'Start date', icon: 'i-lucide-calendar-arrow-up', section: 'details', order: 5 },
     due_date: { kind: 'date', label: 'Due date', icon: 'i-lucide-calendar', section: 'details', order: 6 },
     tags: { kind: 'tags', label: 'Tags', section: 'details', order: 7 },
-    parent: { kind: 'connection', label: 'Parent task', target: 'task', reverseKey: 'subtasks', section: 'details', order: 8 },
-    subtasks: { kind: 'connection', label: 'Subtasks', target: 'task', reverseKey: 'parent', section: 'details', order: 9 },
+    parent: { kind: 'connection', label: 'Parent task', target: 'task', reverseKey: 'subtasks', hierarchy: 'parent', section: 'details', order: 8 },
+    subtasks: { kind: 'connection', label: 'Subtasks', target: 'task', reverseKey: 'parent', hierarchy: 'children', section: 'details', order: 9 },
     description: { kind: 'textarea', label: 'Description', section: 'details', order: 10 },
     attachments: { kind: 'attachments', label: 'Attachments', icon: 'i-lucide-paperclip', section: 'details', order: 11 }
   },

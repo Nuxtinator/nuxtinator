@@ -18,6 +18,7 @@ export { RECORDS_PERMISSIONS, RECORDS_PERMISSION_META } from './permissions'
 export {
   isRecordsFilterGroup,
   recordsFilterOps,
+  recordsFilterOpsFor,
   recordsFilterRuleCount,
   RECORDS_FILTER_INTRINSIC_KINDS,
   RECORDS_FILTER_MAX_DEPTH,
@@ -99,6 +100,13 @@ export interface RecordsFieldDef {
   target?: string
   /** connection: field key on the target type used for reverse reads. */
   reverseKey?: string
+  /**
+   * connection to the field's own type: 'parent' holds a record's one parent
+   * and 'children' (its `reverseKey` pair) the records under it. The kernel
+   * keeps each record's chain of ancestors, refuses loops, and lets whoever
+   * can see or edit a record see or edit everything under it.
+   */
+  hierarchy?: 'parent' | 'children'
   /** communication_channel: channel type key ('email', 'phone', ...). */
   channelType?: string
   /** ref: the registered ref source its ids belong to ('meetings'). */
