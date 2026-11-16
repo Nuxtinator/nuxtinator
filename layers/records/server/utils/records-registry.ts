@@ -262,6 +262,8 @@ export interface RecordsShareVia {
   path: string
   /** Who it reaches and at which level. */
   audience: Array<{ kind: 'user' | 'team' | 'everyone', name: string, level: 'view' | 'edit' }>
+  /** The record above this one that the place holds, when the access comes down a hierarchy. */
+  through?: string
 }
 
 export interface RecordsVisibilitySource {

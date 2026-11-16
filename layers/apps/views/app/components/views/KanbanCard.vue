@@ -5,7 +5,8 @@
 // the feed attaches for the chosen keys — so any field of the type can be
 // shown. User fields render as each person's avatar beside their name;
 // connection fields as names, a count, or done-progress, per the layout. A
-// cover field's first image tops the card.
+// cover field's first image tops the card. Clicking the card opens its
+// slideover; clicking its subtasks value opens the board of those subtasks.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsBoardItem, ViewsConnectionDisplay } from '../../utils/views-types'
 
@@ -51,6 +52,13 @@ const cover = computed(() => {
 function onDragStart(event: DragEvent) {
   emit('dragstart', event)
 }
+
+// The subtasks value opens the card's own board instead of its slideover.
+const { openBoard } = useViewsSubtasksBoard()
+function onDrill(event: MouseEvent) {
+  event.stopPropagation()
+  openBoard(props.item.id)
+}
 </script>
 
 <template>
@@ -80,7 +88,12 @@ function onDragStart(event: DragEvent) {
         v-for="value in values"
         :key="value.key"
         class="flex gap-1.5 text-xs"
-        :class="value.userIds ? 'items-start' : 'items-baseline'"
+        :class="[
+          value.userIds ? 'items-start' : 'items-baseline',
+          value.drill ? '-mx-1 px-1 rounded cursor-pointer hover:bg-(--ui-bg-elevated)' : ''
+        ]"
+        :title="value.drill ? `Open the ${value.label.toLowerCase()} board` : undefined"
+        @click="value.drill && onDrill($event)"
       >
         <dt class="text-(--ui-text-dimmed) shrink-0">
           {{ value.label }}
@@ -119,6 +132,11 @@ function onDragStart(event: DragEvent) {
             class="flex-1 max-w-24"
           />
           <span class="text-(--ui-text-muted) tabular-nums">{{ value.text }}</span>
+          <UIcon
+            v-if="value.drill"
+            name="i-lucide-chevron-right"
+            class="size-3.5 text-(--ui-text-dimmed) ml-auto shrink-0"
+          />
         </dd>
         <dd
           v-else

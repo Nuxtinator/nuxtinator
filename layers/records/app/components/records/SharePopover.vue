@@ -9,7 +9,8 @@
 // capability, passed down from the page; the server enforces the permission
 // regardless, so the client gate is presentation only. Below the shares, the
 // views that share the record (hand-picked views holding it) are listed with
-// who they reach; that access is changed on the view.
+// who they reach; that access is changed on the view. So are the records
+// above it whose audience sees it too, and the views holding those.
 import type { RecordsUser } from '../../composables/useRecordsUsers'
 import type { RecordsShareLevel } from '../../composables/useRecordsShares'
 
@@ -238,7 +239,7 @@ async function onRemove(userId: string) {
             class="flex items-start gap-2"
           >
             <UIcon
-              name="i-lucide-kanban"
+              :name="v.sourceId === 'records:ancestor' ? 'i-lucide-list-tree' : 'i-lucide-kanban'"
               class="size-4 mt-0.5 shrink-0 text-(--ui-text-muted)"
             />
             <div class="min-w-0 text-sm">
@@ -250,6 +251,12 @@ async function onRemove(userId: string) {
               </NuxtLink>
               <p class="text-xs text-(--ui-text-muted)">
                 {{ v.audience.length === 0 ? 'Only its owner' : v.audience.map(a => `${a.name} · ${a.level === 'edit' ? 'can edit' : 'can view'}`).join(', ') }}
+              </p>
+              <p
+                v-if="v.through"
+                class="text-xs text-(--ui-text-dimmed)"
+              >
+                Through {{ v.through }}
               </p>
             </div>
           </li>

@@ -1,5 +1,6 @@
 // Runs a write that may name someone in an access-granting people field (an
-// assignee) who can't see the record yet. The server refuses such a write
+// assignee) who can't see the record yet, or move a record under a parent
+// other people can see. The server refuses such a write
 // with a 409 (`records.share_confirmation`); this asks the user, then resends
 // it confirmed. Resolves to the write's result, or undefined when the user
 // declines.
@@ -10,13 +11,21 @@ export const RECORDS_SHARE_CONFIRMATION = 'records.share_confirmation'
 export interface RecordsShareConfirmationError {
   statusMessage: string
   users: Array<{ id: string, name: string }>
+  /** The dialog's title and confirm button, when the write isn't an assignment (a move under a shared parent). */
+  title?: string
+  confirmLabel?: string
 }
 
 /** The share-confirmation details of a failed $fetch, or null for any other error. */
 export function recordsShareConfirmation(err: unknown): RecordsShareConfirmationError | null {
-  const body = (err as { data?: { statusMessage?: string, data?: { code?: string, users?: Array<{ id: string, name: string }> } } } | null)?.data
+  const body = (err as { data?: { statusMessage?: string, data?: { code?: string, users?: Array<{ id: string, name: string }>, title?: string, confirmLabel?: string } } } | null)?.data
   if (body?.data?.code !== RECORDS_SHARE_CONFIRMATION) return null
-  return { statusMessage: body.statusMessage ?? '', users: body.data.users ?? [] }
+  return {
+    statusMessage: body.statusMessage ?? '',
+    users: body.data.users ?? [],
+    title: body.data.title,
+    confirmLabel: body.data.confirmLabel
+  }
 }
 
 export function useRecordsShareConfirm() {
@@ -29,9 +38,9 @@ export function useRecordsShareConfirm() {
       if (!details) throw err
       const names = details.users.map(u => u.name).join(', ')
       const ok = await confirmAction({
-        title: `Share with ${names || 'them'}?`,
+        title: details.title ?? `Share with ${names || 'them'}?`,
         description: details.statusMessage,
-        confirmLabel: 'Assign and share',
+        confirmLabel: details.confirmLabel ?? 'Assign and share',
         color: 'primary'
       })
       if (!ok) return undefined

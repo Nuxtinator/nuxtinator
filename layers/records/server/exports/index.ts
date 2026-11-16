@@ -41,9 +41,10 @@ export {
   getRecordType,
   getRecordTypeFields,
   recordsAccessGrantingKeys,
+  recordsHierarchy,
   RECORDS_DEFAULT_PERMISSION_PREFIX
 } from '../utils/definition-settings'
-export type { RecordTypeSetting, RecordsFieldSetting } from '../utils/definition-settings'
+export type { RecordTypeSetting, RecordsFieldSetting, RecordsHierarchy } from '../utils/definition-settings'
 
 export { normalizeChannelValue, channelFingerprint } from '../utils/normalize'
 export type { NormalizedChannelValue } from '../utils/normalize'
@@ -62,7 +63,7 @@ export {
 } from '../utils/attachments'
 export type { RecordsAttachmentFile } from '../utils/attachments'
 
-export { requireShareConfirmation, recordsUnsharedAssignees, RECORDS_SHARE_CONFIRMATION } from '../utils/share-confirmation'
+export { requireShareConfirmation, requireMoveConfirmation, recordsUnsharedAssignees, RECORDS_SHARE_CONFIRMATION } from '../utils/share-confirmation'
 export type { RecordsSharingMode, RecordsShareConfirmationUser } from '../utils/share-confirmation'
 
 export { permFor, RECORD_ACTIONS } from '../utils/records-perms'

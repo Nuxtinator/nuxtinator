@@ -21,6 +21,7 @@ export type RecordsFilterOp =
   | 'eq'
   | 'lt'
   | 'gt'
+  | 'under'
 
 export interface RecordsFilterRule {
   field: string
@@ -61,7 +62,8 @@ export const RECORDS_FILTER_OP_LABELS: Record<RecordsFilterOp, string> = {
   between: 'is between',
   eq: 'equals',
   lt: 'is less than',
-  gt: 'is greater than'
+  gt: 'is greater than',
+  under: 'is anywhere under'
 }
 
 // What each op's value is: none, one value, a list, or a [from, to] pair.
@@ -82,7 +84,8 @@ export const RECORDS_FILTER_VALUE_SHAPE: Record<RecordsFilterOp, RecordsFilterVa
   between: 'range',
   eq: 'single',
   lt: 'single',
-  gt: 'single'
+  gt: 'single',
+  under: 'single'
 }
 
 /** Filterable record columns every type has, whatever its fields. */
@@ -126,6 +129,15 @@ export function recordsFilterOps(kind: string): RecordsFilterOp[] {
     default:
       return []
   }
+}
+
+/**
+ * The operators `field` offers: its kind's, plus "is anywhere under" on the
+ * parent field of a hierarchy, which matches at any depth.
+ */
+export function recordsFilterOpsFor(field: { kind: string, hierarchy?: string | null }): RecordsFilterOp[] {
+  const ops = recordsFilterOps(field.kind)
+  return field.kind === 'connection' && field.hierarchy === 'parent' ? [...ops, 'under'] : ops
 }
 
 /** The number of rules in a tree, counting into groups. */

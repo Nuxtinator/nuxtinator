@@ -3,7 +3,8 @@
 // the records kernel's own field editors and patch pipeline (useRecordsRecord), so permissions
 // and validation are exactly the detail page's. Channels, connections
 // widgets, comments, and the timeline stay on the full record page — the
-// header links there. Below the record's own fields, a section named after
+// header links there, and to the board of the record's subtasks on types
+// that have them. Below the record's own fields, a section named after
 // the view holds the view's own fields: everyone who opens the view sees
 // them, and its editors fill them in.
 import type { RecordsFieldSetting, RecordsTypeFields } from '#records/client'
@@ -65,6 +66,18 @@ watch(recordId, (id) => {
 }, { immediate: true })
 
 const canEdit = computed(() => record.value?.capabilities.canEdit ?? false)
+
+// A task opens as a board of what sits under it, unless that board is the
+// page behind this slideover.
+const route = useRoute()
+const { boardRoute } = useViewsSubtasksBoard()
+const childrenField = computed(() =>
+  fieldSettings.value?.fields.find(f => viewsIsSubtasksField(f) && !f.hidden) ?? null)
+const boardLink = computed(() => {
+  const id = recordId.value
+  if (!id || !childrenField.value || route.params.id === viewsSubtasksViewId(id)) return null
+  return boardRoute(id)
+})
 
 // Same grouping as the detail page, minus the name (header) and channel
 // fields (their widget lives on the full page only).
@@ -152,6 +165,19 @@ function viewUploadUrl(field: RecordsFieldSetting): string | undefined {
           <h2 class="flex-1 text-base font-semibold truncate">
             {{ record?.name ?? '…' }}
           </h2>
+          <UTooltip
+            v-if="boardLink && childrenField"
+            :text="`${childrenField.label} board`"
+          >
+            <UButton
+              icon="i-lucide-list-tree"
+              variant="ghost"
+              color="neutral"
+              size="sm"
+              :aria-label="`Open the ${childrenField.label.toLowerCase()} board`"
+              :to="boardLink"
+            />
+          </UTooltip>
           <UButton
             v-if="recordId"
             icon="i-lucide-maximize-2"

@@ -21,6 +21,9 @@ export interface RecordsEntriesTable {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>
   // The user account of the person the record describes (see crm_011).
   user_id: ColumnType<string | null, string | null | undefined, string | null>
+  // The record's ancestors through its type's hierarchy field, root first;
+  // empty for a record with no parent (see records_004).
+  ancestor_ids: Generated<string[]>
 }
 
 export interface RecordFieldEntriesTable {

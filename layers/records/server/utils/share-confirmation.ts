@@ -1,5 +1,6 @@
 // Naming someone in an access-granting people field (an assignee) lets them
-// see the record. When that widens who can see it, the person making the
+// see the record, and so does moving it under a parent other people can see.
+// When that widens who can see it, the person making the
 // change confirms it first: writes that ask for the check fail with a 409
 // carrying `RECORDS_SHARE_CONFIRMATION` and the people involved, and succeed
 // once resent with the confirmation. System writes (producer layers, inbound
@@ -10,7 +11,9 @@ import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import { getMemberPermissions, type TenantContext } from '#tenant/server'
 import { getRecordType, recordsAccessGrantingKeys } from './definition-settings'
+import type { RecordsHierarchyMove } from './hierarchy'
 import { recordsVisibilityScope, visibilityPredicate } from './list-records'
+import { getRecordsVisibilitySources } from './records-registry'
 import { resolveTypePermission } from './type-permissions'
 
 type Tx = Transaction<Database>
@@ -58,7 +61,9 @@ async function memberContext(tx: Tx, ctx: TenantContext, userId: string): Promis
 async function seesWithoutAssignment(tx: Tx, ctx: TenantContext, typeKey: string, recordId: string, userId: string): Promise<boolean> {
   const memberCtx = await memberContext(tx, ctx, userId)
   if (await resolveTypePermission(tx, memberCtx, typeKey, 'view_all')) return true
-  const scope = { ...(await recordsVisibilityScope(tx, typeKey)), grantKeys: [] }
+  // Being assigned a record above this one still counts as seeing it.
+  const full = await recordsVisibilityScope(tx, typeKey)
+  const scope = { ...full, grantKeys: [], inheritedGrantKeys: full.grantKeys }
   const row = await tx
     .selectFrom('records_entries')
     .select('id')
@@ -128,4 +133,82 @@ export async function requireShareConfirmation(
     statusMessage: `${names} can't see this ${noun} yet. Assigning it shares it with ${users.length === 1 ? 'them' : 'each of them'}.`,
     data: { code: RECORDS_SHARE_CONFIRMATION, users }
   })
+}
+
+// Whether anyone but the caller sees one of `ids` through something on the
+// record itself: they created it, it's shared with them, it names them in an
+// access-granting field, or a place that shares it has an audience.
+async function sharedBeyondCaller(tx: Tx, ctx: TenantContext, typeKey: string, ids: string[]): Promise<boolean> {
+  const created = await tx
+    .selectFrom('records_entries')
+    .select('id')
+    .where('id', 'in', ids)
+    .where('created_by', '<>', ctx.userId)
+    .executeTakeFirst()
+  if (created) return true
+  const shared = await tx
+    .selectFrom('records_shares')
+    .select('record_id')
+    .where('record_id', 'in', ids)
+    .where('user_id', '<>', ctx.userId)
+    .executeTakeFirst()
+  if (shared) return true
+  const grantKeys = recordsAccessGrantingKeys(typeKey)
+  if (grantKeys.length > 0) {
+    const named = await tx
+      .selectFrom('records_user_refs')
+      .select('record_id')
+      .where('record_id', 'in', ids)
+      .where('field_key', 'in', grantKeys)
+      .where('user_id', '<>', ctx.userId)
+      .executeTakeFirst()
+    if (named) return true
+  }
+  const type = await getRecordType(tx, typeKey)
+  if (type && !type.boardsGrantVisibility) return false
+  for (const source of getRecordsVisibilitySources()) {
+    if (!source.describe) continue
+    for (const id of ids) {
+      if ((await source.describe(tx, ctx, id)).some(via => via.audience.length > 0)) return true
+    }
+  }
+  return false
+}
+
+/**
+ * Refuses (409, `RECORDS_SHARE_CONFIRMATION`) a write that moved an existing
+ * record under a record other people can see, unless it was confirmed:
+ * everyone who sees the new parent then sees the record and everything under
+ * it. A move that puts nothing new above the record doesn't ask.
+ */
+export async function requireMoveConfirmation(
+  tx: Tx,
+  ctx: TenantContext,
+  typeKey: string,
+  moves: RecordsHierarchyMove[],
+  sharing: RecordsSharingMode
+): Promise<void> {
+  if (sharing === 'confirmed') return
+  for (const move of moves) {
+    if (move.gained.length === 0) continue
+    if (!(await sharedBeyondCaller(tx, ctx, typeKey, move.gained))) continue
+    const rows = await tx
+      .selectFrom('records_entries')
+      .select(['id', 'name'])
+      .where('id', 'in', [move.recordId, move.parentId])
+      .execute()
+    const parent = rows.find(r => r.id === move.parentId)
+    const record = rows.find(r => r.id === move.recordId)
+    if (!parent || !record) continue
+    throw createError({
+      statusCode: 409,
+      statusMessage: `Everyone who can see "${parent.name}" will see "${record.name}" and everything under it.`,
+      data: {
+        code: RECORDS_SHARE_CONFIRMATION,
+        users: [],
+        title: `Move under "${parent.name}"?`,
+        confirmLabel: 'Move and share'
+      }
+    })
+  }
 }

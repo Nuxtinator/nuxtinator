@@ -6,7 +6,7 @@
 // fields carry ids to render as people; connection fields shown as a count
 // or progress carry the totals. Refs show their resolved label.
 import type { RecordsFieldSetting } from '#records/client'
-import type { ViewsBoardItem, ViewsConnectionDisplay } from '../utils/views-types'
+import { viewsIsSubtasksField, type ViewsBoardItem, type ViewsConnectionDisplay } from '../utils/views-types'
 
 export interface ViewsCardValueSource {
   item: ViewsBoardItem
@@ -28,6 +28,8 @@ export interface ViewsCardValue {
   userIds?: string[]
   /** Set for connection fields shown as progress — rendered as a bar. */
   progress?: { done: number, total: number }
+  /** Set for a task's subtasks: the value opens the record's own board. */
+  drill?: true
 }
 
 const INTRINSIC_DEFS: Record<string, Pick<RecordsFieldSetting, 'key' | 'kind' | 'label'>> = {
@@ -71,8 +73,9 @@ export function useViewsCardValues(source: () => ViewsCardValueSource) {
       const progress = item.progress?.[field.key]
       if (field.kind === 'connection' && progress && (display === 'count' || display === 'progress')) {
         if (progress.total === 0) continue
-        if (display === 'count') out.push({ key, label: field.label, text: String(progress.total) })
-        else out.push({ key, label: field.label, text: `${progress.done}/${progress.total}`, progress })
+        const drill = viewsIsSubtasksField(field) ? { drill: true as const } : {}
+        if (display === 'count') out.push({ key, label: field.label, text: String(progress.total), ...drill })
+        else out.push({ key, label: field.label, text: `${progress.done}/${progress.total}`, progress, ...drill })
         continue
       }
 

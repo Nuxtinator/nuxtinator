@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // One row of a list tab: a done checkbox (on types with a single closed
 // status), the record name, and the tab's card fields as chips. The row
-// drags to reorder or into another section.
+// drags to reorder or into another section. Its subtasks progress links to
+// the board of those subtasks.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsBoardItem, ViewsConnectionDisplay } from '../../utils/views-types'
 
@@ -28,6 +29,8 @@ const emit = defineEmits<{
 
 const { byId } = useRecordsUsers()
 const displayName = (id: string) => byId.value.get(id)?.name ?? 'Unknown user'
+const NuxtLink = resolveComponent('NuxtLink')
+const { boardRoute } = useViewsSubtasksBoard()
 
 // A status chip repeats what the checkbox already says.
 const shownFields = computed(() =>
@@ -92,9 +95,13 @@ const menuItems = computed(() => props.removable
             size="3xs"
           />
         </span>
-        <span
+        <component
+          :is="value.drill ? NuxtLink : 'span'"
           v-else-if="value.progress"
+          :to="value.drill ? boardRoute(item.id) : undefined"
+          :title="value.drill ? `Open the ${value.label.toLowerCase()} board` : undefined"
           class="inline-flex items-center gap-1 text-xs text-(--ui-text-muted) tabular-nums"
+          :class="value.drill ? 'rounded px-1 hover:bg-(--ui-bg-elevated) hover:text-(--ui-text)' : ''"
         >
           <UProgress
             :model-value="value.progress.done"
@@ -103,7 +110,12 @@ const menuItems = computed(() => props.removable
             class="w-12"
           />
           {{ value.text }}
-        </span>
+          <UIcon
+            v-if="value.drill"
+            name="i-lucide-chevron-right"
+            class="size-3.5 text-(--ui-text-dimmed)"
+          />
+        </component>
         <UBadge
           v-else
           variant="subtle"

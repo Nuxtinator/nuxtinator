@@ -51,12 +51,12 @@ const orgInput = z.string().min(1).max(64).optional()
   .describe('Org slug to operate in. Defaults to the X-Active-Org header sent by the client.')
 
 const viewIdInput = z.union([z.string().uuid(), z.string().regex(/^builtin\.[A-Za-z0-9.-]{1,140}$/)])
-  .describe('View id, from views_list.')
+  .describe('View id, from views_list. A task\'s subtasks are the view `builtin.subtasks.<task id>`: its first tab is a board of the direct subtasks, its second lists everything under the task.')
 const tabIdInput = z.string().uuid().optional().describe('Tab id, from views_list or views_get_board. Defaults to the view\'s first tab.')
 
 const FILTER_OPS = [
   'is', 'is_not', 'any_of', 'none_of', 'all_of', 'contains', 'empty', 'not_empty',
-  'before', 'after', 'on', 'between', 'eq', 'lt', 'gt'
+  'before', 'after', 'on', 'between', 'eq', 'lt', 'gt', 'under'
 ] as const
 
 const filterRule = z.object({
@@ -75,10 +75,10 @@ const filterInput = z.object({
   rules: z.array(z.union([filterRule, filterInnerGroup])).max(50)
     .describe('Rules, and groups of rules one level deep, e.g. status is open AND (assignee is @me OR assignee is empty).')
 }).strict()
-  .describe('A filter. Ops by field kind: text contains/is/empty; dropdown is/is_not/any_of/none_of/empty; multi-select and tags any_of/all_of/none_of/empty; people is/any_of/none_of/empty; dates on/before/after/between/empty (YYYY-MM-DD); numbers eq/lt/gt/between/empty; checkbox is; connections any_of/none_of/empty (record ids). Pass { match: "all", rules: [] } to clear it.')
+  .describe('A filter. Ops by field kind: text contains/is/empty; dropdown is/is_not/any_of/none_of/empty; multi-select and tags any_of/all_of/none_of/empty; people is/any_of/none_of/empty; dates on/before/after/between/empty (YYYY-MM-DD); numbers eq/lt/gt/between/empty; checkbox is; connections any_of/none_of/empty (record ids); a task\'s parent also takes under (one record id: everything below that task, at any depth). Pass { match: "all", rules: [] } to clear it.')
 
 const shareInput = z.boolean().optional()
-  .describe('Set true to assign someone who can\'t see the card yet; doing so shares it with them. Without it the call is refused and names those people, so confirm with the user first.')
+  .describe('Set true to assign someone who can\'t see the card yet, or to move an existing task under one other people can see; either shares it. Without it the call is refused and says who it would be shared with, so confirm with the user first.')
 
 const layoutInput = z.enum(VIEWS_LAYOUTS).describe('kanban = a board of columns, list = rows with a done checkbox, table = a sortable grid.')
 

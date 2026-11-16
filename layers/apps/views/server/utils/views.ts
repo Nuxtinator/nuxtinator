@@ -529,6 +529,10 @@ export function toViewDetail(
   return {
     id: builtIn?.id ?? view.id,
     builtIn: !!builtIn,
+    /** The record a built-in view stands for (a task's subtasks board), else null. */
+    recordId: builtIn?.recordId ?? null,
+    /** The views above a built-in that stands for a record, outermost first. */
+    trail: builtIn?.trail ?? [],
     name: view.name,
     icon: view.icon,
     recordTypeKey: view.record_type_key,

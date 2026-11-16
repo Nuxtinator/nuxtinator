@@ -4,9 +4,12 @@
 // still move between field-grouped columns and get added through the
 // records routes, and "Copy view" turns one into a view of your own.
 //
-// A built-in may take a parameter (a meeting's id), which its filter uses.
-// Parameterized built-ins aren't listed; another layer opens them for one
-// value, e.g. embedded on that meeting's page.
+// A built-in may take a parameter (a meeting's id, a task's id), which its
+// filters use. Parameterized built-ins aren't listed; they're opened for one
+// value, e.g. embedded on that meeting's page, or as the board of one task's
+// subtasks. One that stands for a record names it and the views above it
+// (the same built-in for the record's ancestors), which the header shows as
+// a trail.
 //
 // Ids: `builtin.<key>` and `builtin.<key>.<param>`. Inside the server a
 // built-in reads as a ViewRow (and its tabs as ViewTabRows) whose ids are
@@ -31,6 +34,17 @@ export interface ViewsBuiltInTab {
   name: string
   layout: ViewsLayout
   definition: ViewTabDefinition
+  /** The tab's filter, given the view's parameter; replaces `definition.filter`. */
+  filter?: (param: string | null) => RecordsFilterGroup
+}
+
+/** What a parameterized built-in opens as for one parameter value. */
+export interface ViewsBuiltInTarget {
+  name: string
+  /** The record the view stands for: its header opens it. */
+  recordId?: string
+  /** The same built-in's views above this one, outermost first, by parameter. */
+  trail?: Array<{ param: string, name: string }>
 }
 
 export interface ViewsBuiltInView {
@@ -49,7 +63,7 @@ export interface ViewsBuiltInView {
    * reports the view as missing.
    */
   param?: {
-    resolve: (tx: Tx, ctx: TenantContext, param: string) => Promise<{ name: string } | null>
+    resolve: (tx: Tx, ctx: TenantContext, param: string) => Promise<ViewsBuiltInTarget | null>
   }
   tabs: ViewsBuiltInTab[]
 }
@@ -88,6 +102,10 @@ export interface ResolvedBuiltInView {
   def: ViewsBuiltInView
   view: ViewRow
   tabs: ViewTabRow[]
+  /** The record a parameterized view stands for, when it names one. */
+  recordId: string | null
+  /** The views above it, outermost first. */
+  trail: Array<{ id: string, name: string }>
 }
 
 const _resolved = new WeakMap<object, ResolvedBuiltInView>()
@@ -105,7 +123,8 @@ async function typeOpenTo(tx: Tx, ctx: TenantContext, typeKey: string): Promise<
   return await resolveTypePermission(tx, ctx, typeKey, 'read')
 }
 
-function build(id: string, def: ViewsBuiltInView, name: string, param: string | null): ResolvedBuiltInView {
+function build(id: string, def: ViewsBuiltInView, target: ViewsBuiltInTarget, param: string | null): ResolvedBuiltInView {
+  const name = target.name
   const viewUuid = stableUuid(id)
   const definition: ViewDefinition = {}
   const filter = def.filter?.(param)
@@ -130,11 +149,18 @@ function build(id: string, def: ViewsBuiltInView, name: string, param: string | 
     name: tab.name,
     layout: tab.layout,
     position: positions[i]!,
-    definition: tab.definition as Record<string, unknown>,
+    definition: (tab.filter ? { ...tab.definition, filter: tab.filter(param) } : tab.definition) as Record<string, unknown>,
     created_at: epoch,
     updated_at: epoch
   }))
-  const resolved: ResolvedBuiltInView = { id, def, view, tabs }
+  const resolved: ResolvedBuiltInView = {
+    id,
+    def,
+    view,
+    tabs,
+    recordId: target.recordId ?? null,
+    trail: (target.trail ?? []).map(t => ({ id: builtInViewId(def.key, t.param), name: t.name }))
+  }
   _resolved.set(view, resolved)
   return resolved
 }
@@ -154,13 +180,13 @@ export async function resolveBuiltInView(tx: Tx, ctx: TenantContext, id: string)
   if (!!def.param !== (param !== null)) return null
   if (param !== null && !PARAM_RE.test(param)) return null
   if (!(await typeOpenTo(tx, ctx, def.recordTypeKey))) return null
-  let name = def.name
+  let target: ViewsBuiltInTarget = { name: def.name }
   if (def.param && param !== null) {
     const named = await def.param.resolve(tx, ctx, param)
     if (!named) return null
-    name = named.name
+    target = named
   }
-  return build(id, def, name, param)
+  return build(id, def, target, param)
 }
 
 /** The unparameterized built-ins the caller can open, in listing order. */
@@ -170,7 +196,7 @@ export async function listBuiltInViews(tx: Tx, ctx: TenantContext): Promise<Reso
     .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.name.localeCompare(b.name))
   const out: ResolvedBuiltInView[] = []
   for (const def of defs) {
-    if (await typeOpenTo(tx, ctx, def.recordTypeKey)) out.push(build(builtInViewId(def.key), def, def.name, null))
+    if (await typeOpenTo(tx, ctx, def.recordTypeKey)) out.push(build(builtInViewId(def.key), def, { name: def.name }, null))
   }
   return out
 }

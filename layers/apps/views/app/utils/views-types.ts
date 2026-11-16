@@ -105,6 +105,33 @@ export interface ViewDetail extends Omit<ViewSummary, 'layout' | 'tabCount' | 't
   orgLevel: ViewsShareLevel
   /** Records created on this hand-picked view and on no other — deleted with it. */
   ownCardCount: number
+  /** The record a built-in view stands for (a task's subtasks board), else null. */
+  recordId: string | null
+  /** The views above a built-in that stands for a record, outermost first. */
+  trail: Array<{ id: string, name: string }>
+}
+
+/** The built-in view that shows one task's subtasks as a board. */
+export const VIEWS_SUBTASKS_KEY = 'subtasks'
+
+/** The record type that built-in view is declared for. */
+export const VIEWS_SUBTASKS_TYPE = 'task'
+
+/** Whether `field` holds the records that open as their record's subtasks board. */
+export function viewsIsSubtasksField(field: { hierarchy?: 'parent' | 'children' | null, target?: string | null }): boolean {
+  return field.hierarchy === 'children' && field.target === VIEWS_SUBTASKS_TYPE
+}
+
+const VIEW_ID_RE = /^(?:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|builtin\.[A-Za-z0-9.-]{1,140})$/i
+
+/** Whether `value` has the shape of a view id (a stored view's uuid or `builtin.…`). */
+export function viewsIsViewId(value: unknown): value is string {
+  return typeof value === 'string' && VIEW_ID_RE.test(value)
+}
+
+/** The id of the view showing what sits under record `recordId`. */
+export function viewsSubtasksViewId(recordId: string): string {
+  return `builtin.${VIEWS_SUBTASKS_KEY}.${recordId}`
 }
 
 /**
@@ -178,8 +205,8 @@ export const VIEWS_NO_VALUE_COLUMN = ''
 /** How a drag between field-grouped columns changes the record (see placements.ts). */
 export type ViewsDragMode = 'move' | 'add'
 
-export function viewsDragMode(field: { kind: string }): ViewsDragMode {
-  return field.kind === 'key_select' || field.kind === 'user_select' ? 'move' : 'add'
+export function viewsDragMode(field: { kind: string, hierarchy?: 'parent' | 'children' | null }): ViewsDragMode {
+  return field.kind === 'key_select' || field.kind === 'user_select' || field.hierarchy === 'parent' ? 'move' : 'add'
 }
 
 export const VIEWS_LAYOUT_META: Record<ViewsLayout, { label: string, icon: string }> = {

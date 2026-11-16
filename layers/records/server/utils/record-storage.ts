@@ -25,19 +25,19 @@ import { createNotification } from '#core/server/utils/notifications'
 import {
   getRecordsRefSource,
   getRecordsStorageDriver,
-  getRegisteredRecordTypes,
   runRecordsClosingHooks,
   runRecordsFieldFilters,
   type RecordsFieldPatch,
   type RecordsListPatch,
   type RecordsRefTarget
 } from './records-registry'
-import { getRecordType, getRecordTypeFields, recordsAccessGrantingKeys, recordsStatusDefault, type RecordsFieldSetting } from './definition-settings'
+import { getRecordType, getRecordTypeFields, recordsAccessGrantingKeys, recordsConnectionReverseKeys, recordsHierarchy, recordsStatusDefault, type RecordsFieldSetting } from './definition-settings'
+import { applyHierarchyOp, lockRecordsHierarchy, type RecordsHierarchyMove } from './hierarchy'
 import { normalizeChannelValue } from './normalize'
 import { recordRecordsActivity } from './records-activity'
 import { closingRulesOf, enforceClosingRules } from './closing'
 import { visibleRecordIds } from './list-records'
-import { requireShareConfirmation, type RecordsSharingMode } from './share-confirmation'
+import { requireMoveConfirmation, requireShareConfirmation, type RecordsSharingMode } from './share-confirmation'
 import { applyAttachmentsPatch, listRecordAttachments } from './attachments'
 
 type Tx = Transaction<Database>
@@ -80,24 +80,6 @@ function emptyValueFor(def: RecordsFieldSetting): unknown {
 
 function pushUnique(list: string[], value: string): void {
   if (!list.includes(value)) list.push(value)
-}
-
-// Field keys (on any registered type) whose connection rows surface in
-// reverse under `fieldKey` of `typeKey` records: every field declared with
-// `target: typeKey, reverseKey: fieldKey`. Connection rows store only the
-// writing side's field_key, so a key shared by two types pointing at
-// different targets would be ambiguous — field keys are expected to be
-// distinct across connection vocabularies.
-function connectionReverseSources(typeKey: string, fieldKey: string): string[] {
-  const sources = new Set<string>()
-  for (const manifest of getRegisteredRecordTypes()) {
-    for (const [key, def] of Object.entries(manifest.fields)) {
-      if (def.kind === 'connection' && def.target === typeKey && def.reverseKey === fieldKey) {
-        sources.add(key)
-      }
-    }
-  }
-  return [...sources]
 }
 
 export async function hydrateRecords(
@@ -202,7 +184,7 @@ export async function hydrateRecords(
     // their writer's def named via reverseKey.
     const reverseMap = new Map<string, string[]>()
     for (const def of connDefs) {
-      for (const source of connectionReverseSources(typeKey, def.key)) {
+      for (const source of recordsConnectionReverseKeys(typeKey, def.key)) {
         const targets = reverseMap.get(source) ?? []
         targets.push(def.key)
         reverseMap.set(source, targets)
@@ -661,7 +643,7 @@ async function applyConnectionsOp(
 ): Promise<void> {
   // Rows surfaced in reverse under this field belong to the other side —
   // deletes must reach them too, or the UI could never remove them.
-  const reverseSources = connectionReverseSources(typeKey, def.key)
+  const reverseSources = recordsConnectionReverseKeys(typeKey, def.key)
   if (list.force) {
     await tx
       .deleteFrom('records_connections')
@@ -852,7 +834,8 @@ export interface ApplyFieldPatchOpts {
   /**
    * Set by writes a person makes: 'ask' refuses (409) a patch that names
    * someone in an access-granting people field who can't otherwise see the
-   * record, until resent as 'confirmed'. Absent for system writes. A person's
+   * record, or that moves a record under a parent other people can see,
+   * until resent as 'confirmed'. Absent for system writes. A person's
    * write also notifies whoever it newly names in such a field.
    */
   sharing?: RecordsSharingMode
@@ -929,6 +912,12 @@ export async function applyFieldPatch(
   await assertUsersExist(tx, defsByKey, listOps)
   await assertConnectionTargetsExist(tx, defsByKey, listOps)
 
+  const hierarchy = recordsHierarchy(typeKey)
+  // Before the request writes any row, so two moves never wait on each other's rows.
+  if (hierarchy && [...listOps.keys()].some(key => defsByKey.get(key)!.hierarchy)) {
+    await lockRecordsHierarchy(tx, ctx, typeKey)
+  }
+
   let id: string
   let oldRecord: RecordsHydratedRecord | null = null
   const closingRules = closingRulesOf(type, defs)
@@ -999,6 +988,7 @@ export async function applyFieldPatch(
       .execute()
   }
 
+  const moves: RecordsHierarchyMove[] = []
   for (const [key, list] of listOps) {
     const def = defsByKey.get(key)!
     switch (def.storage) {
@@ -1009,7 +999,11 @@ export async function applyFieldPatch(
         await applyUserRefsOp(tx, ctx, id, def, list)
         break
       case 'connections':
-        await applyConnectionsOp(tx, typeKey, id, def, list)
+        if (hierarchy && def.hierarchy) {
+          moves.push(...await applyHierarchyOp(tx, ctx, typeKey, hierarchy, id, def, list, isCreate))
+        } else {
+          await applyConnectionsOp(tx, typeKey, id, def, list)
+        }
         break
       case 'channels':
         await getRecordsStorageDriver(def.storage)!.apply(tx, ctx, id, def, list)
@@ -1024,6 +1018,10 @@ export async function applyFieldPatch(
   const grantKeys = recordsAccessGrantingKeys(typeKey)
   if (opts.sharing && [...listOps.keys()].some(key => grantKeys.includes(key))) {
     await requireShareConfirmation(tx, ctx, typeKey, id, oldRecord?.fields ?? null, opts.sharing)
+  }
+  // Putting a record under a parent shares it with whoever sees the parent.
+  if (opts.sharing && moves.length > 0) {
+    await requireMoveConfirmation(tx, ctx, typeKey, moves, opts.sharing)
   }
 
   const record = await getRecord(tx, ctx, typeKey, id)
