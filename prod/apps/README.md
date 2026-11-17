@@ -10,7 +10,7 @@ literally named `layers/`; we use `apps/` because in your project everything
 here is an app, and glob it in ourselves.)
 
 Contrast with `_layers/` (leading underscore): that holds the **upstream
-nuxtinator layers** — `core`, `tenancy`, email backends, the bundled apps —
+nuxtinator layers** — `core`, `tenancy`, `mail`, the bundled apps —
 fetched by `bun run sync-layers` from the URLs in [`../layers.ts`](../layers.ts).
 It's gitignored and regenerated; never edit it.
 

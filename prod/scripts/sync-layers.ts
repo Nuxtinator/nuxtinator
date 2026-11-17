@@ -25,6 +25,11 @@ if (onlyIdx !== -1 && (!only || !LAYERS.some(l => l.id === only))) {
 const selected = only ? LAYERS.filter(l => l.id === only) : LAYERS
 
 let lock = readLock()
+// A single-layer fetch never resolves: it takes exactly the pinned ref or stops.
+if (only && !lock?.[only]) {
+  console.error(`layers.lock.json has no entry for ${only}. Run 'bun run layers:update' and commit the lock, then fetch again.`)
+  process.exit(1)
+}
 if (!lock) {
   console.log('No layers.lock.json — resolving once from layers.ts…')
   const resolved = await resolveAll(LAYERS, process.env.LAYER_SOURCE_TOKEN)

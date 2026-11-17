@@ -266,7 +266,7 @@ You do NOT write any of these files from scratch. Steps 5–8 trim the template 
 
 `layers.ts` at the project root is the **single source of truth** for which layers this project uses. Both `nuxt.config.ts` (the `extends:` array) and `scripts/sync-layers.ts` (the fetcher) import the `LAYERS` array from it.
 
-Open `layers.ts`. It contains an entry for every available nuxtinator layer. **Delete the entries for layers the user did NOT select** — don't comment them out, delete entirely. Keep load order intact: `core` first; `tenancy` second (so its multi-mode kernel overrides core's single-mode); email backend; `oauth`; `mcp`; app layers; `dev` last (and remove `dev` before production).
+Open `layers.ts`. It contains an entry for every available nuxtinator layer. **Delete the entries for layers the user did NOT select** — don't comment them out, delete entirely. Keep load order intact: `core` first; `tenancy` second (so its multi-mode kernel overrides core's single-mode); `mail`; `oauth`; `mcp`; app layers; `dev` last (and remove `dev` before production).
 
 You do not need to touch `nuxt.config.ts` or `scripts/sync-layers.ts` — both derive from `LAYERS`.
 

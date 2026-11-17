@@ -184,7 +184,7 @@ The module merges locales and messages across all layers by locale code; the hos
 [dev/nuxt.config.ts](dev/nuxt.config.ts) does three layer-related things worth knowing about:
 
 1. **`stripLayerTsconfigs()`** runs before modules — layers extracted from full Nuxt projects sometimes ship a `tsconfig.json` that references `./.nuxt/tsconfig.*.json` (only generated when the layer is opened standalone). Vite's tsconfig walker would crash; the cleanup deletes them.
-2. **`extends:`** lists every layer in load order. `core` first (lowest priority — gets overridden by other layers and host); `tenancy` next (multi-mode kernel overrides core's single-mode); then email backend, oauth, mcp, app layers, dev.
+2. **`extends:`** lists every layer in load order. `core` first (lowest priority — gets overridden by other layers and host); `tenancy` next (multi-mode kernel overrides core's single-mode); then `mail`, oauth, mcp, app layers, dev.
 3. **The host has no modules of its own** — `migrations`, `tenant-kernel`, and `email-kernel` modules all live in `layers/core/nuxt.config.ts`.
 
 ### The seven runtime registries (core owns)
@@ -200,6 +200,16 @@ Every app layer feeds the host through seven in-process registries in [layers/co
 | In-app nav items | [nav-registry.ts](layers/core/server/utils/nav-registry.ts) | `registerNavItem(...)` |
 | Rail entries | [rail-registry.ts](layers/core/server/utils/rail-registry.ts) | `registerRailItem(...)` |
 | Admin shell sections | [admin-section-registry.ts](layers/core/server/utils/admin-section-registry.ts) | `registerAdminSection(...)` |
+
+Mail has five more, all in [mail.ts](layers/core/server/utils/mail.ts). Core's mail plugin hands them to `createMail` once at boot, so a registration after that throws; register from a Nitro plugin (see [documentation/layers.md](documentation/layers.md#mail)):
+
+| Registry | Function |
+|---|---|
+| Mail streams | `registerMailStream({ id, label, defaultLocal, orgAssignable?, needsReceive?, userInitiated?, bulk?, queued? })` |
+| Inbound handlers | `registerInboundHandler({ id, order, match, handle })` |
+| Provider event handlers | `registerMailEventHandler({ id, stream?, types?, handle })` |
+| Send guards | `registerSendGuard({ id, check })` |
+| Mail providers | `registerMailProvider(provider)`; core registers Mailgun, SES and SendGrid itself |
 
 The host bridges these to the client via auth-gated, permission-filtered endpoints (`/api/_apps`, `/api/_nav`, `/api/_admin-sections`) consumed by composables (`useApps`, `useAppNav`, `useAdminSections`). Core's own admin sections are registered the same way — see [layers/core/server/plugins/register-host-admin.ts](layers/core/server/plugins/register-host-admin.ts). Rail items ride along in the app feeds (`rail` on each app entry). A host changes how an installed app is presented with `configureApp(id, { title, icon, order, defaultStatus })`, and sets the rail's behaviour under `rail` in its `app.config.ts` (see [documentation/layers.md](documentation/layers.md#the-app-rail)).
 

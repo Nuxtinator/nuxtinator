@@ -13,12 +13,12 @@
     "source": "github:Nuxtinator/nuxtinator/layers/tenancy",
     "tagPrefix": "@nuxtinator/tenancy@"
   },
-  "email-mailgun": {
-    "pkg": "@nuxtinator/email-mailgun",
+  "mail": {
+    "pkg": "@nuxtinator/mail",
     "version": "latest",
     "ref": "master",
-    "source": "github:Nuxtinator/nuxtinator/layers/email-mailgun",
-    "tagPrefix": "@nuxtinator/email-mailgun@"
+    "source": "github:Nuxtinator/nuxtinator/layers/mail",
+    "tagPrefix": "@nuxtinator/mail@"
   },
   "oauth": {
     "pkg": "@nuxtinator/oauth",

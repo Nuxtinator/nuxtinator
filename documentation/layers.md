@@ -793,6 +793,47 @@ An org holds the signing key of its own provider account, so its events only eve
 
 Providers keep their own lists. Each domain's mode follows its key's capabilities: `disabled` (SES, with a configuration set that turns its list off), `mirrored` (Mailgun or SendGrid with a key that can change the lists: the kernel releases addresses it has cleared), `unmanaged` (the provider's list stays in charge; `/admin/email` says so).
 
+### Providers
+
+A provider is a plain object implementing `MailProvider` from `@nuxtinator/mail/kernel`. Core registers Mailgun, SES and SendGrid; a layer adds another from its Nitro plugin, before the mail instance is built:
+
+```ts
+import { registerMailProvider } from '#core/server/utils/mail'
+import { postmarkProvider } from '../utils/postmark'
+
+registerMailProvider(postmarkProvider)
+```
+
+| Member | What it does |
+|---|---|
+| `id`, `label` | the stored provider id (unique) and its name in the UI |
+| `credentialFields` | the account form: `{ key, label, secret, optional?, help?, env? }`. `env` names the variable that fills the field for the Environment account |
+| `domainCredentialFields` | optional per-domain key (a Mailgun sending key) |
+| `supports` | `{ send, receive, events }`: which roles a domain may give it |
+| `webhookScope` | `domain` (webhooks set per domain) or `account` (one webhook for the whole account, like SendGrid's); the kernel works out the event list across the account's domains |
+| `notes` | optional `{ send?, receive? }` caveats, shown where an admin picks the provider or sets a domain up on it |
+| `verifyCredentials(creds, domain?, opts?)` | checks the key with calls that change nothing and returns the capabilities it proved (`send`, `domains`, `routes`, `webhooks`, `suppressionLists`) |
+| `manualSetup(domain, role, urls, { events })` | the steps an admin follows at the provider when setup isn't automatic |
+| `send(creds, msg)` | one attempt; returns `sent` (with the provider's id), `failed` (`retryable`, and `keyRejected` when the key itself was refused) or `unknown` |
+| `provisionDomain?`, `checkDomain?`, `configureWebhooks?`, `deprovisionDomain?` | automatic setup. Throw `ProviderPermissionError(capability)` when the key isn't allowed: the kernel records the capability as false and falls back to the manual steps |
+| `providerSuppression` | `mode(capabilities)` (`disabled`, `mirrored`, `unmanaged`) and an optional `release(creds, domain, address, list)` |
+| `handleWebhook(creds, req)` | verifies the signature and returns `handshake`, `events` (mapped to `MailEvent`s, with `stream`, `orgId` and `ref` from the message's correlation) or `inbound` (a parsed message), or `rejected` |
+
+Capabilities are recorded one by one from calls the kernel needs, and a refusal never fails an add, a check or a send. `@nuxtinator/mail/test` has a fake provider whose capabilities and suppression mode are configurable; adapter tests run against a local fake HTTP server.
+
+### Organizations' own domains
+
+With tenancy loaded, an org adds its own domain on `/@<slug>/settings/email`. It must prove it controls the name before anything else happens:
+
+1. The domain is created `pending`, with a token. The page shows one TXT record: `_nx-verify.<domain>` with the value `nx-verify=<token>`.
+2. **Check now** looks the record up. Until it is found, nothing is called at any provider and the domain sends, receives and qualifies for nothing.
+3. Found: the domain becomes `verified` and is set up on the host's accounts for organizations' domains (or on the org's own account, if it chose one). Every other org's row for the name is then deleted, so one name never has two live rows. A name a host domain holds can't be claimed.
+4. A pending claim not verified within 7 days is deleted by the daily job.
+
+The daily job then rechecks each org domain's record. One failed lookup changes nothing; three in a row set the domain `lapsed`: its streams fall back to the host's domains, it receives no inbound mail, the name is no longer held exclusively, and the org's admins are emailed. A passing check (the daily one, or **Check now**) restores it, unless another org has verified the name meanwhile.
+
+Domains a host admin adds and the Environment domain are `verified` from the start.
+
 ### Outside Nuxt
 
 A worker on the same database builds its own instance:
@@ -807,7 +848,7 @@ mail.startSweeping()
 process.on('SIGTERM', () => mail.stop())
 ```
 
-- **Fetching the package.** `_layers/` is usually outside the Docker build context, so the worker image's build runs `bun run scripts/sync-layers.ts --only mail`, which fetches the tag pinned in `layers.lock.json`.
+- **Fetching the package.** `_layers/` is usually outside the Docker build context, so the worker image's build runs `bun run scripts/sync-layers.ts --only mail`, which fetches the tag pinned in `layers.lock.json`. It never resolves anything itself: with no lock entry for `mail` it stops with an error, so run `bun run layers:update` and commit the lock first.
 - **Who holds what.** A sending process needs the database, the secret key (it decrypts every account's credentials) and the env account's provider variables. An enqueue-only process (a public server) gets only `outboxPublicKey` (`MAIL_OUTBOX_PUBLIC_KEY`, shown on `/admin/email`) and calls `enqueue`; a worker sends.
 - **Identical env-account variables.** The env account's credentials are never stored; each process uses its own. The app records a fingerprint at boot, and a process whose variables differ pauses its env-account sends (queued rows wait) until they match. When rotating a key, redeploy the app first.
 - **Connections.** `db` may be pooled (PgBouncer transaction mode, `prepare: false`): the kernel takes no advisory locks and never listens on it. To wake the sender on each enqueue, give `subscribe` a `LISTEN` on a direct connection (core does this when `MAIL_LISTEN_DATABASE_URL` is set); otherwise the sweep tick (`sweepSeconds`) is the trigger.
@@ -828,7 +869,16 @@ Pin core to `^3` first if the host tracks `latest`, so the major arrives deliber
 5. Mailgun dashboard: point the inbound route at the new `/inbound/mime` URL and the webhooks at the new events URL; remove the old `/api/inbox/webhooks/mailgun/*` targets.
 6. Check: a password reset arrives, the receiving probe turns green, a test reply shows "Delivered".
 
-Between steps 3 and 5 the old URLs answer 404. Mailgun retries route forwards for about 8 hours, so inbound mail in the gap arrives once the route points at the new URL; delivered notifications posted in the gap may be lost.
+Between steps 3 and 5 the old URLs answer 404. Mailgun retries a route forward that gets a 404, first after 10 minutes and then for about 8 hours, so inbound mail in the gap arrives once the route points at the new URL. Events posted in the gap (bounces, complaints, failures) are retried the same way; only delivered notifications may be lost.
+
+### Releasing the mail kernel
+
+Until `mail` has its first tag, core requires `@nuxtinator/mail >=0.0.0`: the build check still stops a host that fetched core without mail, and a host or the monorepo building from `master` passes with mail at `0.0.0`. Release in this order, each with `bun run release`:
+
+1. mail → 1.0.0.
+2. core → 4.0.0, raising its requirement to `@nuxtinator/mail >=1.0.0` in the release commit.
+3. tenancy and crm → minor, inbox → 1.0.0, each raising its requirement to `@nuxtinator/core >=4.0.0`.
+4. email-mailgun → 2.0.0, the empty layer.
 
 ---
 

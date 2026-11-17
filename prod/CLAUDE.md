@@ -12,7 +12,7 @@ This is a thin **host shell**. Almost all functionality — auth, admin, RBAC, m
 
 - **Add/remove a layer** → edit the `LAYERS` array in `layers.ts`, then run `bun run setup` to fetch it.
 - **Never edit the `extends:` array** in `nuxt.config.ts` directly — it's computed from `LAYERS`. Editing it creates drift between what's fetched and what's loaded.
-- Load order matters: `core` first, `tenancy` second (its multi-mode kernel overrides core's single-mode), email backend, `oauth`, `mcp`, app layers, `dev` last.
+- Load order matters: `core` first, `tenancy` second (its multi-mode kernel overrides core's single-mode), `mail`, `oauth`, `mcp`, app layers, `dev` last.
 
 ## Commands (run from the project root)
 
