@@ -99,9 +99,10 @@ const onAdd = async () => {
       : mode.value === 'email'
         ? { email: email.value.trim(), role: role.value }
         : { link: true, role: role.value }
-    const res = await $fetch<{ id: string, url?: string }>(props.endpoint, { method: 'POST', body })
+    const res = await $fetch<{ id: string, url?: string, emailSkipped?: ShareSkip }>(props.endpoint, { method: 'POST', body })
+    skippedNote.value = ''
     if (mode.value === 'link' && res.url) linkUrl.value = res.url
-    if (mode.value === 'email') toast.add({ title: 'Invite sent', color: 'success' })
+    if (mode.value === 'email' && !noteSkipped(res.emailSkipped, res.url)) toast.add({ title: 'Invite sent', color: 'success' })
     personId.value = undefined
     email.value = ''
     await load()
@@ -136,13 +137,28 @@ const onRemove = async (share: ShareEntry) => {
 
 const onResend = async (share: ShareEntry) => {
   try {
-    const res = await $fetch<{ url: string }>(`${props.endpoint}/${share.id}/resend`, { method: 'POST' })
+    const res = await $fetch<{ url: string, emailSkipped?: ShareSkip }>(`${props.endpoint}/${share.id}/resend`, { method: 'POST' })
+    skippedNote.value = ''
+    if (share.pending?.email && noteSkipped(res.emailSkipped, res.url)) return
     if (share.pending?.email) toast.add({ title: 'Invite sent again', color: 'success' })
     else linkUrl.value = res.url
     await load()
   } catch (err: unknown) {
     toast.add({ title: 'Resend failed', description: errorMessage(err), color: 'error' })
   }
+}
+
+type ShareSkip = 'hard_bounce' | 'complaint'
+const skippedNote = ref('')
+
+// The share stands even when the address can't be mailed; the sharer passes the link on.
+function noteSkipped(reason: ShareSkip | undefined, url: string | undefined) {
+  if (!reason || !url) return false
+  linkUrl.value = url
+  skippedNote.value = reason === 'complaint'
+    ? 'We couldn\'t email this person, because they marked our mail as spam. Send them the link yourself.'
+    : 'We couldn\'t email this person, because mail to them has bounced before. Send them the link yourself.'
+  return true
 }
 
 const copyLink = async () => {
@@ -219,6 +235,12 @@ const copyLink = async () => {
                 {{ mode === 'link' ? 'Create link' : 'Share' }}
               </UButton>
             </div>
+            <p
+              v-if="skippedNote"
+              class="text-sm text-(--ui-text-muted)"
+            >
+              {{ skippedNote }}
+            </p>
             <div
               v-if="linkUrl"
               class="flex gap-2"

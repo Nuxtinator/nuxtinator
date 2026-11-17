@@ -54,7 +54,8 @@ export function validateSlug(slug: string): string | null {
   if (!SLUG_RE.test(slug)) {
     return 'Slug must be 2–40 lowercase letters, digits, or hyphens, starting with a letter.'
   }
-  if (RESERVED_SLUGS.includes(slug)) {
+  // `nx-` local parts belong to the mail kernel (receiving probes).
+  if (RESERVED_SLUGS.includes(slug) || slug.startsWith('nx-')) {
     return `"${slug}" is reserved. Choose another slug.`
   }
   return null

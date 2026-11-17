@@ -15,7 +15,8 @@ export const ORG_PERMISSIONS = [
   'org.roles.delete',
   'org.settings.write',
   'org.apps.manage',
-  'org.groups.manage'
+  'org.groups.manage',
+  'org.mail.manage'
 ] as const
 
 export type OrgPermission = typeof ORG_PERMISSIONS[number]
@@ -68,6 +69,10 @@ export const ORG_PERMISSION_META: Record<string, { title: string, description: s
   'org.groups.manage': {
     title: 'Manage groups',
     description: 'Create and edit this org\'s groups, choose whether they run as audiences or teams, and set who is in them.'
+  },
+  'org.mail.manage': {
+    title: 'Manage email',
+    description: 'Add the org\'s own email domains and provider accounts, and choose which domain each kind of mail is sent from.'
   }
 }
 

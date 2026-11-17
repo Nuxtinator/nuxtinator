@@ -38,8 +38,10 @@ go-saas/                          ← repo root (bun workspace)
     │                                peer: nuxt, @nuxt/kit, @nuxt/ui, kysely, postgres, h3, vue
     ├── tenancy/                  ← OPTIONAL multi-tenant: orgs, memberships, RLS,
     │   └── package.json             multi-mode #tenant kernel. peer-deps only.
-    ├── email-mailgun/            ← OPTIONAL email backend (provides #email).
-    │   └── package.json             deps: nodemailer, nodemailer-mailgun-transport
+    ├── mail/                     ← ALWAYS: @nuxtinator/mail, the framework-free mail kernel
+    │   └── package.json             (./kernel, ./adapters, ./test). deps: nodemailer, postal-mime.
+    │                                Core depends on it; non-Nuxt processes import it directly.
+    ├── email-mailgun/            ← retired, empty (replaced by mail)
     ├── oauth/                    ← OPTIONAL OAuth 2.1 server (peer-deps only)
     ├── mcp/                      ← OPTIONAL MCP transport
     │   └── package.json             deps: @modelcontextprotocol/sdk, zod
@@ -111,15 +113,11 @@ This repo is **a host shell + a stack of layers** wired through Nuxt's `extends:
 |---|---|---|
 | `core` | Auth, admin, profile pages; 6 runtime registries; #tenant single-mode kernel; RBAC; activity logger; rate limiter; secret crypto; storage; slug; migrations runner; bootstrap-admin script; launcher chrome (AppRail, AppSidebar, layouts, composables). | yes |
 | `tenancy` | Multi-tenant: orgs, memberships, org_apps, org_role_overrides, RLS, BYPASSRLS adminDb, OrgSwitcher, /admin/orgs UI, multi-mode #tenant kernel that overrides core's. | optional |
-| `email-mailgun` | Mailgun (HTTP API in prod, MailHog locally). Provides `#email` alias. | optional* |
-| `email-smtp` | (planned) Plain SMTP via nodemailer. | optional* |
-| `email-ses` | (planned) AWS SES. | optional* |
+| `mail` | The mail kernel package: streams, sending-domain resolution, outbox, suppressions, inbound dispatch, provider events, and the Mailgun/SES/SendGrid adapters. Framework-free; core wraps it. | yes |
 | `oauth` | OAuth 2.1 issuer (token, consent, admin endpoints). | optional |
 | `mcp` | MCP server transport (depends on oauth). | optional |
 | `dev` | UI sandboxes (e.g. `/kitchen`). | optional |
 | `apps/<id>` | Per-app feature: pages + routes + perms + migrations. | per-project choice |
-
-*If no email layer is loaded, code that imports from `#email` throws helpfully at first call.
 
 ### Layer auto-discovery escape
 
@@ -155,7 +153,11 @@ Auth/notification code imports email helpers from `#email`:
 import { sendTemplateEmail } from '#email'
 ```
 
-Each email backend layer (`email-mailgun`, future `email-smtp`/`email-ses`) provides its own implementation and registers `#email` to point at it. Core ships a throwing fallback at [layers/core/email-fallback/email.ts](layers/core/email-fallback/email.ts) that surfaces a clear error if no email layer is loaded.
+Core points `#email` at [layers/core/email-kernel/email.ts](layers/core/email-kernel/email.ts), which renders core's templates and sends through the mail kernel: password reset and verification mail on the `account` stream (skips suppressions), everything else on `system`. It returns true when the mail was sent or queued. Code that needs more (Reply-To, threading, attachments, its own stream, the send result) uses `sendMail` / `enqueueMail` from `#core/server/utils/mail` directly.
+
+### Mail
+
+The mail kernel (`@nuxtinator/mail`, [layers/mail/](layers/mail/)) takes a Kysely instance and plain objects; core builds the one instance in [plugins/mail.ts](layers/core/server/plugins/mail.ts) after every plugin has run and migrations have finished. Layers register from their Nitro plugins through [#core/server/utils/mail](layers/core/server/utils/mail.ts): `registerMailStream`, `registerMailProvider`, `registerInboundHandler`, `registerMailEventHandler`, `registerSendGuard`. Registering after the build throws. Sends: `sendMail(m)` (never inside a transaction) or `enqueueMail(tx, m)` (outbox row in the caller's transaction, first attempt right after commit). Mail settings come from the runtime environment, never `runtimeConfig`. Admin UI: `/admin/email` (host) and `/@<slug>/settings/email` (orgs, `org.mail.manage`). The mail tables have no RLS (handlers filter by `org_id`). Full guide: [documentation/layers.md](documentation/layers.md#mail).
 
 ### Translations (i18n)
 
@@ -182,7 +184,7 @@ The module merges locales and messages across all layers by locale code; the hos
 [dev/nuxt.config.ts](dev/nuxt.config.ts) does three layer-related things worth knowing about:
 
 1. **`stripLayerTsconfigs()`** runs before modules — layers extracted from full Nuxt projects sometimes ship a `tsconfig.json` that references `./.nuxt/tsconfig.*.json` (only generated when the layer is opened standalone). Vite's tsconfig walker would crash; the cleanup deletes them.
-2. **`extends:`** lists every layer in load order. `core` first (lowest priority — gets overridden by other layers and host); `tenancy` next (multi-mode kernel overrides core's single-mode); then email backend, oauth, mcp, app layers, dev.
+2. **`extends:`** lists every layer in load order. `core` first (lowest priority — gets overridden by other layers and host); `tenancy` next (multi-mode kernel overrides core's single-mode); then `mail`, oauth, mcp, app layers, dev.
 3. **The host has no modules of its own** — `migrations`, `tenant-kernel`, and `email-kernel` modules all live in `layers/core/nuxt.config.ts`.
 
 ### The seven runtime registries (core owns)
@@ -198,6 +200,16 @@ Every app layer feeds the host through seven in-process registries in [layers/co
 | In-app nav items | [nav-registry.ts](layers/core/server/utils/nav-registry.ts) | `registerNavItem(...)` |
 | Rail entries | [rail-registry.ts](layers/core/server/utils/rail-registry.ts) | `registerRailItem(...)` |
 | Admin shell sections | [admin-section-registry.ts](layers/core/server/utils/admin-section-registry.ts) | `registerAdminSection(...)` |
+
+Mail has five more, all in [mail.ts](layers/core/server/utils/mail.ts). Core's mail plugin hands them to `createMail` once at boot, so a registration after that throws; register from a Nitro plugin (see [documentation/layers.md](documentation/layers.md#mail)):
+
+| Registry | Function |
+|---|---|
+| Mail streams | `registerMailStream({ id, label, defaultLocal, orgAssignable?, needsReceive?, userInitiated?, bulk?, queued? })` |
+| Inbound handlers | `registerInboundHandler({ id, order, match, handle })` |
+| Provider event handlers | `registerMailEventHandler({ id, stream?, types?, handle })` |
+| Send guards | `registerSendGuard({ id, check })` |
+| Mail providers | `registerMailProvider(provider)`; core registers Mailgun, SES and SendGrid itself |
 
 The host bridges these to the client via auth-gated, permission-filtered endpoints (`/api/_apps`, `/api/_nav`, `/api/_admin-sections`) consumed by composables (`useApps`, `useAppNav`, `useAdminSections`). Core's own admin sections are registered the same way — see [layers/core/server/plugins/register-host-admin.ts](layers/core/server/plugins/register-host-admin.ts). Rail items ride along in the app feeds (`rail` on each app entry). A host changes how an installed app is presented with `configureApp(id, { title, icon, order, defaultStatus })`, and sets the rail's behaviour under `rail` in its `app.config.ts` (see [documentation/layers.md](documentation/layers.md#the-app-rail)).
 

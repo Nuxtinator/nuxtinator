@@ -5,11 +5,12 @@ import { registerApp } from '#core/server/utils/app-registry'
 import { registerNavItem } from '#core/server/utils/nav-registry'
 import { registerSetting } from '#core/server/utils/settings-registry'
 import { registerAiFeature } from '#ai/server'
+import { registerInboundHandler, registerMailEventHandler, registerMailStream } from '#core/server/utils/mail'
 import { INBOX_PERMISSIONS, INBOX_PERMISSION_META, INBOX_DEFAULT_GRANTS } from '../../app/utils/permissions'
 import {
   INBOX_SETTINGS_NAMESPACE,
-  INBOX_SETTING_INBOUND_DOMAIN,
-  INBOX_SETTING_CONTACT_ADDRESS,
+  INBOX_SETTING_CONTACT_LOCAL,
+  INBOX_CONTACT_LOCAL_DEFAULT,
   INBOX_SETTING_BRAND_FROM_NAME,
   INBOX_SETTING_AUTO_ACK,
   INBOX_SETTING_CONTACT_FORM_API_KEY,
@@ -20,11 +21,13 @@ import {
   sanitizeGroundingUrls,
   sanitizeInboxNotifyUserIds,
   sanitizeAutoCloseDays,
-  inboxSlugAddressesEnabled
+  sanitizeContactLocal
 } from '../utils/inbox-settings'
 import { INBOX_SETTING_TAGS, sanitizeTagPalette, type InboxTag } from '../utils/inbox-tags'
 import { INBOX_AI_DRAFT_FEATURE } from '../utils/inbox-ai-draft'
 import { INBOX_AI_KNOWLEDGE_FEATURE } from '../utils/inbox-ai-knowledge-extract'
+import { inboxHandleInbound } from '../utils/inbox-inbound'
+import { inboxHandleDeliveryEvent } from '../utils/inbox-delivery'
 
 // Single owner of all inbox boot registrations. Deliberately reads nothing
 // from the CRM registries at boot (Nitro plugin order is alphabetical, not
@@ -48,18 +51,10 @@ export default defineNitroPlugin(() => {
   const config = useRuntimeConfig()
   registerSetting<string>({
     namespace: INBOX_SETTINGS_NAMESPACE,
-    key: INBOX_SETTING_INBOUND_DOMAIN,
-    default: String(config.inboxDomain || '').toLowerCase(),
-    parse: v => String(v ?? '').trim().toLowerCase(),
-    label: 'Inbound mail domain'
-  })
-  registerSetting<string>({
-    namespace: INBOX_SETTINGS_NAMESPACE,
-    key: INBOX_SETTING_CONTACT_ADDRESS,
-    // Empty under slug addresses: getInboxSettings derives the org's address.
-    default: inboxSlugAddressesEnabled() ? '' : String(config.inboxContactAddress || '').toLowerCase(),
-    parse: v => String(v ?? '').trim().toLowerCase(),
-    label: 'Shared contact address'
+    key: INBOX_SETTING_CONTACT_LOCAL,
+    default: INBOX_CONTACT_LOCAL_DEFAULT,
+    parse: v => sanitizeContactLocal(v),
+    label: 'Shared contact address local part'
   })
   registerSetting<string>({
     namespace: INBOX_SETTINGS_NAMESPACE,
@@ -124,6 +119,14 @@ export default defineNitroPlugin(() => {
     label: 'Inbox — knowledge extraction',
     description: 'Turns a resolved thread into an anonymised knowledge-base entry.'
   })
+
+  // Inbox mail follows the org's own domain when it has one that can receive
+  // (replies come back to it). Not queued: the inbox's own send sweep is the
+  // retry loop. The catch-all inbound handler runs after every more specific
+  // one; delivery events flip the state of the inbox message named by `ref`.
+  registerMailStream({ id: 'inbox', label: 'Inbox', defaultLocal: INBOX_CONTACT_LOCAL_DEFAULT, orgAssignable: true, needsReceive: true })
+  registerInboundHandler({ id: 'inbox', order: 1000, match: () => true, handle: inboxHandleInbound })
+  registerMailEventHandler({ id: 'inbox:delivery', stream: 'inbox', handle: inboxHandleDeliveryEvent })
 
   registerApp({
     id: 'inbox',

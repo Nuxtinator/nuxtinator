@@ -4,7 +4,7 @@
 // org; the same alias can legitimately exist in two orgs.
 import type { Selectable, Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
-import { inboxSharedDomain } from './inbox-settings'
+import type { InboxSettings } from './inbox-settings'
 
 type Tx = Transaction<Database>
 
@@ -25,17 +25,19 @@ export function inboxNormalizeAlias(raw: string): string {
   if (!ALIAS_RE.test(alias)) {
     throw createError({ statusCode: 400, statusMessage: 'Alias may contain only letters, numbers, dots, hyphens and underscores' })
   }
-  if (INBOX_RESERVED_LOCAL_PARTS.includes(alias)) {
+  if (INBOX_RESERVED_LOCAL_PARTS.includes(alias) || alias.startsWith('nx-')) {
     throw createError({ statusCode: 400, statusMessage: `"${alias}" is reserved and cannot be used as an alias` })
   }
   return alias
 }
 
-// An alias's personal From address: null without an alias or inbound domain,
-// and on the shared slug-address domain, where local parts are org slugs.
-export function inboxPersonalFromAddress(alias: string | null, inboundDomain: string): string | null {
-  if (!alias || !inboundDomain || inboundDomain === inboxSharedDomain()) return null
-  return `${alias}@${inboundDomain}`
+type MailDomainSettings = Pick<InboxSettings, 'mailDomain' | 'slugAddress'>
+
+// An alias's personal From address: null without an alias or mail domain,
+// and under slug addresses, where local parts on the host domain are org slugs.
+export function inboxPersonalFromAddress(alias: string | null, settings: MailDomainSettings): string | null {
+  if (!alias || !settings.mailDomain || settings.slugAddress) return null
+  return `${alias}@${settings.mailDomain}`
 }
 
 // Resolve a user's personal From address + signature for an outbound send.
@@ -44,12 +46,12 @@ export function inboxPersonalFromAddress(alias: string | null, inboundDomain: st
 export async function inboxResolvePersonalIdentity(
   tx: Tx,
   userId: string,
-  settings: { inboundDomain: string }
+  settings: MailDomainSettings
 ): Promise<{ personalFrom: string | null, signature: string | null }> {
   const identity = await inboxGetIdentity(tx, userId)
   const alias = identity?.alias ?? null
   return {
-    personalFrom: inboxPersonalFromAddress(alias, settings.inboundDomain),
+    personalFrom: inboxPersonalFromAddress(alias, settings),
     signature: identity?.signature ?? null
   }
 }

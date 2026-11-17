@@ -8,7 +8,7 @@ import {
   inboxBuildFromAddress
 } from '../../server/utils/inbox-addressing'
 import {
-  inboxParseMessageHeaders,
+  type InboxInboundHeaders,
   inboxExtractEmailAddress,
   inboxExtractDisplayName,
   inboxParseAuthentication,
@@ -16,7 +16,13 @@ import {
   inboxIsVacationAutoReply
 } from '../../server/utils/inbox-inbound-parse'
 import { inboxConstrainImages } from '../../server/utils/inbox-email-shell'
+import { inboxStripQuotedHtml, inboxStripQuotedText } from '../../server/utils/inbox-sanitize'
 import { inboxSniffImageMime, inboxIsInlineImageKey, inboxInlineMimeForKey } from '../../server/utils/inbox-inline-images'
+
+function headers(pairs: [string, string][]): InboxInboundHeaders {
+  const all = (name: string) => pairs.filter(([k]) => k.toLowerCase() === name.toLowerCase()).map(([, v]) => v)
+  return { get: name => all(name)[0] ?? null, getAll: all }
+}
 
 describe('inbox addressing', () => {
   it('parses plain, token, and future signed-shape recipients', () => {
@@ -50,18 +56,18 @@ describe('inbound parsing', () => {
   })
 
   it('authenticates on dmarc pass or aligned dkim, never on misaligned dkim', () => {
-    const h = (ar: string) => inboxParseMessageHeaders(JSON.stringify([['Authentication-Results', ar]]))
+    const h = (ar: string) => headers([['Authentication-Results', ar]])
     expect(inboxParseAuthentication(h('mx; dmarc=pass'), 'a@gmail.com').authenticated).toBe(true)
     expect(inboxParseAuthentication(h('mx; dkim=pass header.d=gmail.com'), 'a@gmail.com').authenticated).toBe(true)
     expect(inboxParseAuthentication(h('mx; dkim=pass header.d=evil.example'), 'a@gmail.com').authenticated).toBe(false)
     expect(inboxParseAuthentication(h('mx; dkim=fail; dmarc=fail'), 'a@gmail.com').authenticated).toBe(false)
-    expect(inboxParseAuthentication(inboxParseMessageHeaders('[]'), 'a@gmail.com').authenticated).toBe(false)
+    expect(inboxParseAuthentication(headers([]), 'a@gmail.com').authenticated).toBe(false)
   })
 
   it('detects auto-responders and the vacation subset', () => {
-    const auto = inboxParseMessageHeaders(JSON.stringify([['Auto-Submitted', 'auto-replied']]))
-    const bounce = inboxParseMessageHeaders(JSON.stringify([['Auto-Submitted', 'auto-generated']]))
-    const human = inboxParseMessageHeaders('[]')
+    const auto = headers([['Auto-Submitted', 'auto-replied']])
+    const bounce = headers([['Auto-Submitted', 'auto-generated']])
+    const human = headers([])
 
     expect(inboxIsAutoResponderOrBounce(auto, 'a@x.test')).toBe(true)
     expect(inboxIsVacationAutoReply(auto, 'a@x.test')).toBe(true)
@@ -71,6 +77,21 @@ describe('inbound parsing', () => {
     expect(inboxIsAutoResponderOrBounce(human, 'mailer-daemon@x.test')).toBe(true)
     expect(inboxIsVacationAutoReply(human, 'mailer-daemon@x.test')).toBe(false)
     expect(inboxIsAutoResponderOrBounce(human, 'a@x.test')).toBe(false)
+  })
+})
+
+describe('quoted history stripping', () => {
+  it('drops blockquotes and client quote containers from html', () => {
+    expect(inboxStripQuotedHtml('<p>Thanks!</p><div class="gmail_quote">On Mon <blockquote>old</blockquote></div>'))
+      .toBe('<p>Thanks!</p>')
+    expect(inboxStripQuotedHtml('<p>New</p><blockquote type="cite"><p>old</p></blockquote>')).toBe('<p>New</p>')
+    expect(inboxStripQuotedHtml('<blockquote>only quotes</blockquote>')).toBe('')
+  })
+
+  it('cuts plain text at the quote', () => {
+    expect(inboxStripQuotedText('Sounds good.\n\nOn Mon, Jan 1, Jane wrote:\n> old')).toBe('Sounds good.')
+    expect(inboxStripQuotedText('Yes\n> earlier')).toBe('Yes')
+    expect(inboxStripQuotedText('> all quoted')).toBe('> all quoted')
   })
 })
 

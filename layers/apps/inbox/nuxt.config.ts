@@ -1,13 +1,11 @@
 // Inbox layer — two-way shared email inbox built on the CRM layer's channel
-// kernel. Conversations key on crm_channels (the address registry); inbound
-// mail arrives via a signed Mailgun webhook, outbound replies ride a
-// croner-swept queue on inbox_messages itself.
+// kernel. Conversations key on crm_channels (the address registry). Mail goes
+// through core's mail kernel on the `inbox` stream: inbound mail arrives
+// through the kernel's provider webhooks and the inbox's inbound handler,
+// outbound replies ride a croner-swept queue on inbox_messages itself.
 //
 // The layer imports CRM kernel services from `#crm/server` (registered by the
-// crm layer's own nuxt.config; aliases merge across extends:). Mailgun sending
-// credentials are shared with the email-mailgun layer (same env names —
-// duplicate runtimeConfig declarations merge harmlessly); the webhook signing
-// key and inbox addressing are inbox-specific.
+// crm layer's own nuxt.config; aliases merge across extends:).
 //
 // `#inbox` is the client registry for extra conversation menu actions
 // (app/utils/inbox-thread-actions.ts), for hosts and other layers.
@@ -46,29 +44,6 @@ export default defineNuxtConfig({
   },
 
   runtimeConfig: {
-    mailgunApiKey: process.env.MAILGUN_API_KEY || '',
-    mailgunDomain: process.env.MAILGUN_DOMAIN || '',
-    // Mailgun sending domain and API key for inbox mail when they differ from
-    // MAILGUN_DOMAIN / MAILGUN_API_KEY (which the email-mailgun layer also reads
-    // for system mail). Each falls back to the shared value when unset.
-    inboxMailgunDomain: process.env.INBOX_MAILGUN_DOMAIN || '',
-    inboxMailgunApiKey: process.env.INBOX_MAILGUN_API_KEY || '',
-    mailgunHost: process.env.MAILGUN_HOST || 'api.mailgun.net',
-    // Webhook signing key — a DIFFERENT Mailgun key than the sending API key
-    // (Settings → API Keys → "HTTP webhook signing key").
-    mailgunWebhookSigningKey: process.env.MAILGUN_WEBHOOK_SIGNING_KEY || '',
-    // Signing key for the inbox's webhooks when they come from a different
-    // Mailgun account; falls back to MAILGUN_WEBHOOK_SIGNING_KEY.
-    inboxMailgunWebhookSigningKey: process.env.INBOX_MAILGUN_WEBHOOK_SIGNING_KEY || '',
-    // Domain inbound mail is addressed to (MX → Mailgun catch-all route).
-    // Per-org overrides live in inbox_settings; this is the code default.
-    inboxDomain: process.env.INBOX_DOMAIN || '',
-    // Shared/system From identity and the base of contact+<token> reply
-    // addresses, e.g. "contact@example.com".
-    inboxContactAddress: process.env.INBOX_CONTACT_ADDRESS || '',
-    // Multi-tenant only: orgs on INBOX_DOMAIN get <org slug>@INBOX_DOMAIN as
-    // their contact address, and new mail to it routes by slug.
-    inboxSlugAddresses: process.env.INBOX_SLUG_ADDRESSES === 'true',
     // Send-sweep cadence in seconds. Tests lower it to make queued sends
     // observable quickly.
     inboxSendSweepSeconds: process.env.INBOX_SEND_SWEEP_SECONDS || '20',

@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createKyselyDb } from '#core/server/utils/db-connection'
-import { setHeldBackMigrations } from '#core/server/utils/migration-status'
+import { setHeldBackMigrations, settleMigrations } from '#core/server/utils/migration-status'
 
 // Migration runner. Builds its own Kysely client connecting via DATABASE_URL.
 // In single-tenant mode that's just the database. In multi-tenant mode it's
@@ -136,19 +136,24 @@ class LayeredMigrationProvider implements MigrationProvider {
 
 export default defineNitroPlugin(async () => {
   try {
-    await runMigrations()
+    const database = await runMigrations()
+    settleMigrations({ database })
+  } catch (error) {
+    settleMigrations({ error })
+    throw error
   } finally {
     // No-op when runMigrations already recorded the held-back set.
     setHeldBackMigrations([])
   }
 })
 
-async function runMigrations(): Promise<void> {
+// Returns false when there is no database to migrate.
+async function runMigrations(): Promise<boolean> {
   const config = useRuntimeConfig()
   const databaseUrl = config.databaseUrl || process.env.DATABASE_URL
   if (!databaseUrl) {
     console.warn('DATABASE_URL not set, skipping migrations')
-    return
+    return false
   }
 
   const adminDb = createKyselyDb<unknown>(databaseUrl, {
@@ -183,7 +188,7 @@ async function runMigrations(): Promise<void> {
 
   if (pending.length === 0) {
     console.log('Migrations already up-to-date')
-    return
+    return true
   }
 
   console.log(`Running ${pending.length} pending migration(s)...`)
@@ -204,4 +209,5 @@ async function runMigrations(): Promise<void> {
   }
 
   console.log('Migrations complete')
+  return true
 }

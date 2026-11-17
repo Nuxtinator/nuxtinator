@@ -1,16 +1,22 @@
 <script setup lang="ts">
-// Per-org inbox configuration (inbox.settings.manage): inbound mail domain, shared
-// contact address, auto-ack, the auto-close threshold, the contact-form API
-// key, who is emailed about unassigned mail, and the AI grounding source URLs. Values are org-scoped
-// overrides on top of code defaults —
-// clearing a field falls back to the deployment default at read time.
+// Per-org inbox configuration (inbox.settings.manage): the shared contact
+// address's local part, auto-ack, the auto-close threshold, the contact-form
+// API key, who is emailed about unassigned mail, and the AI grounding source
+// URLs. Values are org-scoped overrides on top of code defaults. The mail
+// domain comes from the host's mail setup and is shown read-only.
 definePageMeta({ middleware: 'auth' })
 
 const inboxPath = useInboxPath()
+const { me } = useInboxMe()
 
 interface InboxAdminSettings {
-  inboundDomain: string
+  // The receiving domain resolved for the org; '' when none can receive yet.
+  mailDomain: string
+  // On the host's domain under slug addresses: the address is <slug>@domain.
+  slugAddress: boolean
+  contactLocal: string
   contactAddress: string
+  noReceivingDomain: boolean
   brandFromName: string
   autoAckEnabled: boolean
   contactFormApiKey: string
@@ -18,8 +24,6 @@ interface InboxAdminSettings {
   notifyUserIds: string[]
   // Null while the number input is cleared.
   autoCloseDays: number | null
-  // False for org admins in multi mode: only an operator sets these two.
-  mailIdentityEditable: boolean
 }
 
 const toast = useToast()
@@ -32,8 +36,7 @@ const urlsText = ref('')
 const serverErrors = ref<Record<string, string[] | undefined>>({})
 
 const FIELD_LABELS: Record<string, string> = {
-  inboundDomain: 'Inbound mail domain',
-  contactAddress: 'Shared contact address',
+  contactLocal: 'Contact address local part',
   brandFromName: 'Brand From name',
   autoAckEnabled: 'Auto-acknowledge',
   contactFormApiKey: 'Contact-form API key',
@@ -43,25 +46,13 @@ const FIELD_LABELS: Record<string, string> = {
 }
 
 // Mirrors the PUT route's checks so bad input is flagged before saving.
-const DOMAIN_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const LOCAL_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i
 
-const domainError = computed(() => {
-  const v = form.value?.inboundDomain.trim() ?? ''
-  if (!v || DOMAIN_RE.test(v)) return serverErrors.value.inboundDomain?.[0]
-  const afterAt = v.split('@').pop() ?? ''
-  if (v.includes('@') && DOMAIN_RE.test(afterAt)) return `Enter only the domain: ${afterAt}`
-  return 'Must be a bare domain, e.g. mail.example.com'
-})
-
-const contactError = computed(() => {
-  const v = form.value?.contactAddress.trim().toLowerCase() ?? ''
-  if (!v) return serverErrors.value.contactAddress?.[0]
-  if (!EMAIL_RE.test(v)) return 'Must be an email address'
-  const domain = form.value?.inboundDomain.trim().toLowerCase() ?? ''
-  if (!domain) return 'Set the inbound mail domain first'
-  if (!domainError.value && v.split('@')[1] !== domain) return `Must be an address on ${domain}`
-  return serverErrors.value.contactAddress?.[0]
+const contactLocalError = computed(() => {
+  const v = form.value?.contactLocal.trim().toLowerCase() ?? ''
+  if (!LOCAL_RE.test(v)) return 'Use only letters, numbers, dots, hyphens and underscores'
+  if (v === 'bounce' || v === 'notifications' || v.startsWith('nx-')) return `"${v}" is reserved`
+  return serverErrors.value.contactLocal?.[0]
 })
 
 const autoCloseError = computed(() =>
@@ -141,8 +132,8 @@ await load()
 async function save() {
   if (!form.value) return
   serverErrors.value = {}
-  const identityError = form.value.mailIdentityEditable && (domainError.value || contactError.value)
-  if (identityError || autoCloseError.value) {
+  const localError = !form.value.slugAddress && contactLocalError.value
+  if (localError || autoCloseError.value) {
     toast.add({ title: 'Save failed', description: 'Fix the highlighted fields.', color: 'error' })
     return
   }
@@ -151,9 +142,7 @@ async function save() {
     const updated = await $fetch<InboxAdminSettings>('/api/inbox/settings', {
       method: 'PUT',
       body: {
-        ...(form.value.mailIdentityEditable
-          ? { inboundDomain: form.value.inboundDomain, contactAddress: form.value.contactAddress }
-          : {}),
+        ...(form.value.slugAddress ? {} : { contactLocal: form.value.contactLocal }),
         brandFromName: form.value.brandFromName,
         autoAckEnabled: form.value.autoAckEnabled,
         contactFormApiKey: form.value.contactFormApiKey,
@@ -178,7 +167,7 @@ async function save() {
       title: 'Save failed',
       description: details.length
         ? details.join('\n')
-        : e.data?.statusMessage || (e.statusCode === 400 ? 'Check the domain and address formats.' : undefined),
+        : e.data?.statusMessage || (e.statusCode === 400 ? 'Check the address format.' : undefined),
       color: 'error'
     })
   } finally {
@@ -222,23 +211,37 @@ function generateApiKey() {
 
     <template v-else-if="form">
       <div class="space-y-4">
-        <UFormField :error="form.mailIdentityEditable ? domainError : undefined">
-          <template #label>
-            Inbound mail domain
-            <InfoTip text="The (sub)domain inbound mail arrives on, e.g. mail.example.com. Mail on it is routed to this organization." />
-          </template>
-          <UInput v-model="form.inboundDomain" placeholder="mail.example.com" class="w-full" :disabled="!form.mailIdentityEditable" />
-        </UFormField>
-
-        <UFormField
-          :help="form.mailIdentityEditable ? undefined : 'Set by the platform operator.'"
-          :error="form.mailIdentityEditable ? contactError : undefined"
-        >
+        <UFormField>
           <template #label>
             Shared contact address
-            <InfoTip text="The From address for team replies and the base of contact+token reply addresses. Must be on the inbound domain." />
+            <InfoTip text="The From address for team replies and the base of contact+token reply addresses. Its domain is the one set up to receive this organization's mail." />
           </template>
-          <UInput v-model="form.contactAddress" placeholder="contact@mail.example.com" class="w-full" :disabled="!form.mailIdentityEditable" />
+          <p v-if="form.contactAddress" class="font-mono text-sm">
+            {{ form.contactAddress }}
+          </p>
+          <div v-else class="flex items-center gap-2 text-sm text-(--ui-text-muted)">
+            <span>No domain can receive mail yet</span>
+            <UButton
+              v-if="me?.isHostAdmin"
+              to="/admin/email"
+              label="Set up email"
+              size="xs"
+              color="neutral"
+              variant="subtle"
+            />
+          </div>
+        </UFormField>
+
+        <UFormField v-if="!form.slugAddress" :error="contactLocalError">
+          <template #label>
+            Contact address local part
+            <InfoTip text="The part before the @ of the shared contact address, e.g. contact or support." />
+          </template>
+          <UInput v-model="form.contactLocal" placeholder="contact" class="w-full font-mono">
+            <template v-if="form.mailDomain" #trailing>
+              <span class="text-xs text-(--ui-text-dimmed)">@{{ form.mailDomain }}</span>
+            </template>
+          </UInput>
         </UFormField>
 
         <UFormField>
@@ -323,7 +326,7 @@ function generateApiKey() {
       <section class="space-y-3 pt-4 border-t border-(--ui-border)">
         <h2 class="text-lg font-semibold">
           Sending identities
-          <InfoTip text="An alias routes <alias>@ the inbound domain to that teammate and gives them a personal From address. Each user edits their own signature." />
+          <InfoTip text="An alias routes <alias>@ the organization's mail domain to that teammate and gives them a personal From address. Each user edits their own signature." />
         </h2>
         <ul class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md">
           <li

@@ -1,7 +1,6 @@
-// Parsing helpers for Mailgun inbound (route store/forward) payloads.
+// Header-based helpers for inbound mail (the mail kernel parses the MIME).
 //
-// Mailgun delivers the message pre-parsed as form fields — no MIME parsing
-// happens here. The `From` header is never trusted on its own: the forwarded
+// The `From` header is never trusted on its own: the receiving provider's
 // Authentication-Results decide whether a message is authenticated (DMARC
 // passes, or DKIM passes and aligns with the From domain), which gates
 // side effects like channel ownership verification and courtesy replies.
@@ -9,35 +8,6 @@
 export interface InboxInboundHeaders {
   get(name: string): string | null
   getAll(name: string): string[]
-}
-
-// Parse Mailgun's `message-headers` (a JSON array of [name, value] pairs).
-export function inboxParseMessageHeaders(raw: unknown): InboxInboundHeaders {
-  const map = new Map<string, string[]>()
-  let pairs: [string, string][] = []
-
-  if (typeof raw === 'string' && raw.trim()) {
-    try {
-      pairs = JSON.parse(raw)
-    } catch {
-      pairs = []
-    }
-  } else if (Array.isArray(raw)) {
-    pairs = raw as [string, string][]
-  }
-
-  for (const pair of pairs) {
-    if (!Array.isArray(pair) || pair.length < 2) continue
-    const key = String(pair[0]).toLowerCase()
-    const existing = map.get(key) || []
-    existing.push(String(pair[1]))
-    map.set(key, existing)
-  }
-
-  return {
-    get: (name: string) => map.get(name.toLowerCase())?.[0] ?? null,
-    getAll: (name: string) => map.get(name.toLowerCase()) ?? []
-  }
 }
 
 // Extract the bare email address from a `From`-style header value.
@@ -145,11 +115,4 @@ export function inboxIsVacationAutoReply(headers: InboxInboundHeaders, fromEmail
   if (headers.get('x-autoreply') || headers.get('x-autorespond')) return true
 
   return false
-}
-
-export function inboxParseSpamScore(headers: InboxInboundHeaders, fields: Record<string, unknown>): number | null {
-  const raw = headers.get('x-mailgun-sscore') ?? fields['X-Mailgun-Sscore'] ?? fields['spam-score']
-  if (raw === undefined || raw === null || raw === '') return null
-  const n = Number(raw)
-  return Number.isNaN(n) ? null : n
 }

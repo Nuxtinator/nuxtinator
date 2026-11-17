@@ -56,7 +56,7 @@ export default defineEventHandler(async (event) => {
     let fromEmail: string | null = null
     let bodyHtml = html
     if (parsed.data.fromIdentity === 'personal') {
-      const { personalFrom, signature } = await inboxResolvePersonalIdentity(tx, ctx.userId, { inboundDomain: (await getInboxSettings(tx)).inboundDomain })
+      const { personalFrom, signature } = await inboxResolvePersonalIdentity(tx, ctx.userId, await getInboxSettings(tx))
       if (personalFrom) {
         fromEmail = personalFrom
         if (signature) bodyHtml = `${html}<br><br>${inboxSanitizeEmailHtml(signature)}`

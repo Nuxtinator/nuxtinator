@@ -169,6 +169,7 @@ export async function inboxAfterIntake(
   // Auto-ack (fire-and-forget — never blocks or fails the caller).
   if (opts.ack !== false && created.autoAck && created.contactAddress) {
     void inboxSendCourtesy('auto_ack', {
+      orgId: scope,
       toEmail: created.email,
       toName: created.name,
       subject: created.subject,

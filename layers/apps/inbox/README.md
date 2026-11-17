@@ -5,12 +5,15 @@ the team triages and replies from `/inbox`, and every address automatically beco
 a CRM channel identity — with ownership verification, bounce suppression, and
 consent tracking flowing into the CRM for free.
 
-Requires `@nuxtinator/crm` (and core/tenancy as usual). Mail transport is Mailgun
-in production and Mailpit (`localhost:1025`, UI on `:8025`) in development.
+Requires `@nuxtinator/crm` and `@nuxtinator/mail` (and core/tenancy as usual). Mail
+goes through core's mail kernel on the `inbox` stream: whatever provider a host admin
+set up under **Admin → Email** in production, Mailpit (`localhost:1025`, UI on
+`:8025`) in development.
 
 ## Features
 
-- **Inbound**: signed Mailgun webhook; per-conversation reply addresses
+- **Inbound**: the mail kernel's provider webhooks hand each message to the
+  inbox's catch-all inbound handler; per-conversation reply addresses
   (`contact+<token>@your-domain`); threading by token and References; sender
   classification (mail that reaches a thread from a sender who doesn't own it is
   **held for review**, never trusted); spam blocklist; vacation/auto-responder
@@ -19,8 +22,9 @@ in production and Mailpit (`localhost:1025`, UI on `:8025`) in development.
   history, correct threading headers, and at-most-once send semantics; automatic
   acknowledgment for new conversations (per-org toggle).
 - **CRM integration**: DKIM/DMARC-authenticated inbound marks the channel
-  *verified*; hard bounces/complaints write CRM suppressions (blocking future
-  sends); Mailgun unsubscribes flip the channel's marketing consent; contact
+  *verified*; hard bounces/complaints land on the mail kernel's suppression list
+  (blocking future sends); provider unsubscribes flip the channel's marketing
+  consent (CRM's event handler); contact
   chips + create-contact-from-conversation on every thread.
 - **Triage UI**: 3-pane inbox (scope folders / list / thread) with search,
   status strip, assignment, review queue, bulk actions (close / assign / tag a
@@ -36,42 +40,45 @@ in production and Mailpit (`localhost:1025`, UI on `:8025`) in development.
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `MAILGUN_API_KEY` / `MAILGUN_DOMAIN` / `MAILGUN_HOST` | prod | Sending (shared with the email-mailgun layer) |
-| `INBOX_MAILGUN_DOMAIN` / `INBOX_MAILGUN_API_KEY` | no | Mailgun sending domain and API key for inbox mail, when they differ from `MAILGUN_DOMAIN` / `MAILGUN_API_KEY` (each falls back to the shared one) |
-| `MAILGUN_WEBHOOK_SIGNING_KEY` | prod | Webhook HMAC verification — the **HTTP webhook signing key** (Settings → API Keys), NOT the sending key |
-| `INBOX_MAILGUN_WEBHOOK_SIGNING_KEY` | no | Signing key for the inbox's webhooks when the inbox domain is on a different Mailgun account (falls back to `MAILGUN_WEBHOOK_SIGNING_KEY`) |
-| `INBOX_DOMAIN` | yes | Domain inbound mail is addressed to (single-tenant default; per-org override via settings) |
-| `INBOX_CONTACT_ADDRESS` | yes | Shared From identity + base of `contact+<token>` reply addresses |
-| `INBOX_SLUG_ADDRESSES` | no | `true` in multi-tenant deploys where orgs share `INBOX_DOMAIN`: an org on it gets `<org slug>@INBOX_DOMAIN` as its contact address (derived, never stored) and new mail to it routes by slug. Personal aliases are off on the shared domain; an operator can still give an org its own domain |
+| `INBOX_SLUG_ADDRESSES` | no | `true` in multi-tenant deploys: an org with no receiving domain of its own uses the host's inbox domain, gets `<org slug>@<that domain>` as its contact address (derived, never stored), and new mail to it routes by slug. Contact local parts and personal aliases don't apply there. Read at runtime |
 | `INBOX_SEND_SWEEP_SECONDS` | no | Send sweep cadence (default 20) |
 | `INBOX_AUTO_CLOSE_CRON` | no | UTC cron for the nightly auto-close sweep (default `0 4 * * *`); the per-org quiet threshold is an inbox setting |
 | `NUXT_PUBLIC_SITE_URL` | yes | Canonical origin for links in mail (the auto-ack's confirmation link is dropped when unset) |
 
-Multi-tenant: each org claims its own inbound (sub)domain via the settings store
-(namespace `inbox`, keys `inbound_domain` / `contact_address` / `auto_ack_enabled` /
-`auto_close_days`).
-Two orgs must never claim the same domain — such mail is unroutable and dropped,
-except the shared domain under `INBOX_SLUG_ADDRESSES`, which routes by slug.
+Provider keys and domains are the mail kernel's (`MAIL_*`, or `MAILGUN_API_KEY` /
+`MAILGUN_DOMAIN` for the env account); see the mail layer's docs.
 
-## Mailgun setup (per environment)
+## Mail domains
 
-1. **Add + verify the domain** in Mailgun (bare domain to match
-   `INBOX_DOMAIN`), region US or EU (match `MAILGUN_HOST`).
-2. **DNS**: MX `mxa.mailgun.org` + `mxb.mailgun.org` (priority 10) on the inbox
-   domain — this reroutes ALL mail for the domain, confirm nothing else uses its
-   MX; SPF `v=spf1 include:mailgun.org ~all`; the DKIM TXT record from the
-   dashboard (required for inbound *authentication* — sender verification and
-   courtesy mail gate on it); DMARC `v=DMARC1; p=none`.
-3. **Inbound route**: Receiving → Create Route → Match Recipient `.*@your-domain`
-   (catch-all) → Forward → `https://your-app/api/inbox/webhooks/mailgun/inbound`.
-4. **Event webhook**: Sending → Webhooks → add
-   `https://your-app/api/inbox/webhooks/mailgun/events` for `delivered`,
-   `permanent_failure`, `complained`, and `unsubscribed`.
-5. Set the env vars (webhook **signing** key ≠ sending API key) and enable the
-   Inbox app for the org(s) that use it.
+The inbox stream needs a domain that can **receive** (replies come back to it). For
+each org the kernel resolves the inbox stream's domain: the org's own domain when it
+has one that can send and receive, else the host's (its inbox route, its `*` route,
+then the env domain). The org's shared contact address is `<contact_local>@<that
+domain>` (`contact_local` is an inbox setting, default `contact`), or `<slug>@` the
+host's domain under `INBOX_SLUG_ADDRESSES`. Replies use `<contact address
+local>+<token>@<domain>` as Reply-To.
 
-An unsigned `curl -X POST https://your-app/api/inbox/webhooks/mailgun/inbound`
-should return 4xx (never 404) — that confirms the route is reachable.
+Until some domain can receive, the inbox shows "No domain can receive mail yet" and
+holds replies in the queue (nothing is lost); they go out once a domain qualifies.
+
+Setting one up (host admin, **Admin → Email**):
+
+1. Add the provider account, then the inbox domain on it for sending **and
+   receiving** (manual setup if the key can't manage domains). Point the domain's MX
+   at the provider — this reroutes ALL mail for the domain, so confirm nothing else
+   uses its MX. Authentication DNS (SPF/DKIM/DMARC) matters for inbound too: sender
+   verification and courtesy mail gate on authenticated mail.
+2. Forward inbound mail as raw MIME to the account's **inbound** webhook URL and
+   subscribe the **events** URL (both shown on the account); the receiving probe
+   turns green when the route works.
+3. Assign the inbox stream to the domain (Streams tab) and enable the Inbox app for
+   the org(s) that use it.
+
+Inbound routing: reply-token mail goes to the token's conversation; other mail on an
+org's own domain goes to that org; on a host domain, to the org named by the slug
+under slug addresses, to the one inbox in single-tenant mode, and is dropped
+otherwise. Per-org settings live in the settings store (namespace `inbox`, keys
+`contact_local` / `brand_from_name` / `auto_ack_enabled` / `auto_close_days` / …).
 
 ## Permissions
 
@@ -148,7 +155,8 @@ holds only the built-in items.
 
 ## Local development
 
-No Mailgun needed: outbound mail lands in Mailpit (http://localhost:8025). To
-exercise inbound, POST a signed multipart fixture — see the builder in
+No provider needed: outbound mail lands in Mailpit (http://localhost:8025). To
+exercise inbound, run with `MAIL_FAKE_PROVIDER=1` and POST raw MIME to a fake-provider
+account's inbound URL — see the fixture builder in
 [tests/helpers/index.ts](tests/helpers/index.ts) and the notes in [dev.md](dev.md).
 Tests: `bun run test -- --project inbox` from `dev/`.

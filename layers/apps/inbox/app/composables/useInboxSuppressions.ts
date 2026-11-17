@@ -10,6 +10,9 @@ export interface InboxSuppression {
   source: string | null
   since: string
   recordNames: string[]
+  // False for the mail kernel's bounces and complaints, which a host admin
+  // clears under Admin → Email.
+  clearable: boolean
 }
 
 export function useInboxSuppressions() {

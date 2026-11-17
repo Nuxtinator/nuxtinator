@@ -21,13 +21,11 @@ function sender(): string {
   return `test-inbox-${randomUUID().slice(0, 8)}@sender.example`
 }
 
-const RAW_MIME = 'MIME-Version: 1.0\r\nContent-Type: text/plain\r\n\r\nraw archived body\r\n'
-
 // Seed an org holding both kinds of private S3 objects: an inbound message
 // with archived raw MIME, and a draft attachment blob.
 async function seedOrgWithS3Objects() {
   const { org, opts, domain, auth } = await createInboxOrgWith(sql)
-  const res = await postInbound({ recipient: `hello@${domain}`, from: `P <${sender()}>`, bodyMime: RAW_MIME })
+  const res = await postInbound({ recipient: `hello@${domain}`, from: `P <${sender()}>` })
   const convId = res.body.conversation_id as string
 
   const draft = await $fetch<{ id: string }>(`/api/inbox/conversations/${convId}/messages`, {

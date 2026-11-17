@@ -14,6 +14,7 @@ interface AdminOrg {
   created_at: string
   member_count: number
   app_count: number
+  complaint_count: number
 }
 
 const { data, pending, refresh } = await useFetch<{ orgs: AdminOrg[] }>(
@@ -123,6 +124,15 @@ const handleDelete = async () => {
           </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
+          <UBadge
+            v-if="o.complaint_count"
+            color="warning"
+            variant="subtle"
+            leading-icon="i-lucide-mail-warning"
+            :title="`Spam complaints about mail sent for ${o.name} in the last 30 days`"
+          >
+            {{ o.complaint_count }} complaint{{ o.complaint_count === 1 ? '' : 's' }}
+          </UBadge>
           <UBadge
             v-if="o.suspended"
             color="error"

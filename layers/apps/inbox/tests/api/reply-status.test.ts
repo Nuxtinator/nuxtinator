@@ -4,7 +4,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import { randomUUID } from 'node:crypto'
-import { getHostAdminDb, cleanupInboxTestData, createInboxOrgWith, postInbound, postDeliveryEvent } from '../helpers'
+import { getHostAdminDb, cleanupInboxTestData, createInboxOrgWith, postInbound, postMailEvents } from '../helpers'
 
 const sql = getHostAdminDb()
 afterEach(async () => { await cleanupInboxTestData(sql) })
@@ -50,11 +50,7 @@ describe('reply status', () => {
     const { org, opts, domain } = await createInboxOrgWith(sql)
     const sender = uniqueSender('bounced')
     const res = await postInbound({ recipient: `hello@${domain}`, from: `B <${sender}>` })
-    await postDeliveryEvent({
-      event: 'failed', severity: 'permanent', recipient: sender,
-      'delivery-status': { message: '550 mailbox gone' },
-      'user-variables': { 'inbox-org': org.id }
-    })
+    await postMailEvents([{ type: 'bounced', recipient: sender, detail: '550 mailbox gone', orgId: org.id }])
 
     const status = await replyStatus(res.body.conversation_id as string, opts)
     expect(status.suppression?.reason).toBe('hard_bounce')

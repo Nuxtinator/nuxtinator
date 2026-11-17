@@ -31,7 +31,7 @@ Just don't include `layer('@nuxtinator/tenancy')` in `extends:`:
 export default defineNuxtConfig({
   extends: [
     layer('@nuxtinator/core'),
-    layer('@nuxtinator/email-mailgun'),  // optional — pick an email backend
+    layer('@nuxtinator/mail'),           // always — core depends on it
     layer('@nuxtinator/oauth'),          // optional — only if you need OAuth/MCP
     layer('@nuxtinator/mcp'),            // optional
     layer('@nuxtinator/messages'),

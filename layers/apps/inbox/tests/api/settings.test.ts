@@ -2,8 +2,7 @@
 // configuration through /api/inbox/settings, values persist as org-scoped
 // overrides, and a freshly set contact-form API key immediately routes
 // public submissions to the org. Callers without inbox.settings.manage are
-// refused. Only an operator admin changes the inbound domain and contact
-// address.
+// refused. The mail domain and contact address are derived, never written.
 import { describe, it, expect, afterEach } from 'vitest'
 import { $fetch } from '@nuxt/test-utils/e2e'
 import { randomUUID } from 'node:crypto'
@@ -13,7 +12,8 @@ const sql = getHostAdminDb()
 afterEach(async () => { await cleanupInboxTestData(sql) })
 
 interface Settings {
-  inboundDomain: string
+  mailDomain: string
+  contactLocal: string
   contactAddress: string
   autoAckEnabled: boolean
   contactFormApiKey: string
@@ -23,28 +23,24 @@ interface Settings {
 
 describe('inbox settings admin', () => {
   it('org admin reads + writes settings; a new API key routes the contact form to the org', async () => {
-    const { org, user, opts, domain } = await createInboxOrgWith(sql)
-    await sql`UPDATE users SET is_admin = true WHERE id = ${user.id}`
+    const { org, opts, domain } = await createInboxOrgWith(sql)
 
     const current = await $fetch<Settings>('/api/inbox/settings', opts)
-    expect(current.inboundDomain).toBe(domain)
+    expect(current.mailDomain).toBe(domain)
     expect(current.autoAckEnabled).toBe(true)
 
-    const newDomain = `mail.${org.slug}.test`
     const apiKey = `test-inbox-key-${randomUUID()}`
     const updated = await $fetch<Settings>('/api/inbox/settings', {
       method: 'PUT',
       body: {
-        inboundDomain: newDomain,
-        contactAddress: `contact@${newDomain}`,
+        contactLocal: 'help',
         autoAckEnabled: false,
         contactFormApiKey: apiKey,
         groundingSourceUrls: ['https://example.com/help', 'not-a-url', 'http://169.254.169.254/latest/meta-data/', 'http://10.0.0.5:5432/']
       },
       ...opts
     })
-    expect(updated.inboundDomain).toBe(newDomain)
-    expect(updated.contactAddress).toBe(`contact@${newDomain}`)
+    expect(updated.contactAddress).toBe(`help@${domain}`)
     expect(updated.autoAckEnabled).toBe(false)
     expect(updated.contactFormApiKey).toBe(apiKey)
     // The registered parse sanitizes on write — non-http and private-address entries drop.
@@ -84,24 +80,11 @@ describe('inbox settings admin', () => {
     expect(cleared.notifyUserIds).toEqual([])
   })
 
-  it('only an operator changes the domain and address; the domain is unique and the address lives on it', async () => {
-    const a = await createInboxOrgWith(sql)
-    const b = await createInboxOrgWith(sql)
-    const put = (opts: typeof a.opts, body: Record<string, unknown>) =>
-      $fetch<Settings & { mailIdentityEditable: boolean }>('/api/inbox/settings', { method: 'PUT', body, ...opts })
-
-    // An org admin can't move the domain or address, but saving them unchanged is fine.
-    expect((await $fetch<{ mailIdentityEditable: boolean }>('/api/inbox/settings', b.opts)).mailIdentityEditable).toBe(false)
-    await expect(put(b.opts, { inboundDomain: a.domain })).rejects.toMatchObject({ statusCode: 403 })
-    await expect(put(b.opts, { contactAddress: `support@${a.domain}` })).rejects.toMatchObject({ statusCode: 403 })
-    const unchanged = await put(b.opts, { inboundDomain: b.domain, contactAddress: `contact@${b.domain}`, autoAckEnabled: false })
-    expect(unchanged.autoAckEnabled).toBe(false)
-
-    await sql`UPDATE users SET is_admin = true WHERE id = ${b.user.id}`
-    await expect(put(b.opts, { inboundDomain: a.domain, contactAddress: `contact@${a.domain}` })).rejects.toMatchObject({ statusCode: 409 })
-    await expect(put(b.opts, { contactAddress: `support@${a.domain}` })).rejects.toMatchObject({ statusCode: 400 })
-    const moved = await put(b.opts, { inboundDomain: `new.${b.domain}`, contactAddress: `help@new.${b.domain}` })
-    expect(moved).toMatchObject({ inboundDomain: `new.${b.domain}`, contactAddress: `help@new.${b.domain}`, mailIdentityEditable: true })
+  it('refuses the old domain and address fields', async () => {
+    const { opts, domain } = await createInboxOrgWith(sql)
+    for (const body of [{ inboundDomain: domain }, { contactAddress: `support@${domain}` }]) {
+      await expect($fetch('/api/inbox/settings', { method: 'PUT', body, ...opts })).rejects.toMatchObject({ statusCode: 400 })
+    }
   })
 
   it('refuses callers without inbox.settings.manage (403), admits a granted agent, and rejects malformed values (400)', async () => {
@@ -116,14 +99,11 @@ describe('inbox settings admin', () => {
       VALUES (${agent.user.id}, 'inbox.settings.manage', ${agent.org.id})
     `
     const granted = await $fetch<Settings>('/api/inbox/settings', agent.opts)
-    expect(granted.inboundDomain).toBe(agent.domain)
+    expect(granted.mailDomain).toBe(agent.domain)
 
     const admin = await createInboxOrgWith(sql)
     await expect(
-      $fetch('/api/inbox/settings', { method: 'PUT', body: { inboundDomain: 'not a domain!' }, ...admin.opts })
-    ).rejects.toMatchObject({ statusCode: 400 })
-    await expect(
-      $fetch('/api/inbox/settings', { method: 'PUT', body: { contactAddress: 'not-an-email' }, ...admin.opts })
+      $fetch('/api/inbox/settings', { method: 'PUT', body: { contactLocal: 'not a local part!' }, ...admin.opts })
     ).rejects.toMatchObject({ statusCode: 400 })
     await expect(
       $fetch('/api/inbox/settings', { method: 'PUT', body: { notifyUserIds: ['not-a-user-id'] }, ...admin.opts })

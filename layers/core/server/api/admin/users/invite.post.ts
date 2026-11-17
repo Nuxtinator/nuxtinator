@@ -9,6 +9,7 @@ import { sendTemplateEmail } from '#email'
 import { createInvite, emitInviteAttached, findPendingInvite } from '../../../utils/invites'
 import { getApps } from '../../../utils/app-settings'
 import { setUserAppGrant } from '../../../utils/personal-apps'
+import { assertMailable } from '../../../utils/mail'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -135,6 +136,7 @@ export default defineEventHandler(async (event) => {
     if (await findPendingInvite(db, email)) {
       throw createError({ statusCode: 409, statusMessage: 'An invitation is already pending for this email. Resend it from the pending invites list.' })
     }
+    await assertMailable(email, 'invite')
 
     const invite = await createInvite(db, {
       email,

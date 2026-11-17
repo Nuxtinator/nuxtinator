@@ -1,0 +1,19 @@
+{
+  "name": "@nuxtinator/mail",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./nuxt.config.ts",
+    "./kernel": "./kernel/index.ts",
+    "./adapters": "./adapters/index.ts",
+    "./test": "./test/index.ts"
+  },
+  "dependencies": {
+    "nodemailer": "^10.1.0",
+    "postal-mime": "^4.2.1"
+  },
+  "peerDependencies": {
+    "kysely": "^0.28.0"
+  }
+}

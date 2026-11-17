@@ -6,6 +6,7 @@ import { validateRoleNames, getRolePermissions } from '#core/server/utils/rbac'
 import { logEvent } from '#core/server/utils/activity-logger'
 import { createInvite, emitInviteAttached, findPendingInvite } from '#core/server/utils/invites'
 import { sendTemplateEmail } from '#email'
+import { assertMailable } from '#core/server/utils/mail'
 import { adminDb } from '#tenant/admin-db'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -82,6 +83,7 @@ export default defineEventHandler(async (event) => {
       if (await findPendingInvite(tx, email, ctx.orgId)) {
         throw createError({ statusCode: 409, statusMessage: 'An invitation is already pending for this email. Resend it from the pending invites list.' })
       }
+      await assertMailable(email, 'invite')
 
       const invite = await createInvite(tx, {
         email,

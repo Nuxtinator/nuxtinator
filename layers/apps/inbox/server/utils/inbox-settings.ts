@@ -1,16 +1,17 @@
 // Per-org inbox settings, backed by core's shared settings store
 // (core_settings + the code-owned registry). The defs are registered in
-// register-inbox.ts with runtimeConfig-derived defaults; the DB holds only
-// explicit per-org overrides, and RLS scopes reads to the caller's org
-// through the transaction.
+// register-inbox.ts with their code defaults; the DB holds only explicit
+// per-org overrides, and RLS scopes reads to the caller's org through the
+// transaction. The mail domain and contact address are not settings: they
+// follow the domain the mail kernel resolves for the org's inbox stream.
 import { sql } from 'kysely'
 import { getSetting } from '#core/server/utils/settings-store'
 import { urlLooksPublic } from '#core/server/utils/safe-fetch'
+import { resolveMailSender } from '#core/server/utils/mail'
 import type { DbClient } from '#core/server/utils/settings'
 
 export const INBOX_SETTINGS_NAMESPACE = 'inbox'
-export const INBOX_SETTING_INBOUND_DOMAIN = 'inbound_domain'
-export const INBOX_SETTING_CONTACT_ADDRESS = 'contact_address'
+export const INBOX_SETTING_CONTACT_LOCAL = 'contact_local'
 export const INBOX_SETTING_BRAND_FROM_NAME = 'brand_from_name'
 export const INBOX_SETTING_AUTO_ACK = 'auto_ack_enabled'
 export const INBOX_SETTING_CONTACT_FORM_API_KEY = 'contact_form_api_key'
@@ -18,6 +19,7 @@ export const INBOX_SETTING_GROUNDING_SOURCE_URLS = 'grounding_source_urls'
 export const INBOX_SETTING_NOTIFY_USER_IDS = 'notify_user_ids'
 export const INBOX_SETTING_AUTO_CLOSE_DAYS = 'auto_close_days'
 
+export const INBOX_CONTACT_LOCAL_DEFAULT = 'contact'
 export const INBOX_AUTO_CLOSE_DAYS_DEFAULT = 14
 export const INBOX_AUTO_CLOSE_DAYS_MAX = 365
 
@@ -27,6 +29,23 @@ export function sanitizeAutoCloseDays(value: unknown): number {
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n)) return INBOX_AUTO_CLOSE_DAYS_DEFAULT
   return Math.min(Math.max(Math.trunc(n), 0), INBOX_AUTO_CLOSE_DAYS_MAX)
+}
+
+// Local parts that are never a contact address: the VERP return path, a
+// common system sender, and the kernel's own `nx-` addresses (probes).
+const CONTACT_LOCAL_RESERVED = ['bounce', 'notifications']
+const CONTACT_LOCAL_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/
+
+// Why a contact local part is refused, or null when it's usable.
+export function inboxContactLocalError(value: string): string | null {
+  if (!CONTACT_LOCAL_RE.test(value)) return 'Use only letters, numbers, dots, hyphens and underscores'
+  if (CONTACT_LOCAL_RESERVED.includes(value) || value.startsWith('nx-')) return `"${value}" is reserved`
+  return null
+}
+
+export function sanitizeContactLocal(value: unknown): string {
+  const v = String(value ?? '').trim().toLowerCase()
+  return inboxContactLocalError(v) ? INBOX_CONTACT_LOCAL_DEFAULT : v
 }
 
 // Coerce a stored notify list into deduped user-id strings, preserving order.
@@ -55,24 +74,18 @@ export function sanitizeGroundingUrls(value: unknown): string[] {
   return out
 }
 
-// Whether the caller may change the inbound domain and contact address. In
-// multi mode they decide which org receives a domain's mail and whose address
-// replies come from, so only an operator admin (users.is_admin), who also sets
-// the domain up on the mail provider, may change them. Single mode has one
-// inbox, so its admins can.
-export async function inboxMailIdentityEditable(tx: DbClient, ctx: { orgId: string | null, userId: string }): Promise<boolean> {
-  if (!ctx.orgId) return true
-  const user = await tx.selectFrom('users').select('is_admin').where('id', '=', ctx.userId).executeTakeFirst()
-  return !!user?.is_admin
-}
-
 export interface InboxSettings {
-  // Domain inbound mail is addressed to; matches recipient domains in the
-  // webhook's org routing. One distinct (sub)domain per org.
-  inboundDomain: string
-  // Shared From identity and the base of contact+<token> reply addresses.
-  // Under slug addresses, <org slug>@<shared domain> for an org on the shared
-  // domain.
+  // The receiving domain the mail kernel resolves for this org's inbox
+  // stream; '' when no domain can receive mail yet.
+  mailDomain: string
+  // True when the org uses the host's domain under slug addresses, where the
+  // local part is the org slug and personal aliases don't apply.
+  slugAddress: boolean
+  // The local part of the shared address on the org's own or the host's
+  // domain (not used under slug addresses).
+  contactLocal: string
+  // Shared From identity and the base of contact+<token> reply addresses,
+  // derived from mailDomain; '' when there is none (replies are then held).
   contactAddress: string
   // Display name on shared-address sends and courtesy mail ("Acme Support").
   // Personal-alias sends carry the agent's own name instead.
@@ -96,9 +109,8 @@ export interface InboxSettings {
 }
 
 export async function getInboxSettings(tx: DbClient): Promise<InboxSettings> {
-  const [inboundDomain, contactAddress, brandFromName, autoAckEnabled, contactFormApiKey, groundingSourceUrls, notifyUserIds, autoCloseDays] = await Promise.all([
-    getSetting<string>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_INBOUND_DOMAIN),
-    getSetting<string>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_CONTACT_ADDRESS),
+  const [contactLocalRaw, brandFromName, autoAckEnabled, contactFormApiKey, groundingSourceUrls, notifyUserIds, autoCloseDays] = await Promise.all([
+    getSetting<string>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_CONTACT_LOCAL),
     getSetting<string>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_BRAND_FROM_NAME),
     getSetting<boolean>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_AUTO_ACK),
     getSetting<string>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_CONTACT_FORM_API_KEY),
@@ -106,12 +118,11 @@ export async function getInboxSettings(tx: DbClient): Promise<InboxSettings> {
     getSetting<string[]>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_NOTIFY_USER_IDS),
     getSetting<number>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_AUTO_CLOSE_DAYS)
   ])
-  const domain = String(inboundDomain || '').toLowerCase()
-  let contact = String(contactAddress || '').toLowerCase()
-  if (!contact) contact = await inboxSlugAddressFor(tx, domain)
+  const contactLocal = sanitizeContactLocal(contactLocalRaw)
+  const identity = await inboxResolveMailIdentity(tx, contactLocal)
   return {
-    inboundDomain: domain,
-    contactAddress: contact,
+    ...identity,
+    contactLocal,
     brandFromName: String(brandFromName || '').trim(),
     autoAckEnabled: autoAckEnabled !== false,
     contactFormApiKey: String(contactFormApiKey || ''),
@@ -121,31 +132,59 @@ export async function getInboxSettings(tx: DbClient): Promise<InboxSettings> {
   }
 }
 
-// Slug addresses: every org may share INBOX_DOMAIN, where the local part is the
-// org slug. Orgs only exist with the tenancy layer, so it needs multi mode.
+// Slug addresses (INBOX_SLUG_ADDRESSES=true): an org without its own
+// receiving domain gets <org slug>@<host inbox domain>. Orgs only exist with
+// the tenancy layer, so it needs multi mode. Read at runtime, not build time.
 export function inboxSlugAddressesEnabled(): boolean {
+  if (process.env.INBOX_SLUG_ADDRESSES !== 'true') return false
   try {
-    const config = useRuntimeConfig()
-    return !!config.inboxSlugAddresses && !!config.public.tenancy
+    return !!useRuntimeConfig().public.tenancy
   } catch {
     return false
   }
 }
 
-// The domain every org shares under slug addresses; '' when they are off.
-export function inboxSharedDomain(): string {
-  if (!inboxSlugAddressesEnabled()) return ''
-  return String(useRuntimeConfig().inboxDomain || '').toLowerCase()
+// The org bound to `tx` (null in single mode or the host scope).
+export async function inboxCurrentOrgId(tx: DbClient): Promise<string | null> {
+  const res = await sql<{ org: string | null }>`
+    select nullif(current_setting('app.current_org', true), '') as org
+  `.execute(tx)
+  return res.rows[0]?.org ?? null
 }
 
-// <slug>@<shared domain> for the org bound to `tx` when `inboundDomain` is the
-// shared domain; '' otherwise. Derived on every read, so it follows renames.
-export async function inboxSlugAddressFor(tx: DbClient, inboundDomain: string): Promise<string> {
-  const shared = inboxSharedDomain()
-  if (!shared || inboundDomain !== shared) return ''
-  const res = await sql<{ slug: string }>`
-    select slug from orgs where id = nullif(current_setting('app.current_org', true), '')::uuid
-  `.execute(tx)
-  const slug = res.rows[0]?.slug
-  return slug ? `${slug}@${shared}` : ''
+// The org's mail domain and contact address. The domain is the inbox
+// stream's resolved `domain` (not its From domain): replies must reach a
+// receiving domain. Derived on every read, so it follows domain changes and
+// slug renames.
+export async function inboxResolveMailIdentity(
+  tx: DbClient,
+  contactLocal: string
+): Promise<Pick<InboxSettings, 'mailDomain' | 'slugAddress' | 'contactAddress'>> {
+  const orgId = await inboxCurrentOrgId(tx)
+  const sender = await resolveMailSender('inbox', orgId)
+  if (!sender) return { mailDomain: '', slugAddress: false, contactAddress: '' }
+  const domain = sender.domain.toLowerCase()
+  if (orgId && sender.domainOrgId === null && inboxSlugAddressesEnabled()) {
+    const res = await sql<{ slug: string }>`select slug from orgs where id = ${orgId}`.execute(tx)
+    const slug = res.rows[0]?.slug
+    return { mailDomain: domain, slugAddress: true, contactAddress: slug ? `${slug}@${domain}` : '' }
+  }
+  return { mailDomain: domain, slugAddress: false, contactAddress: `${contactLocal}@${domain}` }
+}
+
+// The settings shape the settings endpoints return.
+export function inboxSettingsView(s: InboxSettings) {
+  return {
+    mailDomain: s.mailDomain,
+    slugAddress: s.slugAddress,
+    contactLocal: s.contactLocal,
+    contactAddress: s.contactAddress,
+    noReceivingDomain: !s.mailDomain,
+    brandFromName: s.brandFromName,
+    autoAckEnabled: s.autoAckEnabled,
+    contactFormApiKey: s.contactFormApiKey,
+    groundingSourceUrls: s.groundingSourceUrls,
+    notifyUserIds: s.notifyUserIds,
+    autoCloseDays: s.autoCloseDays
+  }
 }

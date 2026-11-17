@@ -1,6 +1,7 @@
 // Core's own entries in the settings registry.
 import { registerSetting } from '../utils/settings-registry'
 import { REGISTRATION_SETTINGS_NAMESPACE, SETTING_SELF_REGISTRATION } from '../utils/registration'
+import { MAIL_SETTINGS_NAMESPACE, SETTING_MAIL_ORG_RECEIVE_ACCOUNT, SETTING_MAIL_ORG_SEND_ACCOUNT, parseAccountId } from '../utils/mail-host'
 import { GROUPS_SETTINGS_NAMESPACE, SETTING_GROUP_MODE, SETTING_ORG_GROUP_MODE, parseGroupMode, type GroupMode } from '../utils/groups'
 
 export default defineNitroPlugin(() => {
@@ -28,5 +29,21 @@ export default defineNitroPlugin(() => {
     default: 'teams',
     parse: parseGroupMode,
     label: 'Org group mode'
+  })
+
+  // The host accounts org custom domains are provisioned on; null = the env account.
+  registerSetting<string | null>({
+    namespace: MAIL_SETTINGS_NAMESPACE,
+    key: SETTING_MAIL_ORG_SEND_ACCOUNT,
+    default: null,
+    parse: parseAccountId,
+    label: 'Sending account for organizations\' domains'
+  })
+  registerSetting<string | null>({
+    namespace: MAIL_SETTINGS_NAMESPACE,
+    key: SETTING_MAIL_ORG_RECEIVE_ACCOUNT,
+    default: null,
+    parse: parseAccountId,
+    label: 'Receiving account for organizations\' domains'
   })
 })

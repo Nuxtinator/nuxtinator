@@ -4,6 +4,7 @@ import { logEvent } from '#core/server/utils/activity-logger'
 import { renewInvite } from '#core/server/utils/invites'
 import { assertInviteWithinCaller } from '../../../../../../utils/org-invites'
 import { sendTemplateEmail } from '#email'
+import { assertMailable } from '#core/server/utils/mail'
 
 // Issues a fresh link for an unaccepted invite into the active org. An email
 // invite is re-sent; a link invite returns the new URL to share. The old link
@@ -23,6 +24,8 @@ export default defineEventHandler(async (event) => {
       .executeTakeFirst()
     if (!invite) throw createError({ statusCode: 404, statusMessage: 'Invite not found' })
     await assertInviteWithinCaller(tx, ctx, invite.id, { onlyThisOrg: true })
+
+    if (invite.email) await assertMailable(invite.email, 'invite')
 
     const renewed = await renewInvite(tx, invite.id)
 

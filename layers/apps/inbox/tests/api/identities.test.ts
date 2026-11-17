@@ -31,6 +31,10 @@ describe('sending identities', () => {
     await expect(
       $fetch(`/api/inbox/identities/${user.id}`, { method: 'PUT', body: { alias: 'contact' }, ...opts })
     ).rejects.toMatchObject({ statusCode: 400 })
+    // `nx-` local parts belong to the mail kernel's receiving probes.
+    await expect(
+      $fetch(`/api/inbox/identities/${user.id}`, { method: 'PUT', body: { alias: 'nx-probe-abc' }, ...opts })
+    ).rejects.toMatchObject({ statusCode: 400 })
   })
 
   it('lets a send-capable non-admin edit their signature but not their alias', async () => {

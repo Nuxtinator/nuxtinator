@@ -9,17 +9,14 @@ import type { InboxMessageRow } from './inbox-messages'
 
 type Tx = Transaction<Database>
 
-// A reply is refused up front when it could only end up held or failed: the
-// org has no shared contact address to send from, the conversation has no
-// address to reply to, or that address carries a deliverability suppression.
+// A reply is refused up front when it could only end up failed: the
+// conversation has no address to reply to, or that address carries a
+// deliverability suppression. A reply while no domain can receive mail is
+// queued and held until one can.
 export async function inboxAssertReplyDeliverable(
   tx: Tx,
   conversation: Pick<InboxConversationRow, 'channel_id'>
 ): Promise<void> {
-  const settings = await getInboxSettings(tx)
-  if (!settings.contactAddress) {
-    throw createError({ statusCode: 409, statusMessage: 'The inbox has no sending address configured' })
-  }
   const status = await inboxGetReplyStatus(tx, conversation)
   if (!status.email) {
     throw createError({ statusCode: 409, statusMessage: 'This conversation has no address to reply to' })

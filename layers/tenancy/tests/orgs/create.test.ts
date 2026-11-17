@@ -69,4 +69,17 @@ describe('POST /api/admin/orgs', () => {
 
     expect(err.statusCode).toBe(400)
   })
+
+  it('rejects a slug starting nx-, which the mail kernel reserves', async () => {
+    const { auth } = await createOperatorAdmin(sql)
+    const slug = `nx-${randomUUID().slice(0, 8)}`
+    const err = await $fetch('/api/admin/orgs', {
+      method: 'POST',
+      body: { name: 'Acme', slug },
+      ...auth
+    }).catch(e => e)
+
+    expect(err.statusCode).toBe(400)
+    expect(await sql`SELECT 1 FROM orgs WHERE slug = ${slug}`).toHaveLength(0)
+  })
 })

@@ -16,12 +16,12 @@
         "@nuxtinator/core": "workspace:*",
         "@nuxtinator/crm": "workspace:*",
         "@nuxtinator/dev": "workspace:*",
-        "@nuxtinator/email-mailgun": "workspace:*",
         "@nuxtinator/feedback": "workspace:*",
         "@nuxtinator/files": "workspace:*",
         "@nuxtinator/helpinator": "workspace:*",
         "@nuxtinator/inbox": "workspace:*",
         "@nuxtinator/list-of-100": "workspace:*",
+        "@nuxtinator/mail": "workspace:*",
         "@nuxtinator/mcp": "workspace:*",
         "@nuxtinator/messages": "workspace:*",
         "@nuxtinator/oauth": "workspace:*",
@@ -52,7 +52,7 @@
     },
     "layers/ai": {
       "name": "@nuxtinator/ai",
-      "version": "0.10.1",
+      "version": "0.10.2",
       "dependencies": {
         "tinfoil": "^1.2.1",
       },
@@ -70,7 +70,7 @@
     },
     "layers/apps/context": {
       "name": "@nuxtinator/context",
-      "version": "1.13.0",
+      "version": "1.14.0",
       "dependencies": {
         "archiver": "^7.0.1",
         "diff": "^9.0.0",
@@ -115,7 +115,7 @@
     },
     "layers/apps/feedback": {
       "name": "@nuxtinator/feedback",
-      "version": "1.10.1",
+      "version": "1.11.0",
       "dependencies": {
         "zod": "^4.1.8",
       },
@@ -149,7 +149,7 @@
     },
     "layers/apps/helpinator": {
       "name": "@nuxtinator/helpinator",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "dependencies": {
         "@mozilla/readability": "^0.6.0",
         "croner": "^10.0.1",
@@ -180,11 +180,10 @@
     },
     "layers/apps/inbox": {
       "name": "@nuxtinator/inbox",
-      "version": "0.8.0",
+      "version": "0.11.1",
       "dependencies": {
         "croner": "^10.0.1",
         "dompurify": "^3.4.13",
-        "nodemailer": "^10.1.0",
         "sanitize-html": "^2.17.7",
       },
       "devDependencies": {
@@ -194,6 +193,7 @@
         "@nuxtinator/ai": "*",
         "@nuxtinator/core": "*",
         "@nuxtinator/crm": "*",
+        "@nuxtinator/mail": "*",
         "@nuxtinator/records": "*",
       },
       "peerDependencies": {
@@ -246,7 +246,7 @@
     },
     "layers/apps/videos": {
       "name": "@nuxtinator/videos",
-      "version": "1.2.5",
+      "version": "1.3.0",
       "dependencies": {
         "fix-webm-duration": "^1.0.6",
         "mediabunny": "^1.25.1",
@@ -264,7 +264,7 @@
     },
     "layers/apps/views": {
       "name": "@nuxtinator/views",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "fractional-indexing": "^3.2.0",
       },
@@ -282,7 +282,7 @@
     },
     "layers/core": {
       "name": "@nuxtinator/core",
-      "version": "3.3.0",
+      "version": "3.5.0",
       "dependencies": {
         "@bradenmacdonald/s3-lite-client": "^1.0.0",
         "@nuxtjs/i18n": "^10.6.0",
@@ -296,6 +296,9 @@
         "@types/bcrypt": "^6.0.0",
         "@types/jsonwebtoken": "^9.0.10",
         "@types/semver": "^7.5.0",
+      },
+      "optionalDependencies": {
+        "@nuxtinator/mail": "*",
       },
       "peerDependencies": {
         "@iconify-json/lucide": "^1.0.0",
@@ -312,7 +315,7 @@
     },
     "layers/dev": {
       "name": "@nuxtinator/dev",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "peerDependencies": {
         "nuxt": "^4.0.0",
         "vue": "^3.0.0",
@@ -321,16 +324,19 @@
     "layers/email-mailgun": {
       "name": "@nuxtinator/email-mailgun",
       "version": "1.0.2",
+      "peerDependencies": {
+        "nuxt": "^4.0.0",
+      },
+    },
+    "layers/mail": {
+      "name": "@nuxtinator/mail",
+      "version": "0.0.0",
       "dependencies": {
         "nodemailer": "^10.1.0",
-      },
-      "optionalDependencies": {
-        "@nuxtinator/core": "*",
+        "postal-mime": "^4.2.1",
       },
       "peerDependencies": {
-        "@nuxt/kit": "^4.0.0",
-        "h3": "^1.0.0",
-        "nuxt": "^4.0.0",
+        "kysely": "^0.28.0",
       },
     },
     "layers/mcp": {
@@ -376,7 +382,7 @@
     },
     "layers/records": {
       "name": "@nuxtinator/records",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "optionalDependencies": {
         "@nuxtinator/core": "*",
       },
@@ -411,7 +417,7 @@
     },
     "layers/tenancy": {
       "name": "@nuxtinator/tenancy",
-      "version": "3.6.1",
+      "version": "3.8.0",
       "optionalDependencies": {
         "@nuxtinator/core": "*",
       },
@@ -799,6 +805,8 @@
     "@nuxtinator/inbox": ["@nuxtinator/inbox@workspace:layers/apps/inbox"],
 
     "@nuxtinator/list-of-100": ["@nuxtinator/list-of-100@workspace:layers/apps/list-of-100"],
+
+    "@nuxtinator/mail": ["@nuxtinator/mail@workspace:layers/mail"],
 
     "@nuxtinator/mcp": ["@nuxtinator/mcp@workspace:layers/mcp"],
 
@@ -2283,6 +2291,8 @@
     "playwright-core": ["playwright-core@1.64.0", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-T9r+MZkTECl2+oUcZ26YgZzTrYidTsIhYYkJix+6iDOymOb1FB2RLLSOxRGnZGv5DStt+aduIVbt+E8WygXYpg=="],
 
     "pluralize": ["pluralize@8.0.0", "", {}, "sha512-Nc3IT5yHzflTfbjgqWcCPpo7DaKy4FnpB0l/zCAW0Tc7jxAiuqSxHasntB3D7887LSrA93kDJ9IXovxJYxyLCA=="],
+
+    "postal-mime": ["postal-mime@4.2.1", "", {}, "sha512-uFQnu6TPJe5IGzj3ZIjzAYCk7qnVYM3KFvo0JpRFftJKtxJcUSMgTaWsIXDakTKfN71fUULhjNNVbNonim5f0Q=="],
 
     "postcss": ["postcss@8.5.30", "", { "dependencies": { "nanoid": "^3.3.20", "picocolors": "^1.1.1", "source-map-js": "^1.2.2" } }, "sha512-zkd+e9S1AQHhmaBKye9zlFHWjOwVgqXl1q3ECYy8561K7qxR2cREf/STLskulBFd78k6AOFeA+ff1TtEzk9bAA=="],
 

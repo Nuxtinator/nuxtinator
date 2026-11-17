@@ -72,19 +72,19 @@ const REF = process.env.NUXTINATOR_REF || 'master'
 export const LAYERS = [
   { id: 'core',           pkg: '@nuxtinator/core',           url: `github:Nuxtinator/nuxtinator/layers/core#${REF}` },
   { id: 'tenancy',        pkg: '@nuxtinator/tenancy',        url: `github:Nuxtinator/nuxtinator/layers/tenancy#${REF}` },
-  { id: 'email-mailgun',  pkg: '@nuxtinator/email-mailgun',  url: `github:Nuxtinator/nuxtinator/layers/email-mailgun#${REF}` },
+  { id: 'mail',           pkg: '@nuxtinator/mail',           url: `github:Nuxtinator/nuxtinator/layers/mail#${REF}` },
   // ...one entry per layer...
   { id: 'dev',            pkg: '@nuxtinator/dev',            url: `github:Nuxtinator/nuxtinator/layers/dev#${REF}` }
 ] as const
 ```
 
-**Delete the entries for layers you don't want.** Keep load order intact: `core` first; `tenancy` second (its multi-mode kernel overrides core's single-mode); email backend; `oauth`; `mcp`; app layers; `dev` last.
+**Delete the entries for layers you don't want.** Keep load order intact: `core` first; `tenancy` second (its multi-mode kernel overrides core's single-mode); `mail`; `oauth`; `mcp`; app layers; `dev` last.
 
 Rules of thumb:
 
 - **`core` is mandatory.** It owns the registries, auth, admin shell, and the single-mode `#tenant` kernel.
 - **`tenancy` is the big switch.** With it: orgs, memberships, RLS, two DB roles, `/@:slug/...` URLs. Without it: single-tenant, one DB role, plain URLs. App layers work the same in both modes — see [layers.md](layers.md#the-tenant-kernel).
-- **Email backends are pluggable.** Currently shipped: `email-mailgun`. Pick zero or one. With none loaded, code that imports `#email` throws helpfully on first call (so unused features stay quiet, but auth flows that send mail will fail loudly).
+- **`mail` is mandatory too.** Core depends on it. The provider (Mailgun, SES or SendGrid) is chosen in the environment or on `/admin/email`, not by picking a layer.
 - **App layers are à la carte.** Keep what you want, delete what you don't. Each is self-contained.
 - **Drop `dev` for production builds** — it adds the `/kitchen` sandbox.
 
@@ -113,7 +113,7 @@ Add more depending on which layers you enabled:
 | Layer | Extra env |
 |---|---|
 | `tenancy` | `NUXT_TENANT_FLOW_SECRET` (`APP_DATABASE_URL`, the `app_user` role, is needed by every deploy — see [database-roles.md](database-roles.md)) |
-| `email-mailgun` | `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `SMTP_FROM`, `SMTP_FROM_NAME` |
+| `mail` | `MAILGUN_API_KEY` + `MAILGUN_DOMAIN` (or `MAIL_PROVIDER` + that provider's `MAIL_*` vars and `MAIL_DOMAIN`), `SMTP_FROM`, `SMTP_FROM_NAME`, `MAIL_WEBHOOK_SECRET` |
 | `oauth` | `OAUTH_CONSENT_COOKIE_SECRET` |
 | `feedback` | `NUXT_PUBLIC_FEEDBACK_PROJECT_ID` |
 | Anything that uploads (videos, attachments) | `S3_*` vars |

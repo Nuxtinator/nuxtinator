@@ -4,6 +4,7 @@ import { requireOperatorAdmin } from '#tenant/server'
 import { requireAuth } from '../../../../utils/auth'
 import { renewInvite } from '../../../../utils/invites'
 import { sendTemplateEmail } from '#email'
+import { assertMailable } from '../../../../utils/mail'
 
 // Host admin: issue a fresh link for an unaccepted invite. An email invite is
 // re-sent to its address; a link invite returns the new URL to share (the old
@@ -22,6 +23,8 @@ export default defineEventHandler(async (event) => {
   if (!invite || invite.accepted_at) {
     throw createError({ statusCode: 404, statusMessage: 'Invite not found' })
   }
+
+  if (invite.email) await assertMailable(invite.email, 'invite')
 
   const renewed = await renewInvite(db, invite.id)
 

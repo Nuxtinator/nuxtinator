@@ -46,8 +46,7 @@ function localApps(): string[] {
 // Standalone starter config — copy this whole prod/ folder to begin a project,
 // then edit this file freely. Layer selection lives in ./layers.ts. Only
 // HOST-authoritative config (branding + infra secrets) lives here; each layer
-// declares its own runtimeConfig (mailgun*/smtp* in @nuxtinator/email-mailgun,
-// mcpServer* in @nuxtinator/mcp, public.feedbackProjectId in @nuxtinator/feedback,
+// declares its own runtimeConfig (mcpServer* in @nuxtinator/mcp, public.feedbackProjectId in @nuxtinator/feedback,
 // public.tenancy in @nuxtinator/core).
 export default defineNuxtConfig({
 

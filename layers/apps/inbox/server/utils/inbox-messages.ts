@@ -29,7 +29,7 @@ export const INBOX_SEND_MAX_ATTEMPTS = 3
 // often. Short enough that fixing the setting releases held mail promptly,
 // long enough that a misconfigured org isn't re-scanned every sweep.
 export const INBOX_SEND_HOLD_RECHECK_MINUTES = 1
-export const INBOX_HOLD_NO_CONTACT_ADDRESS = 'Inbox contact address not configured'
+export const INBOX_HOLD_NO_RECEIVING_DOMAIN = 'No domain can receive mail yet'
 
 export interface InboxCreateMessageData {
   conversationId: string
@@ -135,7 +135,7 @@ export async function inboxFindMessageByEmailMessageId(tx: Tx, messageId: string
 // Find the conversation a referenced message belongs to (threading fallback
 // when no reply token). Matches either email_message_id or
 // provider_message_id: a contact replying to our outbound references the
-// provider's id. The ids are attacker-controlled — the caller MUST verify the
+// Message-Id we sent it with. The ids are attacker-controlled — the caller MUST verify the
 // sender belongs to the matched conversation's channel before threading into
 // it (anti thread-grafting).
 export async function inboxFindConversationByMessageIds(tx: Tx, messageIds: string[]): Promise<string | null> {
@@ -235,18 +235,36 @@ export async function inboxHoldForConfig(tx: Tx, id: string, reason: string): Pr
     .execute()
 }
 
-// Mark an outbound message sent and store the provider's message-id — also as
-// email_message_id (when unset) so the contact's reply threads back to it.
-export async function inboxMarkSent(tx: Tx, id: string, providerMessageId?: string): Promise<void> {
+// Mark an outbound message sent. The RFC Message-Id goes in email_message_id
+// (when unset) so the contact's reply threads back to it; the provider's own
+// id is kept for support.
+export async function inboxMarkSent(tx: Tx, id: string, messageId?: string | null, providerMessageId?: string | null): Promise<void> {
   await tx
     .updateTable('inbox_messages')
     .set({
       status: 'sent',
       provider_message_id: sql`COALESCE(${providerMessageId ?? null}, provider_message_id)`,
-      email_message_id: sql`COALESCE(email_message_id, ${providerMessageId ?? null})`,
+      email_message_id: sql`COALESCE(email_message_id, ${messageId ?? null})`,
       updated_at: new Date()
     })
     .where('id', '=', id)
+    .execute()
+}
+
+// Return a claimed message to the queue on hold when the mail kernel found no
+// sender for it after all: the claim's attempt is given back, as with
+// inboxHoldForConfig.
+export async function inboxReleaseForHold(tx: Tx, row: InboxMessageRow, reason: string): Promise<void> {
+  await tx
+    .updateTable('inbox_messages')
+    .set({
+      status: 'queued',
+      attempts: Math.max(row.attempts - 1, 0),
+      hold_reason: reason,
+      next_attempt_at: sql<Date>`now() + (${INBOX_SEND_HOLD_RECHECK_MINUTES} * interval '1 minute')`,
+      updated_at: new Date()
+    })
+    .where('id', '=', row.id)
     .execute()
 }
 
@@ -299,18 +317,16 @@ export async function inboxListDueQueued(tx: Tx, limit = 20): Promise<InboxMessa
     .execute()
 }
 
-// Update delivery state by the provider's message-id (used by the delivery
-// webhook). Matches provider_message_id or email_message_id, ignoring angle
-// brackets. A failure never downgrades an already-delivered message — the
-// mail reached the recipient; whatever arrived later (a complaint, a late
-// bounce record) rides suppressions, not message state.
-export async function inboxMarkDeliveryByProviderId(
+// Update an outbound message's delivery state by its row id (the `ref` every
+// inbox send carries). A failure never downgrades an already-delivered
+// message — the mail reached the recipient; whatever arrived later (a
+// complaint, a late bounce record) rides suppressions, not message state.
+export async function inboxMarkDelivery(
   tx: Tx,
-  providerMessageId: string,
+  id: string,
   status: 'delivered' | 'failed',
   extra: { failedReason?: string, deliveredAt?: Date } = {}
 ): Promise<InboxMessageRow | null> {
-  const normalized = providerMessageId.replace(/^<|>$/g, '')
   let qb = tx
     .updateTable('inbox_messages')
     .set({
@@ -319,33 +335,10 @@ export async function inboxMarkDeliveryByProviderId(
       delivered_at: sql`COALESCE(${extra.deliveredAt ?? null}, delivered_at)`,
       updated_at: new Date()
     })
+    .where('id', '=', id)
     .where('direction', '=', 'outbound')
-    .where(sql<boolean>`(
-      replace(replace(provider_message_id, '<', ''), '>', '') = ${normalized}
-      OR replace(replace(email_message_id, '<', ''), '>', '') = ${normalized}
-    )`)
+    .where('status', 'in', ['sent', 'delivered', 'failed'])
   if (status === 'failed') qb = qb.where('status', '!=', 'delivered')
   const row = await qb.returningAll().executeTakeFirst()
-  return row ?? null
-}
-
-// Correlate an outbound message by the provider's message-id WITHOUT touching
-// its state. The delivery webhook uses this to anchor org resolution for
-// events that must not rewrite delivery state (complaints, legacy bounces,
-// failures on an already-delivered message).
-export async function inboxFindOutboundByProviderId(
-  tx: Tx,
-  providerMessageId: string
-): Promise<InboxMessageRow | null> {
-  const normalized = providerMessageId.replace(/^<|>$/g, '')
-  const row = await tx
-    .selectFrom('inbox_messages')
-    .selectAll()
-    .where('direction', '=', 'outbound')
-    .where(sql<boolean>`(
-      replace(replace(provider_message_id, '<', ''), '>', '') = ${normalized}
-      OR replace(replace(email_message_id, '<', ''), '>', '') = ${normalized}
-    )`)
-    .executeTakeFirst()
   return row ?? null
 }

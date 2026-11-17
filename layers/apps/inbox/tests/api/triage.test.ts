@@ -166,8 +166,10 @@ describe('triage API', () => {
 
     const [row] = await sql`SELECT status, provider_message_id, email_message_id FROM inbox_messages WHERE id = ${queued.id}`
     expect(row!.status).toBe('sent')
-    expect(row!.provider_message_id).toBeTruthy()
-    expect(row!.email_message_id).toBe(row!.provider_message_id)
+    // The RFC Message-Id threads; the provider's own id (none under the smtp
+    // transport these tests run on) is kept apart from it.
+    expect(row!.email_message_id).toBe(Object.entries(headers).find(([k]) => k.toLowerCase() === 'message-id')?.[1]?.[0])
+    expect(row!.provider_message_id).toBeNull()
 
     // Conversation flipped to pending and auto-assigned to the replier.
     const detail = await $fetch<{ conversation: { status: string, assignedUserId: string | null } }>(

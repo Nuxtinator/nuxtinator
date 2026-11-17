@@ -697,6 +697,191 @@ Reinstalling is idempotent.
 
 ---
 
+## Mail
+
+All mail goes through one kernel, `@nuxtinator/mail` ([layers/mail/](../layers/mail/)). It is a framework-free package: it takes a Kysely instance and plain objects. Core wraps it for Nuxtinator apps (registries, routes, `/admin/email`, migrations `023`–`025`). Processes outside Nuxt on the same database import it directly.
+
+| Export | Holds |
+|---|---|
+| `@nuxtinator/mail/kernel` | `createMail`, the types, `addressHash`, `notSuppressed`, `parseInbound`, the crypto helpers |
+| `@nuxtinator/mail/adapters` | `mailgunProvider`, `sesProvider`, `sendgridProvider` |
+| `@nuxtinator/mail/test` | `createFakeProvider` (delivers to Mailpit, takes HMAC-signed JSON events and raw-MIME inbound) |
+
+### Streams
+
+A stream is a kind of mail, defined in code. Core registers `account` (password resets, verification: `userInitiated`, `queued`) and `system` (everything else core sends: `queued`). A layer adds its own from its Nitro plugin:
+
+```ts
+import { registerMailStream } from '#core/server/utils/mail'
+
+registerMailStream({
+  id: 'newsletter',          // letters, digits, - and _
+  label: 'Newsletter',
+  defaultLocal: 'news',      // From local part; the domain always comes from resolution
+  orgAssignable: true,       // follows the org's own domain when it has one
+  bulk: true                 // the Streams tab warns when it shares a domain that posts delivered events
+})
+```
+
+| Flag | Effect |
+|---|---|
+| `orgAssignable` | an org's own domain routes (its `*` switch and per-stream picks) apply |
+| `needsReceive` | only domains that can also receive qualify (replies come back to them) |
+| `userInitiated` | mail the person just asked for: skips suppressions, and gets past the provider's own list where it can. Keep it narrow |
+| `queued` | `send()` writes an outbox row and attempts at once; failures are retried by the outbox |
+| `maxAgeMinutes` | queued rows older than this fail as `expired` (default 24 hours). `expiresInMinutes` on a message overrides it |
+
+**Which domain sends.** For `(stream, org)` the first qualifying candidate wins: the org's route for the stream, the org's `*` route (only for `orgAssignable` streams), the host's route for the stream, the host's `*` route (its default domain), then the env domain. A domain qualifies when its ownership and sending are verified (and receiving, for `needsReceive`). No candidate → `no_sender`: queued mail waits, nothing is dropped.
+
+**Bulk streams** (reminders, newsletters) belong on their own domain. A domain that carries a `userInitiated` stream or a stream with a `delivered` handler subscribes to delivered events, one per message.
+
+### Sending
+
+```ts
+import { sendMail, enqueueMail } from '#core/server/utils/mail'
+
+// Now, on its own connection. Never inside a transaction.
+const res = await sendMail({ stream: 'newsletter', orgId, to, subject, html, ref: issueId })
+
+// Inside a handler's transaction: the outbox row commits with your work,
+// and the first attempt runs right after commit. Nothing is sent on rollback.
+await enqueueMail(tx, { stream: 'newsletter', orgId, to, subject, html })
+```
+
+`SendResult` is `sent` (with `messageId`, the Message-Id the recipient sees — thread on it), `suppressed`, `refused` (a send guard), `no_sender`, `failed` (`retryable` or not), `unknown` (timed out mid-call: treat as sent, never retry) or `queued`. A non-queued `send` makes one attempt: a caller with its own queue keeps the item due until `sent`, `suppressed` or a non-retryable failure; a caller without one uses a `queued` stream or `enqueueMail`.
+
+`ref` (letters, digits, `-`, `_`, up to 64) comes back on every provider event for that message. Match events by `ref`, never by a provider id.
+
+`#email` (`sendEmail`, `sendTemplateEmail`) stays for simple mail: it picks `account` or `system` from the template and returns a boolean.
+
+### Inbound handlers, event handlers, send guards
+
+```ts
+registerInboundHandler({
+  id: 'unsubscribe',
+  order: 10,                                   // ascending; core's probe handler is 0, the inbox catch-all 1000
+  match: ({ recipient }) => recipient.local.startsWith('unsubscribe+'),
+  handle: async (mail, ctx) => 'handled'       // 'handled' | 'drop' | 'retry' (retry → 503, the provider retries)
+})
+
+registerMailEventHandler({
+  id: 'newsletter:delivery',
+  stream: 'newsletter',
+  types: ['delivered', 'bounced'],
+  handle: async (event) => { /* event.ref, event.orgId */ }
+})
+
+registerSendGuard({
+  id: 'no-org-accounts',
+  check: async (m, ctx) => ctx.accountOrgId ? { ok: false, reason: 'org accounts are off here' } : { ok: true }
+})
+```
+
+Inbound mail is dispatched once per receiving recipient, only for an ownership-verified domain whose receiving account is the one the webhook arrived on, so handlers must be idempotent. A guard that counts (throttling) keeps its counters in the database, since several processes send.
+
+### Suppressions and trust
+
+The kernel is the only authority on bounces and complaints, and stores only address hashes.
+
+| Event | Host-owned account | Org-owned account |
+|---|---|---|
+| permanent bounce | global hard bounce | hard bounce for that org |
+| complaint | the org named by the message (`nx-org`), else the host | that org; the message's org is ignored |
+| delivered | clears an older global hard bounce | clears only that org's |
+
+An org holds the signing key of its own provider account, so its events only ever affect that org, and event handlers receive the account's org, not the one the event names. For set-based queries the same rule is SQL: `WHERE NOT mail_is_suppressed(email, org_id)`, or `notSuppressed(eb, 'c.email', 'c.org_id')` in Kysely.
+
+Providers keep their own lists. Each domain's mode follows its key's capabilities: `disabled` (SES, with a configuration set that turns its list off), `mirrored` (Mailgun or SendGrid with a key that can change the lists: the kernel releases addresses it has cleared), `unmanaged` (the provider's list stays in charge; `/admin/email` says so).
+
+### Providers
+
+A provider is a plain object implementing `MailProvider` from `@nuxtinator/mail/kernel`. Core registers Mailgun, SES and SendGrid; a layer adds another from its Nitro plugin, before the mail instance is built:
+
+```ts
+import { registerMailProvider } from '#core/server/utils/mail'
+import { postmarkProvider } from '../utils/postmark'
+
+registerMailProvider(postmarkProvider)
+```
+
+| Member | What it does |
+|---|---|
+| `id`, `label` | the stored provider id (unique) and its name in the UI |
+| `credentialFields` | the account form: `{ key, label, secret, optional?, help?, env? }`. `env` names the variable that fills the field for the Environment account |
+| `domainCredentialFields` | optional per-domain key (a Mailgun sending key) |
+| `supports` | `{ send, receive, events }`: which roles a domain may give it |
+| `webhookScope` | `domain` (webhooks set per domain) or `account` (one webhook for the whole account, like SendGrid's); the kernel works out the event list across the account's domains |
+| `notes` | optional `{ send?, receive? }` caveats, shown where an admin picks the provider or sets a domain up on it |
+| `verifyCredentials(creds, domain?, opts?)` | checks the key with calls that change nothing and returns the capabilities it proved (`send`, `domains`, `routes`, `webhooks`, `suppressionLists`) |
+| `manualSetup(domain, role, urls, { events })` | the steps an admin follows at the provider when setup isn't automatic |
+| `send(creds, msg)` | one attempt; returns `sent` (with the provider's id), `failed` (`retryable`, and `keyRejected` when the key itself was refused) or `unknown` |
+| `provisionDomain?`, `checkDomain?`, `configureWebhooks?`, `deprovisionDomain?` | automatic setup. Throw `ProviderPermissionError(capability)` when the key isn't allowed: the kernel records the capability as false and falls back to the manual steps |
+| `providerSuppression` | `mode(capabilities)` (`disabled`, `mirrored`, `unmanaged`) and an optional `release(creds, domain, address, list)` |
+| `handleWebhook(creds, req)` | verifies the signature and returns `handshake`, `events` (mapped to `MailEvent`s, with `stream`, `orgId` and `ref` from the message's correlation) or `inbound` (a parsed message), or `rejected` |
+
+Capabilities are recorded one by one from calls the kernel needs, and a refusal never fails an add, a check or a send. `@nuxtinator/mail/test` has a fake provider whose capabilities and suppression mode are configurable; adapter tests run against a local fake HTTP server.
+
+### Organizations' own domains
+
+With tenancy loaded, an org adds its own domain on `/@<slug>/settings/email`. It must prove it controls the name before anything else happens:
+
+1. The domain is created `pending`, with a token. The page shows one TXT record: `_nx-verify.<domain>` with the value `nx-verify=<token>`.
+2. **Check now** looks the record up. Until it is found, nothing is called at any provider and the domain sends, receives and qualifies for nothing.
+3. Found: the domain becomes `verified` and is set up on the host's accounts for organizations' domains (or on the org's own account, if it chose one). Every other org's row for the name is then deleted, so one name never has two live rows. A name a host domain holds can't be claimed.
+4. A pending claim not verified within 7 days is deleted by the daily job.
+
+The daily job then rechecks each org domain's record. One failed lookup changes nothing; three in a row set the domain `lapsed`: its streams fall back to the host's domains, it receives no inbound mail, the name is no longer held exclusively, and the org's admins are emailed. A passing check (the daily one, or **Check now**) restores it, unless another org has verified the name meanwhile.
+
+Domains a host admin adds and the Environment domain are `verified` from the start.
+
+### Outside Nuxt
+
+A worker on the same database builds its own instance:
+
+```ts
+import { createMail } from '@nuxtinator/mail/kernel'
+import { mailgunProvider } from '@nuxtinator/mail/adapters'
+import { streams, guards } from './mail-config'   // the same module the app imports
+
+const mail = createMail({ db, providers: [mailgunProvider], streams, guards, env: process.env, secretKey: process.env.NUXT_SECRET_ENCRYPTION_KEY })
+mail.startSweeping()
+process.on('SIGTERM', () => mail.stop())
+```
+
+- **Fetching the package.** `_layers/` is usually outside the Docker build context, so the worker image's build runs `bun run scripts/sync-layers.ts --only mail`, which fetches the tag pinned in `layers.lock.json`. It never resolves anything itself: with no lock entry for `mail` it stops with an error, so run `bun run layers:update` and commit the lock first.
+- **Who holds what.** A sending process needs the database, the secret key (it decrypts every account's credentials) and the env account's provider variables. An enqueue-only process (a public server) gets only `outboxPublicKey` (`MAIL_OUTBOX_PUBLIC_KEY`, shown on `/admin/email`) and calls `enqueue`; a worker sends.
+- **Identical env-account variables.** The env account's credentials are never stored; each process uses its own. The app records a fingerprint at boot, and a process whose variables differ pauses its env-account sends (queued rows wait) until they match. When rotating a key, redeploy the app first.
+- **Connections.** `db` may be pooled (PgBouncer transaction mode, `prepare: false`): the kernel takes no advisory locks and never listens on it. To wake the sender on each enqueue, give `subscribe` a `LISTEN` on a direct connection (core does this when `MAIL_LISTEN_DATABASE_URL` is set); otherwise the sweep tick (`sweepSeconds`) is the trigger.
+- **Webhooks** are only received by the Nuxt app.
+
+### Environment
+
+`MAILGUN_API_KEY` + `MAILGUN_DOMAIN` (or `MAIL_PROVIDER` with that provider's `MAIL_SES_*` / `MAIL_SENDGRID_*` variables and `MAIL_DOMAIN`) become the read-only "Environment" account and domain. `SMTP_FROM` / `SMTP_FROM_NAME` give core's streams their From; an address on another domain than the sending one becomes that domain's From domain. `MAIL_TRANSPORT` is `provider` (default), `smtp` (Mailpit; the default in development) or `log` (staging: nothing leaves the building, whatever accounts the database holds). Set `MAIL_WEBHOOK_SECRET` before ever rotating `NUXT_SECRET_ENCRYPTION_KEY`, or every webhook URL changes; rotating the key also strands queued outbox rows, so drain the outbox first.
+
+### Moving a host from email-mailgun
+
+Pin core to `^3` first if the host tracks `latest`, so the major arrives deliberately. Then:
+
+1. `layers.ts`: swap `email-mailgun` for `mail`, raise core to `^4` and inbox to `^1`.
+2. Runtime env: keep `MAILGUN_API_KEY` / `MAILGUN_DOMAIN` (and `MAILGUN_HOST` in the EU) and `NUXT_SECRET_ENCRYPTION_KEY`; add `MAIL_WEBHOOK_SECRET`; remove `INBOX_DOMAIN`, `INBOX_CONTACT_ADDRESS` and `INBOX_MAILGUN_*`. Every value goes in the runtime environment, not the image build.
+3. Deploy. The boot fails loudly if a provider is missing.
+4. `/admin/email`: add the inbox domain for sending and receiving (manual setup, with its own sending key if the key is domain-scoped), assign it to the Inbox stream, copy the webhook URLs. A host whose inbox used a second Mailgun account adds that account first and puts the inbox domain on it. Until a domain can receive, inbox replies are held.
+5. Mailgun dashboard: point the inbound route at the new `/inbound/mime` URL and the webhooks at the new events URL; remove the old `/api/inbox/webhooks/mailgun/*` targets.
+6. Check: a password reset arrives, the receiving probe turns green, a test reply shows "Delivered".
+
+Between steps 3 and 5 the old URLs answer 404. Mailgun retries a route forward that gets a 404, first after 10 minutes and then for about 8 hours, so inbound mail in the gap arrives once the route points at the new URL. Events posted in the gap (bounces, complaints, failures) are retried the same way; only delivered notifications may be lost.
+
+### Releasing the mail kernel
+
+Until `mail` has its first tag, core requires `@nuxtinator/mail >=0.0.0`: the build check still stops a host that fetched core without mail, and a host or the monorepo building from `master` passes with mail at `0.0.0`. Release in this order, each with `bun run release`:
+
+1. mail → 1.0.0.
+2. core → 4.0.0, raising its requirement to `@nuxtinator/mail >=1.0.0` in the release commit.
+3. tenancy and crm → minor, inbox → 1.0.0, each raising its requirement to `@nuxtinator/core >=4.0.0`.
+4. email-mailgun → 2.0.0, the empty layer.
+
+---
+
 ## Working on the OAuth or MCP layer
 
 These are tracked source under [layers/oauth/](../layers/oauth/) and [layers/mcp/](../layers/mcp/) — edit them in place. The eventual port-back to `nuxt-blueprints` is documented in [context/plans/multi-tenancy-layer/](../context/plans/multi-tenancy-layer/).

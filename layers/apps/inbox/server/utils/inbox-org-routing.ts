@@ -1,11 +1,11 @@
-// Org-scope plumbing for the inbox's session-less code paths (webhooks, the
+// Org-scope plumbing for the inbox's session-less code paths (inbound mail, the
 // send sweep). Same pattern as core's notification jobs: iterate org scopes
 // and open a transaction per scope with the RLS GUC set via set_config.
 // `[null]` in single mode (no GUC). This is the ONLY inbox code that imports
 // `db` — every kernel-style function takes the transaction these helpers
 // open.
 //
-// The per-org iteration is O(orgs) per sweep/webhook; fine at current scale.
+// The per-org iteration is O(orgs) per sweep; fine at current scale.
 // If org count grows large, replace with NOTIFY/LISTEN or a non-RLS routing
 // table.
 import { sql, type Transaction } from 'kysely'
@@ -13,7 +13,9 @@ import { db } from '#core/server/utils/database'
 import { withAdvisoryLock } from '#core/server/utils/advisory-lock'
 import type { Database } from '#core/server/database/schema'
 import { isAppEnabledForCurrentOrg } from '#tenant/server'
-import { getInboxSettings, inboxSharedDomain } from './inbox-settings'
+import type { MailDomainRow } from '@nuxtinator/mail/kernel'
+import { getSetting } from '#core/server/utils/settings-store'
+import { INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_CONTACT_FORM_API_KEY, inboxSlugAddressesEnabled } from './inbox-settings'
 import { INBOX_RESERVED_LOCAL_PARTS } from './inbox-identities'
 import type { InboxParsedRecipient } from './inbox-addressing'
 
@@ -69,37 +71,26 @@ export async function inboxWithAdvisoryLock(
   await withAdvisoryLock(key, { scope: 'inbox', label, staleAfterMs }, fn)
 }
 
-// Resolve which org's inbox a tokenless inbound recipient belongs to. On the
-// shared slug-address domain it is the org whose slug is the local part (one
-// lookup; anything else there is unroutable). Elsewhere the recipient domain
-// is matched against each org scope's inbound-domain setting. Returns the
-// matching scope (null = single-mode/no-org scope), or undefined when no
-// scope — or more than one — matches. Ambiguity means two orgs claim the same
-// domain, which is unsupported config: the mail is ignored with a loud log
-// rather than guessed at.
-export async function inboxResolveOrgForRecipient(parsed: InboxParsedRecipient): Promise<string | null | undefined> {
-  const shared = inboxSharedDomain()
-  if (shared && parsed.domain === shared) return await inboxResolveOrgForSlug(parsed.base, shared)
-
-  const matches: (string | null)[] = []
-  for (const scope of await inboxListOrgScopes()) {
-    const settings = await inboxWithScopeTx(scope, tx => getInboxSettings(tx))
-    if (settings.inboundDomain && settings.inboundDomain === parsed.domain) {
-      matches.push(scope)
-    }
-  }
-  if (matches.length === 1) return matches[0]
-  if (matches.length > 1) {
-    console.error(`[inbox] recipient domain "${parsed.domain}" matches ${matches.length} org scopes — shared inbound domains are unsupported; ignoring the message`)
-  }
+// Resolve which org's inbox a tokenless inbound recipient belongs to, from
+// the receiving domain the kernel matched. An org's own domain routes to that
+// org. On a host domain: under slug addresses, the org whose slug is the local
+// part; in single mode, the one inbox. Returns the scope (null = single-mode
+// scope), or undefined when the mail is unroutable (a host domain in multi
+// mode without slug addresses, or an unknown slug).
+export async function inboxResolveOrgForInbound(
+  parsed: InboxParsedRecipient,
+  domain: Pick<MailDomainRow, 'org_id'>
+): Promise<string | null | undefined> {
+  if (domain.org_id) return domain.org_id
+  if (inboxSlugAddressesEnabled()) return await inboxResolveOrgForSlug(parsed.base)
+  if (!isTenancyMode()) return null
   return undefined
 }
 
-// The org with this slug on the shared domain, if its inbox is on. Reserved
-// local parts and the platform's own contact address never route to an org.
-async function inboxResolveOrgForSlug(slug: string, shared: string): Promise<string | undefined> {
-  const platformContact = String(useRuntimeConfig().inboxContactAddress || '').toLowerCase()
-  if (INBOX_RESERVED_LOCAL_PARTS.includes(slug) || platformContact === `${slug}@${shared}`) return undefined
+// The org with this slug, if its inbox is on. Reserved local parts never
+// route to an org.
+async function inboxResolveOrgForSlug(slug: string): Promise<string | undefined> {
+  if (INBOX_RESERVED_LOCAL_PARTS.includes(slug) || slug.startsWith('nx-')) return undefined
   const res = await sql<{ id: string }>`select id from orgs where slug = ${slug}`.execute(db)
   const orgId = res.rows[0]?.id
   if (!orgId) return undefined
@@ -107,30 +98,17 @@ async function inboxResolveOrgForSlug(slug: string, shared: string): Promise<str
   return enabled ? orgId : undefined
 }
 
-// Whether an org scope other than `orgId` already routes mail for `domain`.
-// The shared slug-address domain belongs to the platform, so no org claims it.
-export async function inboxDomainClaimedElsewhere(domain: string, orgId: string | null): Promise<boolean> {
-  const wanted = domain.toLowerCase()
-  if (wanted === inboxSharedDomain()) return false
-  for (const scope of await inboxListOrgScopes()) {
-    if (scope === orgId) continue
-    const settings = await inboxWithScopeTx(scope, tx => getInboxSettings(tx))
-    if (settings.inboundDomain === wanted) return true
-  }
-  return false
-}
-
 // Resolve which org a contact-form submission belongs to by matching the
-// presented API key against each scope's `contact_form_api_key` setting. Same
-// scope-scan shape as domain routing; returns undefined when no scope (or more
+// presented API key against each scope's `contact_form_api_key` setting.
+// Returns undefined when no scope (or more
 // than one) matches, so an unknown/duplicate key is rejected rather than
 // guessed. An empty key never matches (the form is disabled by default).
 export async function inboxResolveOrgForApiKey(key: string): Promise<string | null | undefined> {
   if (!key) return undefined
   const matches: (string | null)[] = []
   for (const scope of await inboxListOrgScopes()) {
-    const settings = await inboxWithScopeTx(scope, tx => getInboxSettings(tx))
-    if (settings.contactFormApiKey && settings.contactFormApiKey === key) {
+    const scopeKey = await inboxWithScopeTx(scope, tx => getSetting<string>(tx, INBOX_SETTINGS_NAMESPACE, INBOX_SETTING_CONTACT_FORM_API_KEY))
+    if (scopeKey && String(scopeKey) === key) {
       matches.push(scope)
     }
   }

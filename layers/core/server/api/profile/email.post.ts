@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt'
 import crypto from 'crypto'
 import { sql } from 'kysely'
+import { sendTemplateEmail } from '#email'
 
 export default defineEventHandler(async (event) => {
   // Require authentication

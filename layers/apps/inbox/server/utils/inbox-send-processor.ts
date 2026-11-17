@@ -6,17 +6,21 @@
 // mid-send leaves the row 'sent' without a provider id — at-most-once, the
 // same bias the inbound pipeline has.
 //
+// Sends go through the mail kernel's `inbox` stream, which picks the sending
+// domain, checks its suppression list and guards, and stamps the Message-Id.
+//
 // Missing configuration is not a failure and never consumes the retry budget:
-// an org with no contact address has its due mail held (still 'queued', same
-// attempts, hold_reason set) and goes out untouched on the first sweep after
-// an operator sets the address.
+// an org with no domain that can receive mail has its due mail held (still
+// 'queued', same attempts, hold_reason set) and goes out untouched on the
+// first sweep after a domain qualifies.
 import type { Transaction } from 'kysely'
+import type { MailAttachment, SendResult } from '@nuxtinator/mail/kernel'
 import type { Database } from '#core/server/database/schema'
 import { isSuppressed } from '#crm/server'
 import { generateSignedUrl } from '#core/server/utils/storage'
+import { sendMail } from '#core/server/utils/mail'
 import type { InboxMessageRow } from './inbox-messages'
 import type { InboxQuoteCandidate } from './inbox-quote'
-import type { InboxEmailAttachment } from './inbox-transport'
 
 type Tx = Transaction<Database>
 
@@ -29,7 +33,9 @@ interface OutboundAttachmentRef {
 interface PreparedSend {
   claimed: InboxMessageRow
   toEmail: string
-  fromAddress: string
+  // The From display name and local part; the domain comes from the kernel.
+  fromName: string | undefined
+  fromLocal: string
   replyTo: string
   subject: string
   // Assembled body + quoted history, BEFORE the send-time HTML passes. The
@@ -45,9 +51,9 @@ interface PreparedSend {
 // window. A fetch failure THROWS so the send fails/retries — the thread must
 // never read 'sent' while an attachment silently went missing. Skipped under
 // VITEST (no S3).
-async function fetchOutboundAttachments(refs: OutboundAttachmentRef[]): Promise<InboxEmailAttachment[]> {
+async function fetchOutboundAttachments(refs: OutboundAttachmentRef[]): Promise<MailAttachment[]> {
   if (!refs.length || process.env.VITEST) return []
-  const out: InboxEmailAttachment[] = []
+  const out: MailAttachment[] = []
   for (const ref of refs) {
     const url = await generateSignedUrl(ref.s3Key, 300)
     const res = await fetch(url)
@@ -63,10 +69,10 @@ async function fetchOutboundAttachments(refs: OutboundAttachmentRef[]): Promise<
 
 // Embed composer inline images as CID parts at send time: scan the assembled
 // HTML for inline-image proxy URLs, dedupe keys, fetch each from S3, and
-// rewrite every occurrence to cid:<basename> (Mailgun requires cid ===
-// filename). An unfetchable image is LEFT AS-IS and the send proceeds — a
+// rewrite every occurrence to cid:<basename> (cid === filename, which every
+// provider accepts). An unfetchable image is LEFT AS-IS and the send proceeds — a
 // broken <img> degrades, unlike a missing file attachment which fails the send.
-async function embedInlineImages(html: string): Promise<{ html: string, attachments: InboxEmailAttachment[] }> {
+async function embedInlineImages(html: string): Promise<{ html: string, attachments: MailAttachment[] }> {
   if (process.env.VITEST) return { html, attachments: [] }
   const scan = /\/api\/inbox\/inline-image\/(inbox-inline\/[A-Za-z0-9/_.-]+?\.(?:jpe?g|png|gif|webp))/gi
   const keys = new Set<string>()
@@ -74,7 +80,7 @@ async function embedInlineImages(html: string): Promise<{ html: string, attachme
   while ((match = scan.exec(html))) keys.add(match[1]!)
   if (!keys.size) return { html, attachments: [] }
 
-  const attachments: InboxEmailAttachment[] = []
+  const attachments: MailAttachment[] = []
   let out = html
   for (const key of keys) {
     try {
@@ -119,15 +125,15 @@ async function prepareSend(tx: Tx, msg: InboxMessageRow): Promise<PreparedSend |
     return null
   }
 
-  // Configuration gate, deliberately ahead of the claim: without a From
-  // identity nothing can send, and that stays true until an operator changes a
-  // setting. Holding costs no attempt, where claiming and releasing would burn
-  // the retry budget and land the message in 'failed' — unrecoverable — within
-  // minutes. The sweep already holds a whole org's due mail in one pass; this
-  // covers a settings change landing mid-sweep.
+  // Configuration gate, deliberately ahead of the claim: without a domain
+  // that can receive mail nothing can send, and that stays true until an
+  // operator sets one up. Holding costs no attempt, where claiming and
+  // releasing would burn the retry budget and land the message in 'failed' —
+  // unrecoverable — within minutes. The sweep already holds a whole org's due
+  // mail in one pass; this covers a change landing mid-sweep.
   const settings = await getInboxSettings(tx)
   if (!settings.contactAddress) {
-    await inboxHoldForConfig(tx, msg.id, INBOX_HOLD_NO_CONTACT_ADDRESS)
+    await inboxHoldForConfig(tx, msg.id, INBOX_HOLD_NO_RECEIVING_DOMAIN)
     return null
   }
 
@@ -163,23 +169,22 @@ async function prepareSend(tx: Tx, msg: InboxMessageRow): Promise<PreparedSend |
   const attachmentRefs: OutboundAttachmentRef[] = (await inboxListAttachmentsForMessage(tx, claimed.id))
     .map(a => ({ s3Key: a.s3_key, filename: a.filename, contentType: a.content_type }))
 
-  // From address: the personal alias snapshotted onto the row at queue time,
-  // else the shared contact address. A personal send carries the agent's
-  // CURRENT display_name (not snapshotted, so a rename shows on pending
-  // sends); a shared-address send carries the org's brand From name — the
-  // shared identity exists to not expose the individual. Reply-To always
-  // stays the contact+<token> address so the contact's reply threads back
-  // regardless of which From we sent on.
+  // From local part: the personal alias snapshotted onto the row at queue
+  // time, else the shared contact address's; the domain is always the one the
+  // kernel resolves. A personal send carries the agent's CURRENT display_name
+  // (not snapshotted, so a rename shows on pending sends); a shared-address
+  // send carries the org's brand From name — the shared identity exists to
+  // not expose the individual. Reply-To always stays the contact+<token>
+  // address so the contact's reply threads back regardless of which From we
+  // sent on.
   const usingPersonalFrom = !!claimed.from_email
   const fromBase = claimed.from_email || settings.contactAddress
 
   return {
     claimed,
     toEmail,
-    fromAddress: inboxBuildFromAddress({
-      displayName: usingPersonalFrom ? senderName : (settings.brandFromName || null),
-      contactAddress: fromBase
-    }),
+    fromName: (usingPersonalFrom ? senderName : settings.brandFromName) || undefined,
+    fromLocal: fromBase.slice(0, fromBase.lastIndexOf('@')),
     replyTo: inboxBuildReplyAddress(conversation.reply_token, settings.contactAddress),
     subject,
     bodyHtml,
@@ -194,18 +199,18 @@ export async function inboxRunSendSweep(): Promise<void> {
     const due = await inboxWithScopeTx(orgId, tx => inboxListDueQueued(tx))
     if (due.length === 0) continue
 
-    // One settings read per org per sweep. An org with no From identity can't
-    // send anything, so its whole due batch is held together and reported once
-    // — not once per message, and not once for the whole sweep, which would
-    // hide which org needs attention.
+    // One settings read per org per sweep. An org with no receiving domain
+    // can't send anything, so its whole due batch is held together and
+    // reported once — not once per message, and not once for the whole sweep,
+    // which would hide which org needs attention.
     const orgSettings = await inboxWithScopeTx(orgId, tx => getInboxSettings(tx))
     if (!orgSettings.contactAddress) {
       await inboxWithScopeTx(orgId, async (tx) => {
-        for (const msg of due) await inboxHoldForConfig(tx, msg.id, INBOX_HOLD_NO_CONTACT_ADDRESS)
+        for (const msg of due) await inboxHoldForConfig(tx, msg.id, INBOX_HOLD_NO_RECEIVING_DOMAIN)
       })
       console.warn(
         `[inbox] ${due.length} queued message(s) held for org ${orgId ?? 'single-tenant'} — `
-        + 'no contact address configured; set one in Inbox settings to release them'
+        + 'no domain can receive mail yet; set one up under Admin → Email to release them'
       )
       continue
     }
@@ -223,7 +228,7 @@ export async function inboxRunSendSweep(): Promise<void> {
       // Attachments are fetched OUTSIDE the claim tx (provider latency must not
       // hold a connection). A fetch failure releases the claim for retry — the
       // message never reads 'sent' with a missing attachment.
-      let attachments: InboxEmailAttachment[]
+      let attachments: MailAttachment[]
       try {
         attachments = await fetchOutboundAttachments(prep.attachmentRefs)
       } catch (err) {
@@ -244,29 +249,54 @@ export async function inboxRunSendSweep(): Promise<void> {
         subject: prep.subject
       })
 
-      const result = await inboxSendEmail({
-        from: prep.fromAddress,
-        to: prep.toEmail,
-        subject: prep.subject,
-        html,
-        text: prep.text,
-        replyTo: prep.replyTo,
-        inReplyTo: prep.inReplyTo,
-        references: prep.inReplyTo,
-        attachments: allAttachments.length ? allAttachments : undefined,
-        userVariables: {
-          ...(orgId ? { 'inbox-org': orgId } : {}),
-          'inbox-msg': prep.claimed.id
-        }
-      })
+      let result: SendResult
+      try {
+        result = await sendMail({
+          stream: 'inbox',
+          orgId,
+          fromName: prep.fromName,
+          fromLocal: prep.fromLocal,
+          to: prep.toEmail,
+          replyTo: prep.replyTo,
+          subject: prep.subject,
+          html,
+          text: prep.text,
+          inReplyTo: prep.inReplyTo,
+          references: prep.inReplyTo,
+          attachments: allAttachments.length ? allAttachments : undefined,
+          ref: prep.claimed.id
+        })
+      } catch (err) {
+        result = { status: 'failed', retryable: true, error: err instanceof Error ? err.message : 'Send failed' }
+      }
 
-      await inboxWithScopeTx(orgId, async (tx) => {
-        if (result.success) {
-          await inboxMarkSent(tx, prep.claimed.id, result.providerMessageId)
-        } else {
-          await inboxReleaseForRetry(tx, prep.claimed, result.error || 'Send failed')
-        }
-      })
+      await inboxWithScopeTx(orgId, tx => inboxRecordSendResult(tx, prep!.claimed, result))
     }
+  }
+}
+
+// Records the kernel's answer for a claimed message. 'unknown' (the provider
+// may or may not have taken it) stays 'sent' without an id: at-most-once.
+async function inboxRecordSendResult(tx: Tx, claimed: InboxMessageRow, result: SendResult): Promise<void> {
+  switch (result.status) {
+    case 'sent':
+      await inboxMarkSent(tx, claimed.id, result.messageId, result.providerMessageId)
+      return
+    case 'unknown':
+    case 'queued':
+      await inboxMarkSent(tx, claimed.id, null)
+      return
+    case 'suppressed':
+      await inboxMarkMessageFailed(tx, claimed.id, 'Recipient suppressed')
+      return
+    case 'refused':
+      await inboxMarkMessageFailed(tx, claimed.id, result.reason)
+      return
+    case 'no_sender':
+      await inboxReleaseForHold(tx, claimed, INBOX_HOLD_NO_RECEIVING_DOMAIN)
+      return
+    case 'failed':
+      if (result.retryable) await inboxReleaseForRetry(tx, claimed, result.error || 'Send failed')
+      else await inboxMarkMessageFailed(tx, claimed.id, result.error || 'Send failed')
   }
 }

@@ -26,6 +26,7 @@ import type { Database } from '#core/server/database/schema'
 import type { Permission } from '#core/app/utils/permissions'
 import { sendTemplateEmail } from '#email'
 import { afterCommit, txScopeFor } from './after-commit'
+import { isAddressSuppressed } from './mail'
 import { requireAuth } from './auth'
 import { getRegisteredApp } from './app-registry'
 import { createInvite, inviteState, renewInvite } from './invites'
@@ -179,7 +180,7 @@ export async function shareByInvite(
     itemLabel?: string | null
     appTitle?: string | null
   }
-): Promise<{ id: string, url: string }> {
+): Promise<{ id: string, url: string, emailed?: boolean, emailSkipped?: 'hard_bounce' | 'complaint' }> {
   requireStandardTable(input.table)
   const email = input.email?.trim().toLowerCase() || null
   if (email !== null && !EMAIL_RE.test(email)) {
@@ -199,7 +200,10 @@ export async function shareByInvite(
     returning id
   `.execute(tx)
 
-  if (email !== null) {
+  // An address the kernel won't mail still gets the share; the sharer is
+  // told to pass the link on themselves.
+  const suppressed = email !== null ? await isAddressSuppressed(email) : false
+  if (email !== null && !suppressed) {
     await afterCommit(tx, async () => {
       try {
         await sendTemplateEmail({
@@ -212,7 +216,8 @@ export async function shareByInvite(
       }
     })
   }
-  return { id: rows[0]!.id, url: invite.url }
+  if (email === null) return { id: rows[0]!.id, url: invite.url }
+  return { id: rows[0]!.id, url: invite.url, emailed: !suppressed, ...(suppressed ? { emailSkipped: suppressed.reason } : {}) }
 }
 
 export async function setResourceShareRole(tx: Tx, input: { table: string, resourceId: string, shareId: string, role: ShareRole }): Promise<void> {
@@ -328,6 +333,8 @@ export function defineShareHandler(opts: ShareHandlerOptions): EventHandler<Even
           const me = await tx.selectFrom('users').select('display_name').where('id', '=', userId).executeTakeFirst()
           const itemLabel = opts.label ? await opts.label(tx, resourceId) : null
           const email = invite.email
+          const suppressed = await isAddressSuppressed(email)
+          if (suppressed) return { id: share.id, url: renewed.url, emailed: false, emailSkipped: suppressed.reason }
           await afterCommit(tx, async () => {
             try {
               await sendTemplateEmail({
