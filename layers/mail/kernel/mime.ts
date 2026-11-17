@@ -34,11 +34,21 @@ export async function buildMime(msg: ProviderMessage): Promise<Buffer> {
 
 const smtpTransporters = new Map<string, ReturnType<typeof nodemailer.createTransport>>()
 
-export async function sendViaSmtp(host: string, port: number, msg: ProviderMessage): Promise<ProviderSendResult> {
-  const key = `${host}:${port}`
+// `timeoutMs` bounds each connection, greeting and socket wait, so a hung
+// catcher can't hold a call past the caller's own timeout.
+export async function sendViaSmtp(host: string, port: number, msg: ProviderMessage, timeoutMs = 30_000): Promise<ProviderSendResult> {
+  const key = `${host}:${port}:${timeoutMs}`
   let transporter = smtpTransporters.get(key)
   if (!transporter) {
-    transporter = nodemailer.createTransport({ host, port, secure: false, tls: { rejectUnauthorized: false } })
+    transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: false,
+      tls: { rejectUnauthorized: false },
+      connectionTimeout: timeoutMs,
+      greetingTimeout: timeoutMs,
+      socketTimeout: timeoutMs
+    })
     smtpTransporters.set(key, transporter)
   }
   try {

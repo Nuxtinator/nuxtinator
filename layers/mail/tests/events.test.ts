@@ -1,3 +1,4 @@
+import { sql } from 'kysely'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { addressHash, encryptJson, type MailAccountRow, type MailEvent, type MailEventHandler } from '../kernel'
 import { fakeSignature } from '../test'
@@ -167,6 +168,134 @@ describe('events → suppressions', () => {
     fake.control.mode = 'unmanaged'
     expect((await mail.send(mailFor('hb@x.test', { stream: 'account' }))).status).toBe('sent')
     expect(fake.released).toHaveLength(0)
+  })
+})
+
+describe('one address, one scope', () => {
+  it('an active hard bounce and complaint in one scope are two rows; send reports the complaint, and clearing the bounce leaves it', async () => {
+    const { mail } = harness({ env: {} })
+    const a = await orgId()
+    const orgAcct = await insertAccount({ org_id: a, credentials: encryptJson(SECRET, { apiKey: 'k' }) })
+    const domain = await insertDomain({ org_id: a, domain: 'org-a.example.net', send_account_id: orgAcct.id })
+    await route(a, '*', domain.id)
+    const earlier = new Date(Date.now() - 60_000)
+    await mail.handleEvents(orgAcct, [
+      event({ type: 'bounced', permanent: true, recipient: 'same@x.test', occurredAt: earlier }),
+      event({ type: 'complained', recipient: 'same@x.test', occurredAt: earlier })
+    ])
+    const active = await rows()
+    expect(active.map(r => [r.reason, r.scope, r.org_id])).toEqual([['hard_bounce', 'org', a], ['complaint', 'org', a]])
+
+    expect(await mail.send(mailFor('same@x.test', { stream: 'newsletter', orgId: a }))).toEqual({ status: 'suppressed', reason: 'complaint' })
+
+    await mail.admin.clearSuppression({ orgId: a }, active.find(r => r.reason === 'hard_bounce')!.id)
+    expect(await mail.isSuppressed('same@x.test', { orgId: a })).toEqual({ reason: 'complaint', scope: 'org' })
+    expect(await mail.send(mailFor('same@x.test', { stream: 'newsletter', orgId: a }))).toEqual({ status: 'suppressed', reason: 'complaint' })
+  })
+})
+
+describe('events that name no domain, or no live org', () => {
+  it('an event without a domain releases on each mirrored domain of the account, by that domain\'s own capabilities', async () => {
+    const { mail, fake } = harness()
+    const acct = await hostAccount()
+    await insertDomain({ domain: 'one.example.net', send_account_id: acct.id })
+    await insertDomain({ domain: 'two.example.net', send_account_id: acct.id })
+    await insertDomain({ domain: 'own-key.example.net', send_account_id: acct.id, capabilities: JSON.stringify({ send: true, suppressionLists: false }) })
+    const other = await hostAccount()
+    await insertDomain({ domain: 'other-account.example.net', send_account_id: other.id })
+    await mail.handleEvents(acct, [event({ type: 'complained', recipient: 'c@x.test' })])
+    expect(fake.released.map(r => r.domain).sort()).toEqual(['one.example.net', 'two.example.net'])
+  })
+
+  it('an event naming the From domain finds the sending domain behind it', async () => {
+    const { mail, fake } = harness()
+    const acct = await hostAccount()
+    await insertDomain({ domain: 'mg.example.net', from_domain: 'example.net', send_account_id: acct.id })
+    await insertDomain({ domain: 'news.example.net', send_account_id: acct.id })
+    await mail.handleEvents(acct, [event({ type: 'complained', recipient: 'c@x.test', domain: 'example.net' })])
+    expect(fake.released).toEqual([{ domain: 'mg.example.net', address: 'c@x.test', list: 'complaint' }])
+  })
+
+  it('a complaint for an org that no longer exists is skipped, and the rest of the batch is applied', async () => {
+    await db().schema.createTable('events_test_orgs').ifNotExists().addColumn('id', 'uuid', c => c.primaryKey()).execute()
+    await sql`ALTER TABLE mail_suppressions ADD CONSTRAINT events_test_org_fk FOREIGN KEY (org_id) REFERENCES events_test_orgs(id)`.execute(db())
+    try {
+      const seen: (string | null)[] = []
+      const { mail } = harness({ eventHandlers: [{ id: 'h', handle: async e => void seen.push(e.orgId) }] })
+      const acct = await hostAccount()
+      const gone = await orgId()
+      await mail.handleEvents(acct, [
+        event({ type: 'complained', recipient: 'gone@x.test', orgId: gone }),
+        event({ type: 'bounced', permanent: true, recipient: 'next@x.test' })
+      ])
+      expect((await rows()).map(r => [r.reason, r.scope])).toEqual([['hard_bounce', 'global']])
+      expect(seen).toEqual([gone, null])
+    } finally {
+      await sql`ALTER TABLE mail_suppressions DROP CONSTRAINT events_test_org_fk`.execute(db())
+      await db().schema.dropTable('events_test_orgs').execute()
+    }
+  })
+
+  it('a correlation org that isn\'t a uuid is ignored', async () => {
+    const seen: (string | null)[] = []
+    const { mail } = harness({ eventHandlers: [{ id: 'h', handle: async e => void seen.push(e.orgId) }] })
+    const acct = await hostAccount()
+    await mail.handleEvents(acct, [event({ type: 'complained', recipient: 'odd@x.test', orgId: 'not-a-uuid' })])
+    expect((await rows()).map(r => [r.reason, r.scope, r.org_id])).toEqual([['complaint', 'host', null]])
+    expect(seen).toEqual([null])
+  })
+})
+
+describe('a delivery that clears a bounce', () => {
+  it('host account: releases the bounce from the other mirrored domains\' lists', async () => {
+    const { mail, fake } = harness()
+    const acct = await hostAccount()
+    await insertDomain({ domain: 'a.example.net', send_account_id: acct.id })
+    await insertDomain({ domain: 'b.example.net', send_account_id: acct.id })
+    const org = await orgId()
+    const orgAcct = await insertAccount({ org_id: org, credentials: encryptJson(SECRET, { apiKey: 'k' }), capabilities: JSON.stringify({ suppressionLists: true }) })
+    await insertDomain({ org_id: org, domain: 'org.example.net', send_account_id: orgAcct.id })
+    await mail.handleEvents(acct, [event({ type: 'bounced', permanent: true, recipient: 'back@x.test', occurredAt: new Date(Date.now() - 1000) })])
+    await mail.handleEvents(acct, [event({ type: 'delivered', recipient: 'back@x.test', domain: 'a.example.net' })])
+    expect(fake.released.map(r => [r.domain, r.list]).sort()).toEqual([['b.example.net', 'bounce'], ['org.example.net', 'bounce']])
+
+    fake.released.length = 0
+    await mail.handleEvents(acct, [event({ type: 'delivered', recipient: 'back@x.test', domain: 'a.example.net' })])
+    expect(fake.released).toEqual([])
+  })
+
+  it('org-owned account: releases only on that org\'s own accounts', async () => {
+    const { mail, fake } = harness()
+    const host = await hostAccount()
+    await insertDomain({ domain: 'host.example.net', send_account_id: host.id })
+    const org = await orgId()
+    const orgAcct = await insertAccount({ org_id: org, credentials: encryptJson(SECRET, { apiKey: 'k' }), capabilities: JSON.stringify({ suppressionLists: true }) })
+    await insertDomain({ org_id: org, domain: 'one.org.example.net', send_account_id: orgAcct.id })
+    await insertDomain({ org_id: org, domain: 'two.org.example.net', send_account_id: orgAcct.id })
+    await mail.handleEvents(orgAcct, [event({ type: 'bounced', permanent: true, recipient: 'o@x.test', occurredAt: new Date(Date.now() - 1000) })])
+    await mail.handleEvents(orgAcct, [event({ type: 'delivered', recipient: 'o@x.test' })])
+    expect(fake.released.map(r => r.domain).sort()).toEqual(['one.org.example.net', 'two.org.example.net'])
+  })
+})
+
+describe('clearing a suppression by hand', () => {
+  it('without the address the provider lists are reported untouched; with it they are released', async () => {
+    const { mail, fake } = harness()
+    const acct = await hostAccount()
+    await insertDomain({ domain: 'm.example.net', send_account_id: acct.id })
+    await insertDomain({ domain: 'u.example.net', send_account_id: acct.id, capabilities: JSON.stringify({ send: true, suppressionLists: false }) })
+    await mail.handleEvents(acct, [event({ type: 'bounced', permanent: true, recipient: 'h@x.test' })])
+    const [row] = await rows()
+    const plain = await mail.admin.clearSuppression({ orgId: null }, row!.id)
+    expect(plain.providerLists).toEqual({ released: [], notReleased: ['m.example.net'] })
+    expect(plain.address).toBeUndefined()
+    expect(fake.released).toEqual([])
+
+    await mail.handleEvents(acct, [event({ type: 'bounced', permanent: true, recipient: 'h@x.test' })])
+    const again = (await rows()).find(r => !r.cleared_at)!
+    const withAddress = await mail.admin.clearSuppression({ orgId: null }, again.id, 'H@x.test')
+    expect(withAddress.providerLists).toEqual({ released: ['m.example.net'], notReleased: [] })
+    expect(fake.released).toEqual([{ domain: 'm.example.net', address: 'H@x.test', list: 'bounce' }])
   })
 })
 

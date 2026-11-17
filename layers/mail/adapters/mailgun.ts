@@ -10,12 +10,25 @@ import {
   ProviderPermissionError, type Capabilities, type CheckResult, type Credentials, type DnsRecord, type MailEvent,
   type MailEventType, type MailProvider, type ManualStep, type ProviderList, type ProviderSendResult
 } from '../kernel/types'
-import { basicAuth, baseUrl, formString, lowerHeaders, parseForm, request, type HttpResult } from './http'
+import { basicAuth, baseUrl, EndpointError, formString, lowerHeaders, parseForm, request, type HttpResult } from './http'
 
 const SIGNATURE_SKEW_SECONDS = 15 * 60
 
+const API_HOST = /^api(\.eu)?\.mailgun\.net$/
+
 function api(creds: Credentials) {
-  return baseUrl(creds.host, 'api.mailgun.net')
+  return baseUrl(creds.host, 'api.mailgun.net', API_HOST, 'Mailgun')
+}
+
+// The configured host's problem, or null when it's usable.
+function endpointProblem(creds: Credentials): string | null {
+  try {
+    api(creds)
+    return null
+  } catch (err) {
+    if (err instanceof EndpointError) return err.message
+    throw err
+  }
 }
 
 function isEu(creds: Credentials) {
@@ -154,14 +167,18 @@ export const mailgunProvider: MailProvider = {
 
   async verifyCredentials(creds, domain, opts) {
     const caps: Capabilities = {}
+    const badHost = endpointProblem(creds)
+    if (badHost) return { ok: false, error: badHost }
     const key = sendKey(creds)
     if (!key) {
       if (creds.webhookSigningKey) return { ok: true, capabilities: caps }
       return { ok: false, error: 'Enter an API key, or a sending key on each domain' }
     }
 
+    // The account key is probed even beside a domain sending key: the domain
+    // still uses it for everything but sending.
     let accountKeyWorks = false
-    if (creds.apiKey && !creds.sendingKey) {
+    if (creds.apiKey) {
       const res = await call(creds, creds.apiKey, 'GET', '/v4/domains?limit=1')
       if (res.ok) accountKeyWorks = true
       else if (!refused(res)) return { ok: false, error: `Mailgun responded ${res.status}` }
@@ -191,7 +208,7 @@ export const mailgunProvider: MailProvider = {
 
     if (!accountKeyWorks) {
       if (caps.send !== true) return { ok: false, error: 'Mailgun rejected the key' }
-      // A domain sending key: it can send and nothing else.
+      // Only a domain sending key works: it can send and nothing else.
       Object.assign(caps, { domains: false, routes: false, webhooks: false, suppressionLists: false })
     }
     return { ok: true, capabilities: caps }
@@ -224,6 +241,8 @@ export const mailgunProvider: MailProvider = {
   async send(creds, msg): Promise<ProviderSendResult> {
     const key = sendKey(creds)
     if (!key) return { status: 'failed', retryable: false, error: 'No Mailgun key for this domain', keyRejected: true }
+    const badHost = endpointProblem(creds)
+    if (badHost) return { status: 'failed', retryable: false, error: badHost }
     const form = new FormData()
     form.append('from', msg.from.name ? `"${msg.from.name.replace(/"/g, '\'')}" <${msg.from.address}>` : msg.from.address)
     form.append('to', msg.to)

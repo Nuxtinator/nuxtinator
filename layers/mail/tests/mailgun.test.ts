@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net'
 import { createHmac } from 'node:crypto'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { mailgunProvider, mapMailgunEvent } from '../adapters/mailgun'
+import { __setEndpointCheck } from '../adapters/http'
 import { createMail, memoryDns, type MailAccountRow, type MailStream, type ProviderMessage, type WebhookRequest } from '../kernel'
 import { db, resetTables, SECRET } from './helpers'
 
@@ -42,9 +43,11 @@ beforeAll(async () => {
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  __setEndpointCheck(url => url.hostname === '127.0.0.1')
 })
 
 afterAll(async () => {
+  __setEndpointCheck(null)
   await new Promise<void>(resolve => server.close(() => resolve()))
   await db().destroy()
 })
@@ -363,6 +366,32 @@ describe('verifyCredentials', () => {
     expect(calls()).toEqual(['GET /v4/domains?limit=1'])
   })
 
+  it('a sending key beside an account key: send is the sending key\'s, the rest the account key\'s', async () => {
+    reply = s => ({ status: s.path.includes('/bounces/') ? 404 : 200, body: {} })
+    const res = await mailgunProvider.verifyCredentials({ apiKey: 'key-acct', sendingKey: 'key-domain', host: endpoint }, 'mg.example.org')
+    expect(res).toEqual({ ok: true, capabilities: { send: true, suppressionLists: true } })
+    expect(seen.find(s => s.method === 'POST')!.auth).toBe(basic('key-domain'))
+    expect(seen.filter(s => s.method === 'GET').every(s => s.auth === basic('key-acct'))).toBe(true)
+
+    seen.length = 0
+    reply = s => ({ status: s.method === 'GET' ? 401 : 200, body: {} })
+    const refusedAccount = await mailgunProvider.verifyCredentials({ apiKey: 'bad', sendingKey: 'key-domain', host: endpoint }, 'mg.example.org')
+    expect(refusedAccount).toEqual({ ok: true, capabilities: { send: true, domains: false, routes: false, webhooks: false, suppressionLists: false } })
+  })
+
+  it('accepts only an https host of Mailgun\'s own', async () => {
+    __setEndpointCheck(null)
+    try {
+      for (const host of ['169.254.169.254', 'http://api.mailgun.net', 'https://evil.example.com', 'api.mailgun.net.evil.com', 'api.mailgun.net:8080']) {
+        expect(await mailgunProvider.verifyCredentials({ apiKey: 'k', host }, 'mg.example.org')).toMatchObject({ ok: false, error: expect.stringContaining('https URL') })
+        expect(await mailgunProvider.send({ apiKey: 'k', host }, message())).toMatchObject({ status: 'failed', retryable: false })
+      }
+      expect(seen).toHaveLength(0)
+    } finally {
+      __setEndpointCheck(url => url.hostname === '127.0.0.1')
+    }
+  })
+
   it('a rejected key fails; a signing key alone is accepted with nothing proven', async () => {
     reply = () => ({ status: 401 })
     expect(await mailgunProvider.verifyCredentials({ apiKey: 'bad', host: endpoint }, 'mg.example.org')).toEqual({ ok: false, error: 'Mailgun rejected the key' })
@@ -519,7 +548,8 @@ describe('with the kernel', () => {
   })
 
   it('a domain with its own key gets its own capabilities, probed against it, and its suppression mode follows them', async () => {
-    reply = s => ({ status: s.path.includes('/bounces/') ? 404 : 200, body: {} })
+    // The account key may read shared.example.org's lists but not own.example.org's.
+    reply = s => ({ status: s.path.includes('/own.example.org/bounces/') ? 403 : s.path.includes('/bounces/') ? 404 : 200, body: {} })
     const mail = kernel()
     const { account } = await mail.admin.createAccount({ orgId: null }, { provider: 'mailgun', credentials: { apiKey: 'key-acct', host: endpoint, webhookSigningKey: SIGNING_KEY } })
     const shared = await mail.admin.addDomain({ orgId: null }, { domain: 'shared.example.org', sendAccountId: account.id, setupMode: 'manual' }, BASE)
@@ -533,8 +563,9 @@ describe('with the kernel', () => {
     expect(probe.path).toBe('/v3/own.example.org/messages')
     expect(probe.auth).toBe(basic('key-own'))
     expect((await fields(probe))['o:testmode']).toBe('yes')
+    expect(seen.find(s => s.path.includes('/own.example.org/bounces/'))!.auth).toBe(basic('key-acct'))
     const ownCaps = (await domainRow(own.domain.id)).capabilities!
-    expect(ownCaps).toEqual({ send: true, domains: false, routes: false, webhooks: false, suppressionLists: false })
+    expect(ownCaps).toEqual({ send: true, suppressionLists: false })
     expect(mailgunProvider.providerSuppression.mode(ownCaps)).toBe('unmanaged')
     expect((await domainRow(shared.domain.id)).capabilities).toBeNull()
 
@@ -555,7 +586,9 @@ describe('with the kernel', () => {
     seen.length = 0
     const { domain } = await mail.admin.addDomain({ orgId: null }, { domain: 'own.example.org', sendAccountId: account.id, setupMode: 'manual', credentials: { sendingKey: 'key-own' } }, BASE)
     expect(seen.find(s => s.method === 'POST')).toMatchObject({ path: '/v3/own.example.org/messages', auth: basic('key-own') })
-    expect(domain.capabilities).toEqual({ send: true, domains: false, routes: false, webhooks: false, suppressionLists: false })
+    // The account key still serves the domain for everything but sending, so its capabilities count.
+    expect(domain.capabilities).toEqual({ send: true, suppressionLists: true })
+    expect(mailgunProvider.providerSuppression.mode(domain.capabilities!)).toBe('mirrored')
   })
 
   it('an account verified with no domain records only the domain-free probes', async () => {

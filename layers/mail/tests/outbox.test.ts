@@ -1,7 +1,8 @@
+import { createPrivateKey } from 'node:crypto'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import postgres from 'postgres'
-import { addressHash, createMail, encryptJson } from '../kernel'
+import { addressHash, createMail, encryptJson, unseal, type MailStream } from '../kernel'
 import { createFakeProvider } from '../test'
 import { db, ENV, harness, insertAccount, insertDomain, mailFor, OTHER_SECRET, resetTables, route, SECRET, STREAMS, TEST_SCHEMA } from './helpers'
 
@@ -37,6 +38,46 @@ describe('outbox', () => {
     expect(res.status).toBe('queued')
   })
 
+  it('send on a queued stream refuses attachments and stores nothing', async () => {
+    const { mail, fake } = harness()
+    await mail.syncEnvAccount()
+    const attachments = [{ filename: 'a.txt', contentType: 'text/plain', data: Buffer.from('hi') }]
+    await expect(mail.send(mailFor('att@x.test', { stream: 'queued', attachments }))).rejects.toThrow(/attachments/)
+    expect(await outbox()).toHaveLength(0)
+    expect(fake.sent).toHaveLength(0)
+  })
+
+  it('a throw while preparing a queued send leaves the row queued, with no attempt counted', async () => {
+    let fail = true
+    const { mail, fake } = harness({ guards: [{ id: 'flaky', check: async () => {
+      if (fail) throw new Error('connection reset')
+      return { ok: true }
+    } }] })
+    await mail.syncEnvAccount()
+    const { outboxId } = await db().transaction().execute(tx => mail.enqueue(mailFor('blip@x.test'), { tx }))
+    await mail.flush([outboxId])
+    const [row] = await outbox()
+    expect(row).toMatchObject({ status: 'queued', attempts: 0, last_error: 'connection reset' })
+    expect(row!.message).not.toBeNull()
+    expect((+new Date(row!.next_attempt_at!) - Date.now()) / 60_000).toBeGreaterThan(4.9)
+
+    fail = false
+    await makeDue()
+    await mail.runOutboxSweep()
+    expect((await outbox())[0]).toMatchObject({ status: 'sent', attempts: 1, message: null })
+    expect(fake.sent.map(m => m.to)).toEqual(['blip@x.test'])
+  })
+
+  it('flush attempts every id it is given, however many', async () => {
+    const { mail, fake } = harness()
+    await mail.syncEnvAccount()
+    const ids: string[] = []
+    for (let i = 0; i < 23; i++) ids.push((await db().transaction().execute(tx => mail.enqueue(mailFor(`many${i}@x.test`), { tx }))).outboxId)
+    await mail.flush(ids)
+    expect(fake.sent).toHaveLength(23)
+    expect((await outbox()).every(r => r.status === 'sent' && r.message === null)).toBe(true)
+  })
+
   it('enqueue in a rolled-back transaction leaves nothing; after commit a subscribed sweeper sends without the tick', async () => {
     const listener = postgres(process.env.TEST_DATABASE_URL!, { max: 1, onnotice: () => {}, connection: { search_path: `${TEST_SCHEMA},public` } })
     const { mail, fake } = harness({
@@ -60,6 +101,22 @@ describe('outbox', () => {
     expect(fake.sent.map(m => m.to)).toEqual(['commit@x.test'])
     await mail.stop()
     await listener.end()
+  })
+
+  it('a stored body can\'t be opened with the public key alone', async () => {
+    const { mail } = harness()
+    const enqueuer = createMail({ db: db(), providers: [createFakeProvider()], streams: STREAMS, env: ENV, outboxPublicKey: mail.outboxPublicKey, log: () => {} })
+    await db().transaction().execute(tx => enqueuer.enqueue(mailFor('secret-person@x.test', { subject: 'Reset code 4242' }), { tx }))
+    const [row] = await outbox()
+    for (const plain of ['secret-person', 'Reset code', '4242', 'Hello']) expect(row!.message).not.toContain(plain)
+    await expect(enqueuer.runOutboxSweep()).rejects.toThrow(/secret key/)
+    await expect(enqueuer.flush([row!.id])).rejects.toThrow(/secret key/)
+
+    // The public key's bytes used as a private key open nothing.
+    const pub = Buffer.from(mail.outboxPublicKey, 'base64url')
+    const asPrivate = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b656e04220420', 'hex'), pub]), format: 'der', type: 'pkcs8' })
+    expect(() => unseal({ privateKey: asPrivate, publicKey: mail.outboxPublicKey }, row!.message!)).toThrow(/different key/)
+    expect((await outbox())[0]).toMatchObject({ status: 'queued', attempts: 0 })
   })
 
   it('flush sends at once; an enqueue-only instance can enqueue with just the public key and refuses to flush', async () => {
@@ -128,6 +185,52 @@ describe('outbox', () => {
     expect((await outbox()).find(r => r.id === p.outboxId)).toMatchObject({ status: 'failed', last_error: 'bad address', message: null })
   })
 
+  it('a flush that outlives its lease can\'t send a row the same process re-claimed', async () => {
+    const gates: Record<string, { open: () => void, wait: Promise<void> }> = {}
+    const gate = (name: string) => {
+      let open!: () => void
+      const wait = new Promise<void>((r) => {
+        open = r
+      })
+      gates[name] = { open, wait }
+    }
+    gate('a')
+    gate('b')
+    const calls: Record<string, number> = {}
+    const entered: Record<string, () => void> = {}
+    const enteredP = (name: string) => new Promise<void>((r) => {
+      entered[name] = r
+    })
+    const aEntered = enteredP('a')
+    const bEntered = enteredP('b')
+    const { mail, fake } = harness({ guards: [{ id: 'slow', check: async (m) => {
+      const name = m.to.split('@')[0]!
+      calls[name] = (calls[name] ?? 0) + 1
+      if (calls[name] === 1 && gates[name]) {
+        entered[name]!()
+        await gates[name].wait
+      }
+      return { ok: true }
+    } }] })
+    await mail.syncEnvAccount()
+    const a = await db().transaction().execute(tx => mail.enqueue(mailFor('a@x.test'), { tx }))
+    await new Promise(r => setTimeout(r, 5))
+    const b = await db().transaction().execute(tx => mail.enqueue(mailFor('b@x.test'), { tx }))
+
+    const flushing = mail.flush([a.outboxId, b.outboxId])
+    await aEntered
+    // Row b's lease runs out while the flush is stuck on a; the same process's sweep takes b.
+    await db().updateTable('mail_outbox').set({ claimed_until: sql`now() - interval '1 second'` }).where('id', '=', b.outboxId).execute()
+    const sweeping = mail.runOutboxSweep()
+    await bEntered
+    gates.a!.open()
+    await flushing
+    gates.b!.open()
+    await sweeping
+    expect(fake.sent.map(m => m.to).sort()).toEqual(['a@x.test', 'b@x.test'])
+    expect((await outbox()).map(r => [r.status, r.attempts])).toEqual([['sent', 1], ['sent', 1]])
+  })
+
   it('two sweepers and a flush of the same row call the provider once', async () => {
     const fake = createFakeProvider()
     const { mail: a } = harness({ fake })
@@ -170,7 +273,8 @@ describe('outbox', () => {
 
   it('a slow batch outliving its lease: every row is sent once, and the first process skips rows it lost', async () => {
     const fake = createFakeProvider()
-    const { mail: slow } = harness({ fake, leaseSeconds: 1, requestTimeoutMs: 700 })
+    // The lease floor makes this claim's lease 11s; two 6s hangs outlast it.
+    const { mail: slow } = harness({ fake, leaseSeconds: 1, requestTimeoutMs: 6000 })
     const { mail: other } = harness({ fake, leaseSeconds: 30 })
     await slow.syncEnvAccount()
     fake.control.hangFor.add('h0@x.test')
@@ -180,11 +284,13 @@ describe('outbox', () => {
       await new Promise(r => setTimeout(r, 5))
     }
     const first = slow.runOutboxSweep()
-    await new Promise(r => setTimeout(r, 1200))
+    await new Promise(r => setTimeout(r, 11_500))
     await other.runOutboxSweep()
+    const sentBySecond = fake.sent.map(m => m.to).sort()
     await first
     const rows = await outbox()
     const sent = fake.sent.map(m => m.to)
+    expect(sentBySecond).toEqual(['ok2@x.test', 'ok3@x.test'])
     expect(sent.filter(t => t === 'ok2@x.test')).toHaveLength(1)
     expect(sent.filter(t => t === 'ok3@x.test')).toHaveLength(1)
     expect(rows.find(r => r.last_error === 'outcome unknown')).toBeTruthy()
@@ -229,7 +335,7 @@ describe('outbox', () => {
     const started = Date.now()
     const res = await mail.send(mailFor('hang@x.test', { stream: 'queued' }))
     expect(Date.now() - started).toBeLessThan(3000)
-    expect(res.status).toBe('queued')
+    expect(res.status).toBe('unknown')
     expect((await outbox())[0]).toMatchObject({ status: 'sent', last_error: 'outcome unknown' })
   })
 
@@ -248,6 +354,14 @@ describe('outbox', () => {
     await makeDue()
     await app.runOutboxSweep()
     expect((await outbox()).find(r => r.id === paused.outboxId)!.status).toBe('sent')
+    expect((await outbox()).find(r => r.id === nosender.outboxId)!.status).toBe('queued')
+
+    const acct = await insertAccount({ credentials: encryptJson(SECRET, { apiKey: 'k' }) })
+    const receiving = await insertDomain({ domain: 'in.example.net', send_account_id: acct.id, receive_account_id: acct.id, receive_status: 'verified' })
+    await route(null, 'inbox', receiving.id)
+    await makeDue()
+    await app.runOutboxSweep()
+    expect((await outbox()).find(r => r.id === nosender.outboxId)).toMatchObject({ status: 'sent', attempts: 1, message: null })
   })
 
   it('a row on a stream this instance doesn\'t know is left for one that does', async () => {
@@ -297,8 +411,32 @@ describe('outbox', () => {
     await mail.send(mailFor('a@x.test', { stream: 'queued' }))
     await db().transaction().execute(tx => mail.enqueue(mailFor('q@x.test', { stream: 'inbox' }), { tx }))
     await db().updateTable('mail_outbox').set({ created_at: sql`now() - interval '8 days'`, sent_at: sql`now() - interval '8 days'` }).execute()
+    await mail.send(mailFor('young@x.test', { stream: 'queued' }))
+    await db().insertInto('mail_suppressions').values({ address_hash: addressHash('nope@x.test'), scope: 'global', reason: 'hard_bounce', occurred_at: new Date() }).execute()
+    await mail.send(mailFor('nope@x.test', { stream: 'queued' }))
+    await db().updateTable('mail_outbox').set({ created_at: sql`now() - interval '6 days'`, sent_at: sql`now() - interval '6 days'` }).where('status', '<>', 'queued').where('created_at', '>', sql<Date>`now() - interval '1 day'`).execute()
+    const before = await outbox()
+    expect(before.filter(r => r.status !== 'queued').every(r => r.message === null)).toBe(true)
+
     expect(await mail.purgeOutbox()).toBe(1)
-    expect((await outbox()).map(r => r.status)).toEqual(['queued'])
+    expect((await outbox()).map(r => r.status).sort()).toEqual(['failed', 'queued', 'sent'])
+  })
+
+  it('expiry defaults to 24 hours, follows the stream\'s maxAgeMinutes, and expiresInMinutes overrides both', async () => {
+    const shortLived: MailStream = { id: 'short', label: 'Short', defaultLocal: 'n', orgAssignable: false, maxAgeMinutes: 90 }
+    const { mail } = harness({ streams: [...STREAMS, shortLived] })
+    const ids = {
+      system: (await db().transaction().execute(tx => mail.enqueue(mailFor('d@x.test'), { tx }))).outboxId,
+      short: (await db().transaction().execute(tx => mail.enqueue(mailFor('s@x.test', { stream: 'short' }), { tx }))).outboxId,
+      override: (await db().transaction().execute(tx => mail.enqueue(mailFor('o@x.test', { stream: 'short', expiresInMinutes: 50 }), { tx }))).outboxId
+    }
+    const rows = await db().selectFrom('mail_outbox')
+      .select(['id', sql<number>`extract(epoch from expires_at - created_at) / 60`.as('minutes')])
+      .execute()
+    const minutes = (id: string) => Math.round(Number(rows.find(r => r.id === id)!.minutes))
+    expect(minutes(ids.system)).toBe(1440)
+    expect(minutes(ids.short)).toBe(90)
+    expect(minutes(ids.override)).toBe(50)
   })
 })
 

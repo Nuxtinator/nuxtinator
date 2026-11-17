@@ -5,7 +5,7 @@ import type { Kysely, Transaction } from 'kysely'
 import * as admin from './admin'
 import { addressHash } from './address'
 import type { Kernel } from './context'
-import { deriveKey, outboxKeyPair, randomToken } from './crypto'
+import { deriveKey, outboxKeyPair } from './crypto'
 import { systemDns, type DnsLookup } from './dns'
 import { envFingerprint, readEnvAccount, readTransport, type MailEnv } from './env'
 import { envAccountStatus, syncEnvAccount } from './env-account'
@@ -36,6 +36,7 @@ export { OUTBOX_CHANNEL } from './outbox'
 export type { MailEnv } from './env'
 
 const STREAM_ID = /^[A-Za-z0-9_-]{1,64}$/
+const LEASE_MARGIN_SECONDS = 5
 
 export interface CreateMailOptions {
   db: Kysely<any>
@@ -51,11 +52,12 @@ export interface CreateMailOptions {
   transport?: MailTransport
   subscribe?: (channel: string, onNotify: () => void) => void
   // Outbox sweep tick once startSweeping() runs, in seconds (default 30,
-  // minimum 5). 0 leaves only `subscribe` as the trigger.
+  // minimum 5).
   sweepSeconds?: number
   // Provider request timeout; capped at 60 seconds.
   requestTimeoutMs?: number
-  // How long an outbox claim holds its rows before another process may take them.
+  // How long an outbox claim holds its rows before another process may take
+  // them (default 120). Never shorter than the request timeout plus a margin.
   leaseSeconds?: number
   dns?: DnsLookup
   log?: (line: string) => void
@@ -86,6 +88,7 @@ export function createMail(opts: CreateMailOptions) {
     ? Buffer.from(opts.webhookSecret, 'utf8')
     : secretKey ? deriveKey(secretKey, 'webhook') : null
 
+  const requestTimeoutMs = Math.min(opts.requestTimeoutMs ?? 30_000, 60_000)
   const k: Kernel = {
     db: opts.db as Kysely<MailDatabase>,
     providers,
@@ -101,12 +104,12 @@ export function createMail(opts: CreateMailOptions) {
     inboundHandlers: [],
     eventHandlers: [...(opts.eventHandlers ?? [])],
     transport: opts.transport ?? readTransport(opts.env),
-    requestTimeoutMs: Math.min(opts.requestTimeoutMs ?? 30_000, 60_000),
-    leaseSeconds: opts.leaseSeconds ?? 120,
+    requestTimeoutMs,
+    leaseSeconds: Math.max(opts.leaseSeconds ?? 120, requestTimeoutMs / 1000 + LEASE_MARGIN_SECONDS),
     dns: opts.dns ?? systemDns,
     log: opts.log ?? (line => console.log(line)),
     envCheck: null,
-    claimToken: randomToken(12),
+    claims: new Set(),
     stopped: false
   }
   k.inboundHandlers = [probeHandler(k), ...(opts.inboundHandlers ?? [])]
@@ -116,17 +119,15 @@ export function createMail(opts: CreateMailOptions) {
   }
 
   let timer: ReturnType<typeof setInterval> | null = null
-  const sweepSeconds = opts.sweepSeconds ?? 30
+  const sweepSeconds = Number.isFinite(opts.sweepSeconds) ? Math.max(5, opts.sweepSeconds!) : 30
   const startSweeping = () => {
     if (!k.secretKey || timer) return
     const sweep = () => {
       if (k.stopped) return
       runOutboxSweep(k).catch(err => k.log(`[mail] outbox sweep failed: ${err instanceof Error ? err.message : err}`))
     }
-    if (sweepSeconds > 0) {
-      timer = setInterval(sweep, Math.max(5, sweepSeconds) * 1000)
-      timer.unref?.()
-    }
+    timer = setInterval(sweep, sweepSeconds * 1000)
+    timer.unref?.()
     opts.subscribe?.(OUTBOX_CHANNEL, sweep)
   }
 
@@ -222,6 +223,7 @@ const ADMIN_FNS = {
   verifyOwnership: admin.verifyOwnership,
   checkDomain: admin.checkDomain,
   requiredEvents: admin.requiredEvents,
+  postedEvents: admin.postedEvents,
   webhookStatus: admin.webhookStatus,
   manualSteps: admin.manualSteps,
   setStreamRoute: admin.setStreamRoute,

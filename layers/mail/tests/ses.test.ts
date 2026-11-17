@@ -8,6 +8,7 @@ import {
   __setSnsUrlCheck, configurationSetName, isAwsSnsUrl, mapSesEvent, sesEventTypes, sesProvider, sesTags, signingKey,
   signV4, snsStringToSign
 } from '../adapters/ses'
+import { __setEndpointCheck } from '../adapters/http'
 import { ProviderPermissionError, type MailAccountRow, type ProviderMessage, type WebhookRequest } from '../kernel/types'
 import { db, harness, resetTables } from './helpers'
 
@@ -51,6 +52,7 @@ function defaults(s: Seen): Reply {
       case 'CreateTopic': return xml('CreateTopic', `<TopicArn>arn:aws:sns:${REGION}:123456789012:${new URLSearchParams(s.body).get('Name')}</TopicArn>`)
       case 'Subscribe': return xml('Subscribe', '<SubscriptionArn>pending confirmation</SubscriptionArn>')
       case 'DescribeActiveReceiptRuleSet': return xml('DescribeActiveReceiptRuleSet')
+      case 'GetCallerIdentity': return xml('GetCallerIdentity', '<Arn>arn:aws:iam::123456789012:user/test</Arn><UserId>AIDTEST</UserId><Account>123456789012</Account>')
       default: return xml(s.action)
     }
   }
@@ -64,6 +66,7 @@ function defaults(s: Seen): Reply {
   if (s.method === 'POST' && s.path === '/v2/email/identities') return { status: 200, json: { ...identity, VerifiedForSendingStatus: false, DkimAttributes: { Status: 'PENDING', Tokens: ['tok1', 'tok2', 'tok3'] }, MailFromAttributes: undefined } }
   if (s.method === 'GET' && s.path.startsWith('/v2/email/identities/')) return { status: 200, json: identity }
   if (s.method === 'POST' && s.path === '/v2/email/outbound-emails') return { status: 200, json: { MessageId: '0100018c-test-000000' } }
+  if (s.method === 'GET' && s.path.startsWith('/v2/email/configuration-sets/')) return { status: 200, json: { ConfigurationSetName: s.path.split('/').pop(), SuppressionOptions: { SuppressedReasons: [] } } }
   return { status: 200, json: {} }
 }
 
@@ -103,9 +106,11 @@ beforeAll(async () => {
   })
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done))
   endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  __setEndpointCheck(url => url.hostname === '127.0.0.1')
 })
 
 afterAll(async () => {
+  __setEndpointCheck(null)
   await new Promise<void>(done => server.close(() => done()))
 })
 
@@ -297,10 +302,11 @@ describe('provisioning', () => {
     const res = await sesProvider.provisionDomain!(creds(), 'example.org', 'send', urls)
     expect(res.capabilities).toEqual({ suppressionLists: false })
     expect(res.refs).toMatchObject({ configurationSet: null })
-    expect(seen.find(s => s.method === 'POST' && s.path === '/v2/email/identities')!.body).not.toHaveProperty('ConfigurationSetName')
+    expect(seen.find(s => s.method === 'POST' && s.path === '/v2/email/identities')!.json()).toEqual({ EmailIdentity: 'example.org' })
     expect(sesProvider.providerSuppression.mode({ suppressionLists: false })).toBe('unmanaged')
-    expect(sesProvider.providerSuppression.mode({})).toBe('disabled')
-    expect(sesProvider.providerSuppression.mode({ domains: true, send: true })).toBe('disabled')
+    expect(sesProvider.providerSuppression.mode({})).toBe('unmanaged')
+    expect(sesProvider.providerSuppression.mode({ domains: true, send: true })).toBe('unmanaged')
+    expect(sesProvider.providerSuppression.mode({ suppressionLists: true })).toBe('disabled')
   })
 
   it('a refused identity create is a domains refusal', async () => {
@@ -329,9 +335,17 @@ describe('provisioning', () => {
     expect(res.refs).toMatchObject({ ruleSet: 'nx-mail', rule: 'nx-in-example-org', region: 'us-west-2' })
   })
 
+  it('automatic receiving needs the inbound bucket, since SNS alone bounces mail over 150 KB', async () => {
+    const err = await sesProvider.provisionDomain!(creds(), 'in.example.org', 'receive', urls).catch(e => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBeInstanceOf(ProviderPermissionError)
+    expect(err.message).toMatch(/inbound S3 bucket.*150 KB/)
+    expect(seen).toHaveLength(0)
+  })
+
   it('a refused receipt rule is a routes refusal', async () => {
     override = s => s.action === 'CreateReceiptRule' ? { status: 403, contentType: 'text/xml', text: '<ErrorResponse><Error><Code>AccessDenied</Code></Error></ErrorResponse>' } : undefined
-    const err = await sesProvider.provisionDomain!(creds(), 'in.example.org', 'receive', urls).catch(e => e)
+    const err = await sesProvider.provisionDomain!(creds({ inboundBucket: 'inbox-bucket' }), 'in.example.org', 'receive', urls).catch(e => e)
     expect(err).toBeInstanceOf(ProviderPermissionError)
     expect(err.capability).toBe('routes')
   })
@@ -366,12 +380,53 @@ describe('provisioning', () => {
     expect(err.capability).toBe('webhooks')
   })
 
+  it('without the configuration set, the event list goes to the identity\'s own notification topics', async () => {
+    override = s => s.method === 'POST' && s.path.endsWith('/event-destinations') ? { status: 404, json: { message: 'Configuration set <nx-example-org> does not exist.' } } : undefined
+    await sesProvider.configureWebhooks!(creds(), 'example.org', urls, { delivered: false, events: ['bounced', 'complained'] })
+    const set = seen.filter(s => s.action === 'SetIdentityNotificationTopic').map(s => Object.fromEntries(new URLSearchParams(s.body)))
+    expect(set.map(p => [p.Identity, p.NotificationType, p.SnsTopic ?? null])).toEqual([
+      ['example.org', 'Bounce', 'arn:aws:sns:eu-west-1:123456789012:nx-example-org-events'],
+      ['example.org', 'Complaint', 'arn:aws:sns:eu-west-1:123456789012:nx-example-org-events'],
+      ['example.org', 'Delivery', null]
+    ])
+    expect(seen.every(s => s.signatureValid)).toBe(true)
+
+    override = s => s.method === 'POST' && s.path.endsWith('/event-destinations')
+      ? { status: 404, json: { message: 'not found' } }
+      : s.action === 'SetIdentityNotificationTopic' ? { status: 403, contentType: 'text/xml', text: '<Error><Code>AccessDenied</Code></Error>' } : undefined
+    const err = await sesProvider.configureWebhooks!(creds(), 'example.org', urls, { delivered: false, events: ['bounced'] }).catch(e => e)
+    expect(err).toBeInstanceOf(ProviderPermissionError)
+    expect(err.capability).toBe('webhooks')
+  })
+
   it('verifyCredentials reports send for a verified identity and rejects a bad key', async () => {
-    expect(await sesProvider.verifyCredentials(creds(), 'example.org')).toEqual({ ok: true, capabilities: { send: true } })
+    expect(await sesProvider.verifyCredentials(creds(), 'example.org')).toEqual({ ok: true, capabilities: { send: true, suppressionLists: true } })
     expect(await sesProvider.verifyCredentials(creds())).toEqual({ ok: true, capabilities: {} })
     override = () => ({ status: 403, json: { message: 'The security token included in the request is invalid.' } })
     expect(await sesProvider.verifyCredentials(creds(), 'example.org')).toMatchObject({ ok: false })
     expect(seen.every(s => s.method === 'GET')).toBe(true)
+  })
+
+  it('verifyCredentials reports SES\'s own list in charge when the configuration set is missing or keeps suppressing', async () => {
+    override = s => s.path.startsWith('/v2/email/configuration-sets/') ? { status: 404, json: { message: 'not found' } } : undefined
+    expect(await sesProvider.verifyCredentials(creds(), 'example.org')).toEqual({ ok: true, capabilities: { send: true, suppressionLists: false } })
+    override = s => s.path.startsWith('/v2/email/configuration-sets/') ? { status: 200, json: { SuppressionOptions: { SuppressedReasons: ['BOUNCE'] } } } : undefined
+    expect(await sesProvider.verifyCredentials(creds(), 'example.org')).toEqual({ ok: true, capabilities: { send: true, suppressionLists: false } })
+    override = s => s.path.startsWith('/v2/email/configuration-sets/') ? { status: 403, json: { message: 'not authorized' } } : undefined
+    expect(await sesProvider.verifyCredentials(creds(), 'example.org')).toEqual({ ok: true, capabilities: { send: true } })
+  })
+
+  it('accepts only an https endpoint on an AWS host', async () => {
+    __setEndpointCheck(null)
+    try {
+      for (const bad of ['http://169.254.169.254', 'https://evil.example.com', 'https://email.eu-west-1.amazonaws.com.evil.com', 'http://email.eu-west-1.amazonaws.com', 'https://email.eu-west-1.amazonaws.com:8443']) {
+        expect(await sesProvider.verifyCredentials(creds({ endpoint: bad }), 'example.org')).toMatchObject({ ok: false, error: expect.stringContaining('https URL') })
+        expect(await sesProvider.send(creds({ endpoint: bad }), message())).toMatchObject({ status: 'failed', retryable: false })
+      }
+      expect(seen).toHaveLength(0)
+    } finally {
+      __setEndpointCheck(url => url.hostname === '127.0.0.1')
+    }
   })
 
   it('manual steps name the configuration set and the SES event types', () => {
@@ -406,6 +461,62 @@ describe('kernel: refused configuration set', () => {
     const row = await db().selectFrom('mail_accounts').select('capabilities').where('id', '=', acct.id).executeTakeFirstOrThrow()
     expect(row.capabilities).toMatchObject({ suppressionLists: false })
     expect(sesProvider.providerSuppression.mode(row.capabilities as never)).toBe('unmanaged')
+  })
+
+  it('still learns of bounces: the check routes them through the identity\'s notification topics', async () => {
+    override = s => s.path === '/v2/email/configuration-sets'
+      ? { status: 403, json: { message: 'not authorized' } }
+      : s.method === 'POST' && s.path.endsWith('/event-destinations') ? { status: 404, json: { message: 'Configuration set <nx-example-org> does not exist.' } } : undefined
+    const { mail } = harness({ providers: [sesProvider], env: {} })
+    const { account: acct } = await mail.admin.createAccount({ orgId: null }, { provider: 'ses', credentials: creds() })
+    const { domain } = await mail.admin.addDomain({ orgId: null }, { domain: 'example.org', sendAccountId: acct.id }, 'https://app.example.org')
+    seen.length = 0
+    const check = await mail.admin.checkDomain({ orgId: null }, domain.id, 'https://app.example.org')
+    expect(check.webhooks).toEqual({ ok: true })
+    expect(seen.filter(s => s.action === 'SetIdentityNotificationTopic').map(s => new URLSearchParams(s.body).get('NotificationType'))).toEqual(['Bounce', 'Complaint', 'Delivery'])
+    const row = await db().selectFrom('mail_domains').select('webhook_events').where('id', '=', domain.id).executeTakeFirstOrThrow()
+    expect(row.webhook_events).toContain('bounced')
+  })
+})
+
+describe('kernel: a send and its events', () => {
+  beforeEach(resetTables)
+
+  it('returns both ids, threads a reply on the Message-ID, and an event reaches the handler with the send\'s ref', async () => {
+    const events: { type: string, ref: string | null, stream: string | null }[] = []
+    const { mail } = harness({
+      providers: [sesProvider],
+      env: {},
+      eventHandlers: [{ id: 'h', handle: async e => void events.push({ type: e.type, ref: e.ref, stream: e.stream }) }]
+    })
+    const { account: acct } = await mail.admin.createAccount({ orgId: null }, { provider: 'ses', credentials: creds() })
+    const { domain } = await mail.admin.addDomain({ orgId: null }, { domain: 'example.org', sendAccountId: acct.id }, 'https://app.example.org')
+    await mail.admin.checkDomain({ orgId: null }, domain.id, 'https://app.example.org')
+    await mail.admin.setStreamRoute({ orgId: null }, 'system', domain.id, 'https://app.example.org')
+
+    seen.length = 0
+    const first = await mail.send({ stream: 'system', to: 'person@example.com', subject: 'Hi', html: '<p>Hi</p>', ref: 'msg_42' })
+    expect(first).toMatchObject({ status: 'sent', providerMessageId: '0100018c-test-000000', messageId: '<0100018c-test-000000@eu-west-1.amazonses.com>' })
+    const sent = seen.find(s => s.path === '/v2/email/outbound-emails')!.json()
+    expect(sent.ConfigurationSetName).toBe('nx-example-org')
+
+    seen.length = 0
+    const reply = await mail.send({ stream: 'system', to: 'person@example.com', subject: 'Re: Hi', html: '<p>Again</p>', inReplyTo: (first as { messageId: string }).messageId, references: (first as { messageId: string }).messageId })
+    expect(reply.status).toBe('sent')
+    const mime = Buffer.from(seen.find(s => s.path === '/v2/email/outbound-emails')!.json().Content.Raw.Data, 'base64').toString('utf8')
+    expect(mime).toMatch(/^In-Reply-To: <0100018c-test-000000@eu-west-1\.amazonses\.com>$/m)
+
+    __setSnsUrlCheck(allowLocal('cert'))
+    const tags = Object.fromEntries((sent.EmailTags as { Name: string, Value: string }[]).map(t => [t.Name, [t.Value]]))
+    const delivery = JSON.stringify({
+      eventType: 'Delivery',
+      mail: { messageId: '0100018c-test-000000', source: 'noreply@example.org', destination: ['person@example.com'], tags },
+      delivery: { timestamp: new Date().toISOString(), recipients: ['person@example.com'] }
+    })
+    const body = Buffer.from(JSON.stringify(snsMessage({ Type: 'Notification', Message: delivery })))
+    const res = await mail.handleWebhook({ accountId: acct.id, token: mail.webhookToken(acct), kind: 'events', headers: { 'content-type': 'text/plain' }, rawBody: body })
+    expect(res.status).toBe(200)
+    expect(events).toEqual([{ type: 'delivered', ref: 'msg_42', stream: 'system' }])
   })
 })
 
@@ -476,6 +587,23 @@ describe('SNS webhooks', () => {
     }
   })
 
+  it('rejects a topic this app doesn\'t subscribe, or one in another AWS account', async () => {
+    __setSnsUrlCheck(allowLocal('both'))
+    const cases: [string, 'events' | 'inbound'][] = [
+      [`arn:aws:sns:${REGION}:999999999999:nx-example-org-events`, 'events'],
+      [`arn:aws:sns:${REGION}:123456789012:someone-elses-topic`, 'events'],
+      [`arn:aws:sns:${REGION}:123456789012:nx-example-org-inbound`, 'events'],
+      [`arn:aws:sns:${REGION}:123456789012:nx-example-org-events`, 'inbound']
+    ]
+    for (const [arn, kind] of cases) {
+      const res = await sesProvider.handleWebhook(creds(), webhook(kind, snsMessage({ Type: 'Notification', Message: bounce, TopicArn: arn })))
+      expect(res).toMatchObject({ type: 'rejected', reason: expect.stringMatching(/SNS topic/) })
+    }
+    const confirm = snsMessage({ Type: 'SubscriptionConfirmation', Message: 'confirm', Token: 'tok', SubscribeURL: `${endpoint}/confirm?Token=tok`, TopicArn: `arn:aws:sns:${REGION}:999999999999:nx-example-org-events` })
+    expect(await sesProvider.handleWebhook(creds(), webhook('events', confirm))).toMatchObject({ type: 'rejected' })
+    expect(seen.some(s => s.path.startsWith('/confirm'))).toBe(false)
+  })
+
   it('rejects a bad signature', async () => {
     __setSnsUrlCheck(allowLocal('cert'))
     const msg = snsMessage({ Type: 'Notification', Message: bounce })
@@ -522,6 +650,8 @@ describe('inbound', () => {
     ''
   ].join('\r\n'))
 
+  const INBOUND_TOPIC = `arn:aws:sns:${REGION}:123456789012:nx-in-example-org-inbound`
+
   function received(action: Record<string, unknown>, extra: Record<string, unknown> = {}) {
     return JSON.stringify({
       notificationType: 'Received',
@@ -534,7 +664,7 @@ describe('inbound', () => {
   it('fetches the message from S3 and parses it', async () => {
     __setSnsUrlCheck(allowLocal('cert'))
     objects.set('/inbox-bucket/nx-inbound/in.example.org/ses-in-1', raw)
-    const msg = snsMessage({ Type: 'Notification', Message: received({ type: 'S3', bucketName: 'inbox-bucket', objectKey: 'nx-inbound/in.example.org/ses-in-1' }) })
+    const msg = snsMessage({ Type: 'Notification', TopicArn: INBOUND_TOPIC, Message: received({ type: 'S3', bucketName: 'inbox-bucket', objectKey: 'nx-inbound/in.example.org/ses-in-1' }) })
     const res = await sesProvider.handleWebhook(creds({ inboundBucket: 'inbox-bucket' }), webhook('inbound', msg))
     expect(res.type).toBe('inbound')
     if (res.type !== 'inbound') return
@@ -549,20 +679,20 @@ describe('inbound', () => {
 
   it('refuses a bucket the account doesn\'t receive into', async () => {
     __setSnsUrlCheck(allowLocal('cert'))
-    const msg = snsMessage({ Type: 'Notification', Message: received({ type: 'S3', bucketName: 'someone-else', objectKey: 'x' }) })
+    const msg = snsMessage({ Type: 'Notification', TopicArn: INBOUND_TOPIC, Message: received({ type: 'S3', bucketName: 'someone-else', objectKey: 'x' }) })
     expect(await sesProvider.handleWebhook(creds({ inboundBucket: 'inbox-bucket' }), webhook('inbound', msg))).toMatchObject({ type: 'rejected' })
     expect(seen.some(s => s.service === 's3')).toBe(false)
   })
 
   it('throws when S3 fails, so SNS retries', async () => {
     __setSnsUrlCheck(allowLocal('cert'))
-    const msg = snsMessage({ Type: 'Notification', Message: received({ type: 'S3', bucketName: 'inbox-bucket', objectKey: 'missing' }) })
+    const msg = snsMessage({ Type: 'Notification', TopicArn: INBOUND_TOPIC, Message: received({ type: 'S3', bucketName: 'inbox-bucket', objectKey: 'missing' }) })
     await expect(sesProvider.handleWebhook(creds(), webhook('inbound', msg))).rejects.toThrow(/S3 responded 404/)
   })
 
   it('parses content carried inline by an SNS action', async () => {
     __setSnsUrlCheck(allowLocal('cert'))
-    const msg = snsMessage({ Type: 'Notification', Message: received({ type: 'SNS', encoding: 'BASE64' }, { content: raw.toString('base64') }) })
+    const msg = snsMessage({ Type: 'Notification', TopicArn: INBOUND_TOPIC, Message: received({ type: 'SNS', encoding: 'BASE64' }, { content: raw.toString('base64') }) })
     const res = await sesProvider.handleWebhook(creds(), webhook('inbound', msg))
     expect(res).toMatchObject({ type: 'inbound', mail: { subject: 'Inbound test', envelopeTo: ['hello@in.example.org'] } })
   })

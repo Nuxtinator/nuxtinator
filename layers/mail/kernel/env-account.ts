@@ -11,6 +11,9 @@ export async function syncEnvAccount(k: Kernel): Promise<void> {
   const cfg = k.envAccount
   if (!cfg) {
     k.log('[mail] no env account: MAIL_DOMAIN (or MAILGUN_DOMAIN) is not set')
+    // Rows left from an earlier env stay; with no fingerprint, sends through
+    // them fail with a clear error instead of waiting for one.
+    await k.db.updateTable('mail_accounts').set({ env_fingerprint: null }).where('source', '=', 'env').execute()
     return
   }
   await k.db.transaction().execute(async (tx) => {
@@ -31,6 +34,14 @@ export async function syncEnvAccount(k: Kernel): Promise<void> {
       account = await tx.selectFrom('mail_accounts').selectAll().where('source', '=', 'env').executeTakeFirstOrThrow()
     }
 
+    // The env domain is the one the operator configured, so any other row for
+    // the same name (a host admin's, or an org's claim) gives way before the
+    // env row takes the name.
+    await tx.deleteFrom('mail_domains')
+      .where(sql`lower(domain)`, '=', cfg.domain)
+      .where('source', '<>', 'env')
+      .execute()
+
     const existing = await tx.selectFrom('mail_domains').selectAll().where('source', '=', 'env').executeTakeFirst()
     if (existing) {
       await tx
@@ -48,13 +59,6 @@ export async function syncEnvAccount(k: Kernel): Promise<void> {
         .where('id', '=', existing.id)
         .execute()
     } else {
-      // A UI row for the same name gives way: the env domain is the one the
-      // operator configured.
-      await tx.deleteFrom('mail_domains')
-        .where(sql`lower(domain)`, '=', cfg.domain)
-        .where('org_id', 'is', null)
-        .where('source', '=', 'ui')
-        .execute()
       await tx
         .insertInto('mail_domains')
         .values({
@@ -72,18 +76,14 @@ export async function syncEnvAccount(k: Kernel): Promise<void> {
         })
         .execute()
     }
-    // An org can't hold a name the env domain uses.
-    await tx.deleteFrom('mail_domains')
-      .where(sql`lower(domain)`, '=', cfg.domain)
-      .where('org_id', 'is not', null)
-      .execute()
   })
   k.envCheck = { status: k.envFingerprint ? 'ok' : 'missing', at: Date.now() }
 }
 
 export async function envAccountStatus(k: Kernel): Promise<'ok' | 'missing' | 'mismatch'> {
   const row = await k.db.selectFrom('mail_accounts').select('env_fingerprint').where('source', '=', 'env').executeTakeFirst()
-  if (!row?.env_fingerprint || !k.envFingerprint) return 'missing'
+  if (!row?.env_fingerprint) return 'missing'
+  if (!k.envFingerprint) return 'mismatch'
   return row.env_fingerprint === k.envFingerprint ? 'ok' : 'mismatch'
 }
 

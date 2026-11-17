@@ -36,9 +36,36 @@ export async function request(url: string, init: RequestInit & { timeoutMs?: num
   }
 }
 
-export function baseUrl(host: string | undefined, fallback: string): string {
-  const h = (host || fallback).replace(/\/$/, '')
-  return /^https?:\/\//.test(h) ? h : `https://${h}`
+let endpointCheck: ((url: URL) => boolean) | null = null
+
+// Tests only: replaces the provider-host check on endpoint overrides. null restores it.
+export function __setEndpointCheck(fn: ((url: URL) => boolean) | null): void {
+  endpointCheck = fn
+}
+
+export class EndpointError extends Error {}
+
+// A configured API endpoint, accepted only as https on one of the provider's
+// own hosts: org admins can set it, so anything else would let them aim the
+// server's requests (and the key) elsewhere.
+export function providerEndpoint(value: string | undefined, allowedHost: RegExp, label: string): string | null {
+  if (!value) return null
+  const raw = value.trim().replace(/\/$/, '')
+  let url: URL
+  try {
+    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`)
+  } catch {
+    throw new EndpointError(`The ${label} endpoint isn't a valid URL`)
+  }
+  const ok = endpointCheck
+    ? endpointCheck(url)
+    : url.protocol === 'https:' && allowedHost.test(url.hostname) && !url.port && !url.username && !url.password && (url.pathname === '/' || url.pathname === '') && !url.search
+  if (!ok) throw new EndpointError(`The ${label} endpoint must be an https URL on ${label}'s own API host`)
+  return `${url.protocol}//${url.host}${url.pathname.replace(/\/$/, '')}`
+}
+
+export function baseUrl(host: string | undefined, fallback: string, allowedHost: RegExp, label: string): string {
+  return providerEndpoint(host, allowedHost, label) ?? `https://${fallback}`
 }
 
 export function basicAuth(user: string, pass: string): string {

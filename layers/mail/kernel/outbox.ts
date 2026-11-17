@@ -9,7 +9,7 @@
 // unknown and the row is finalized as sent (at most once).
 import { sql, type Transaction } from 'kysely'
 import { requireSecret, type Kernel } from './context'
-import { seal, unseal } from './crypto'
+import { randomToken, seal, unseal } from './crypto'
 import { deliver, prepareSend, validateMail } from './send'
 import type { MailDatabase, MailOutboxRow } from './schema'
 import type { OutgoingMail, SendResult } from './types'
@@ -69,11 +69,30 @@ export async function enqueue(k: Kernel, m: OutgoingMail, tx: Transaction<any>):
   return { status: 'queued', outboxId: row.id }
 }
 
+// A fresh token for one claim. A row is only ever written by the claim that
+// holds it, so two claims in one process can't both act on a row.
+function newClaim(k: Kernel): string {
+  const token = randomToken(12)
+  k.claims.add(token)
+  return token
+}
+
 // send() on a queued stream: the row is written already claimed by this
-// process, so the first attempt can't race a sweeper.
+// process, so the first attempt can't race a sweeper. Like enqueue, it takes
+// no attachments: the stored message never holds any.
 export async function sendQueued(k: Kernel, m: OutgoingMail): Promise<SendResult> {
   validateMail(k, m)
+  if (m.attachments?.length) throw new Error('A queued stream takes no attachments')
   requireSecret(k, 'send mail')
+  const token = newClaim(k)
+  try {
+    return await sendQueuedAs(k, m, token)
+  } finally {
+    k.claims.delete(token)
+  }
+}
+
+async function sendQueuedAs(k: Kernel, m: OutgoingMail, token: string): Promise<SendResult> {
   const row = await k.db
     .insertInto('mail_outbox')
     .values({
@@ -81,7 +100,7 @@ export async function sendQueued(k: Kernel, m: OutgoingMail): Promise<SendResult
       stream: m.stream,
       message: seal(k.outboxPublicKey, serialize(m)),
       status: 'sending',
-      claimed_by: k.claimToken,
+      claimed_by: token,
       claimed_until: lease(k),
       next_attempt_at: sql<Date>`now()`,
       expires_at: sql<Date>`now() + make_interval(mins => ${expiryMinutes(k, m)})`
@@ -90,18 +109,18 @@ export async function sendQueued(k: Kernel, m: OutgoingMail): Promise<SendResult
     .executeTakeFirstOrThrow()
   const result = await attemptRow(k, row)
   if (result && (result.status === 'sent' || result.status === 'suppressed' || result.status === 'refused'
-    || (result.status === 'failed' && !result.retryable))) {
+    || result.status === 'unknown' || (result.status === 'failed' && !result.retryable))) {
     return result
   }
   return { status: 'queued', outboxId: row.id }
 }
 
-async function claim(k: Kernel, ids?: string[]): Promise<MailOutboxRow[]> {
+async function claim(k: Kernel, token: string, ids?: string[]): Promise<MailOutboxRow[]> {
   const streams = [...k.streams.keys()]
   if (streams.length === 0) return []
   const res = await sql<MailOutboxRow>`
     UPDATE mail_outbox
-       SET status = 'sending', claimed_by = ${k.claimToken}, claimed_until = ${lease(k)}
+       SET status = 'sending', claimed_by = ${token}, claimed_until = ${lease(k)}
      WHERE id IN (
        SELECT id FROM mail_outbox
         WHERE status = 'queued'
@@ -117,12 +136,14 @@ async function claim(k: Kernel, ids?: string[]): Promise<MailOutboxRow[]> {
   return res.rows.sort((a, b) => +new Date(a.next_attempt_at!) - +new Date(b.next_attempt_at!))
 }
 
-function held(k: Kernel, id: string) {
-  return k.db.updateTable('mail_outbox').where('id', '=', id).where('claimed_by', '=', k.claimToken)
+type Claimed = Pick<MailOutboxRow, 'id' | 'claimed_by'>
+
+function held(k: Kernel, row: Claimed) {
+  return k.db.updateTable('mail_outbox').where('id', '=', row.id).where('claimed_by', '=', row.claimed_by)
 }
 
-async function finalize(k: Kernel, id: string, status: 'sent' | 'failed', fields: { last_error?: string | null, provider_message_id?: string | null } = {}) {
-  await held(k, id)
+async function finalize(k: Kernel, row: Claimed, status: 'sent' | 'failed', fields: { last_error?: string | null, provider_message_id?: string | null } = {}) {
+  await held(k, row)
     .set({
       status,
       message: null,
@@ -135,8 +156,8 @@ async function finalize(k: Kernel, id: string, status: 'sent' | 'failed', fields
     .execute()
 }
 
-async function release(k: Kernel, id: string, delayMinutes: number, lastError: string | null) {
-  await held(k, id)
+async function release(k: Kernel, row: Claimed, delayMinutes: number, lastError: string | null) {
+  await held(k, row)
     .set({
       status: 'queued',
       claimed_by: null,
@@ -152,7 +173,7 @@ async function release(k: Kernel, id: string, delayMinutes: number, lastError: s
 // when the row was skipped because this process no longer holds it.
 async function attemptRow(k: Kernel, row: MailOutboxRow): Promise<SendResult | null> {
   if (new Date(row.expires_at) <= new Date()) {
-    await finalize(k, row.id, 'failed', { last_error: 'expired' })
+    await finalize(k, row, 'failed', { last_error: 'expired' })
     return { status: 'failed', retryable: false, error: 'expired' }
   }
 
@@ -161,21 +182,23 @@ async function attemptRow(k: Kernel, row: MailOutboxRow): Promise<SendResult | n
     m = deserialize(unseal(k.outboxKeys!, row.message ?? ''))
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
-    await finalize(k, row.id, 'failed', { last_error: error })
+    await finalize(k, row, 'failed', { last_error: error })
     return { status: 'failed', retryable: false, error }
   }
 
+  // A throw here (a database blip during resolution or the suppression
+  // check) happens before any provider call, so the row is simply tried later.
   let prepared
   try {
     prepared = await prepareSend(k, m)
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
-    await finalize(k, row.id, 'failed', { last_error: error })
-    return { status: 'failed', retryable: false, error }
+    await release(k, row, HOLD_MINUTES, error)
+    return { status: 'failed', retryable: true, error }
   }
 
   if (prepared.kind === 'hold') {
-    await release(k, row.id, HOLD_MINUTES, prepared.reason)
+    await release(k, row, HOLD_MINUTES, prepared.reason)
     return prepared.result
   }
   if (prepared.kind === 'final') {
@@ -185,11 +208,11 @@ async function attemptRow(k: Kernel, row: MailOutboxRow): Promise<SendResult | n
       : r.status === 'refused'
         ? `refused by ${r.guard}: ${r.reason}`
         : r.status === 'failed' ? r.error : r.status
-    await finalize(k, row.id, 'failed', { last_error: error })
+    await finalize(k, row, 'failed', { last_error: error })
     return r
   }
 
-  const started = await held(k, row.id)
+  const started = await held(k, row)
     .where('claimed_until', '>', sql<Date>`now()`)
     .set({
       attempt_started_at: sql<Date>`now()`,
@@ -202,13 +225,13 @@ async function attemptRow(k: Kernel, row: MailOutboxRow): Promise<SendResult | n
 
   const result = await deliver(k, prepared)
   if (result.status === 'sent') {
-    await finalize(k, row.id, 'sent', { provider_message_id: result.providerMessageId, last_error: null })
+    await finalize(k, row, 'sent', { provider_message_id: result.providerMessageId, last_error: null })
   } else if (result.status === 'unknown') {
-    await finalize(k, row.id, 'sent', { last_error: 'outcome unknown' })
+    await finalize(k, row, 'sent', { last_error: 'outcome unknown' })
   } else if (result.status === 'failed' && result.retryable && started.attempts < MAX_ATTEMPTS) {
-    await release(k, row.id, BACKOFF_MINUTES[started.attempts - 1] ?? BACKOFF_MINUTES.at(-1)!, result.error)
+    await release(k, row, BACKOFF_MINUTES[started.attempts - 1] ?? BACKOFF_MINUTES.at(-1)!, result.error)
   } else if (result.status === 'failed') {
-    await finalize(k, row.id, 'failed', { last_error: result.error })
+    await finalize(k, row, 'failed', { last_error: result.error })
   }
   return result
 }
@@ -227,11 +250,28 @@ async function attemptBatch(k: Kernel, rows: MailOutboxRow[]): Promise<Map<strin
   return out
 }
 
+// One claim and its batch, with the claim's token held until the batch is done.
+async function claimAndAttempt(k: Kernel, ids?: string[]): Promise<MailOutboxRow[]> {
+  const token = newClaim(k)
+  try {
+    const rows = await claim(k, token, ids)
+    await attemptBatch(k, rows)
+    return rows
+  } finally {
+    k.claims.delete(token)
+  }
+}
+
+// Attempts every due row among `ids`, a batch at a time.
 export async function flush(k: Kernel, ids: string[]): Promise<void> {
   requireSecret(k, 'flush the outbox')
-  if (ids.length === 0) return
-  const rows = await claim(k, ids)
-  await attemptBatch(k, rows)
+  let remaining = [...new Set(ids)]
+  while (remaining.length > 0 && !k.stopped) {
+    const rows = await claimAndAttempt(k, remaining)
+    if (rows.length === 0) break
+    const done = new Set(rows.map(r => r.id))
+    remaining = remaining.filter(id => !done.has(id))
+  }
 }
 
 // Rows whose lease ran out: requeued when the call never started, finalized
@@ -264,9 +304,8 @@ export async function runOutboxSweep(k: Kernel): Promise<void> {
   const run = (async () => {
     await recoverLeases(k)
     for (let i = 0; i < 50 && !k.stopped; i++) {
-      const rows = await claim(k)
+      const rows = await claimAndAttempt(k)
       if (rows.length === 0) break
-      await attemptBatch(k, rows)
     }
   })()
   sweeping.set(k, run)
@@ -288,10 +327,11 @@ export async function purgeOutbox(k: Kernel): Promise<number> {
 
 export async function stopOutbox(k: Kernel): Promise<void> {
   k.stopped = true
+  if (k.claims.size === 0) return
   await k.db
     .updateTable('mail_outbox')
     .set({ status: 'queued', claimed_by: null, claimed_until: null })
-    .where('claimed_by', '=', k.claimToken)
+    .where('claimed_by', 'in', [...k.claims])
     .where('status', '=', 'sending')
     .where('attempt_started_at', 'is', null)
     .execute()

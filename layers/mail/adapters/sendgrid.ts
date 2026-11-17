@@ -7,7 +7,7 @@ import {
   ProviderPermissionError, type Capabilities, type CapabilityKey, type CheckResult, type Credentials, type DnsRecord,
   type MailEvent, type MailEventType, type MailProvider, type ManualStep, type ProviderList, type ProviderSendResult
 } from '../kernel/types'
-import { baseUrl, formString, lowerHeaders, parseForm } from './http'
+import { baseUrl, EndpointError, formString, lowerHeaders, parseForm } from './http'
 
 const SIGNATURE_SKEW_SECONDS = 15 * 60
 const SIGNATURE_HEADER = 'x-twilio-email-event-webhook-signature'
@@ -20,7 +20,10 @@ export const SENDGRID_CAPABILITY_SCOPES: Record<CapabilityKey, string[]> = {
   domains: ['whitelabel.create', 'whitelabel.read', 'whitelabel.update'],
   routes: ['user.webhooks.parse.settings.create', 'user.webhooks.parse.settings.read', 'user.webhooks.parse.settings.update'],
   webhooks: ['user.webhooks.event.settings.read', 'user.webhooks.event.settings.update'],
-  suppressionLists: ['suppression.bounces.delete', 'suppression.spam_reports.delete', 'asm.suppressions.global.delete']
+  suppressionLists: [
+    'suppression.bounces.delete', 'suppression.spam_reports.delete', 'asm.suppressions.global.delete',
+    'asm.groups.suppressions.read', 'asm.groups.suppressions.delete'
+  ]
 }
 
 interface SgResult {
@@ -31,8 +34,21 @@ interface SgResult {
   json: () => unknown
 }
 
+const API_HOST = /^api(\.eu)?\.sendgrid\.com$/
+
 function api(creds: Credentials) {
-  return baseUrl(creds.endpoint, 'api.sendgrid.com')
+  return baseUrl(creds.endpoint, 'api.sendgrid.com', API_HOST, 'SendGrid')
+}
+
+// The configured endpoint's problem, or null when it's usable.
+function endpointProblem(creds: Credentials): string | null {
+  try {
+    api(creds)
+    return null
+  } catch (err) {
+    if (err instanceof EndpointError) return err.message
+    throw err
+  }
 }
 
 // fetch with a manually cleared timeout (AbortSignal.timeout leaks timers under Bun); keeps the response headers.
@@ -132,6 +148,7 @@ export function mapSendgridEvent(data: Record<string, any>): MailEvent | null {
     stream: data['nx-stream'] ? String(data['nx-stream']) : null,
     orgId: data['nx-org'] ? String(data['nx-org']) : null,
     ref: data['nx-ref'] ? String(data['nx-ref']) : null,
+    domain: data['nx-domain'] ? String(data['nx-domain']).toLowerCase() : null,
     permanent: false
   }
   switch (type) {
@@ -235,13 +252,18 @@ export const sendgridProvider: MailProvider = {
   credentialFields: [
     { key: 'apiKey', label: 'API key', secret: true, env: 'MAIL_SENDGRID_API_KEY', help: 'Settings → API Keys. Full access, or Mail Send plus the scopes for automatic setup.' },
     { key: 'webhookPublicKey', label: 'Webhook verification key', secret: true, optional: true, env: 'MAIL_SENDGRID_WEBHOOK_PUBLIC_KEY', help: 'Mail Settings → Event Webhook → Signed Event Webhook → Verification Key' },
-    { key: 'endpoint', label: 'API endpoint', secret: false, optional: true, help: 'Leave empty for api.sendgrid.com' }
+    { key: 'endpoint', label: 'API endpoint', secret: false, optional: true, help: 'Leave empty for api.sendgrid.com; api.eu.sendgrid.com for EU regional subusers' }
   ],
   supports: { send: true, receive: true, events: true },
   webhookScope: 'account',
+  notes: {
+    receive: 'Inbound Parse posts are unsigned, so the inbound URL is the only check. Keep it private.'
+  },
 
   async verifyCredentials(creds) {
     if (!creds.apiKey) return { ok: false, error: 'Enter a SendGrid API key' }
+    const badEndpoint = endpointProblem(creds)
+    if (badEndpoint) return { ok: false, error: badEndpoint }
     const res = await call(creds, 'GET', '/v3/scopes')
     if (refused(res)) return { ok: false, error: 'SendGrid rejected the key' }
     if (!res.ok) return { ok: false, error: `SendGrid responded ${res.status}: ${res.text.slice(0, 200)}` }
@@ -279,7 +301,10 @@ export const sendgridProvider: MailProvider = {
 
   async send(creds, msg): Promise<ProviderSendResult> {
     if (!creds.apiKey) return { status: 'failed', retryable: false, error: 'No SendGrid API key', keyRejected: true }
-    const customArgs: Record<string, string> = { 'nx-stream': msg.correlation.stream }
+    const badEndpoint = endpointProblem(creds)
+    if (badEndpoint) return { status: 'failed', retryable: false, error: badEndpoint }
+    // Events don't name the sending domain, so it travels with the correlation values.
+    const customArgs: Record<string, string> = { 'nx-stream': msg.correlation.stream, 'nx-domain': msg.domain }
     if (msg.correlation.orgId) customArgs['nx-org'] = msg.correlation.orgId
     if (msg.correlation.ref) customArgs['nx-ref'] = msg.correlation.ref
     const content = [
@@ -386,6 +411,19 @@ export const sendgridProvider: MailProvider = {
       const res = await call(creds, 'DELETE', path)
       if (refused(res)) throw new ProviderPermissionError('suppressionLists')
       if (!res.ok && res.status !== 404) throw fail(res, `${list} release`)
+      if (list !== 'unsubscribe') return
+      // Unsubscribe groups each keep their own list.
+      const groups = await call(creds, 'GET', `/v3/asm/suppressions/${email}`)
+      if (refused(groups)) throw new ProviderPermissionError('suppressionLists')
+      if (groups.status === 404) return
+      if (!groups.ok) throw fail(groups, 'unsubscribe group lookup')
+      const listed = ((groups.json() as { suppressions?: { id?: unknown, suppressed?: boolean }[] }).suppressions ?? [])
+        .filter(g => g.suppressed && g.id !== undefined && g.id !== null)
+      for (const group of listed) {
+        const del = await call(creds, 'DELETE', `/v3/asm/groups/${encodeURIComponent(String(group.id))}/suppressions/${email}`)
+        if (refused(del)) throw new ProviderPermissionError('suppressionLists')
+        if (!del.ok && del.status !== 404) throw fail(del, 'group unsubscribe release')
+      }
     }
   },
 

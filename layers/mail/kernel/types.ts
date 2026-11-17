@@ -230,6 +230,8 @@ export interface MailProvider {
   domainCredentialFields?: Omit<CredentialField, 'env'>[]
   supports: { send: boolean, receive: boolean, events: boolean }
   webhookScope: 'domain' | 'account'
+  // Caveats per role, shown where an admin picks the provider or sets up a domain on it
+  notes?: { send?: string, receive?: string }
 
   verifyCredentials: (creds: Credentials, domain?: string, opts?: { probeAddress?: string }) => Promise<VerifyResult | { ok: false, error: string }>
   manualSetup: (domain: string, role: 'send' | 'receive', urls: WebhookUrls, opts: { events: MailEventType[] }) => ManualStep[]

@@ -50,10 +50,10 @@ export async function prepareSend(k: Kernel, m: OutgoingMail): Promise<Prepared>
   }
   const { domain, account } = sender
 
-  let bypassProviderSuppression = false
+  let heldAsBounced = false
   if (stream.userInitiated) {
     const held = await activeSuppressions(k.db, [addressHash(m.to)], orgId)
-    if (held.some(r => r.reason === 'hard_bounce')) bypassProviderSuppression = true
+    heldAsBounced = held.some(r => r.reason === 'hard_bounce')
   } else {
     const hit = await isSuppressed(k.db, m.to, orgId)
     if (hit) return { kind: 'final', result: { status: 'suppressed', reason: hit.reason } }
@@ -66,6 +66,7 @@ export async function prepareSend(k: Kernel, m: OutgoingMail): Promise<Prepared>
 
   let provider: MailProvider | null = null
   let credentials: Credentials = {}
+  let bypassProviderSuppression = false
   if (k.transport === 'provider') {
     if (!account.provider) {
       return { kind: 'final', result: { status: 'failed', retryable: false, error: 'The sending account has no provider; it can only send under the smtp or log transport' } }
@@ -75,6 +76,9 @@ export async function prepareSend(k: Kernel, m: OutgoingMail): Promise<Prepared>
       return { kind: 'final', result: { status: 'failed', retryable: false, error: `Mail provider "${account.provider}" isn't registered in this process` } }
     }
     if (account.source === 'env') {
+      if (!k.envAccount && !account.env_fingerprint) {
+        return { kind: 'final', result: { status: 'failed', retryable: false, error: 'The env account\'s variables (MAIL_DOMAIN and the provider\'s keys) are no longer set. Set them again, or route this domain\'s streams through another account' } }
+      }
       const status = await checkEnvAccount(k)
       if (status !== 'ok') {
         const error = status === 'missing'
@@ -88,7 +92,10 @@ export async function prepareSend(k: Kernel, m: OutgoingMail): Promise<Prepared>
     } catch (err) {
       return { kind: 'final', result: { status: 'failed', retryable: false, error: err instanceof Error ? err.message : String(err) } }
     }
-    if (bypassProviderSuppression && suppressionMode(k, account, domain) === 'mirrored' && provider.providerSuppression.release) {
+    // Only a mirrored domain gets past the provider's list: elsewhere the
+    // provider's list stays in charge.
+    bypassProviderSuppression = heldAsBounced && suppressionMode(k, account, domain) === 'mirrored'
+    if (bypassProviderSuppression && provider.providerSuppression.release) {
       try {
         await provider.providerSuppression.release(credentials, domain.domain, m.to, 'bounce')
       } catch (err) {
@@ -122,7 +129,8 @@ export async function deliver(k: Kernel, ready: ReadySend): Promise<SendResult> 
     outcome = sendViaLog(k.log, { ...ready.message, signal: new AbortController().signal })
   } else if (typeof k.transport === 'object') {
     const { host, port } = k.transport.smtp
-    outcome = await sendViaSmtp(host, port, { ...ready.message, signal: new AbortController().signal })
+    const res = await withTimeout(k.requestTimeoutMs, signal => sendViaSmtp(host, port, { ...ready.message, signal }, k.requestTimeoutMs))
+    outcome = res.timedOut ? { status: 'unknown', error: 'The SMTP server didn\'t answer in time' } : res.value
   } else {
     const provider = ready.provider!
     try {

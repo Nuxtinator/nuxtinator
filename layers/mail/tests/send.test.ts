@@ -1,5 +1,9 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { sql } from 'kysely'
+import { __setEndpointCheck } from '../adapters/http'
+import { mailgunProvider } from '../adapters/mailgun'
 import { createMail, decryptJson, encryptJson, notSuppressed, addressHash } from '../kernel'
 import { createFakeProvider } from '../test'
 import {
@@ -78,9 +82,115 @@ describe('env account', () => {
     expect((await mail.send(mailFor('a@x.test'))).status).toBe('sent')
     expect(logged.some(l => l.includes('a@x.test'))).toBe(true)
 
+    const { mail: viaSmtp, fake } = harness({ env, transport: { smtp: { host: '127.0.0.1', port: 1025 } } })
+    expect((await viaSmtp.send(mailFor('smtp@x.test'))).status).toBe('sent')
+    expect(fake.sent).toHaveLength(0)
+
     const { mail: viaProvider } = harness({ env, transport: 'provider' })
     const res = await viaProvider.send(mailFor('a@x.test'))
     expect(res).toMatchObject({ status: 'failed', retryable: false })
+    expect((res as { error: string }).error).toMatch(/no provider/)
+  })
+
+  it('MAILGUN_API_KEY and MAILGUN_DOMAIN alone: the first send goes out From SMTP_FROM; a 401 flips the domain until the next sync', async () => {
+    const seen: { path: string, body: string }[] = []
+    let status = 200
+    const server: Server = createServer((req, res) => {
+      const chunks: Buffer[] = []
+      req.on('data', c => chunks.push(c as Buffer))
+      req.on('end', () => {
+        seen.push({ path: req.url ?? '', body: Buffer.concat(chunks).toString('utf8') })
+        res.writeHead(status, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(status === 200 ? { id: '<mg-1@mg.example.org>', message: 'Queued' } : { message: 'Forbidden' }))
+      })
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    __setEndpointCheck(url => url.hostname === '127.0.0.1')
+    try {
+      const env = {
+        MAILGUN_API_KEY: 'key-mg',
+        MAILGUN_DOMAIN: 'mg.example.org',
+        MAILGUN_HOST: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+        SMTP_FROM: 'noreply@example.org'
+      }
+      const app = () => createMail({ db: db(), providers: [mailgunProvider], streams: STREAMS, env, secretKey: SECRET, transport: 'provider', log: () => {} })
+      const mail = app()
+      await mail.syncEnvAccount()
+      const account = await db().selectFrom('mail_accounts').selectAll().executeTakeFirstOrThrow()
+      expect(account.provider).toBe('mailgun')
+      const domain = await db().selectFrom('mail_domains').selectAll().executeTakeFirstOrThrow()
+      expect(domain).toMatchObject({ domain: 'mg.example.org', from_domain: 'example.org' })
+
+      expect(await mail.send(mailFor('a@x.test'))).toMatchObject({ status: 'sent', domain: 'mg.example.org', providerMessageId: '<mg-1@mg.example.org>' })
+      expect(seen[0]!.path).toBe('/v3/mg.example.org/messages')
+      expect(seen[0]!.body).toContain('noreply@example.org')
+      expect(seen[0]!.body).not.toContain('noreply@mg.example.org')
+
+      status = 401
+      expect(await mail.send(mailFor('a@x.test'))).toMatchObject({ status: 'failed', retryable: false })
+      expect(await db().selectFrom('mail_domains').select(['send_status', 'send_error']).executeTakeFirstOrThrow())
+        .toEqual({ send_status: 'failed', send_error: 'key_rejected' })
+      expect((await mail.send(mailFor('a@x.test'))).status).toBe('no_sender')
+
+      status = 200
+      await app().syncEnvAccount()
+      expect((await mail.send(mailFor('a@x.test'))).status).toBe('sent')
+    } finally {
+      __setEndpointCheck(null)
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  })
+
+  it('a MAIL_DOMAIN change to a name a host admin already added takes that name over', async () => {
+    const { mail } = harness()
+    await mail.syncEnvAccount()
+    const acct = await insertAccount({ credentials: encryptJson(SECRET, { apiKey: 'k' }) })
+    const ui = await insertDomain({ domain: 'taken.example.org', send_account_id: acct.id })
+    await route(null, '*', ui.id)
+
+    const { mail: moved } = harness({ env: { ...ENV, MAIL_DOMAIN: 'Taken.example.org' } })
+    await moved.syncEnvAccount()
+    const rows = await db().selectFrom('mail_domains').select(['domain', 'source']).execute()
+    expect(rows).toEqual([{ domain: 'taken.example.org', source: 'env' }])
+  })
+
+  it('the env domain takes a name an org has verified or claimed', async () => {
+    const org = await orgId()
+    const other = await orgId()
+    const acct = await insertAccount({ org_id: org, credentials: encryptJson(SECRET, { apiKey: 'k' }) })
+    await insertDomain({ org_id: org, domain: 'mg.example.org', send_account_id: acct.id })
+    await insertDomain({ org_id: other, domain: 'MG.example.org', ownership_status: 'pending' })
+
+    const { mail } = harness()
+    await mail.syncEnvAccount()
+    const rows = await db().selectFrom('mail_domains').select(['domain', 'source', 'org_id']).execute()
+    expect(rows).toEqual([{ domain: 'mg.example.org', source: 'env', org_id: null }])
+
+    // A later sync, after an org claimed the name again, also clears the claim.
+    await insertDomain({ org_id: other, domain: 'mg.example.org', ownership_status: 'pending' })
+    await mail.syncEnvAccount()
+    expect(await db().selectFrom('mail_domains').select('source').execute()).toEqual([{ source: 'env' }])
+  })
+
+  it('removed env vars: sends through the env rows fail clearly and queued rows fail at once', async () => {
+    const { mail: before } = harness()
+    await before.syncEnvAccount()
+    const { mail: worker } = harness({ env: {} })
+
+    const { mail, fake } = harness({ env: {} })
+    await mail.syncEnvAccount()
+    const res = await mail.send(mailFor('a@x.test'))
+    expect(res).toMatchObject({ status: 'failed', retryable: false })
+    expect((res as { error: string }).error).toMatch(/no longer set/)
+    expect(await mail.send(mailFor('q@x.test', { stream: 'queued' }))).toMatchObject({ status: 'failed', retryable: false })
+    expect(await db().selectFrom('mail_outbox').select(['status', 'last_error']).executeTakeFirstOrThrow())
+      .toMatchObject({ status: 'failed', last_error: expect.stringMatching(/no longer set/) })
+    expect(fake.sent).toHaveLength(0)
+
+    // A process missing the vars while the app still records them pauses instead.
+    await before.syncEnvAccount()
+    expect(await worker.envAccountStatus()).toBe('mismatch')
+    expect(await worker.send(mailFor('a@x.test'))).toMatchObject({ status: 'failed', retryable: true })
   })
 
   it('uses from_domain for the From address', async () => {
@@ -115,6 +225,30 @@ describe('env account', () => {
     const fingerprint = (await db().selectFrom('mail_accounts').select('env_fingerprint').where('source', '=', 'env').executeTakeFirstOrThrow()).env_fingerprint!
     expect(fingerprint).not.toContain('key-1')
     expect(fingerprint).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('pauses on a different provider, and resumes in the same instance once the fingerprint matches', async () => {
+    const { mail: app } = harness()
+    await app.syncEnvAccount()
+    const other = createFakeProvider('other')
+    other.control.deliver = false
+    const fake = createFakeProvider()
+    fake.control.deliver = false
+    const env: Record<string, string | undefined> = { ...ENV, MAIL_PROVIDER: 'other' }
+    const worker = createMail({ db: db(), providers: [fake, other], streams: STREAMS, env, secretKey: SECRET, transport: 'provider', log: () => {} })
+    expect(await worker.envAccountStatus()).toBe('mismatch')
+    expect(await worker.send(mailFor('a@x.test'))).toMatchObject({ status: 'failed', retryable: true })
+
+    // The app is redeployed with the worker's values; the worker resumes on its next recheck.
+    const { mail: redeployed } = harness({ env, providers: [fake, other] })
+    await redeployed.syncEnvAccount()
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 31_000 })
+    try {
+      expect(await worker.send(mailFor('a@x.test'))).toMatchObject({ status: 'sent' })
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(other.sent.map(m => m.to)).toEqual(['a@x.test'])
   })
 
   it('pauses when no fingerprint is recorded yet', async () => {
@@ -227,6 +361,27 @@ describe('resolution', () => {
     expect((await mail.send(mailFor('a@x.test'))).status).toBe('sent')
     expect(fake.sent).toHaveLength(1)
   })
+
+  it('a domain key overrides the account key of the same name; a rejected key marks the domain', async () => {
+    const acct = await insertAccount({ credentials: encryptJson(SECRET, { apiKey: 'account-key', signingKey: 's' }) })
+    const domain = await insertDomain({ domain: 'both.example.net', send_account_id: acct.id, credentials: encryptJson(SECRET, { apiKey: 'domain-key' }) })
+    await route(null, '*', domain.id)
+    const fake = createFakeProvider()
+    const keys: string[] = []
+    const send = fake.send
+    fake.send = async (creds, msg) => {
+      keys.push(`${creds.apiKey}/${creds.signingKey}`)
+      return await send(creds, msg)
+    }
+    const { mail } = harness({ env: {}, fake })
+    expect((await mail.send(mailFor('a@x.test'))).status).toBe('sent')
+    expect(keys).toEqual(['domain-key/s'])
+
+    await db().updateTable('mail_domains').set({ credentials: encryptJson(SECRET, { apiKey: 'reject' }) }).where('id', '=', domain.id).execute()
+    expect(await mail.send(mailFor('a@x.test'))).toMatchObject({ status: 'failed', retryable: false })
+    expect(await db().selectFrom('mail_domains').select(['send_status', 'send_error']).where('id', '=', domain.id).executeTakeFirstOrThrow())
+      .toEqual({ send_status: 'failed', send_error: 'key_rejected' })
+  })
 })
 
 describe('suppressions and guards', () => {
@@ -296,6 +451,19 @@ describe('suppressions and guards', () => {
     }
   })
 
+  it('asks the provider to bypass its list only on a mirrored domain', async () => {
+    await suppress('hb@x.test', 'global', 'hard_bounce')
+    for (const mode of ['mirrored', 'unmanaged', 'disabled'] as const) {
+      const fake = createFakeProvider()
+      fake.control.mode = mode
+      const { mail } = harness({ fake })
+      await mail.syncEnvAccount()
+      expect((await mail.send(mailFor('hb@x.test', { stream: 'account' }))).status).toBe('sent')
+      expect((await mail.send(mailFor('fine@x.test', { stream: 'account' }))).status).toBe('sent')
+      expect(fake.sent.map(m => m.bypassProviderSuppression), mode).toEqual([mode === 'mirrored', false])
+    }
+  })
+
   it('a guard can refuse, and sees the account owner', async () => {
     const org = await orgId()
     const acct = await insertAccount({ org_id: org, credentials: encryptJson(SECRET, { apiKey: 'k' }) })
@@ -313,6 +481,36 @@ describe('suppressions and guards', () => {
       .toEqual({ status: 'refused', guard: 'no-org-accounts', reason: 'org accounts are off' })
     expect(seen).toEqual([org])
     expect(fake.sent).toHaveLength(0)
+  })
+})
+
+describe('timing options', () => {
+  it('a sweep tick of 0 or not a number becomes the minimum or the default, never off', () => {
+    const spy = vi.spyOn(globalThis, 'setInterval')
+    try {
+      for (const [sweepSeconds, ms] of [[0, 5000], [Number.NaN, 30_000], [2, 5000], [45, 45_000]] as const) {
+        spy.mockClear()
+        const { mail } = harness({ sweepSeconds })
+        mail.startSweeping()
+        expect(spy.mock.calls.map(c => c[1]), String(sweepSeconds)).toEqual([ms])
+        void mail.stop()
+      }
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('a lease is never shorter than the request timeout plus a margin', async () => {
+    const fake = createFakeProvider()
+    fake.control.hangMs = 300
+    const { mail } = harness({ fake, leaseSeconds: 1, requestTimeoutMs: 20_000 })
+    await mail.syncEnvAccount()
+    const { outboxId } = await db().transaction().execute(tx => mail.enqueue(mailFor('l@x.test'), { tx }))
+    const run = mail.flush([outboxId])
+    await new Promise(r => setTimeout(r, 100))
+    const row = await db().selectFrom('mail_outbox').select(sql<number>`extract(epoch from claimed_until - now())`.as('left')).where('id', '=', outboxId).executeTakeFirstOrThrow()
+    expect(Number(row.left)).toBeGreaterThan(20)
+    await run
   })
 })
 

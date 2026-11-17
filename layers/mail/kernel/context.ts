@@ -30,7 +30,8 @@ export interface Kernel {
   dns: DnsLookup
   log: (line: string) => void
   envCheck: { status: 'ok' | 'missing' | 'mismatch', at: number } | null
-  claimToken: string
+  // This instance's outbox claim tokens still holding rows; one per claim
+  claims: Set<string>
   stopped: boolean
 }
 

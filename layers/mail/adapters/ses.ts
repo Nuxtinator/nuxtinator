@@ -9,7 +9,7 @@ import {
   ProviderPermissionError, type Capabilities, type CheckResult, type Correlation, type Credentials, type DnsRecord,
   type MailEvent, type MailEventType, type MailProvider, type ManualStep, type ProviderSendResult, type WebhookResult
 } from '../kernel/types'
-import { request, type HttpResult } from './http'
+import { EndpointError, providerEndpoint, request, type HttpResult } from './http'
 
 // ---------- SigV4 ----------
 
@@ -87,11 +87,28 @@ function receiveRegion(creds: Credentials): string {
   return creds.receiveRegion || sendRegion(creds)
 }
 
-function serviceUrl(creds: Credentials, host: 'email' | 'sns', region: string): string {
-  return creds.endpoint ? creds.endpoint.replace(/\/$/, '') : `https://${host}.${region}.amazonaws.com`
+const AWS_HOST = /^(email|email-fips|sns|sts)\.[a-z0-9-]+\.amazonaws\.com(\.cn)?$/
+
+// The endpoint override, when set and allowed.
+function endpointOverride(creds: Credentials): string | null {
+  return providerEndpoint(creds.endpoint, AWS_HOST, 'Amazon SES')
 }
 
-async function aws(creds: Credentials, opts: { service: 'ses' | 'sns' | 's3', region: string, url: string, method: string, headers?: Record<string, string>, body?: string, signal?: AbortSignal }): Promise<HttpResult> {
+function endpointProblem(creds: Credentials): string | null {
+  try {
+    endpointOverride(creds)
+    return null
+  } catch (err) {
+    if (err instanceof EndpointError) return err.message
+    throw err
+  }
+}
+
+function serviceUrl(creds: Credentials, host: 'email' | 'sns' | 'sts', region: string): string {
+  return endpointOverride(creds) ?? `https://${host}.${region}.amazonaws.com`
+}
+
+async function aws(creds: Credentials, opts: { service: 'ses' | 'sns' | 's3' | 'sts', region: string, url: string, method: string, headers?: Record<string, string>, body?: string, signal?: AbortSignal }): Promise<HttpResult> {
   const headers = signV4({
     method: opts.method,
     url: opts.url,
@@ -120,13 +137,15 @@ async function sesv2(creds: Credentials, method: string, path: string, body?: un
   })
 }
 
-// The Query APIs: classic SES (receipt rules) and SNS.
-async function query(creds: Credentials, service: 'ses' | 'sns', region: string, params: Record<string, string>): Promise<HttpResult> {
-  const body = new URLSearchParams({ ...params, Version: service === 'ses' ? '2010-12-01' : '2010-03-31' }).toString()
+const QUERY_VERSIONS = { ses: '2010-12-01', sns: '2010-03-31', sts: '2011-06-15' } as const
+
+// The Query APIs: classic SES (receipt rules, identity notifications), SNS and STS.
+async function query(creds: Credentials, service: 'ses' | 'sns' | 'sts', region: string, params: Record<string, string>): Promise<HttpResult> {
+  const body = new URLSearchParams({ ...params, Version: QUERY_VERSIONS[service] }).toString()
   return await aws(creds, {
     service,
     region,
-    url: `${serviceUrl(creds, service === 'ses' ? 'email' : 'sns', region)}/`,
+    url: `${serviceUrl(creds, service === 'ses' ? 'email' : service, region)}/`,
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded; charset=utf-8' },
     body
@@ -148,8 +167,9 @@ async function requestBytes(url: string, init: RequestInit & { timeoutMs?: numbe
 async function s3Get(creds: Credentials, bucket: string, key: string) {
   const region = receiveRegion(creds)
   const path = awsEncode(key, true)
-  const url = creds.endpoint
-    ? `${creds.endpoint.replace(/\/$/, '')}/${bucket}/${path}`
+  const override = endpointOverride(creds)
+  const url = override
+    ? `${override}/${bucket}/${path}`
     : bucket.includes('.')
       ? `https://s3.${region}.amazonaws.com/${bucket}/${path}`
       : `https://${bucket}.s3.${region}.amazonaws.com/${path}`
@@ -413,6 +433,36 @@ export async function verifySnsMessage(m: SnsMessage): Promise<string | null> {
   return ok ? null : 'Invalid SNS signature'
 }
 
+// The AWS account a key belongs to, cached per access key.
+const accountIds = new Map<string, string>()
+async function awsAccountId(creds: Credentials): Promise<string> {
+  const cacheKey = `${creds.endpoint ?? ''}\n${creds.accessKeyId ?? ''}`
+  const hit = accountIds.get(cacheKey)
+  if (hit) return hit
+  const res = await query(creds, 'sts', sendRegion(creds), { Action: 'GetCallerIdentity' })
+  const id = res.ok ? xmlValue(res.text, 'Account') : null
+  // Thrown so the request fails with a 5xx and SNS retries.
+  if (!id) throw new Error(`AWS STS GetCallerIdentity responded ${res.status}`)
+  if (accountIds.size >= 50) accountIds.delete(accountIds.keys().next().value!)
+  accountIds.set(cacheKey, id)
+  return id
+}
+
+// SNS topics this adapter subscribes: `nx-<domain>-events` and
+// `nx-<domain>-inbound`, in the key's own AWS account.
+export function snsTopicName(domain: string, kind: 'events' | 'inbound'): string {
+  return `${configurationSetName(domain)}-${kind}`
+}
+
+const TOPIC_ARN = /^arn:aws(?:-cn|-us-gov)?:sns:[a-z0-9-]+:(\d{12}):(nx-[a-z0-9-]+)$/
+
+async function topicProblem(creds: Credentials, topicArn: unknown, kind: 'events' | 'inbound'): Promise<string | null> {
+  const m = typeof topicArn === 'string' ? topicArn.match(TOPIC_ARN) : null
+  if (!m || !m[2]!.endsWith(`-${kind}`)) return `The SNS topic isn't one this app subscribes to for ${kind}`
+  if (m[1] !== await awsAccountId(creds)) return 'The SNS topic belongs to another AWS account'
+  return null
+}
+
 async function inboundMail(creds: Credentials, n: Record<string, any>): Promise<WebhookResult> {
   const receipt = (n.receipt ?? {}) as Record<string, any>
   const action = (receipt.action ?? {}) as Record<string, any>
@@ -484,20 +534,26 @@ export const sesProvider: MailProvider = {
     { key: 'region', label: 'Sending region', secret: false, env: 'MAIL_SES_REGION', help: 'The AWS region you send from, e.g. eu-west-1' },
     { key: 'sessionToken', label: 'Session token', secret: true, optional: true, env: 'MAIL_SES_SESSION_TOKEN', help: 'Only for temporary credentials' },
     { key: 'receiveRegion', label: 'Receiving region', secret: false, optional: true, env: 'MAIL_SES_RECEIVE_REGION', help: 'Where SES receives mail, when it isn\'t the sending region (SES receives mail only in some regions)' },
-    { key: 'inboundBucket', label: 'Inbound S3 bucket', secret: false, optional: true, env: 'MAIL_SES_INBOUND_BUCKET', help: 'Bucket in the receiving region that SES may write to. Stores mail up to 40 MB; without it, mail arrives inside the SNS notification, up to 150 KB.' },
-    { key: 'endpoint', label: 'Endpoint override', secret: false, optional: true, help: 'Sends every AWS call to this base URL (local testing only)' }
+    { key: 'inboundBucket', label: 'Inbound S3 bucket', secret: false, optional: true, env: 'MAIL_SES_INBOUND_BUCKET', help: 'Bucket in the receiving region that SES may write to, for mail up to 40 MB. Needed to set up receiving automatically; without it SES can only pass mail inside the SNS notification, and bounces anything over 150 KB.' },
+    { key: 'endpoint', label: 'Endpoint override', secret: false, optional: true, help: 'Sends every AWS call to this https base URL on amazonaws.com (e.g. a FIPS endpoint). Leave empty.' }
   ],
   supports: { send: true, receive: true, events: true },
   webhookScope: 'domain',
+  notes: {
+    send: 'New SES accounts start in the sandbox and send only to verified addresses until AWS grants production access.',
+    receive: 'SES receives mail only in some regions, including us-east-1, us-west-2 and eu-west-1. In the sandbox, replies to outside addresses fail.'
+  },
 
-  // GetAccount and GetEmailIdentity change nothing. Domain, route and webhook
-  // writes have no harmless probe and stay untested. suppressionLists isn't
-  // probed: the domain's configuration set turns SES's list off, so it only
-  // matters (as false) when creating that set is refused.
+  // GetAccount, GetEmailIdentity and GetConfigurationSet change nothing.
+  // Domain, route and webhook writes have no harmless probe and stay
+  // untested. suppressionLists records whether the domain's configuration set
+  // turns SES's own list off.
   async verifyCredentials(creds, domain) {
     if (!creds.accessKeyId || !creds.secretAccessKey || !creds.region) {
       return { ok: false, error: 'Enter an access key ID, a secret access key and a region' }
     }
+    const badEndpoint = endpointProblem(creds)
+    if (badEndpoint) return { ok: false, error: badEndpoint }
     const caps: Capabilities = {}
     const account = await sesv2(creds, 'GET', '/v2/email/account')
     if (keyInvalid(account)) return { ok: false, error: 'AWS rejected the access key' }
@@ -515,6 +571,14 @@ export const sesProvider: MailProvider = {
       if (identity.ok && sendingEnabled !== false) {
         const verified = (identity.json() as { VerifiedForSendingStatus?: boolean }).VerifiedForSendingStatus === true
         if (verified) caps.send = true
+      }
+      // SES's own list is off only when the domain's configuration set exists and overrides it to none.
+      const set = await sesv2(creds, 'GET', `/v2/email/configuration-sets/${configurationSetName(domain)}`)
+      if (set.ok) {
+        const reasons = (set.json() as { SuppressionOptions?: { SuppressedReasons?: string[] } }).SuppressionOptions?.SuppressedReasons
+        caps.suppressionLists = Array.isArray(reasons) && reasons.length === 0
+      } else if (set.status === 404) {
+        caps.suppressionLists = false
       }
     }
     return { ok: true, capabilities: caps }
@@ -536,8 +600,8 @@ export const sesProvider: MailProvider = {
       if (types.length) {
         steps.push({
           title: 'Send events to this app',
-          detail: `Create an SNS topic in the same region with an HTTPS subscription to the URL below (the app confirms it). Then add an event destination to ${configSet} that publishes to the topic, with these event types: ${types.join(', ')}.`,
-          values: [{ label: 'Events URL', value: urls.events }]
+          detail: `Create an SNS topic named ${snsTopicName(domain, 'events')} in the same region and AWS account, with an HTTPS subscription to the URL below (the app confirms it, and ignores topics with other names). Then add an event destination to ${configSet} that publishes to the topic, with these event types: ${types.join(', ')}.`,
+          values: [{ label: 'SNS topic', value: snsTopicName(domain, 'events') }, { label: 'Events URL', value: urls.events }]
         })
       }
       steps.push({ title: 'Request production access', detail: 'New SES accounts are in the sandbox and can only send to verified identities. Account dashboard → Request production access.' })
@@ -546,7 +610,7 @@ export const sesProvider: MailProvider = {
     return [
       { title: 'Receive in a region where SES receives mail', detail: 'SES receives mail only in some regions, including us-east-1, us-west-2 and eu-west-1 (see "Email receiving endpoints" in the SES documentation). Set the account\'s receiving region to that region.' },
       { title: `Point the MX record of ${domain} at SES`, detail: 'One MX record, priority 10.', values: [{ label: 'MX', value: 'inbound-smtp.<receiving region>.amazonaws.com' }] },
-      { title: 'Create an SNS topic for incoming mail', detail: 'In the receiving region, with an HTTPS subscription to the URL below (the app confirms it).', values: [{ label: 'Inbound URL', value: urls.inbound }] },
+      { title: 'Create an SNS topic for incoming mail', detail: 'Named as below, in the receiving region and the same AWS account, with an HTTPS subscription to the URL below (the app confirms it, and ignores topics with other names).', values: [{ label: 'SNS topic', value: snsTopicName(domain, 'inbound') }, { label: 'Inbound URL', value: urls.inbound }] },
       {
         title: 'Add a receipt rule',
         detail: `Email receiving → the active rule set → Create rule for the recipient ${domain}. Add an S3 action that stores mail in the account's inbound bucket and notifies the topic above (mail up to 40 MB). Without a bucket, use an SNS action with Base64 encoding instead, which only carries mail up to 150 KB.`
@@ -557,6 +621,8 @@ export const sesProvider: MailProvider = {
 
   async send(creds, msg): Promise<ProviderSendResult> {
     if (!creds.accessKeyId || !creds.secretAccessKey) return { status: 'failed', retryable: false, error: 'No AWS access key for this domain', keyRejected: true }
+    const badEndpoint = endpointProblem(creds)
+    if (badEndpoint) return { status: 'failed', retryable: false, error: badEndpoint }
     const raw = await buildMime(msg)
     const body: Record<string, unknown> = {
       Destination: { ToAddresses: [msg.to] },
@@ -565,7 +631,8 @@ export const sesProvider: MailProvider = {
       ConfigurationSetName: configurationSetName(msg.domain)
     }
     let res = await sesv2(creds, 'POST', '/v2/email/outbound-emails', body, msg.signal)
-    // A missing set (manual setup that skipped it) shouldn't stop mail; SES's account-level list then applies.
+    // A missing set (refused or skipped at setup) shouldn't stop mail; SES's
+    // account-level list then applies, and the domain's mode reports `unmanaged`.
     if ((res.status === 404 || res.status === 400) && /configuration set/i.test(res.text) && /exist|not found/i.test(res.text)) {
       const { ConfigurationSetName: _cs, ...rest } = body
       res = await sesv2(creds, 'POST', '/v2/email/outbound-emails', rest, msg.signal)
@@ -605,13 +672,14 @@ export const sesProvider: MailProvider = {
       return { records, refs: { identityCreated: created, configurationSet: haveSet ? configSet : null, mailFrom }, dkimSelector: tokens[0], capabilities: { suppressionLists: haveSet } }
     }
 
+    // Without a bucket SES could only pass mail inside the SNS notification,
+    // and would bounce anything over 150 KB.
+    if (!creds.inboundBucket) throw new Error('Set the account\'s inbound S3 bucket to receive automatically: without it SES bounces mail over 150 KB')
     const region = receiveRegion(creds)
-    const topicArn = await createTopic(creds, region, `${configSet}-inbound`, 'routes')
+    const topicArn = await createTopic(creds, region, snsTopicName(domain, 'inbound'), 'routes')
     await subscribe(creds, region, topicArn, urls.inbound, 'routes')
     const ruleSet = await activeRuleSet(creds, region)
-    const action: Record<string, string> = creds.inboundBucket
-      ? { 'Rule.Actions.member.1.S3Action.BucketName': creds.inboundBucket, 'Rule.Actions.member.1.S3Action.ObjectKeyPrefix': `nx-inbound/${domain}/`, 'Rule.Actions.member.1.S3Action.TopicArn': topicArn }
-      : { 'Rule.Actions.member.1.SNSAction.TopicArn': topicArn, 'Rule.Actions.member.1.SNSAction.Encoding': 'Base64' }
+    const action: Record<string, string> = { 'Rule.Actions.member.1.S3Action.BucketName': creds.inboundBucket, 'Rule.Actions.member.1.S3Action.ObjectKeyPrefix': `nx-inbound/${domain}/`, 'Rule.Actions.member.1.S3Action.TopicArn': topicArn }
     const params = {
       RuleSetName: ruleSet,
       'Rule.Name': configSet,
@@ -625,7 +693,7 @@ export const sesProvider: MailProvider = {
     if (alreadyExists(res)) res = await query(creds, 'ses', region, { Action: 'UpdateReceiptRule', ...params })
     if (denied(res)) throw new ProviderPermissionError('routes')
     if (!res.ok) throw fail(res, 'receipt rule create')
-    return { records: [receivingMx(region, domain)], refs: { ruleSet, rule: configSet, topicArn, bucket: creds.inboundBucket || null, region } }
+    return { records: [receivingMx(region, domain)], refs: { ruleSet, rule: configSet, topicArn, bucket: creds.inboundBucket, region } }
   },
 
   async checkDomain(creds, domain, role, refs): Promise<CheckResult> {
@@ -661,12 +729,23 @@ export const sesProvider: MailProvider = {
       if (denied(res)) throw new ProviderPermissionError('webhooks')
       return
     }
-    const topicArn = await createTopic(creds, region, `${configSet}-events`, 'webhooks')
+    const topicArn = await createTopic(creds, region, snsTopicName(domain, 'events'), 'webhooks')
     await subscribe(creds, region, topicArn, urls.events, 'webhooks')
     const eventDestination = { Enabled: true, MatchingEventTypes: types, SnsDestination: { TopicArn: topicArn } }
     let res = await sesv2(creds, 'POST', `/v2/email/configuration-sets/${configSet}/event-destinations`, { EventDestinationName: destination, EventDestination: eventDestination })
     if (alreadyExists(res)) res = await sesv2(creds, 'PUT', `/v2/email/configuration-sets/${configSet}/event-destinations/${destination}`, { EventDestination: eventDestination })
     if (denied(res)) throw new ProviderPermissionError('webhooks')
+    if (res.status === 404) {
+      // No configuration set (its creation was refused): the identity's own
+      // notifications still report bounces and complaints, though without the
+      // message tags, so they carry no stream, org or ref.
+      for (const [type, on] of [['Bounce', true], ['Complaint', true], ['Delivery', events.includes('delivered')]] as const) {
+        const set = await query(creds, 'ses', region, { Action: 'SetIdentityNotificationTopic', Identity: domain, NotificationType: type, ...(on ? { SnsTopic: topicArn } : {}) })
+        if (denied(set)) throw new ProviderPermissionError('webhooks')
+        if (!set.ok) throw fail(set, 'identity notification topic')
+      }
+      return
+    }
     if (!res.ok) throw fail(res, 'event destination')
   },
 
@@ -679,8 +758,9 @@ export const sesProvider: MailProvider = {
   },
 
   providerSuppression: {
-    // The configuration set overrides SES's account-level list to none.
-    mode: caps => caps.suppressionLists === false ? 'unmanaged' : 'disabled'
+    // `disabled` only once the domain's configuration set is known to override
+    // SES's account-level list to none; until then SES's list may be in charge.
+    mode: caps => caps.suppressionLists === true ? 'disabled' : 'unmanaged'
   },
 
   async handleWebhook(creds, req) {
@@ -693,6 +773,8 @@ export const sesProvider: MailProvider = {
     if (!msg || typeof msg !== 'object') return { type: 'rejected', reason: 'Malformed payload' }
     const error = await verifySnsMessage(msg)
     if (error) return { type: 'rejected', reason: error }
+    const wrongTopic = await topicProblem(creds, msg.TopicArn, req.kind)
+    if (wrongTopic) return { type: 'rejected', reason: wrongTopic }
 
     if (msg.Type === 'SubscriptionConfirmation') {
       const url = trustedSnsUrl(msg.SubscribeURL, 'subscribe')
