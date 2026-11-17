@@ -89,6 +89,9 @@ export async function notifyMailAlert(alert: MailAlert): Promise<void> {
   const org = alert.orgId && orgAdminEmails ? await orgAdminEmails(alert.orgId) : []
   const host = alert.kind === 'role_lost' || !alert.orgId ? await hostAdminEmails() : []
   const { subject, body } = alertText(alert)
+  if ((org.length || host.length) && !(await (await useMail()).resolveSender('system', null))) {
+    console.error(`[mail] alert "${subject}" has no sending domain: no domain can send the system stream, so it waits in the outbox until one can`)
+  }
   const sent = new Set<string>()
   const send = async (recipients: string[], link: string) => {
     for (const to of recipients) {

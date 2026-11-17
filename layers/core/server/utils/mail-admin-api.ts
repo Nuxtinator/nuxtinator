@@ -3,7 +3,7 @@
 // only ever touch rows of that scope.
 import type { H3Event } from 'h3'
 import { z } from 'zod'
-import { ownershipRecord, probeAddress, type Mail, type MailAccountRow, type MailDomainRow, type ManualStep, type WebhookUrls } from '@nuxtinator/mail/kernel'
+import { effectiveCapabilities, ownershipRecord, probeAddress, type Mail, type MailAccountRow, type MailDomainRow, type ManualStep, type WebhookUrls } from '@nuxtinator/mail/kernel'
 import { db } from './database'
 import { hostOrgMailAccounts, mailAdmin, mailBaseUrl } from './mail-host'
 
@@ -146,7 +146,7 @@ async function domainPayload(mail: Mail, domain: MailDomainRow, accounts: Map<st
     const list = mail.admin.manualSteps(a, domain, role, accountUrls, events)
     return visible(a) ? list : hostSideSteps(list, provider(a)?.label ?? 'provider', accountUrls)
   }
-  const caps = (domain.capabilities ?? send?.capabilities ?? {}) as Record<string, boolean>
+  const caps = (send ? effectiveCapabilities(send, domain) : domain.capabilities ?? {}) as Record<string, boolean>
   const sendProvider = provider(send)
   // A role set up automatically holds the provider's refs; one that fell back to manual doesn't.
   const refs = (domain.provider_refs ?? {}) as Record<string, unknown>
