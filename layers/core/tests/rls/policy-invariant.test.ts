@@ -62,7 +62,14 @@ const NO_RLS = new Set([
   'org_apps', // app switch checks run before and outside the org transaction
   'invite_orgs', // invite acceptance runs before membership exists
   'activity_logs', // nullable org_id; host-wide events and the rate limiter read it without an org
-  'groups' // nullable org_id; host groups have none, and handlers decide who sees a group
+  'groups', // nullable org_id; host groups have none, and handlers decide who sees a group
+  // The mail kernel's tables: nullable org_id for host rows, read by webhooks
+  // before any org is known and by processes outside Nuxt.
+  'mail_accounts',
+  'mail_domains',
+  'mail_stream_routes',
+  'mail_suppressions',
+  'mail_outbox'
 ])
 
 describe('RLS policy invariant', () => {

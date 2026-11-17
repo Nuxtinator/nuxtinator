@@ -38,3 +38,46 @@ export function setHeldBackMigrations(prefixes: string[]): void {
 export async function isMigrationHeldBack(prefix: string): Promise<boolean> {
   return (await getStatus().settled).has(prefix)
 }
+
+// Settles once boot-time migrations are over: resolves when they finished or
+// had nothing to do (`database: false` when there is no DATABASE_URL), rejects
+// when they threw. Code that needs migrated tables at boot awaits it.
+export interface MigrationsOutcome {
+  database: boolean
+}
+
+interface ReadyState {
+  promise: Promise<MigrationsOutcome>
+  resolve: (outcome: MigrationsOutcome) => void
+  reject: (err: unknown) => void
+  done: boolean
+}
+
+const READY_KEY = Symbol.for('nuxtinator.migrations.ready')
+
+function getReady(): ReadyState {
+  const g = globalThis as Record<symbol, unknown>
+  if (!g[READY_KEY]) {
+    let resolve!: ReadyState['resolve']
+    let reject!: ReadyState['reject']
+    const promise = new Promise<MigrationsOutcome>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    promise.catch(() => {})
+    g[READY_KEY] = { promise, resolve, reject, done: false } satisfies ReadyState
+  }
+  return g[READY_KEY] as ReadyState
+}
+
+export function migrationsReady(): Promise<MigrationsOutcome> {
+  return getReady().promise
+}
+
+export function settleMigrations(outcome: MigrationsOutcome | { error: unknown }): void {
+  const r = getReady()
+  if (r.done) return
+  r.done = true
+  if ('error' in outcome) r.reject(outcome.error)
+  else r.resolve(outcome)
+}

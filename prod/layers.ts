@@ -25,14 +25,14 @@
 // in .env to override the ref for ALL layers at once (a global pin escape hatch).
 //
 // Load order matters. core first; tenancy second so its multi-mode kernel
-// overrides core's single-mode; email backend; oauth; mcp; app layers; dev last.
+// overrides core's single-mode; the mail kernel; oauth; mcp; app layers; dev last.
 
 import type { LayerSpec } from './scripts/lib/resolve'
 
 export const LAYERS: readonly LayerSpec[] = [
   { id: 'core',          pkg: '@nuxtinator/core',          repo: 'Nuxtinator/nuxtinator', subdir: 'layers/core' },
   { id: 'tenancy',       pkg: '@nuxtinator/tenancy',       repo: 'Nuxtinator/nuxtinator', subdir: 'layers/tenancy' },
-  { id: 'email-mailgun', pkg: '@nuxtinator/email-mailgun', repo: 'Nuxtinator/nuxtinator', subdir: 'layers/email-mailgun' },
+  { id: 'mail',          pkg: '@nuxtinator/mail',          repo: 'Nuxtinator/nuxtinator', subdir: 'layers/mail' },
   { id: 'social-auth',   pkg: '@nuxtinator/social-auth',   repo: 'Nuxtinator/nuxtinator', subdir: 'layers/social-auth' },
   { id: 'ai',            pkg: '@nuxtinator/ai',            repo: 'Nuxtinator/nuxtinator', subdir: 'layers/ai' },
   { id: 'oauth',         pkg: '@nuxtinator/oauth',         repo: 'Nuxtinator/nuxtinator', subdir: 'layers/oauth' },

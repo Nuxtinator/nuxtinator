@@ -18,6 +18,14 @@
     "semver": "^7.6.0",
     "zod": "^4.1.8"
   },
+  "optionalDependencies": {
+    "@nuxtinator/mail": "*"
+  },
+  "nuxtinator": {
+    "requires": {
+      "@nuxtinator/mail": ">=1.0.0"
+    }
+  },
   "peerDependencies": {
     "@iconify-json/lucide": "^1.0.0",
     "@iconify-json/simple-icons": "^1.0.0",

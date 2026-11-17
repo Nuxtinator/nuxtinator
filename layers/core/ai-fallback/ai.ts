@@ -1,7 +1,7 @@
 // Default `#ai/server` implementation when the `@nuxtinator/ai` layer is not
 // loaded. `isAiConfigured(tx)` reports false so consumers gate their AI features
 // off and never reach the throwing calls; anything that does generate throws
-// helpfully. Mirrors email-fallback/email.ts.
+// helpfully.
 //
 // Lives outside `server/utils/` so Nuxt's auto-imports don't double up on it.
 // The `modules/ai-kernel.ts` Nuxt module wires it as the `#ai/server` alias only

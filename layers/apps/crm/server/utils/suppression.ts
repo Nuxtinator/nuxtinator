@@ -120,12 +120,38 @@ export async function forceClearSuppression(tx: Tx, channelId: string): Promise<
   return Number(result.numUpdatedRows) > 0
 }
 
+// The mail kernel's own list (bounces and complaints learned from providers)
+// for email channels, as rows shaped like CRM's. Applies the kernel's scope
+// rule for the transaction's org.
+async function kernelSuppressions(tx: Tx, channelIds: string[]): Promise<Map<string, CrmSuppressionRow>> {
+  const map = new Map<string, CrmSuppressionRow>()
+  if (channelIds.length === 0) return map
+  const res = await sql<{ channel_id: string, id: string, reason: 'hard_bounce' | 'complaint', detail: string | null, source: string | null, created_at: Date }>`
+    select distinct on (c.id) c.id as channel_id, s.id, s.reason, s.detail, s.source, s.created_at
+    from crm_channels c
+    join mail_suppressions s
+      on s.address_hash = encode(sha256(convert_to(lower(btrim(c.normalized_value)), 'UTF8')), 'hex')
+     and s.cleared_at is null
+     and (s.scope = 'global'
+       or (s.scope = 'org' and s.org_id = nullif(current_setting('app.current_org', true), '')::uuid)
+       or (s.scope = 'host' and nullif(current_setting('app.current_org', true), '') is null))
+    where c.id in (${sql.join(channelIds)}) and c.channel_type = 'email'
+    order by c.id, (s.reason = 'complaint') desc
+  `.execute(tx)
+  for (const r of res.rows) {
+    map.set(r.channel_id, { id: r.id, channel_id: r.channel_id, reason: r.reason, detail: r.detail, source: r.source, created_by: null, created_at: r.created_at, cleared_at: null } as CrmSuppressionRow)
+  }
+  return map
+}
+
+// A manual block here, or a bounce or complaint on the mail kernel's list.
 export async function isSuppressed(tx: Tx, channelId: string): Promise<boolean> {
-  return (await activeSuppression(tx, channelId)) !== undefined
+  if ((await activeSuppression(tx, channelId)) !== undefined) return true
+  return (await kernelSuppressions(tx, [channelId])).size > 0
 }
 
 // Batched active-suppression read for overview endpoints — absent key means
-// not suppressed.
+// not suppressed. CRM's own rows win over the kernel's for the same channel.
 export async function getActiveSuppressions(
   tx: Tx,
   channelIds: string[]
@@ -139,5 +165,7 @@ export async function getActiveSuppressions(
     .where('cleared_at', 'is', null)
     .execute()
   for (const row of rows) map.set(row.channel_id, row)
+  const missing = channelIds.filter(id => !map.has(id))
+  for (const [id, row] of await kernelSuppressions(tx, missing)) map.set(id, row)
   return map
 }

@@ -9,6 +9,10 @@ import { registerCrmChannelType, registerCrmConsentPurpose } from '../utils/crm-
 import { channelStorageDriver } from '../utils/channel-storage'
 import { revokeConsentClosingHook } from '../utils/consent-on-close'
 import { accountLinkPatchGuard } from '../utils/account-link'
+import { registerMailEventHandler } from '#core/server/utils/mail'
+import { txScopeFor } from '#core/server/utils/after-commit'
+import { findChannel } from '../utils/channels'
+import { revokeConsent } from '../utils/consent'
 
 export default defineNitroPlugin(() => {
   registerPermissions(CRM_PERMISSIONS, CRM_PERMISSION_META)
@@ -45,5 +49,20 @@ export default defineNitroPlugin(() => {
   registerCrmConsentPurpose('transactional', {
     title: 'Transactional',
     description: 'Operational messages tied to the recipient\'s own activity.'
+  })
+
+  // An unsubscribe reported by a mail provider revokes marketing consent in
+  // the org the mail came from (an org-owned account's own org, never one an
+  // event names).
+  registerMailEventHandler({
+    id: 'crm:unsubscribe',
+    types: ['unsubscribed'],
+    handle: async (event) => {
+      await txScopeFor(event.orgId)(async (tx) => {
+        const channel = await findChannel(tx, { channelType: 'email', value: event.recipient })
+        if (!channel) return
+        await revokeConsent(tx, { userId: null }, { channelId: channel.id, purpose: 'marketing', source: event.stream ? `mail:${event.stream}` : 'mail' })
+      })
+    }
   })
 })

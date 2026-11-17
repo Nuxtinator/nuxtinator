@@ -11,7 +11,7 @@
 //          package.json `name`
 //
 // Load order matters. core first; tenancy second so its multi-mode kernel
-// overrides core's single-mode; email backend; oauth; mcp; app layers;
+// overrides core's single-mode; the mail kernel; oauth; mcp; app layers;
 // dev last (the @nuxtinator/dev sandbox layer — distinct from this dev/
 // host folder).
 //
@@ -23,7 +23,7 @@
 export const LAYERS = [
   { id: 'core', pkg: '@nuxtinator/core' },
   { id: 'tenancy', pkg: '@nuxtinator/tenancy' },
-  { id: 'email-mailgun', pkg: '@nuxtinator/email-mailgun' },
+  { id: 'mail', pkg: '@nuxtinator/mail' },
   { id: 'social-auth', pkg: '@nuxtinator/social-auth' },
   { id: 'ai', pkg: '@nuxtinator/ai' },
   { id: 'oauth', pkg: '@nuxtinator/oauth' },

@@ -10,10 +10,9 @@ import { loadEnv } from 'vite'
 import { resolve } from 'node:path'
 
 // MUST be set before vitest defaults NODE_ENV to 'test'. The Nuxt/Nitro
-// build inlines `process.env.NODE_ENV` into the bundle, and the email layer
-// switches Mailpit vs. Mailgun on `=== 'development'`. With NODE_ENV='test'
-// at build time, the bundled `isDevelopment` is forever false → real Mailgun
-// → tests fail. Setting it here pins it through the build.
+// build inlines `process.env.NODE_ENV` into the bundle, and mail defaults to
+// the local SMTP catcher (Mailpit) only when it is 'development'. Setting it
+// here pins it through the build.
 process.env.NODE_ENV = 'development'
 
 const env = loadEnv('test', process.cwd(), '')
@@ -26,10 +25,21 @@ for (const k of ['TEST_DATABASE_URL', 'TEST_APP_DATABASE_URL', 'JWT_SECRET', 'TE
   if (env[k]) process.env[k] = env[k]
 }
 
+// The mail kernel reads its env account and secret key from the server's
+// runtime environment. Tests send through the local SMTP catcher, so a
+// placeholder domain and key are enough when dev/.env has none.
+for (const k of ['MAIL_DOMAIN', 'MAILGUN_DOMAIN', 'MAILGUN_API_KEY', 'MAILGUN_HOST', 'MAIL_PROVIDER', 'SMTP_FROM', 'SMTP_FROM_NAME', 'NUXT_SECRET_ENCRYPTION_KEY']) {
+  if (env[k]) process.env[k] = env[k]
+}
+if (!process.env.MAIL_DOMAIN && !process.env.MAILGUN_DOMAIN) process.env.MAIL_DOMAIN = 'mail.test.local'
+process.env.NUXT_SECRET_ENCRYPTION_KEY ||= '0'.repeat(63) + '1'
+
 interface LayerProject {
+  resolve?: { alias: Record<string, string> }
   test: {
     name: string
     include: string[]
+    exclude?: string[]
     globalSetup: string[]
     fileParallelism: false
     testTimeout: number
@@ -37,11 +47,14 @@ interface LayerProject {
   }
 }
 
-function layerProject(name: string, root: string): LayerProject {
+// `exclude` holds folders under `root` that another project runs.
+function layerProject(name: string, root: string, opts: { exclude?: string[], alias?: Record<string, string> } = {}): LayerProject {
   return {
+    ...(opts.alias ? { resolve: { alias: opts.alias } } : {}),
     test: {
       name,
       include: [resolve(__dirname, root, '**/*.test.ts')],
+      ...(opts.exclude ? { exclude: ['**/node_modules/**', ...opts.exclude.map(dir => resolve(__dirname, root, dir, '**'))] } : {}),
       globalSetup: [resolve(__dirname, root, 'global-setup.ts')],
       fileParallelism: false,
       testTimeout: 60_000,
@@ -59,7 +72,9 @@ export default defineConfig({
     // Per-layer projects. Projects run in parallel; files within each project
     // are serial (fileParallelism: false above).
     projects: [
-      layerProject('core', '../layers/core/tests'),
+      layerProject('mail', '../layers/mail/tests'),
+      layerProject('core', '../layers/core/tests', { exclude: ['mail'] }),
+      layerProject('core-mail', '../layers/core/tests/mail', { alias: { '#core': resolve(__dirname, '../layers/core') } }),
       layerProject('tenancy', '../layers/tenancy/tests'),
       layerProject('social-auth', '../layers/social-auth/tests'),
       layerProject('messages', '../layers/apps/messages/tests'),

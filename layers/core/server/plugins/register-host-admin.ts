@@ -58,6 +58,14 @@ export default defineNitroPlugin(() => {
 
   registerAdminSection({
     appId: 'host',
+    title: 'Email',
+    path: '/admin/email',
+    icon: 'i-lucide-mail',
+    order: 45
+  })
+
+  registerAdminSection({
+    appId: 'host',
     title: 'Settings',
     path: '/admin/settings',
     icon: 'i-lucide-settings',

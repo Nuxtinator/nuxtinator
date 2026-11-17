@@ -1,4 +1,5 @@
 import type { ColumnType, Generated } from 'kysely'
+import type { MailDatabase } from '@nuxtinator/mail/kernel'
 
 // Resolution-independent schema augmentation.
 //
@@ -239,9 +240,10 @@ export interface NotificationsTable {
   emailed_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
 }
 
-// The always-on core tables. Optional-layer tables live in the global
-// `NuxtinatorDatabaseTables` registry and are joined in by `Database` below.
-export interface CoreDatabase {
+// The always-on core tables, including the mail kernel's. Optional-layer
+// tables live in the global `NuxtinatorDatabaseTables` registry and are
+// joined in by `Database` below.
+export interface CoreDatabase extends MailDatabase {
   users: UsersTable
   password_reset_requests: PasswordResetRequestsTable
   activity_logs: ActivityLogsTable
