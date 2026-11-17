@@ -33,6 +33,7 @@ import {
   type RecordsFieldSetting
 } from './definition-settings'
 import { getRecordsStorageDriver, getRegisteredRecordType } from './records-registry'
+import { dropHierarchyLinks, lockRecordsHierarchy } from './hierarchy'
 import { RECORD_ACTIONS, type RecordAction, type RecordsTypeRoleGrants, type RecordsTypeTeamGrants } from './records-perms'
 
 type Tx = Transaction<Database>
@@ -47,7 +48,8 @@ export const RECORDS_OPTION_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/
 // Field kinds admins may create: kinds whose storage resolves to jsonb or
 // entries; connection, whose one definition input (the target type) is
 // admin-suppliable — admin connections are forward-only, since reverse keys
-// pair two code manifests; and communication_channel, whose channel type is
+// pair two code manifests, except a nesting connection, which is created as
+// a pair; and communication_channel, whose channel type is
 // admin-suppliable and whose storage driver handles the rest; attachments,
 // whose files live in records_attachments. user_select
 // carries code-owned semantics (the assignment summary) and stays code-only.
@@ -522,7 +524,13 @@ export async function deleteRecordType(
     conflict(`Cannot delete '${typeKey}': ${total} record${total === 1 ? '' : 's'} of this type exist`)
   }
   // No FK links records_fields to records_types (both are keyed by the
-  // open type_key vocabulary), so the field rows cascade explicitly.
+  // open type_key vocabulary), so the field rows cascade explicitly, and so
+  // do the other halves of its nesting pairs on other types.
+  await tx
+    .deleteFrom('records_fields')
+    .where('kind', '=', 'connection')
+    .where(sql<boolean>`config->>'target' = ${typeKey} AND config ? 'hierarchy'`)
+    .execute()
   await tx.deleteFrom('records_fields').where('type_key', '=', typeKey).execute()
   await tx.deleteFrom('records_types').where('type_key', '=', typeKey).execute()
 }
@@ -541,6 +549,36 @@ export interface CreateFieldInput {
   channelType?: string
   /** connection only: the record type the field links to. */
   target?: string
+  /**
+   * connection only: makes the link a hierarchy. 'children' puts the linked
+   * records under this type's records, 'parent' puts this type's records
+   * under the linked one. The other half of the pair is created on the target.
+   */
+  nesting?: 'parent' | 'children'
+}
+
+// A key for the other half of a nesting pair that no field of the type uses.
+function freeFieldKey(fields: RecordsFieldSetting[], base: string): string {
+  const slug = RECORDS_SCHEMA_SLUG_RE.test(base) && base !== 'name' && base !== 'status' ? base.slice(0, 37) : 'linked'
+  const taken = new Set(fields.map(f => f.key))
+  if (!taken.has(slug)) return slug
+  for (let n = 2; ; n++) {
+    if (!taken.has(`${slug}_${n}`)) return `${slug}_${n}`
+  }
+}
+
+// A nesting link is one row from the child keyed by the field naming its
+// parent, read back from the parent's side by that key alone. So the key
+// must belong to this pair only: no other type's connection may use it, and
+// no rows may already carry it.
+async function assertParentKeyFree(tx: Tx, childType: string, parentKey: string): Promise<void> {
+  for (const type of await getRecordTypes(tx)) {
+    if (type.key === childType || type.orphan) continue
+    const clash = (await getRecordTypeFields(tx, type.key)).some(f => f.key === parentKey && f.kind === 'connection' && !f.orphan)
+    if (clash) conflict(`The key '${parentKey}' is used by a connection on '${type.key}'; pick another key`)
+  }
+  const used = await tx.selectFrom('records_connections').select('id').where('field_key', '=', parentKey).executeTakeFirst()
+  if (used) conflict(`Links keyed '${parentKey}' already exist; pick another key`)
 }
 
 function validateOptionRecord(options: Record<string, RecordsFieldOption>): void {
@@ -596,13 +634,15 @@ export async function createField(
     bad(`Unsupported field kind: ${input.kind}`)
   }
 
+  let target: RecordTypeSetting | null = null
   if (storage === 'connections') {
     if (!input.target) bad('connection fields require a target record type')
-    const target = await getRecordType(tx, input.target)
+    target = await getRecordType(tx, input.target)
     if (!target || target.orphan) bad(`Unknown target record type: ${input.target}`)
   } else if (input.target !== undefined) {
     bad(`'${input.kind}' fields do not take a target`)
   }
+  if (input.nesting && storage !== 'connections') bad(`'${input.kind}' fields do not nest records`)
 
   // A channel field is unusable without its channel type — the widget and
   // the channel routes resolve normalization and dedupe through it. The key
@@ -619,6 +659,34 @@ export async function createField(
   const fields = await getRecordTypeFields(tx, typeKey)
   if (fields.some(f => f.key === input.fieldKey)) {
     conflict(`Field '${input.fieldKey}' already exists on '${typeKey}'`)
+  }
+
+  // The other half of a nesting pair, on the target type: the children's
+  // list on a parent type, or the parent's name on a child type.
+  let pair: { key: string, label: string, order: number } | null = null
+  if (input.nesting && target) {
+    const sameType = target.key === typeKey
+    const targetFields = sameType ? fields : await getRecordTypeFields(tx, target.key)
+    const [childType, parentType] = input.nesting === 'parent' ? [typeKey, target.key] : [target.key, typeKey]
+    const childFields = input.nesting === 'parent' ? fields : targetFields
+    if (childFields.some(f => f.hierarchy === 'parent' && f.target === parentType && !f.orphan)) {
+      conflict(`'${childType}' records already sit under '${parentType}' records`)
+    }
+    const base = input.nesting === 'parent' ? `${typeKey}s` : typeKey
+    const key = freeFieldKey([...targetFields, ...(sameType ? [{ key: input.fieldKey } as RecordsFieldSetting] : [])], base)
+    pair = {
+      key,
+      label: input.nesting === 'parent' ? type.label : type.labelSingular,
+      order: targetFields.reduce((max, f) => Math.max(max, f.order), 0) + (sameType ? 2 : 1)
+    }
+    await assertParentKeyFree(tx, childType, input.nesting === 'parent' ? input.fieldKey : key)
+  } else if (storage === 'connections') {
+    // A plain connection can't take the key another type's parent field uses.
+    for (const other of await getRecordTypes(tx)) {
+      if (other.key === typeKey || other.orphan) continue
+      const clash = (await getRecordTypeFields(tx, other.key)).some(f => f.key === input.fieldKey && f.hierarchy === 'parent' && !f.orphan)
+      if (clash) conflict(`The key '${input.fieldKey}' names a parent on '${other.key}'; pick another key`)
+    }
   }
 
   if (input.options) {
@@ -650,12 +718,33 @@ export async function createField(
           ? { optionOrder: Object.keys(input.options) }
           : {}),
         ...(input.channelType ? { channelType: input.channelType } : {}),
-        ...(input.target ? { target: input.target } : {})
+        ...(input.target ? { target: input.target } : {}),
+        ...(pair ? { hierarchy: input.nesting, reverseKey: pair.key } : {})
       }),
       updated_by: ctx.userId,
       updated_at: sql`now()`
     })
     .execute()
+
+  if (pair && target) {
+    await tx
+      .insertInto('records_fields')
+      .values({
+        type_key: target.key,
+        field_key: pair.key,
+        kind: 'connection',
+        label_override: pair.label,
+        order_override: pair.order,
+        config: jsonb({
+          target: typeKey,
+          hierarchy: input.nesting === 'parent' ? 'children' : 'parent',
+          reverseKey: input.fieldKey
+        }),
+        updated_by: ctx.userId,
+        updated_at: sql`now()`
+      })
+      .execute()
+  }
 
   const merged = await getRecordTypeFields(tx, typeKey)
   return merged.find(f => f.key === input.fieldKey)!
@@ -959,7 +1048,7 @@ export async function updateField(
 
 export async function deleteField(
   tx: Tx,
-  _ctx: TenantContext,
+  ctx: TenantContext,
   typeKey: string,
   fieldKey: string
 ): Promise<void> {
@@ -972,6 +1061,18 @@ export async function deleteField(
   const row = await getFieldRow(tx, typeKey, fieldKey)
 
   if (field.custom || field.orphan) {
+    // Either half of a nesting pair takes the other half and the links with
+    // it: records that sat under a parent through it become roots.
+    if (field.custom && field.hierarchy && field.reverseKey && field.target) {
+      await lockRecordsHierarchy(tx, ctx)
+      await dropHierarchyLinks(tx, field.hierarchy === 'parent' ? field.key : field.reverseKey)
+      await tx
+        .deleteFrom('records_fields')
+        .where('type_key', '=', field.target)
+        .where('field_key', '=', field.reverseKey)
+        .where('kind', '=', 'connection')
+        .execute()
+    }
     // Custom/stale field: the row is the definition. Stored values in
     // data/entries become orphans, which the readers tolerate.
     await tx.deleteFrom('records_fields').where('id', '=', row!.id).execute()

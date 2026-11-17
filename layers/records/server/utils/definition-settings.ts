@@ -216,7 +216,7 @@ export interface RecordsFieldSetting {
   grantsAccess?: boolean
   target?: string
   reverseKey?: string
-  /** connection: the parent or children side of the type's hierarchy (code-declared only). */
+  /** connection: the parent or children side of a hierarchy the type takes part in. */
   hierarchy?: 'parent' | 'children'
   channelType?: string
   /** ref: the registered ref source (code-declared only). */
@@ -304,7 +304,8 @@ function mergeOrphanField(row: RecordFieldRow): RecordsFieldSetting {
   // Custom fields never promote to record columns and can't join the
   // user_refs storage class (it carries code-owned semantics), so storage is
   // clamped to entries or jsonb — except connection, whose target type is
-  // kept in config and whose edges are forward-only, attachments, whose files
+  // kept in config and whose edges are forward-only unless it is one side of
+  // a hierarchy pair (config.hierarchy with config.reverseKey), attachments, whose files
   // live in their own table, and communication_channel, whose one definition
   // input (the channel type, kept in config by the schema builder) is
   // admin-suppliable, so it routes to the channel storage driver like a
@@ -324,10 +325,20 @@ function mergeOrphanField(row: RecordFieldRow): RecordsFieldSetting {
     options: mergeOptions(undefined, row.config),
     channelType: typeof row.config.channelType === 'string' ? row.config.channelType : undefined,
     target: typeof row.config.target === 'string' ? row.config.target : undefined,
+    ...(kind === 'connection' ? customHierarchyOf(row.config) : {}),
     multiple: kind === 'connection' ? true : undefined,
     custom,
     orphan: !custom
   }
+}
+
+// A custom connection's side of a hierarchy pair: config.hierarchy, with the
+// key of its pair on the target type in config.reverseKey.
+function customHierarchyOf(config: Record<string, unknown>): Pick<RecordsFieldSetting, 'hierarchy' | 'reverseKey'> {
+  const side = config.hierarchy
+  const reverseKey = config.reverseKey
+  if ((side !== 'parent' && side !== 'children') || typeof reverseKey !== 'string' || reverseKey === '') return {}
+  return { hierarchy: side, reverseKey }
 }
 
 // The name column is intrinsic to every record type — the create pipeline
@@ -416,44 +427,70 @@ export function recordsAccessGrantingKeys(typeKey: string): string[] {
     .map(([key]) => key)
 }
 
-/** The field keys of a type's hierarchy: the one naming a record's parent and its children pair. */
+/**
+ * The fields that place a type's records in trees. A record has one parent,
+ * named by one of `parents`; `children` name what sits under a record. A
+ * parent may be of another type (a task under a deliverable).
+ */
 export interface RecordsHierarchy {
-  parentKey: string
-  childrenKey: string | null
+  /** Fields naming a record's parent, each with the parent's type. */
+  parents: Array<{ key: string, target: string }>
+  /** Fields naming what sits under a record: the children's type, and the field on them that names this record. */
+  children: Array<{ key: string, target: string, parentKey: string }>
+}
+
+/** The hierarchy among `defs` (one type's merged fields), or null for a flat type. */
+export function recordsHierarchyOf(defs: RecordsFieldSetting[]): RecordsHierarchy | null {
+  const parents: RecordsHierarchy['parents'] = []
+  const children: RecordsHierarchy['children'] = []
+  for (const def of defs) {
+    if (def.orphan || def.kind !== 'connection' || !def.target) continue
+    if (def.hierarchy === 'parent') parents.push({ key: def.key, target: def.target })
+    else if (def.hierarchy === 'children' && def.reverseKey) children.push({ key: def.key, target: def.target, parentKey: def.reverseKey })
+  }
+  return parents.length > 0 || children.length > 0 ? { parents, children } : null
+}
+
+/** The type's hierarchy, or null for a flat type. An org can add to it, so this reads the type's fields. */
+export async function getRecordsHierarchy(tx: DbClient, typeKey: string): Promise<RecordsHierarchy | null> {
+  return recordsHierarchyOf(await getRecordTypeFields(tx, typeKey))
 }
 
 /**
- * The type's hierarchy fields, or null for a flat type. Declared in code
- * only, so this reads the registry, never the database.
+ * The types a `typeKey` record's ancestors can be of (its own included when
+ * its records nest under each other), following parent fields upward.
  */
-export function recordsHierarchy(typeKey: string): RecordsHierarchy | null {
-  const fields = recordTypeCodeFields(getRegisteredRecordType(typeKey))
-  const parent = Object.entries(fields)
-    .find(([, def]) => def.kind === 'connection' && def.hierarchy === 'parent' && def.target === typeKey)
-  if (!parent) return null
-  const childrenKey = parent[1].reverseKey
-  const children = childrenKey ? fields[childrenKey] : undefined
-  return {
-    parentKey: parent[0],
-    childrenKey: children?.kind === 'connection' && children.hierarchy === 'children' ? childrenKey! : null
+export async function recordsAncestorTypes(tx: DbClient, typeKey: string): Promise<string[]> {
+  const seen = new Set<string>()
+  const queue = [typeKey]
+  while (queue.length > 0) {
+    const hierarchy = await getRecordsHierarchy(tx, queue.shift()!)
+    for (const parent of hierarchy?.parents ?? []) {
+      if (seen.has(parent.target)) continue
+      seen.add(parent.target)
+      queue.push(parent.target)
+    }
   }
+  return [...seen]
 }
 
-// Field keys (on any registered type) whose connection rows surface in
-// reverse under `fieldKey` of `typeKey` records: every field declared with
-// `target: typeKey, reverseKey: fieldKey`. Connection rows store only the
-// writing side's field_key, so a key shared by two types pointing at
+// Field keys whose connection rows surface in reverse under `def` of
+// `typeKey` records: every code field declared with `target: typeKey,
+// reverseKey: def.key`, and the pair of a custom field that names what sits
+// under a record (those rows are written from the child). Connection rows store
+// only the writing side's field_key, so a key shared by two types pointing at
 // different targets would be ambiguous — field keys are expected to be
 // distinct across connection vocabularies.
-export function recordsConnectionReverseKeys(typeKey: string, fieldKey: string): string[] {
+export function recordsConnectionReverseKeys(typeKey: string, def: Pick<RecordsFieldSetting, 'key' | 'custom' | 'reverseKey' | 'hierarchy'>): string[] {
   const sources = new Set<string>()
   for (const manifest of getRegisteredRecordTypes()) {
-    for (const [key, def] of Object.entries(manifest.fields)) {
-      if (def.kind === 'connection' && def.target === typeKey && def.reverseKey === fieldKey) {
+    for (const [key, field] of Object.entries(manifest.fields)) {
+      if (field.kind === 'connection' && field.target === typeKey && field.reverseKey === def.key) {
         sources.add(key)
       }
     }
   }
+  if (def.custom && def.reverseKey && def.hierarchy !== 'parent') sources.add(def.reverseKey)
   return [...sources]
 }
 

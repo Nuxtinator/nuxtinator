@@ -85,6 +85,17 @@ The org's overview holds big cards such as "Prayer Tools v3 rewrite". Most peopl
 - Assigned subtasks show up in each person's My tasks.
 - Status: built. Still to come: progress that counts every level rather than direct subtasks, and dragging a card onto another to nest it.
 
+### 4b. Deliverables with their own statuses, tasks under them
+
+The team tracks deliverables through more stages than a task has (Ideas, Waiting on others, Abandoned), and doesn't want those on every task.
+
+- An admin creates a "Deliverables" record type in the schema builder with its own status options, then adds a connection field to Tasks with Nesting set to "They sit under this". That makes "Tasks" on a deliverable and "Deliverable" on a task.
+- The overview is a view of deliverables grouped by their status. Each card shows its tasks' progress, which opens a board of those tasks; a task's subtasks open the same way one level down, and the header's trail leads back up through the deliverable.
+- A top-level task belongs to a deliverable, a subtask to its parent task. Whoever can see a deliverable sees everything under it.
+- Tasks keep their three statuses, and deliverables never show up in My tasks.
+- A deliverable can't have a people field (admins can't create those), so "who owns it" is shown by sharing it or by who its tasks are assigned to.
+- Status: built. A task can't be turned into a deliverable; it would have to be created again as one.
+
 ### 5. A window onto shared data
 
 Someone creates "Q3 deliverables by status" over all deliverables and shares it with a team.

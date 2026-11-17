@@ -45,6 +45,12 @@ export interface ViewsBuiltInTarget {
   recordId?: string
   /** The same built-in's views above this one, outermost first, by parameter. */
   trail?: Array<{ param: string, name: string }>
+  /** The record type the view shows for this parameter, when not the view's own. */
+  recordTypeKey?: string
+  /** The view's base filter for this parameter, in place of the view's `filter`. */
+  filter?: RecordsFilterGroup
+  /** Per tab key: the tab's filter and definition for this parameter, in place of the tab's own. */
+  tabs?: Record<string, { filter?: RecordsFilterGroup, definition?: ViewTabDefinition }>
 }
 
 export interface ViewsBuiltInView {
@@ -127,7 +133,7 @@ function build(id: string, def: ViewsBuiltInView, target: ViewsBuiltInTarget, pa
   const name = target.name
   const viewUuid = stableUuid(id)
   const definition: ViewDefinition = {}
-  const filter = def.filter?.(param)
+  const filter = target.filter ?? def.filter?.(param)
   if (filter && filter.rules.length > 0) definition.filter = filter
   const epoch = new Date(0)
   const positions = generateNKeysBetween(null, null, def.tabs.length)
@@ -135,7 +141,7 @@ function build(id: string, def: ViewsBuiltInView, target: ViewsBuiltInTarget, pa
     id: viewUuid,
     name,
     icon: def.icon ?? null,
-    record_type_key: def.recordTypeKey,
+    record_type_key: target.recordTypeKey ?? def.recordTypeKey,
     visibility: 'private',
     org_level: null,
     owner_id: viewUuid,
@@ -143,16 +149,21 @@ function build(id: string, def: ViewsBuiltInView, target: ViewsBuiltInTarget, pa
     created_at: epoch,
     updated_at: epoch
   }
-  const tabs: ViewTabRow[] = def.tabs.map((tab, i) => ({
-    id: stableUuid(`${def.key}#${tab.key}`),
-    view_id: viewUuid,
-    name: tab.name,
-    layout: tab.layout,
-    position: positions[i]!,
-    definition: (tab.filter ? { ...tab.definition, filter: tab.filter(param) } : tab.definition) as Record<string, unknown>,
-    created_at: epoch,
-    updated_at: epoch
-  }))
+  const tabs: ViewTabRow[] = def.tabs.map((tab, i) => {
+    const own = target.tabs?.[tab.key]
+    const tabFilter = own?.filter ?? tab.filter?.(param)
+    const tabDefinition = own?.definition ?? tab.definition
+    return {
+      id: stableUuid(`${def.key}#${tab.key}`),
+      view_id: viewUuid,
+      name: tab.name,
+      layout: tab.layout,
+      position: positions[i]!,
+      definition: (tabFilter ? { ...tabDefinition, filter: tabFilter } : tabDefinition) as Record<string, unknown>,
+      created_at: epoch,
+      updated_at: epoch
+    }
+  })
   const resolved: ResolvedBuiltInView = {
     id,
     def,
@@ -179,13 +190,13 @@ export async function resolveBuiltInView(tx: Tx, ctx: TenantContext, id: string)
   if (!def) return null
   if (!!def.param !== (param !== null)) return null
   if (param !== null && !PARAM_RE.test(param)) return null
-  if (!(await typeOpenTo(tx, ctx, def.recordTypeKey))) return null
   let target: ViewsBuiltInTarget = { name: def.name }
   if (def.param && param !== null) {
     const named = await def.param.resolve(tx, ctx, param)
     if (!named) return null
     target = named
   }
+  if (!(await typeOpenTo(tx, ctx, target.recordTypeKey ?? def.recordTypeKey))) return null
   return build(id, def, target, param)
 }
 

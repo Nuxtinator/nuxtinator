@@ -118,12 +118,9 @@ export interface ViewDetail extends Omit<ViewSummary, 'layout' | 'tabCount' | 't
 /** The built-in view that shows one task's subtasks as a board. */
 export const VIEWS_SUBTASKS_KEY = 'subtasks'
 
-/** The record type that built-in view is declared for. */
-export const VIEWS_SUBTASKS_TYPE = 'task'
-
 /** Whether `field` holds the records that open as their record's subtasks board. */
 export function viewsIsSubtasksField(field: { hierarchy?: 'parent' | 'children' | null, target?: string | null }): boolean {
-  return field.hierarchy === 'children' && field.target === VIEWS_SUBTASKS_TYPE
+  return field.hierarchy === 'children' && !!field.target
 }
 
 const VIEW_ID_RE = /^(?:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|builtin\.[A-Za-z0-9.-]{1,140})$/i

@@ -62,8 +62,8 @@ async function seesWithoutAssignment(tx: Tx, ctx: TenantContext, typeKey: string
   const memberCtx = await memberContext(tx, ctx, userId)
   if (await resolveTypePermission(tx, memberCtx, typeKey, 'view_all')) return true
   // Being assigned a record above this one still counts as seeing it.
-  const full = await recordsVisibilityScope(tx, typeKey)
-  const scope = { ...full, grantKeys: [], inheritedGrantKeys: full.grantKeys }
+  const full = await recordsVisibilityScope(tx, typeKey, memberCtx)
+  const scope = { ...full, grantKeys: [] }
   const row = await tx
     .selectFrom('records_entries')
     .select('id')
@@ -81,7 +81,6 @@ export async function recordsUsersWhoSee(
   recordId: string,
   userIds: string[]
 ): Promise<string[]> {
-  const scope = await recordsVisibilityScope(tx, typeKey)
   const seeing: string[] = []
   for (const userId of userIds) {
     const memberCtx = await memberContext(tx, ctx, userId)
@@ -90,6 +89,7 @@ export async function recordsUsersWhoSee(
       seeing.push(userId)
       continue
     }
+    const scope = await recordsVisibilityScope(tx, typeKey, memberCtx)
     const row = await tx
       .selectFrom('records_entries')
       .select('id')
@@ -166,14 +166,13 @@ export async function requireShareConfirmation(
 // Whether anyone but the caller sees one of `ids` through something on the
 // record itself: they created it, it's shared with them, it names them in an
 // access-granting field, or a place that shares it has an audience.
-async function sharedBeyondCaller(tx: Tx, ctx: TenantContext, typeKey: string, ids: string[]): Promise<boolean> {
-  const created = await tx
+async function sharedBeyondCaller(tx: Tx, ctx: TenantContext, ids: string[]): Promise<boolean> {
+  const rows = await tx
     .selectFrom('records_entries')
-    .select('id')
+    .select(['id', 'record_type', 'created_by'])
     .where('id', 'in', ids)
-    .where('created_by', '<>', ctx.userId)
-    .executeTakeFirst()
-  if (created) return true
+    .execute()
+  if (rows.some(r => r.created_by !== ctx.userId)) return true
   const shared = await tx
     .selectFrom('records_shares')
     .select('record_id')
@@ -181,23 +180,27 @@ async function sharedBeyondCaller(tx: Tx, ctx: TenantContext, typeKey: string, i
     .where('user_id', '<>', ctx.userId)
     .executeTakeFirst()
   if (shared) return true
-  const grantKeys = recordsAccessGrantingKeys(typeKey)
-  if (grantKeys.length > 0) {
-    const named = await tx
-      .selectFrom('records_user_refs')
-      .select('record_id')
-      .where('record_id', 'in', ids)
-      .where('field_key', 'in', grantKeys)
-      .where('user_id', '<>', ctx.userId)
-      .executeTakeFirst()
-    if (named) return true
-  }
-  const type = await getRecordType(tx, typeKey)
-  if (type && !type.boardsGrantVisibility) return false
-  for (const source of getRecordsVisibilitySources()) {
-    if (!source.describe) continue
-    for (const id of ids) {
-      if ((await source.describe(tx, ctx, id)).some(via => via.audience.length > 0)) return true
+  // The records may be of several types, each with its own rules.
+  for (const typeKey of new Set(rows.map(r => r.record_type))) {
+    const typeIds = rows.filter(r => r.record_type === typeKey).map(r => r.id)
+    const grantKeys = recordsAccessGrantingKeys(typeKey)
+    if (grantKeys.length > 0) {
+      const named = await tx
+        .selectFrom('records_user_refs')
+        .select('record_id')
+        .where('record_id', 'in', typeIds)
+        .where('field_key', 'in', grantKeys)
+        .where('user_id', '<>', ctx.userId)
+        .executeTakeFirst()
+      if (named) return true
+    }
+    const type = await getRecordType(tx, typeKey)
+    if (type && !type.boardsGrantVisibility) continue
+    for (const source of getRecordsVisibilitySources()) {
+      if (!source.describe) continue
+      for (const id of typeIds) {
+        if ((await source.describe(tx, ctx, id)).some(via => via.audience.length > 0)) return true
+      }
     }
   }
   return false
@@ -212,14 +215,13 @@ async function sharedBeyondCaller(tx: Tx, ctx: TenantContext, typeKey: string, i
 export async function requireMoveConfirmation(
   tx: Tx,
   ctx: TenantContext,
-  typeKey: string,
   moves: RecordsHierarchyMove[],
   sharing: RecordsSharingMode
 ): Promise<void> {
   if (sharing === 'confirmed') return
   for (const move of moves) {
     if (move.gained.length === 0) continue
-    if (!(await sharedBeyondCaller(tx, ctx, typeKey, move.gained))) continue
+    if (!(await sharedBeyondCaller(tx, ctx, move.gained))) continue
     const rows = await tx
       .selectFrom('records_entries')
       .select(['id', 'name'])

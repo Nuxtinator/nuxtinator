@@ -122,6 +122,16 @@ Because a parent shares, a person's move of an existing record into a tree
 others can see asks first (`requireMoveConfirmation`), and linking a record
 from the parent's side needs edit access to it, or anyone could pull a
 record they can't see under one of their own.
+An org can nest one type under another: a custom connection created with
+`nesting` is a pair of `records_fields` rows whose config carries `hierarchy`
+and `reverseKey`, read by `recordsHierarchyOf` beside the manifest's. The
+link is still one row from the child keyed by the field naming its parent, so
+that key may not be used by a connection on any other type (`createField`
+refuses it). A chain can then hold several types; the ancestor checks apply
+each ancestor's own type's rules (`recordsVisibilityScope().above`), and the
+hierarchy is read from the type's fields per org instead of the registry. The
+pair is made only at creation: turning an existing connection into one would
+mean deciding which of a record's several links is its parent.
 
 **Attachments: their own table, objects deleted by a trash queue.** Files on an
 `attachments` field are `records_attachments` rows (bytes in private object

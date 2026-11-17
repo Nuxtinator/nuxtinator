@@ -46,10 +46,13 @@ Closing a record that repeats makes the next one ([repeat.ts](server/utils/repea
 
 A type whose manifest marks a connection to itself with `hierarchy: 'parent'` (and its `reverseKey` pair with `hierarchy: 'children'`) arranges its records in trees: tasks do, through `parent` / `subtasks`.
 
-- A record has one parent. Writing either field sets it, and a record can't be put under itself or under anything below it.
+An org can also nest one type under another in the schema builder: a connection field created with a Nesting choice (`nesting: 'children'` or `'parent'` on `POST …/schema/types/:type/fields`) makes a field on each type, e.g. "Tasks" on an org's own Deliverables type and "Deliverable" on tasks. A tree can then mix types: a deliverable, its tasks, their subtasks. The choice is made when the field is created and can't be changed after. Deleting either field deletes the other and the links, and the records that sat under a parent through it become top-level. The key of the field naming the parent must not be used by a connection on any other type.
+
+- A record has one parent, of its own type or another. Writing either field of a pair sets it, a record with two kinds of parent field (a task's parent task and its deliverable) leaves one when put under the other, and a record can't be put under itself or under anything below it.
+- Access comes down across types: whoever sees a deliverable sees its tasks, by the deliverable type's own rules (its shares, its views, and `view_all` on it). The type's read permission still applies to each record.
 - Whoever can see or edit a record can see or edit everything under it. Sharing a big task, assigning it, or putting it on a hand-picked view shares its whole breakdown; a task with no shared ancestor stays as private as before.
 - Moving an existing record under one other people can see asks first, like assigning someone does (`records.share_confirmation`, with a `title` and `confirmLabel` and no `users`). It asks when any record the move puts above it is shared, assigned or on a shared view, so a move from a private branch to a shared branch of the same tree asks too. Creating a record under a parent doesn't ask, and neither does a move that puts nothing new above the record.
-- Moves of one type's records in an org run one at a time (`lockRecordsHierarchy`), so two at once can't make a loop or leave a record with two parents.
+- Moves in an org run one at a time (`lockRecordsHierarchy`), so two at once can't make a loop or leave a record with two parents.
 - A record's share list (`GET …/shares`, `via`) also lists what shares each record above it that the caller can see: the people it's shared with or assigned to (`sourceId: 'records:ancestor'`) and the views holding it (`through` names the record).
 - Linking a record from its parent's side takes the right to see and edit that record.
 - Filters: "Parent is empty" keeps a list to the top level, "Subtasks is empty" to the leaves, and the parent field's "is anywhere under" (`op: 'under'`) matches at any depth.

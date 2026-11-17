@@ -134,14 +134,12 @@ const visibleFields = computed(() =>
 const isLongText = (f: RecordsFieldSetting) => (f.kind === 'textarea' || f.kind === 'rich_text') && !getRecordsFieldWidget(f.kind)
 const longTextFields = computed(() => visibleFields.value.filter(isLongText))
 
-// On a type whose records nest, the records under this one are a list in the
+// The records under this one (of its own type or another) are a list in the
 // main column instead of a sidebar row. Each child points at its parent
-// through the hierarchy's parent field, hidden or not.
-const parentKey = computed(() =>
-  fieldSettings.value?.fields.find(f => f.hierarchy === 'parent' && f.target === typeKey.value && !f.orphan)?.key ?? null)
-const childrenField = computed(() => parentKey.value
-  ? visibleFields.value.find(f => f.hierarchy === 'children' && f.target === typeKey.value) ?? null
-  : null)
+// through the field paired with the children field, hidden or not.
+const childrenField = computed(() =>
+  visibleFields.value.find(f => f.hierarchy === 'children' && !!f.target && !!f.reverseKey) ?? null)
+const parentKey = computed(() => childrenField.value?.reverseKey ?? null)
 
 // Images in rich text are files on the record's first attachments field.
 const imageField = computed(() => visibleFields.value.find(f => f.kind === 'attachments') ?? null)
@@ -352,7 +350,7 @@ async function removeRecord() {
               :parent-key="parentKey"
               :status-field="statusField"
               :needs-reason="!!reasonField"
-              :can-add="canEdit && (typeInfo?.canCreate ?? false)"
+              :can-add="canEdit"
               @changed="onWidgetChanged"
             />
           </div>

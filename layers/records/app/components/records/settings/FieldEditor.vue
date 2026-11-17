@@ -61,7 +61,8 @@ watch(open, async (v) => {
     required.value = props.field.required
     kindExtras.value = {
       ...(props.field.channelType ? { channelType: props.field.channelType } : {}),
-      ...(props.field.target ? { target: props.field.target } : {})
+      ...(props.field.target ? { target: props.field.target } : {}),
+      ...(props.field.hierarchy ? { nesting: props.field.hierarchy } : {})
     }
     optionsDraft.value = JSON.parse(JSON.stringify(props.field.options ?? {}))
   } else {
@@ -354,6 +355,12 @@ const deleteLabel = computed(() => {
             />
           </UFormField>
 
+          <UAlert
+            v-if="confirmingDelete && field?.custom && field.hierarchy"
+            color="warning"
+            icon="i-lucide-triangle-alert"
+            title="This also deletes the matching field on the other record type, and the records nested through it become top-level."
+          />
           <UAlert
             v-if="error"
             color="error"
