@@ -37,8 +37,9 @@ in production and Mailpit (`localhost:1025`, UI on `:8025`) in development.
 | Variable | Required | Purpose |
 |---|---|---|
 | `MAILGUN_API_KEY` / `MAILGUN_DOMAIN` / `MAILGUN_HOST` | prod | Sending (shared with the email-mailgun layer) |
-| `INBOX_MAILGUN_DOMAIN` | no | Mailgun sending domain for inbox mail, when it differs from `MAILGUN_DOMAIN` (falls back to it) |
+| `INBOX_MAILGUN_DOMAIN` / `INBOX_MAILGUN_API_KEY` | no | Mailgun sending domain and API key for inbox mail, when they differ from `MAILGUN_DOMAIN` / `MAILGUN_API_KEY` (each falls back to the shared one) |
 | `MAILGUN_WEBHOOK_SIGNING_KEY` | prod | Webhook HMAC verification — the **HTTP webhook signing key** (Settings → API Keys), NOT the sending key |
+| `INBOX_MAILGUN_WEBHOOK_SIGNING_KEY` | no | Signing key for the inbox's webhooks when the inbox domain is on a different Mailgun account (falls back to `MAILGUN_WEBHOOK_SIGNING_KEY`) |
 | `INBOX_DOMAIN` | yes | Domain inbound mail is addressed to (single-tenant default; per-org override via settings) |
 | `INBOX_CONTACT_ADDRESS` | yes | Shared From identity + base of `contact+<token>` reply addresses |
 | `INBOX_SLUG_ADDRESSES` | no | `true` in multi-tenant deploys where orgs share `INBOX_DOMAIN`: an org on it gets `<org slug>@INBOX_DOMAIN` as its contact address (derived, never stored) and new mail to it routes by slug. Personal aliases are off on the shared domain; an operator can still give an org its own domain |

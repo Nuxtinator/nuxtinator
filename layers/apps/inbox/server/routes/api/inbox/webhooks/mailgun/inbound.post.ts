@@ -74,7 +74,7 @@ export default defineEventHandler(async (event) => {
   const sigToken = field('token') || ''
   const result = inboxValidateMailgunWebhook(
     { timestamp: field('timestamp') || '', token: sigToken, signature: field('signature') || '' },
-    String(config.mailgunWebhookSigningKey || '')
+    String(config.inboxMailgunWebhookSigningKey || config.mailgunWebhookSigningKey || '')
   )
   if (!result.ok) {
     await logEvent({

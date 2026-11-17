@@ -88,7 +88,7 @@ async function sendViaSmtp(options: InboxEmailOptions): Promise<InboxSendResult>
 
 async function sendViaMailgun(options: InboxEmailOptions): Promise<InboxSendResult> {
   const config = useRuntimeConfig()
-  const apiKey = String(config.mailgunApiKey || '')
+  const apiKey = String(config.inboxMailgunApiKey || config.mailgunApiKey || '')
   const domain = String(config.inboxMailgunDomain || config.mailgunDomain || '')
   const host = String(config.mailgunHost || 'api.mailgun.net')
   if (!apiKey || !domain) {

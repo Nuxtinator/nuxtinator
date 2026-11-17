@@ -52,7 +52,7 @@ export default defineEventHandler(async (event) => {
     : { timestamp: String(body.timestamp || ''), token: String(body.token || ''), signature: String(body.signature || '') }
   const check = inboxValidateMailgunWebhook(
     { timestamp: sig.timestamp || '', token: sig.token || '', signature: sig.signature || '' },
-    String(config.mailgunWebhookSigningKey || '')
+    String(config.inboxMailgunWebhookSigningKey || config.mailgunWebhookSigningKey || '')
   )
   if (!check.ok) {
     throw createError({ statusCode: 406, statusMessage: check.reason || 'Invalid signature' })

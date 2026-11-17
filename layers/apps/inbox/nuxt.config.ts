@@ -48,13 +48,18 @@ export default defineNuxtConfig({
   runtimeConfig: {
     mailgunApiKey: process.env.MAILGUN_API_KEY || '',
     mailgunDomain: process.env.MAILGUN_DOMAIN || '',
-    // Mailgun sending domain for inbox mail when it differs from MAILGUN_DOMAIN
-    // (which the email-mailgun layer also reads for system mail).
+    // Mailgun sending domain and API key for inbox mail when they differ from
+    // MAILGUN_DOMAIN / MAILGUN_API_KEY (which the email-mailgun layer also reads
+    // for system mail). Each falls back to the shared value when unset.
     inboxMailgunDomain: process.env.INBOX_MAILGUN_DOMAIN || '',
+    inboxMailgunApiKey: process.env.INBOX_MAILGUN_API_KEY || '',
     mailgunHost: process.env.MAILGUN_HOST || 'api.mailgun.net',
     // Webhook signing key — a DIFFERENT Mailgun key than the sending API key
     // (Settings → API Keys → "HTTP webhook signing key").
     mailgunWebhookSigningKey: process.env.MAILGUN_WEBHOOK_SIGNING_KEY || '',
+    // Signing key for the inbox's webhooks when they come from a different
+    // Mailgun account; falls back to MAILGUN_WEBHOOK_SIGNING_KEY.
+    inboxMailgunWebhookSigningKey: process.env.INBOX_MAILGUN_WEBHOOK_SIGNING_KEY || '',
     // Domain inbound mail is addressed to (MX → Mailgun catch-all route).
     // Per-org overrides live in inbox_settings; this is the code default.
     inboxDomain: process.env.INBOX_DOMAIN || '',
