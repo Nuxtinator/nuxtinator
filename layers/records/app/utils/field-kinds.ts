@@ -271,6 +271,14 @@ export function recordsFieldIcon(field: Pick<RecordsFieldSetting, 'kind'> & Part
   return recordsRendererFor(field.kind).icon
 }
 
+/** Whether a field holds nothing: no value, blank text or an empty list. `false` and 0 are values. */
+export function recordsFieldIsEmpty(value: unknown): boolean {
+  if (value === null || value === undefined) return true
+  if (typeof value === 'string') return value.trim() === ''
+  if (Array.isArray(value)) return value.length === 0
+  return false
+}
+
 export function formatRecordsValue(value: unknown, field: RecordsFieldSetting, ctx?: RecordsFormatContext): string {
   return recordsRendererFor(field.kind).format(value, field, ctx)
 }
