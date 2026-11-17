@@ -27,7 +27,7 @@ import { z } from 'zod'
 import type { Database } from '#core/server/database/schema'
 import { isAppEnabledForCurrentOrg, type TenantContext } from '#tenant/server'
 import { APP_TEAM_GATE_MESSAGE, isAppOpenToUser } from '#core/server/utils/groups'
-import { getRecordType, getRecordTypes, getRecordTypeFields, recordsAccessGrantingKeys, recordsConnectionReverseKeys, recordsHierarchy, recordsStatusDefault, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
+import { getRecordType, getRecordTypes, getRecordTypeFields, recordsAccessGrantingKeys, recordsAncestorTypes, recordsConnectionReverseKeys, recordsStatusDefault, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
 import { resolveTypePermission } from './type-permissions'
 import { anyAncestor } from './ancestors'
 import type { RecordRow } from './record-storage'
@@ -286,7 +286,7 @@ function connectionsCond(eb: Eb, typeKey: string, def: RecordsFieldSetting, cond
     .select('fcn.id')
     .whereRef('fcn.from_record_id', '=', 'records_entries.id')
     .where('fcn.field_key', '=', def.key)
-  const reverseKeys = recordsConnectionReverseKeys(typeKey, def.key)
+  const reverseKeys = recordsConnectionReverseKeys(typeKey, def)
   const reverse = eb.selectFrom('records_connections as rcn')
     .select('rcn.id')
     .whereRef('rcn.to_record_id', '=', 'records_entries.id')
@@ -650,17 +650,27 @@ export interface RecordsVisibilityScope {
   boardsGrantVisibility: boolean
   /** People fields whose named users see the record (see recordsAccessGrantingKeys). */
   grantKeys: string[]
-  /** The type has a hierarchy: whoever sees a record sees every record under it. */
-  inherits?: boolean
-  /** The people fields that count on a record's ancestors, when not `grantKeys`. */
-  inheritedGrantKeys?: string[]
+  /**
+   * The types a record's ancestors can be of, when the type sits in a
+   * hierarchy: whoever sees a record sees every record under it.
+   */
+  above?: RecordsAncestorScope[]
+}
+
+/** How one type's records are seen when they are the ancestor of another record. */
+export interface RecordsAncestorScope {
+  key: string
+  boardsGrantVisibility: boolean
+  grantKeys: string[]
+  /** The caller sees every record of the type. */
+  viewAll: boolean
 }
 
 // The ways `userId` sees the `records_entries` row in scope without view_all.
 function directVisibility(
   eb: Eb,
   userId: string,
-  type: RecordsVisibilityScope,
+  type: Pick<RecordsVisibilityScope, 'key' | 'boardsGrantVisibility'>,
   grantKeys: string[]
 ): Expression<SqlBool> {
   const sources = type.boardsGrantVisibility
@@ -696,21 +706,38 @@ export function visibilityPredicate(
   type: RecordsVisibilityScope
 ): Expression<SqlBool> {
   const direct = directVisibility(eb, userId, type, type.grantKeys)
-  if (!type.inherits) return direct
-  return eb.or([
-    direct,
-    anyAncestor(directVisibility(eb, userId, type, type.inheritedGrantKeys ?? type.grantKeys))
-  ])
+  if (!type.above || type.above.length === 0) return direct
+  // Inside anyAncestor, `records_entries` is the ancestor: each leg applies
+  // the rule of the ancestor's own type.
+  const seen = type.above.map(above => eb.and([
+    eb('records_entries.record_type', '=', above.key),
+    above.viewAll ? sql<SqlBool>`true` : directVisibility(eb, userId, above, above.grantKeys)
+  ]))
+  return eb.or([direct, anyAncestor(eb.or(seen))])
 }
 
-/** The visibility scope of `typeKey` (its board rule, access-granting people fields and hierarchy). */
-export async function recordsVisibilityScope(tx: Tx, typeKey: string): Promise<RecordsVisibilityScope> {
-  const type = await getRecordType(tx, typeKey)
+/**
+ * The visibility scope of `typeKey`: its board rule, access-granting people
+ * fields, and the types its records can sit under. With `ctx`, an ancestor
+ * type the caller holds view_all on shows everything under its records.
+ */
+export async function recordsVisibilityScope(tx: Tx, typeKey: string, ctx?: TenantContext): Promise<RecordsVisibilityScope> {
+  const types = await getRecordTypes(tx)
+  const boards = (key: string) => types.find(t => t.key === key)?.boardsGrantVisibility ?? true
+  const above: RecordsAncestorScope[] = []
+  for (const key of await recordsAncestorTypes(tx, typeKey)) {
+    above.push({
+      key,
+      boardsGrantVisibility: boards(key),
+      grantKeys: recordsAccessGrantingKeys(key),
+      viewAll: !!ctx && key !== typeKey && await resolveTypePermission(tx, ctx, key, 'view_all')
+    })
+  }
   return {
     key: typeKey,
-    boardsGrantVisibility: type?.boardsGrantVisibility ?? true,
+    boardsGrantVisibility: boards(typeKey),
     grantKeys: recordsAccessGrantingKeys(typeKey),
-    inherits: recordsHierarchy(typeKey) !== null
+    above
   }
 }
 
@@ -788,7 +815,7 @@ export async function listRecords(
     ]))
   }
   if (!(await resolveTypePermission(tx, ctx, typeKey, 'view_all'))) {
-    const scope = await recordsVisibilityScope(tx, typeKey)
+    const scope = await recordsVisibilityScope(tx, typeKey, ctx)
     preds.push(eb => visibilityPredicate(eb, ctx.userId, scope))
   }
 
@@ -917,7 +944,7 @@ export async function visibleRecordIds(tx: Tx, ctx: TenantContext, ids: string[]
       for (const id of typeIds) visible.add(id)
       continue
     }
-    const scope = await recordsVisibilityScope(tx, typeKey)
+    const scope = await recordsVisibilityScope(tx, typeKey, ctx)
     const seen = await tx
       .selectFrom('records_entries')
       .select('id')
@@ -963,7 +990,7 @@ export async function assertRecordVisible(
     .where('id', '=', recordId)
     .where('record_type', '=', typeKey)
   if (!(await resolveTypePermission(tx, ctx, typeKey, 'view_all'))) {
-    const scope = await recordsVisibilityScope(tx, typeKey)
+    const scope = await recordsVisibilityScope(tx, typeKey, ctx)
     qb = qb.where(eb => visibilityPredicate(eb, ctx.userId, scope))
   }
   const row = await qb.executeTakeFirst()

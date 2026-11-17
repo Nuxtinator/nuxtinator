@@ -1,6 +1,7 @@
 // DELETE /api/records/schema/types/:type/fields/:key
 // Custom and stale (orphan) fields: deletes the definition row — any stored
-// values in data/entries become orphans the readers tolerate. Manifest
+// values in data/entries become orphans the readers tolerate; one half of a
+// nesting pair also deletes the other half and the links. Manifest
 // fields: clears the override row instead, restoring code defaults (400 when
 // no override exists). Permission: records.schema.manage.
 

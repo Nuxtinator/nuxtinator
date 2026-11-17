@@ -24,7 +24,7 @@
   "nuxtinator": {
     "requires": {
       "@nuxtinator/core": ">=3.5.0",
-      "@nuxtinator/records": ">=0.2.0"
+      "@nuxtinator/records": ">=0.3.0"
     }
   }
 }

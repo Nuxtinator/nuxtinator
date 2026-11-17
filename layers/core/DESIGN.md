@@ -17,7 +17,7 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 | Confirm before a destructive action | `if (!await confirmAction({ title, confirmLabel })) return` with `const confirmAction = useConfirm()`; or `<ConfirmModal v-model:open @confirm :loading>` when the modal should stay open while the work runs |
 | Labelled divider | `<USeparator label="…">` |
 | Theme or language picker | `<ThemeToggle>`, `<LocaleSwitcher>` |
-| Who can see a project, portfolio or other container | `<TeamAccessField app-id v-model:visibility v-model:team-ids>` in its create and settings forms; add `levels` with `v-model:org-level` / `v-model:team-levels` when Everyone and teams also get Can view / Can edit |
+| Who can see a project, portfolio or other container | `<TeamAccessField app-id v-model:visibility v-model:team-ids>` in its create and settings forms; add `levels` with `v-model:org-level` / `v-model:team-levels` when Everyone and teams also get Can view / Can edit (a newly ticked one starts at Can edit) |
 | Admin "show all teams" switch | `<ShowAllTeamsToggle app-id>` in the app's sidebar or toolbar, behind `<app>.all_teams` |
 | Manage one scope's groups / limit an app to groups | `<GroupsManager>` / `<AppGroupsModal>` |
 | Show a group in a list or picker | `<GroupAvatar :name :icon :image>` beside its name; in a menu or select item, `avatar: groupAvatarProps(group)` |
@@ -32,6 +32,12 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 - No full-sentence `description` under each field, and no intro paragraph under page or section headings.
 - Show on the page only what the user needs right now: short labels, validation errors, and a short note on why a control is disabled (`help="Set by the platform operator."`).
 - No subtitle that repeats the page title.
+
+## Containers and rows
+
+- **Content sits in cards, not loose on the page background.** Each list, form section or group of controls is a `UCard`: its title (with any badge or actions) in `#header`, its rows or fields in the body, its main action ("Add …") in `#footer` when it has one. The page background holds only the page title and the cards.
+- **A row shows its value first and at most one action button**, usually Change. Its other actions go in a ⋯ menu (`UDropdownMenu`), destructive ones last in their own group with `color: 'error'`. Don't put a card-header ⋯ menu directly above a row's ⋯ menu.
+- **Finished items sort last.** Ended, archived or closed items go below the active ones, with a neutral badge and a muted title.
 
 ## Settings pages
 
@@ -57,7 +63,7 @@ Either way, destructive actions open behind an outlined error button and confirm
 - A list page split into columns by who an item is for (Teams / Mine) puts a ghost "+" in each column's header instead of one page-level button; it opens the create modal already set to that column's audience.
 - Items declared in code that nobody can change (a built-in view) sit in their own "Built-in" row above those columns and carry a "Built-in" badge in their header. They show no rename, sharing or settings controls; a "Copy" action makes an editable one.
 - A record with records under it (a task's subtasks) keeps them off its card: the card shows their progress, and that progress opens the record's own board. Clicking the rest of the card opens its details as usual. The board's header shows what leads to it as a trail (the view the person came from, then each record above) instead of a "Built-in" badge, and its back arrow goes up one level.
-- A record's details are two columns (`<RecordsDetailView>`): its long text, connections and activity in the main part, every other field as a row in a sidebar. Records under it (a task's subtasks) are a tick-off list in the main part, not a sidebar row. Opened from a list or board they fill the screen as a dialog (`embedded`); don't build a second, smaller details panel. Show a value once: a field holding people or linked records shows them as chips, each with an × to remove it, followed by a ghost "+" that opens the search; there's no select box. A field holding one person is a ghost button showing that person, which opens the search.
+- A record's details are two columns (`<RecordsDetailView>`): its long text, connections and activity in the main part, every other field as a row in a sidebar. Records under it (a task's subtasks, a deliverable's tasks) are a tick-off list in the main part, not a sidebar row. Opened from a list or board they fill the screen as a dialog (`embedded`); don't build a second, smaller details panel. Show a value once: a field holding people or linked records shows them as chips, each with an × to remove it, followed by a ghost "+" that opens the search; there's no select box. A field holding one person is a ghost button showing that person, which opens the search.
 - Formatted long text is a `rich_text` record field, edited with `<RecordsFieldsRichTextField>`: a toolbar above the text, Markdown shortcuts as you type, checkbox lists, "/" for a menu of everything that can be inserted, "@" to mention a person, "#" to link another record, and images by paste, drop or the toolbar. It saves when focus leaves it. Don't use `prompt()` for a link's URL; the toolbar's link button opens a small popover.
 - A board card shows each field as its icon, then the value; the label is the icon's tooltip. A record's details show the same icon before each field's label. A field with no icon of its own gets its kind's (`recordsFieldIcon`).
 - People on a card or list row are avatars only, never names (`userAvatarProps`), with the name as the tooltip.
@@ -80,6 +86,7 @@ Either way, destructive actions open behind an outlined error button and confirm
 - Headers and sidebars use `bg-(--chrome-bg)` (`SidebarPanel` already does).
 - Cards: plain `<UCard>` — core sets its fill and outline; don't restyle it. A hand-built card-like tile uses `bg-(--ui-bg-elevated)/50 hover:bg-(--ui-bg-elevated) dark:border-(--ui-border-accented)`.
 - A layer never overrides theme tokens. A host may, with plain `:root { … }` / `.dark { … }` rules in its own CSS.
+- A host that overrides `--ui-primary` overrides `--ui-text-inverted` with it, in both `:root` and `.dark`, and checks 4.5:1 between them. A brand color lightened for dark mode needs dark text.
 
 ## Nuxt UI gotchas
 

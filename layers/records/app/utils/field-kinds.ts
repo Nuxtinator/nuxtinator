@@ -23,8 +23,10 @@ export interface RecordsFieldSetting {
   orphan: boolean
   channelType: string | null
   target: string | null
-  /** connection: the parent or children side of the type's hierarchy. */
+  /** connection: the parent or children side of a hierarchy the type takes part in. */
   hierarchy?: 'parent' | 'children' | null
+  /** connection: the key of its pair on the target type, when it has one. */
+  reverseKey?: string | null
   /** ref: the registered ref source its ids belong to. */
   source?: string | null
   multiple: boolean

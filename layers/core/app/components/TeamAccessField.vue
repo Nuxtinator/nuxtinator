@@ -8,7 +8,8 @@
 // container is then open only to its owner and the people it is shared with);
 // the field then always shows, as just Everyone when there are no teams.
 // With `levels`, Everyone and each ticked team also pick Can view / Can edit
-// (`orgLevel`, `teamLevels`; an absent team level means 'view').
+// (`orgLevel`, `teamLevels`; an absent team level means 'view'). Ticking
+// Everyone or a team sets it to Can edit.
 // A new container binds `fresh` (true when its form opens): the first time the
 // field shows, it starts with nothing ticked so the creator chooses, then
 // clears `fresh` so going back to the form keeps that choice.
@@ -63,6 +64,10 @@ const everyone = computed(() => visibility.value !== 'teams' && !isNone.value)
 const isChecked = (id: string) => everyone.value || teamIds.value.includes(id)
 
 const setTeams = (ids: string[]) => {
+  const added = ids.filter(id => !teamIds.value.includes(id))
+  if (props.levels && added.length > 0) {
+    teamLevels.value = { ...teamLevels.value, ...Object.fromEntries(added.map(id => [id, 'edit' as const])) }
+  }
   teamIds.value = ids
   visibility.value = ids.length === 0 && props.noneValue ? props.noneValue : 'teams'
 }
@@ -70,6 +75,7 @@ const setTeams = (ids: string[]) => {
 const onEveryone = (on: boolean) => {
   if (on) {
     visibility.value = 'org'
+    if (props.levels) orgLevel.value = 'edit'
     if (props.noneValue) teamIds.value = []
   } else {
     setTeams([])

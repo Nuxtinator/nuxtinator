@@ -14,7 +14,7 @@ import type { RecordsShareLevel } from '../database/schema.d'
 import type { TenantContext } from '#tenant/server'
 import { recordRecordsActivity } from './records-activity'
 import { getRecordsVisibilitySources, type RecordsShareVia } from './records-registry'
-import { getRecordType, recordsAccessGrantingKeys, recordsHierarchy } from './definition-settings'
+import { getRecordTypes, recordsAccessGrantingKeys } from './definition-settings'
 import { visibleRecordIds } from './list-records'
 
 type Tx = Transaction<Database>
@@ -217,22 +217,20 @@ async function recordAudience(tx: Tx, typeKey: string, recordId: string): Promis
 /**
  * The places other than direct shares that share a record, for the record's
  * share list: hand-picked views holding it that the caller can open (none on
- * types whose boards don't grant visibility) and, on a type with a hierarchy,
- * whatever shares each record above it that the caller can see, nearest first.
+ * types whose boards don't grant visibility) and whatever shares each record
+ * above it that the caller can see, nearest first, by that record's own type.
  */
 export async function listShareVia(tx: Tx, ctx: TenantContext, typeKey: string, recordId: string): Promise<RecordsShareVia[]> {
-  const type = await getRecordType(tx, typeKey)
-  const boards = !type || type.boardsGrantVisibility
-  const places = async (id: string): Promise<RecordsShareVia[]> => {
+  const types = await getRecordTypes(tx)
+  const places = async (type: string, id: string): Promise<RecordsShareVia[]> => {
     const found: RecordsShareVia[] = []
-    if (!boards) return found
+    if (types.find(t => t.key === type)?.boardsGrantVisibility === false) return found
     for (const source of getRecordsVisibilitySources()) {
       if (source.describe) found.push(...await source.describe(tx, ctx, id))
     }
     return found
   }
-  const out = await places(recordId)
-  if (!recordsHierarchy(typeKey)) return out
+  const out = await places(typeKey, recordId)
 
   const row = await tx.selectFrom('records_entries').select('ancestor_ids').where('id', '=', recordId).executeTakeFirst()
   const above = [...(row?.ancestor_ids ?? [])].reverse()
@@ -240,15 +238,16 @@ export async function listShareVia(tx: Tx, ctx: TenantContext, typeKey: string, 
   const visible = await visibleRecordIds(tx, ctx, above)
   const shown = above.filter(id => visible.has(id))
   if (shown.length === 0) return out
-  const names = await tx.selectFrom('records_entries').select(['id', 'name']).where('id', 'in', shown).execute()
-  const nameOf = new Map(names.map(r => [r.id, r.name]))
+  const rows = await tx.selectFrom('records_entries').select(['id', 'name', 'record_type']).where('id', 'in', shown).execute()
+  const rowOf = new Map(rows.map(r => [r.id, r]))
   for (const id of shown) {
-    const name = nameOf.get(id) ?? ''
-    const audience = await recordAudience(tx, typeKey, id)
+    const ancestor = rowOf.get(id)
+    if (!ancestor) continue
+    const audience = await recordAudience(tx, ancestor.record_type, id)
     if (audience.length > 0) {
-      out.push({ sourceId: RECORDS_ANCESTOR_SHARE_SOURCE, label: name, path: `/records/${typeKey}/${id}`, audience })
+      out.push({ sourceId: RECORDS_ANCESTOR_SHARE_SOURCE, label: ancestor.name, path: `/records/${ancestor.record_type}/${id}`, audience })
     }
-    for (const place of await places(id)) out.push({ ...place, through: name })
+    for (const place of await places(ancestor.record_type, id)) out.push({ ...place, through: ancestor.name })
   }
   return out
 }
