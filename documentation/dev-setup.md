@@ -36,7 +36,7 @@ go-saas/
     ├── core/            ← always-on foundation
     │   └── package.json ← bcrypt, jsonwebtoken, s3-lite-client; nuxt/kit/ui/kysely peer
     ├── tenancy/         ← optional multi-tenant (peer-deps only)
-    ├── email-mailgun/   ← optional email backend (nodemailer + mailgun transport)
+    ├── mail/            ← always: the mail kernel (@nuxtinator/mail)
     ├── oauth/, mcp/, dev/   (note: `layers/dev/` is the @nuxtinator/dev UI-sandbox layer —
     │                         distinct from the top-level `dev/` host folder)
     └── apps/calendar/, apps/kanban/, apps/messages/, apps/videos/, apps/feedback/, apps/list-of-100/

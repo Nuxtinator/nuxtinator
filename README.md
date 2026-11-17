@@ -58,7 +58,7 @@ Dev server: <http://localhost:2080>.
 |---|---|---|---|
 | [core](layers/core/) | Always | Auth, admin shell, RBAC, registries, single-mode `#tenant` kernel, migrations runner, launcher chrome. Never optional. | [layers.md](documentation/layers.md) |
 | [tenancy](layers/tenancy/) | Optional | Multi-tenant orgs + memberships + RLS. Adds `/@:slug/...` URL aliases and the multi-mode `#tenant` kernel. Omit for single-tenant. | [tenancy.md](documentation/tenancy.md) |
-| [email-mailgun](layers/email-mailgun/) | Choice | Mailgun (HTTP API in prod, MailHog locally). Provides `#email`. | — |
+| [mail](layers/mail/) | Always | Mail kernel: sending, receiving and delivery events through Mailgun, SES or SendGrid; domains, streams and suppressions on `/admin/email`. Core depends on it. | [layers.md](documentation/layers.md#mail) |
 | [social-auth](layers/social-auth/) | Optional | Sign in with Google and Sign in with Apple, for the web app and native apps. | [README](layers/social-auth/README.md) |
 | [oauth](layers/oauth/) | Optional | OAuth 2.1 issuer (token, consent, admin endpoints). | — |
 | [mcp](layers/mcp/) | Optional | MCP server transport. Depends on `oauth`. | — |
@@ -71,8 +71,7 @@ Dev server: <http://localhost:2080>.
 
 ### Layer types
 
-- **Always** — included in every project (`core`).
-- **Choice** — pick at most one from a group. Currently the only choice group is **email backend** (`email-mailgun`; `email-smtp` and `email-ses` are planned). Skip the group entirely if your app doesn't send mail — code that imports `#email` will throw a clear error if no backend is loaded.
+- **Always** — included in every project (`core`, and `mail`, which core depends on).
 - **Optional** — included only if you ask for it.
 
 Dependencies are resolved automatically: asking for `mcp` pulls in `oauth`; asking for `apps/crm` or `apps/views` pulls in `records`.
@@ -197,8 +196,7 @@ Read the **Available layers** table above. Map casual language to layer names:
 - "auth" / "login" / "users" → already in `core` (no separate layer)
 - "multi-tenant" / "orgs" / "organizations" / "workspaces" / "teams" → `tenancy`
 - "single-tenant" / "no orgs" / "just one team" → omit `tenancy`
-- "Mailgun" / "email" (default backend) → `email-mailgun`
-- "no email" / "skip email" → omit any email layer
+- "Mailgun" / "SES" / "SendGrid" / "email" → already in `mail` (always included); the provider is chosen in the env or on `/admin/email`
 - "Sign in with Google" / "Sign in with Apple" / "social login" → `social-auth`
 - "OAuth" / "OAuth server" / "issue tokens" → `oauth`
 - "MCP" / "Model Context Protocol" → `mcp` (and `oauth`, automatically)
@@ -210,11 +208,10 @@ Read the **Available layers** table above. Map casual language to layer names:
 
 ### Step 2: Resolve dependencies and choices
 
-1. Always include `core`.
+1. Always include `core` and `mail`.
 2. Add every layer the user asked for.
 3. Resolve dependencies — if the user asked for `mcp`, also include `oauth`.
-4. **Choice groups (email backend)**: if the user mentioned a provider, use it. If they mentioned email but no provider, default to `email-mailgun`. If they didn't mention email at all, **ask** before deciding — apps that send mail (auth flows, notifications) need a backend.
-5. Default to including `dev` unless the user is scaffolding for production. Always mention you'll comment it out before prod build.
+4. Default to including `dev` unless the user is scaffolding for production. Always mention you'll comment it out before prod build.
 
 ### Step 3: Confirm the layer list with the user (required, no exceptions)
 
@@ -225,7 +222,7 @@ Based on your description, I'll wire up these layers:
 
   core                  (always — foundation: auth, admin, registries, kernel)
   tenancy               (you asked for multi-tenant orgs)
-  email-mailgun         (you asked for Mailgun)
+  mail                  (always — sending, receiving, suppressions)
   oauth                 (required by mcp)
   mcp                   (you asked for MCP)
   apps/calendar         (you asked for calendar)
@@ -241,7 +238,7 @@ A few things to confirm:
 **Wait for confirmation before doing anything in Step 4 onward.** Specifically:
 
 - **Do not pick "a sensible default" for the user.** The layer set IS the decision they're making — you cannot guess it for them. "Reasonable starter" is not a fallback; "ask" is.
-- **If the user didn't mention email at all**, the confirmation message must explicitly ask whether they want email. Don't silently include `email-mailgun`; don't silently omit an email backend either. The user has to say.
+- **If the user didn't mention email at all**, the confirmation message must ask which provider they'll send through (Mailgun, SES or SendGrid), so the right env block is kept.
 - **If the user didn't mention apps/* at all**, default the proposed list to no app layers and the confirmation message must list every available app layer so they can pick.
 - **If you genuinely have no way to ask** (true non-interactive context with no orchestrator inbox), halt. Tell whatever invoked you that the layer list is needed. **Do not write files.** A wrong scaffold is worse than no scaffold.
 
@@ -294,7 +291,7 @@ _layers
 The scaffolded `.env.example` contains the union of every layer's vars. Trim it to the layers the user selected:
 
 - Always keep the **Core** block (`APP_TITLE`, `DATABASE_URL`, `APP_DATABASE_URL`, `JWT_SECRET`, `NUXT_SECRET_ENCRYPTION_KEY`, `NUXT_PUBLIC_SITE_URL`, `NODE_ENV`).
-- Keep the `MAILGUN_*` + `SMTP_FROM*` block only if `email-mailgun` is selected.
+- Keep the `MAIL_*` + `SMTP_FROM*` block, trimming the provider lines to the provider the user picked.
 - Keep `NUXT_SOCIAL_AUTH_*` only if `social-auth` is selected.
 - Keep `OAUTH_*` only if `oauth` is selected.
 - Keep `MCP_*` only if `mcp` is selected.
