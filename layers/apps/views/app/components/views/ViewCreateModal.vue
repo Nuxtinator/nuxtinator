@@ -94,7 +94,7 @@ const groupField = ref<string | undefined>(undefined)
 const dateField = ref<string | undefined>(undefined)
 const visibility = ref<string>('private')
 const teamIds = ref<string[]>([])
-const orgLevel = ref<'view' | 'edit'>('view')
+const orgLevel = ref<'view' | 'edit'>('edit')
 const teamLevels = ref<Record<string, 'view' | 'edit'>>({})
 const creating = ref(false)
 const createError = ref<string | null>(null)
@@ -117,7 +117,7 @@ watch(open, (v) => {
   dateField.value = undefined
   visibility.value = 'private'
   teamIds.value = []
-  orgLevel.value = 'view'
+  orgLevel.value = 'edit'
   teamLevels.value = {}
   createError.value = null
   audienceApplied.value = false
@@ -135,6 +135,7 @@ watch([open, teamsPending], () => {
   if (teamsMode.value === 'teams' && myTeams.length > 0) {
     visibility.value = 'teams'
     teamIds.value = myTeams.length === 1 ? [myTeams[0]!.id] : []
+    teamLevels.value = Object.fromEntries(teamIds.value.map(id => [id, 'edit' as const]))
   } else {
     visibility.value = 'org'
   }

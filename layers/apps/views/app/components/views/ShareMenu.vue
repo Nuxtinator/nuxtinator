@@ -22,7 +22,7 @@ const shares = ref<ViewsShareEntry[]>([])
 const loading = ref(false)
 
 const newUserId = ref<string | undefined>(undefined)
-const newLevel = ref<'view' | 'edit'>('view')
+const newLevel = ref<'view' | 'edit'>('edit')
 const busy = ref(false)
 
 const LEVEL_ITEMS = [
@@ -45,7 +45,7 @@ async function load() {
 watch(open, (v) => {
   if (!v) return
   newUserId.value = undefined
-  newLevel.value = 'view'
+  newLevel.value = 'edit'
   load()
   ensureUsers().catch(() => {
     // The picker stays empty; existing shares still list.
