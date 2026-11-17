@@ -5,6 +5,7 @@ import { sql } from 'kysely'
 import { registerOrgSettingsSection } from '#core/server/utils/org-settings-section-registry'
 import { mailIfBuilt } from '#core/server/utils/mail'
 import { setMailOrgAdminResolver } from '#core/server/utils/mail-host'
+import { setMailOrgNameResolver } from '#core/server/utils/mail-admin-api'
 import { adminDb } from '../utils/database-admin'
 
 export default defineNitroPlugin((nitroApp) => {
@@ -23,6 +24,11 @@ export default defineNitroPlugin((nitroApp) => {
       where m.org_id = ${orgId} and 'admin' = any(m.roles) and u.email is not null
     `.execute(adminDb)
     return rows.rows.map(r => r.email)
+  })
+
+  setMailOrgNameResolver(async (orgIds) => {
+    const rows = await adminDb.selectFrom('orgs').select(['id', 'name']).where('id', 'in', orgIds).execute()
+    return new Map(rows.map(r => [r.id, r.name]))
   })
 
   nitroApp.hooks.hook('org.deleted', async ({ orgId }: { orgId: string }) => {

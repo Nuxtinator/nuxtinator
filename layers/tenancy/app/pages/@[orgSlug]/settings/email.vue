@@ -107,14 +107,6 @@ const advancedOpen = ref(false)
             v-else
             class="space-y-6"
           >
-            <UAlert
-              v-if="primary.ownershipStatus === 'lapsed'"
-              color="error"
-              variant="subtle"
-              icon="i-lucide-triangle-alert"
-              :title="`We can no longer confirm you control ${primary.domain}. Your mail is going out from ${hostDomain}.`"
-            />
-
             <div
               v-if="primary.ownershipStatus === 'verified'"
               class="space-y-2"
@@ -151,8 +143,10 @@ const advancedOpen = ref(false)
               :org-slug="orgSlug"
               :domain="primary"
               :accounts="accountsData?.accounts ?? []"
+              :host-receive-account="accountsData?.hostReceiveAccount ?? null"
               :providers="accountsData?.providers ?? []"
               :setup="lastSetup"
+              :fallback-domain="hostDomain"
             />
           </div>
         </UCard>
@@ -182,6 +176,7 @@ const advancedOpen = ref(false)
             scope="org"
             :org-slug="orgSlug"
             title="Our provider accounts"
+            add-label="Use our own provider account"
           />
         </template>
 
