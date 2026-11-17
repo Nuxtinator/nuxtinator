@@ -3,8 +3,8 @@
 // the records layer's own detail view, so fields, comments, sharing,
 // permissions and validation are exactly the record page's. The header adds
 // a link to the record's page. At the end of the fields sidebar, a section named after the
-// view holds the view's own fields: everyone who opens the view sees them,
-// and its editors fill them in.
+// view holds the view's own fields: everyone who opens the view sees the ones
+// with a value, and its editors fill them in and add the empty ones.
 import type { RecordsFieldSetting } from '#records/client'
 
 const props = withDefaults(defineProps<{
@@ -47,8 +47,8 @@ function onDeleted() {
   emit('changed')
 }
 
-// The view's own values: the feed's copy, replaced by each save's answer
-// until the next poll catches up.
+// The view's own values: the feed's copy, replaced by each save (the new
+// value at once, then the server's answer) until the next poll catches up.
 const savedViewValues = ref<Record<string, unknown> | null>(null)
 watch(() => [recordId.value, props.viewValues], () => {
   savedViewValues.value = null
@@ -57,6 +57,8 @@ const viewValues = computed(() => savedViewValues.value ?? props.viewValues ?? {
 
 async function commitViewField(field: RecordsFieldSetting, value: unknown) {
   if (!props.viewId || !recordId.value) return
+  const before = savedViewValues.value
+  savedViewValues.value = { ...viewValues.value, [field.key]: value }
   try {
     const res = await $fetch<{ viewValues: Record<string, unknown> }>(`/api/views/${props.viewId}/values/${recordId.value}`, {
       method: 'PATCH',
@@ -65,6 +67,7 @@ async function commitViewField(field: RecordsFieldSetting, value: unknown) {
     savedViewValues.value = res.viewValues
     emit('changed')
   } catch (err) {
+    savedViewValues.value = before
     toast.add({
       title: 'Update failed',
       description: recordsErrorMessage(err, `Failed to update ${field.label}`),
@@ -112,22 +115,26 @@ function viewUploadUrl(field: RecordsFieldSetting): string | undefined {
             </UTooltip>
           </template>
           <template #sidebar>
-            <RecordsFieldSection
+            <RecordsFieldGroup
               v-if="viewFields.length > 0"
               :label="viewName ?? 'This view'"
+              :fields="viewFields"
+              :values="viewValues"
+              :editable="canEditView"
+              @commit="commitViewField"
             >
-              <RecordsFieldRow
-                v-for="field in viewFields"
-                :key="field.key"
-                layout="compact"
-                :field="field"
-                :value="viewValues[field.key] ?? null"
-                :editable="canEditView"
-                :upload-url="viewUploadUrl(field)"
-                @commit="commitViewField(field, $event)"
-                @uploaded="emit('changed')"
-              />
-            </RecordsFieldSection>
+              <template #default="{ field }">
+                <RecordsFieldRow
+                  layout="compact"
+                  :field="field"
+                  :value="viewValues[field.key] ?? null"
+                  :editable="canEditView"
+                  :upload-url="viewUploadUrl(field)"
+                  @commit="commitViewField(field, $event)"
+                  @uploaded="emit('changed')"
+                />
+              </template>
+            </RecordsFieldGroup>
           </template>
         </RecordsDetailView>
       </div>

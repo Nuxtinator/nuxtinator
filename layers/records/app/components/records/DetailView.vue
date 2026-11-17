@@ -4,7 +4,8 @@
 // record's long text (its description), the records under it (a task's
 // subtasks, as a list to tick off and add to), the records that mention this
 // one, and the merged comment/activity timeline; a sidebar holds every other
-// field, in the sections' declared order. On a narrow screen the sidebar sits
+// field, in the sections' declared order: a row for each one with a value and
+// an add button for each empty one (RecordsFieldGroup). On a narrow screen the sidebar sits
 // between those first two and the rest. `embedded` is for a dialog: a close button stands
 // in for the back link, and deleting reports back instead of leaving the
 // page. The
@@ -384,15 +385,17 @@ async function removeRecord() {
         </div>
 
         <aside class="order-2 min-w-0 space-y-6">
-          <RecordsFieldSection
+          <RecordsFieldGroup
             v-for="group in sectionGroups"
-            :key="group.key"
+            :key="`${recordId}:${group.key}`"
             :label="group.label"
+            :fields="group.fields"
+            :values="record.fields"
+            :editable="canEdit"
+            :addable="fieldEditable"
+            @commit="commitField"
           >
-            <template
-              v-for="field in group.fields"
-              :key="field.key"
-            >
+            <template #default="{ field }">
               <div
                 v-if="getRecordsFieldWidget(field.kind)"
                 class="grid grid-cols-1 gap-1.5 px-4 py-3"
@@ -429,7 +432,7 @@ async function removeRecord() {
                 @uploaded="onWidgetChanged"
               />
             </template>
-          </RecordsFieldSection>
+          </RecordsFieldGroup>
 
           <slot name="sidebar" />
         </aside>
