@@ -56,6 +56,33 @@ export function inboxHtmlToText(html: string | null | undefined): string {
     .replace(/<[^>]*>/g, '')
 }
 
+const QUOTE_CLASS_RE = /\b(?:gmail_quote|moz-cite-prefix|yahoo_quoted)\b/
+
+// The reply without its quoted history: drops <blockquote> and the common
+// client quote containers, otherwise leaves the HTML as received (the thread
+// view sanitizes before rendering). '' when nothing but quotes remains.
+export function inboxStripQuotedHtml(html: string | null | undefined): string {
+  if (!html) return ''
+  const stripped = sanitizeHtml(html, {
+    allowedTags: false,
+    allowedAttributes: false,
+    allowVulnerableTags: true,
+    allowedSchemes: ['http', 'https', 'mailto', 'tel', 'cid', 'data'],
+    exclusiveFilter: frame => frame.tag === 'blockquote' || QUOTE_CLASS_RE.test(frame.attribs?.class ?? '')
+  })
+  return inboxHtmlToText(stripped).trim() ? stripped : ''
+}
+
+// The plain-text reply without its quoted history: everything before the
+// first quoted line, "On … wrote:" attribution or forwarded-original marker.
+export function inboxStripQuotedText(text: string | null | undefined): string {
+  if (!text) return ''
+  const lines = text.split(/\r?\n/)
+  const cut = lines.findIndex(l => /^\s*>/.test(l) || /^\s*On\b.*\bwrote:\s*$/.test(l) || /^-{2,}\s*Original Message/i.test(l))
+  const kept = (cut === -1 ? lines : lines.slice(0, cut)).join('\n').trim()
+  return kept || text.trim()
+}
+
 const MENTION_SPAN_RE = /<span\b[^>]*\bdata-type="mention"[^>]*>/gi
 const MENTION_ID_RE = /\bdata-id="([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/i
 

@@ -8,16 +8,21 @@ export default defineEventHandler(async (event) => {
     const identity = await inboxGetIdentity(tx, ctx.userId)
     const settings = await getInboxSettings(tx)
     const alias = identity?.alias ?? null
+    const user = await tx.selectFrom('users').select('is_admin').where('id', '=', ctx.userId).executeTakeFirst()
     return {
       userId: ctx.userId,
       alias,
       signature: identity?.signature ?? null,
-      // Personal From only exists once an alias is set AND the org has an
-      // inbound domain other than the shared slug-address domain to host it.
-      personalFrom: inboxPersonalFromAddress(alias, settings.inboundDomain),
+      // Personal From only exists once an alias is set AND the org has a mail
+      // domain of its own (not the host's under slug addresses) to host it.
+      personalFrom: inboxPersonalFromAddress(alias, settings),
       contactAddress: settings.contactAddress || null,
+      // No domain can receive mail for this org yet: replies are held.
+      noReceivingDomain: !settings.mailDomain,
       brandFromName: settings.brandFromName || null,
       canManageSettings: ctx.perms.has('inbox.settings.manage'),
+      // Host admins set up mail domains under /admin/email.
+      isHostAdmin: !!user?.is_admin,
       // Note moderation and suppression clearing stay with the org admin role.
       canModerate: ctx.roles.includes('admin')
     }

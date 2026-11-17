@@ -9,10 +9,14 @@ export interface InboxMe {
   signature: string | null
   personalFrom: string | null
   contactAddress: string | null
+  // No domain can receive mail for this org yet: replies are held.
+  noReceivingDomain: boolean
   // The org's display name on shared-address sends ("Acme Support").
   brandFromName: string | null
   // inbox.settings.manage: the settings page and teammates' aliases.
   canManageSettings: boolean
+  // Host admin: sets up mail domains under /admin/email.
+  isHostAdmin: boolean
   // Org admin: moderates notes and clears suppressions.
   canModerate: boolean
 }

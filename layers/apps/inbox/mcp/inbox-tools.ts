@@ -683,7 +683,7 @@ const updateConversationTool = defineMcpTool({
 const sendReplyTool = defineMcpTool({
   name: 'inbox_send_reply',
   title: 'Send Inbox Reply',
-  description: 'Send an email reply to the conversation\'s contact, outside the organization. Pass body to send new text, or draftId to send a saved draft (with body, the draft is sent with that text instead). Refused when the address is suppressed or the inbox has no sending address. Assigns the conversation to the user if unassigned and marks it pending.',
+  description: 'Send an email reply to the conversation\'s contact, outside the organization. Pass body to send new text, or draftId to send a saved draft (with body, the draft is sent with that text instead). Refused when the address is suppressed. While no domain can receive mail the reply is held and goes out once one can. Assigns the conversation to the user if unassigned and marks it pending.',
   appId: 'inbox',
   scope: 'inbox.send',
   destructive: true,

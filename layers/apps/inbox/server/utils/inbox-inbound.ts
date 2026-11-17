@@ -1,28 +1,29 @@
-// Mailgun inbound-route webhook — the receiving half of the inbox. Mailgun's
-// forward action POSTs the pre-parsed message (fields + file parts) here.
+// The inbox's catch-all inbound handler — the receiving half of the inbox.
+// The mail kernel verifies the provider webhook, parses the MIME and calls
+// this once per receiving recipient on a domain whose receiving account the
+// webhook arrived on.
 //
-// Unauthenticated surface: trust is established by the webhook HMAC
-// signature; the *sender* is never trusted from the From header alone —
-// DKIM/DMARC alignment gates side effects (verification, courtesy replies)
-// and channel-matching gates threading.
+// The *sender* is never trusted from the From header alone — DKIM/DMARC
+// alignment gates side effects (verification, courtesy replies) and
+// channel-matching gates threading.
 //
 // Org routing (no session, no X-Active-Org):
 //   1. Reply-token mail — the token names exactly one conversation globally,
 //      so `withRecordOrgContext` resolves its org in O(1).
-//   2. Anything else — `inboxResolveOrgForRecipient`: the org slug on the
-//      shared slug-address domain, else the org whose inbound-domain setting
-//      is the recipient domain; unroutable mail is acknowledged (200) and
-//      dropped, because a 503 would make Mailgun retry forever.
+//   2. Anything else — `inboxResolveOrgForInbound`: the org owning the
+//      receiving domain, else (on a host domain) the org slug under slug
+//      addresses or the single-mode inbox. Unroutable mail is dropped, because
+//      a retry would make the provider redeliver forever.
 //
 // Durability choreography (at-most-once, never duplicated):
 //   tx A     resolve + claim: dedupe by Message-Id, thread, insert the
 //            message row (bare ON CONFLICT dedupe claim). Committed before
 //            any slow I/O.
 //   phase B  artifacts: attachments + raw MIME to S3, outside any
-//            transaction. On failure the claim row is DELETED and a 503
-//            returned — Mailgun's retry re-inserts and re-runs persistence
-//            (the committed conversation shell is reused, so retries
-//            converge on one conversation).
+//            transaction. On failure the claim row is DELETED and 'retry'
+//            returned — the provider's redelivery re-inserts and re-runs
+//            persistence (the committed conversation shell is reused, so
+//            retries converge on one conversation).
 //   tx C     side effects: attachment rows, status transitions, denorms,
 //            channel verification, staff notifications.
 //   after    fire-and-forget courtesy mail (auto-ack / held notice) with
@@ -31,13 +32,14 @@
 // duplicates it — the retry hits the dedupe and reports duplicate.
 import { createHash } from 'node:crypto'
 import { sql } from 'kysely'
+import type { H3Event } from 'h3'
+import type { InboundContext, InboundMail, InboundOutcome } from '@nuxtinator/mail/kernel'
 import { withRecordOrgContext } from '#tenant/server'
 import { uploadToS3 } from '#core/server/utils/storage'
-import { logEvent } from '#core/server/utils/activity-logger'
 import { claimChannel, findChannel, markChannelVerified } from '#crm/server'
-import type { InboxConversationRow } from '../../../../../utils/inbox-conversations'
+import type { InboxConversationRow } from './inbox-conversations'
 
-// Transient failures bubble up as this so the catch can return a retryable 5xx.
+// Transient failures bubble up as this so the catch can ask for a retry.
 class TransientError extends Error {}
 
 interface StoredOutcome {
@@ -56,73 +58,43 @@ type TxAOutcome =
   | { kind: 'duplicate', conversationId?: string }
   | { kind: 'spam', conversationId: string }
 
-export default defineEventHandler(async (event) => {
-  const config = useRuntimeConfig()
+export async function inboxHandleInbound(mail: InboundMail, ctx: InboundContext): Promise<InboundOutcome> {
+  const recipient = ctx.recipient.address
+  const headers = mail.headers
+  const fromHeader = headers.get('from') || ''
+  const fromEmail = mail.from?.address ?? inboxExtractEmailAddress(fromHeader)
+  const fromName = mail.from?.name || inboxExtractDisplayName(fromHeader)
+  const subject = mail.subject || ''
+  const bodyHtml = mail.html || ''
+  const bodyStrippedHtml = inboxStripQuotedHtml(bodyHtml)
+  const bodyText = inboxStripQuotedText(mail.text) || inboxHtmlToText(bodyStrippedHtml || bodyHtml).trim()
 
-  let form: FormData
-  try {
-    form = await readFormData(event)
-  } catch {
-    throw createError({ statusCode: 400, statusMessage: 'Malformed payload' })
-  }
-  const field = (name: string): string | null => {
-    const v = form.get(name)
-    return typeof v === 'string' ? v : null
-  }
-
-  // --- 1. Verify the Mailgun signature ---
-  const sigToken = field('token') || ''
-  const result = inboxValidateMailgunWebhook(
-    { timestamp: field('timestamp') || '', token: sigToken, signature: field('signature') || '' },
-    String(config.inboxMailgunWebhookSigningKey || config.mailgunWebhookSigningKey || '')
-  )
-  if (!result.ok) {
-    await logEvent({
-      eventType: 'inbox_webhook_rejected',
-      metadata: { reason: result.reason, path: event.path }
-    })
-    throw createError({ statusCode: 406, statusMessage: result.reason || 'Invalid signature' })
+  if (!fromEmail) {
+    console.warn(`[inbox] dropped inbound mail to "${recipient}" with no sender address`)
+    return 'drop'
   }
 
-  // --- 2. Gather fields ---
-  const recipient = field('recipient') || ''
-  const fromHeaderRaw = field('from') || field('sender') || ''
-  const fromEmail = inboxExtractEmailAddress(fromHeaderRaw)
-  const fromName = inboxExtractDisplayName(fromHeaderRaw)
-  const subject = field('subject') || ''
-  const bodyHtml = field('body-html') || ''
-  const bodyStrippedHtml = field('stripped-html') || ''
-  const bodyText = field('stripped-text') || field('body-plain') || ''
-
-  if (!recipient || !fromEmail) {
-    throw createError({ statusCode: 400, statusMessage: 'Missing recipient or sender' })
-  }
-
-  const headers = inboxParseMessageHeaders(field('message-headers'))
-  const messageId = headers.get('message-id') || field('Message-Id') || null
+  const messageId = headers.get('message-id') || mail.messageId || null
   const inReplyTo = headers.get('in-reply-to') || null
   const references = headers.get('references') || null
   const auth = inboxParseAuthentication(headers, fromEmail)
-  const spamScore = inboxParseSpamScore(headers, Object.fromEntries(form.entries()))
+  const spamScore = mail.spamScore ?? null
 
   const parsedRecipient = inboxParseRecipient(recipient)
-  if (!parsedRecipient) {
-    return { status: 'ignored', reason: 'unparseable_recipient' }
-  }
+  if (!parsedRecipient) return 'drop'
 
   // Mail to the VERP bounce/return-path is machine-to-machine, not human
   // inbox mail — RFC 3834 responders reply to the Return-Path and land here.
   // Real bounces arrive as delivery events, not inbound mail.
-  if (inboxIsBounceRecipient(parsedRecipient)) {
-    return { status: 'ignored', reason: 'bounce_address' }
-  }
+  if (inboxIsBounceRecipient(parsedRecipient)) return 'drop'
 
-  // --- 3. Resolve the org scope ---
+  // --- Resolve the org scope ---
   let scope: string | null | undefined
   if (parsedRecipient.token) {
     try {
+      // withRecordOrgContext never reads the event; there is none here.
       scope = await withRecordOrgContext(
-        event,
+        undefined as unknown as H3Event,
         {
           table: 'inbox_conversations',
           idColumn: 'reply_token',
@@ -144,14 +116,14 @@ export default defineEventHandler(async (event) => {
     }
   }
   if (scope === undefined) {
-    scope = await inboxResolveOrgForRecipient(parsedRecipient)
+    scope = await inboxResolveOrgForInbound(parsedRecipient, ctx.domain)
   }
   if (scope === undefined) {
     console.warn(`[inbox] unroutable inbound recipient "${recipient}" — no org claims it`)
-    return { status: 'ignored', reason: 'unroutable' }
+    return 'drop'
   }
 
-  // --- 4. Idempotency key ---
+  // --- Idempotency key ---
   // Prefer the real Message-Id; synthesize a stable key from the envelope
   // when the mail has none, so a redelivery of a header-less message dedupes
   // instead of duplicating (a NULL email_message_id never conflicts).
@@ -250,7 +222,7 @@ export default defineEventHandler(async (event) => {
           let assignedUserId: string | null = null
           if (!parsedRecipient.token && !inboxIsBounceRecipient(parsedRecipient)) {
             const settings = await getInboxSettings(tx)
-            const contactBase = inboxParseRecipient(settings.contactAddress)?.base ?? 'contact'
+            const contactBase = inboxParseRecipient(settings.contactAddress)?.base ?? settings.contactLocal
             if (parsedRecipient.base !== contactBase) {
               assignedUserId = await inboxResolveAliasUser(tx, parsedRecipient.base)
             }
@@ -315,49 +287,36 @@ export default defineEventHandler(async (event) => {
       }
     })
 
-    if (a.kind === 'duplicate') {
-      return { status: 'duplicate', conversation_id: a.conversationId }
-    }
-    if (a.kind === 'spam') {
-      return { status: 'spam', conversation_id: a.conversationId }
-    }
+    if (a.kind === 'duplicate' || a.kind === 'spam') return 'handled'
 
     // --- phase B: artifacts (outside any transaction) ---
-    // A storage failure deletes the claim row and 503s so the redelivery
-    // re-inserts and re-runs persistence — a half-stored message is never
-    // acknowledged.
+    // A storage failure deletes the claim row and asks for a retry so the
+    // redelivery re-inserts and re-runs persistence — a half-stored message
+    // is never acknowledged.
     let attachmentUploads: { s3Key: string, filename: string, contentType: string | null, sizeBytes: number }[] = []
     let rawKey: string | null = null
     // Test seam (VITEST only): simulate an artifact-persistence failure so the
-    // suite can pin the delete-claim + 503-retry contract without an S3 outage.
-    if (process.env.VITEST && field('x-test-fail') === 'persist') {
+    // suite can pin the delete-claim + retry contract without an S3 outage.
+    if (process.env.VITEST && headers.get('x-test-fail') === 'persist') {
       await inboxWithScopeTx(scope, tx => inboxDeleteMessage(tx, a.messageId))
       throw new TransientError('Injected persistence failure')
     }
     if (process.env.S3_ENDPOINT) {
       try {
-        attachmentUploads = await persistAttachmentFiles(form)
-        const rawMime = field('body-mime')
-        if (rawMime) {
-          const upload = await uploadToS3(Buffer.from(rawMime, 'utf-8'), `raw-${a.messageId}.eml`, 'message/rfc822', 'private', 'inbox')
-          rawKey = upload.key
-        }
+        attachmentUploads = await persistAttachmentFiles(mail)
+        const upload = await uploadToS3(mail.raw, `raw-${a.messageId}.eml`, 'message/rfc822', 'private', 'inbox')
+        rawKey = upload.key
       } catch (s3err) {
         await inboxWithScopeTx(scope, tx => inboxDeleteMessage(tx, a.messageId))
         throw new TransientError(s3err instanceof Error ? s3err.message : 'Attachment persistence failed')
       }
-    } else {
-      // Deliberate SLA choice: an S3-less deploy still accepts mail (503-ing
+    } else if (mail.attachments.length > 0) {
+      // Deliberate SLA choice: an S3-less deploy still accepts mail (retrying
       // would eventually make the provider drop it entirely), but dropping
-      // real artifacts is data loss — shout at error level when this message
-      // actually carried something to store.
-      const droppedFiles = [...form.entries()].some(([, v]) => typeof v !== 'string' && (v as File).name)
-      const droppedRaw = !!field('body-mime')
-      if (droppedFiles || droppedRaw) {
-        console.error(`[inbox] S3 not configured — DROPPING inbound artifacts for message ${a.messageId} (attachments: ${droppedFiles}, raw MIME: ${droppedRaw})`)
-      } else {
-        console.warn('[inbox] S3 not configured — inbound attachments and raw MIME are not archived')
-      }
+      // real attachments is data loss — shout at error level.
+      console.error(`[inbox] S3 not configured — DROPPING ${mail.attachments.length} inbound attachment(s) and the raw MIME for message ${a.messageId}`)
+    } else {
+      console.warn('[inbox] S3 not configured — inbound raw MIME is not archived')
     }
 
     // --- tx C: side effects ---
@@ -406,7 +365,7 @@ export default defineEventHandler(async (event) => {
           // not an inquiry — close quietly, don't flag or notify. A DSN or
           // list/bulk message still lands held + needs-review + notify so a
           // human sees it (bounces reaching the inbound route are worth
-          // surfacing; they normally arrive via the delivery webhook instead).
+          // surfacing; they normally arrive as delivery events instead).
           await inboxUpdateConversationStatus(tx, a.conversation.id, 'closed')
         } else {
           await inboxSetNeedsReview(tx, a.conversation.id, true)
@@ -454,6 +413,7 @@ export default defineEventHandler(async (event) => {
           : null)
     if (eligible && courtesyKind && courtesy.contactAddress) {
       void inboxSendCourtesy(courtesyKind, {
+        orgId: scope,
         toEmail: fromEmail,
         toName: fromName,
         subject: subject || a.conversation.subject,
@@ -463,23 +423,16 @@ export default defineEventHandler(async (event) => {
       }).catch(err => console.warn('[inbox] courtesy send failed:', err))
     }
 
-    return { status: a.outcome, conversation_id: a.conversation.id, message_id: a.messageId }
+    return 'handled'
   } catch (error) {
-    // The signature token was marked seen during validation. Since we're
-    // about to return a retryable 5xx, release it so the provider's retry
-    // (same token) isn't rejected as a replay and the message isn't lost.
-    if (sigToken) inboxReleaseSeenToken(sigToken)
-    if (error instanceof TransientError) {
-      throw createError({ statusCode: 503, statusMessage: 'Temporary failure, please retry' })
-    }
+    if (error instanceof TransientError) return 'retry'
     // The dedupe race is absorbed by createIfNew's bare ON CONFLICT (returns
     // null, never raises), so anything reaching here is unexpected — retry it
-    // rather than report 200 "handled" and silently drop an unpersisted
-    // message.
-    console.error('[inbox] inbound webhook error:', error instanceof Error ? error.message : error)
-    throw createError({ statusCode: 503, statusMessage: 'Temporary failure, please retry' })
+    // rather than report "handled" and silently drop an unpersisted message.
+    console.error('[inbox] inbound mail error:', error instanceof Error ? error.message : error)
+    return 'retry'
   }
-})
+}
 
 // Deterministic stand-in Message-Id for inbound mail that arrives without
 // one: the same envelope always synthesizes the same key, so a redelivery
@@ -491,19 +444,17 @@ function synthesizeMessageId(parts: { from: string, recipient: string, subject: 
   return `<synthesized-${hash}@inbound.local>`
 }
 
+// Every attachment part, inline ones included, minus blocked types and
+// oversized files.
 async function persistAttachmentFiles(
-  form: FormData
+  mail: InboundMail
 ): Promise<{ s3Key: string, filename: string, contentType: string | null, sizeBytes: number }[]> {
   const out: { s3Key: string, filename: string, contentType: string | null, sizeBytes: number }[] = []
-  for (const [, value] of form.entries()) {
-    if (typeof value === 'string') continue
-    const file = value as File
-    if (!file.name) continue
-    if (INBOX_BLOCKED_EXTENSIONS.test(file.name)) continue
-    if (file.size > INBOX_MAX_ATTACHMENT_BYTES) continue
-    const buffer = Buffer.from(await file.arrayBuffer())
-    const upload = await uploadToS3(buffer, file.name, file.type || 'application/octet-stream', 'private', 'inbox')
-    out.push({ s3Key: upload.key, filename: file.name, contentType: file.type || null, sizeBytes: file.size })
+  for (const part of mail.attachments) {
+    if (INBOX_BLOCKED_EXTENSIONS.test(part.filename)) continue
+    if (part.data.length > INBOX_MAX_ATTACHMENT_BYTES) continue
+    const upload = await uploadToS3(part.data, part.filename, part.contentType || 'application/octet-stream', 'private', 'inbox')
+    out.push({ s3Key: upload.key, filename: part.filename, contentType: part.contentType || null, sizeBytes: part.data.length })
   }
   return out
 }

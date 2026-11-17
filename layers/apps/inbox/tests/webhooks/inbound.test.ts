@@ -1,4 +1,4 @@
-// The inbound webhook's security battery: signature gate, org routing,
+// Inbound mail's security battery: signature gate, org routing,
 // dedupe, token threading, thread-graft protection, the held queue, vacation
 // handling, channel claiming + DKIM-gated verification, and org isolation.
 import { describe, it, expect, afterEach } from 'vitest'
@@ -18,15 +18,15 @@ function uniqueSender(tag = 'jane') {
   return `test-inbox-${tag}-${randomUUID().slice(0, 8)}@sender.example`
 }
 
-describe('inbound webhook', () => {
-  it('rejects a bad signature with 406 and stores nothing', async () => {
+describe('inbound mail', () => {
+  it('rejects a bad signature with 401 and stores nothing', async () => {
     const { domain } = await createInboxOrgWith(sql)
     const res = await postInbound({
       recipient: `hello@${domain}`,
       from: `X <${uniqueSender()}>`,
       signatureOverride: '0'.repeat(64)
     })
-    expect(res.status).toBe(406)
+    expect(res.status).toBe(401)
   })
 
   it('routes new mail to the org claiming the recipient domain, claims the channel, and verifies it on authenticated inbound', async () => {
@@ -67,14 +67,15 @@ describe('inbound webhook', () => {
     expect(convo!.verified).toBe(false)
   })
 
-  it('acknowledges unroutable domains without storing anything', async () => {
+  it('acknowledges mail for unknown domains without storing anything', async () => {
     await createInboxOrgWith(sql)
     const res = await postInbound({
       recipient: `hello@test-inbox-nobody-${randomUUID().slice(0, 6)}.test`,
       from: `Jane <${uniqueSender()}>`
     })
+    expect(res.status).toBe(200)
     expect(res.body.status).toBe('ignored')
-    expect(res.body.reason).toBe('unroutable')
+    expect(res.kernel.recipients).toEqual([expect.objectContaining({ outcome: 'unknown_domain' })])
   })
 
   it('dedupes redeliveries by Message-Id', async () => {
@@ -197,7 +198,7 @@ describe('inbound webhook', () => {
       from: `Robot <mailer-daemon@some.example>`
     })
     expect(res.body.status).toBe('ignored')
-    expect(res.body.reason).toBe('bounce_address')
+    expect(res.kernel.recipients).toEqual([expect.objectContaining({ outcome: 'drop', handler: 'inbox' })])
   })
 
   it('isolates orgs: two orgs receive mail on their own domains only', async () => {

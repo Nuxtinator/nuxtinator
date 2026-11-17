@@ -374,8 +374,8 @@ async function onSaveIdentity(patch: { alias?: string | null, signature?: string
 
     <section class="flex-1 flex flex-col min-w-0 overflow-hidden">
       <InboxUnconfiguredBanner
-        v-if="me && !me.contactAddress"
-        :can-manage-settings="me.canManageSettings"
+        v-if="me?.noReceivingDomain"
+        :is-host-admin="me.isHostAdmin"
       />
 
       <div class="flex-1 flex min-w-0 overflow-hidden">

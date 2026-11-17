@@ -11,7 +11,9 @@ import {
   createInboxOrgWith,
   setInboxOrgSetting,
   postInbound,
-  postDeliveryEvent,
+  postMailEvents,
+  setMailDomainReceiving,
+  sharedMailDomainId,
   issueMcpBearer,
   callMcpTool,
   listMcpTools,
@@ -169,14 +171,8 @@ describe('inbox MCP write tools', () => {
 
   it('refuses to send to a suppressed address, through MCP and the composer route alike', async () => {
     const { token, org, opts, from, conversationId } = await setup()
-    const supp = await postDeliveryEvent({
-      event: 'failed',
-      severity: 'permanent',
-      recipient: from,
-      'delivery-status': { message: '550 5.1.1 user unknown' },
-      'user-variables': { 'inbox-org': org.id }
-    })
-    expect(supp.suppressed).toBe(true)
+    const supp = await postMailEvents([{ type: 'bounced', recipient: from, detail: '550 5.1.1 user unknown', orgId: org.id }])
+    expect(supp.status).toBe(200)
 
     const sent = await callMcpTool(token, 'inbox_send_reply', { org: org.slug, conversationId, body: 'Hello' })
     expect(sent.isError).toBe(true)
@@ -192,13 +188,25 @@ describe('inbox MCP write tools', () => {
     expect(count!.n).toBe(0)
   })
 
-  it('refuses to send while the inbox has no sending address', async () => {
+  it('queues a reply that is held while no domain can receive mail', async () => {
     const { token, org, conversationId } = await setup()
-    await sql`DELETE FROM core_settings WHERE org_id = ${org.id} AND namespace = 'inbox' AND key = 'contact_address'`
-
-    const sent = await callMcpTool(token, 'inbox_send_reply', { org: org.slug, conversationId, body: 'Hello' })
-    expect(sent.isError).toBe(true)
-    expect(sent.content[0]!.text).toContain('no sending address')
+    await sql`UPDATE mail_domains SET receive_account_id = NULL, receive_status = 'pending' WHERE org_id = ${org.id}`
+    await setMailDomainReceiving(sql, sharedMailDomainId(), false)
+    try {
+      const sent = await callMcpTool(token, 'inbox_send_reply', { org: org.slug, conversationId, body: 'Hello' })
+      expect(sent.isError).toBeFalsy()
+      let held: { status: string, hold_reason: string | null } | undefined
+      for (let i = 0; i < 60; i++) {
+        ;[held] = await sql<{ status: string, hold_reason: string | null }[]>`
+          SELECT status, hold_reason FROM inbox_messages WHERE conversation_id = ${conversationId} AND direction = 'outbound'
+        `
+        if (held?.hold_reason) break
+        await new Promise(r => setTimeout(r, 250))
+      }
+      expect(held).toMatchObject({ status: 'queued', hold_reason: 'No domain can receive mail yet' })
+    } finally {
+      await setMailDomainReceiving(sql, sharedMailDomainId(), true)
+    }
   })
 
   it('queues a reply with the composer\'s side effects and labels it on the timeline', async () => {

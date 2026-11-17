@@ -58,7 +58,7 @@ async function onClear(s: InboxSuppression) {
               <p class="text-xs text-(--ui-text-dimmed)">Since {{ new Date(s.since).toLocaleDateString() }}<span v-if="s.source"> · {{ s.source }}</span></p>
             </div>
             <UButton
-              v-if="canClear"
+              v-if="canClear && s.clearable"
               label="Un-suppress"
               icon="i-lucide-mail-check"
               size="xs"
@@ -67,6 +67,7 @@ async function onClear(s: InboxSuppression) {
               :loading="clearing === s.channelId"
               @click="onClear(s)"
             />
+            <span v-else-if="canClear" class="text-xs text-(--ui-text-dimmed) shrink-0">Cleared by a host admin</span>
           </div>
         </div>
       </div>

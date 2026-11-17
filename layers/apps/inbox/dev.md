@@ -1,13 +1,13 @@
 # Inbox layer — maintainer notes
 
 Working doc for sessions building out `@nuxtinator/inbox`. [README.md](README.md) is the
-consumer-facing overview (Mailgun/DNS setup lives there). The layer is built on the CRM
+consumer-facing overview (mail domain setup lives there). The layer is built on the CRM
 layer's channel kernel; the build backlog lives in [PLAN.md](PLAN.md) and the decision
 record in the repo's session logs.
 
 ## What this layer is
 
-A two-way shared email inbox: signed Mailgun webhooks in, a queued send sweep out, a
+A two-way shared email inbox: the mail kernel's inbound handler in, a queued send sweep out, a
 3-pane triage UI. Conversations key on `crm_channels` — the CRM address registry —
 never on contact records: an inbound sender gets history before (and whether or not)
 they ever become a contact. First app-layer→app-layer dependency in the monorepo
@@ -32,32 +32,38 @@ linked-contact chips resolve per detail view, gated on
 ([server/plugins/inbox-send-sweep.ts](server/plugins/inbox-send-sweep.ts), cadence
 `INBOX_SEND_SWEEP_SECONDS`) claims each due row with an atomic queued→sent UPDATE
 (`inboxClaimForSend`) **before** the provider call. Confirmed provider failure →
-release with exponential backoff (or `failed` at 3 attempts); crash mid-send leaves it
-`sent` without a provider id — **at-most-once**. `markSent` copies
-the provider Message-Id into `email_message_id` so contact replies thread back.
+release with exponential backoff (or `failed` at 3 attempts); crash mid-send (or a
+kernel `unknown`) leaves it `sent` without an id — **at-most-once**. Sends go through
+core's `sendMail` on the `inbox` stream (not queued: this sweep is the retry loop) with
+the row id as `ref`; `no_sender` returns the row to the queue on hold, `suppressed` /
+`refused` fail it. `markSent` stores the Message-Id the kernel sent with in
+`provider_message_id` and `email_message_id` so contact replies thread back.
 
 **CRM plumbing activated here.** DKIM/DMARC-authenticated inbound ⇒
 `markChannelVerified` (the ONLY thing that ever verifies a channel — delivery events
-never do). Delivery webhook: permanent fail/bounce ⇒ `suppress('hard_bounce')`,
-complaint ⇒ `'complaint'`, `unsubscribed` ⇒ `revokeConsent({userId: null}, purpose
-'marketing')` — consent flip only, never a suppression. Outbound gate is
+never do). Bounces and complaints land on the mail kernel's suppression list (CRM's
+`isSuppressed` includes it); CRM's own event handler turns `unsubscribed` into
+`revokeConsent({userId: null}, purpose 'marketing')`. The inbox's event handler
+(`inbox:delivery`, [inbox-delivery.ts](server/utils/inbox-delivery.ts)) only flips
+message state by `ref` in the event's org scope. Outbound gate is
 **`isSuppressed()` only, never `canSend()`**: consent must not block 1:1
 conversational replies (a bounce stops sends; a marketing unsubscribe doesn't).
 
-**Webhook org routing** (no session): reply-token mail resolves O(1) via
-`withRecordOrgContext` on `reply_token` (which is why the token unique is deliberately
-**global** even in multi mode — 80 random bits can't collide); delivery events carry
-`v:inbox-org` back from the send (fallback: scope-scan correlation on
-provider_message_id); tokenless new mail scans org scopes for an `inbound_domain`
-settings match. One distinct inbound (sub)domain per org; two orgs claiming the same
-domain = unroutable + loud log. Settings live in **core_settings** (namespace `inbox`,
-keys `inbound_domain` / `contact_address` / `auto_ack_enabled`; code defaults from
-runtimeConfig, registered in [server/plugins/register-inbox.ts](server/plugins/register-inbox.ts)).
+**Inbound org routing** (no session; [inbox-inbound.ts](server/utils/inbox-inbound.ts)):
+reply-token mail resolves O(1) via `withRecordOrgContext` on `reply_token` (which is why
+the token unique is deliberately **global** even in multi mode — 80 random bits can't
+collide); tokenless new mail goes to the org owning the receiving domain the kernel
+matched, else on a host domain to the slug's org (`INBOX_SLUG_ADDRESSES`) or the
+single-mode inbox; anything else is dropped. The mail domain and contact address are
+derived from `resolveMailSender('inbox', org)` on every settings read, never stored.
+Settings live in **core_settings** (namespace `inbox`, keys `contact_local` /
+`auto_ack_enabled` / …; code defaults registered in
+[server/plugins/register-inbox.ts](server/plugins/register-inbox.ts)).
 
 **Durability choreography (inbound).** tx A: dedupe by Message-Id (or a synthesized
 sha256 stand-in) → thread → insert the claim row (bare ON CONFLICT). phase B (no tx):
-attachments + raw MIME to S3; failure DELETES the claim row and 503s so Mailgun's
-retry re-runs persistence (the committed conversation shell is reused —
+attachments + raw MIME to S3; failure DELETES the claim row and returns `'retry'`
+(the webhook 503s) so the provider's retry re-runs persistence (the committed conversation shell is reused —
 `inboxGetRecentEmptyForChannel`, 24h window — so retries converge). tx C: side
 effects (statuses, verification, notifications). A crash between B and C loses side
 effects but never duplicates. Don't "fix" this into double-sending.
@@ -115,26 +121,26 @@ files, bare ON CONFLICT only — the dedupe index shape differs between modes).
 4. Attachments are served ONLY through `/api/inbox/attachments/:id` (auth proxy,
    forced `Content-Disposition: attachment` + octet-stream — stored-XSS defense).
    Never hand the client a raw signed S3 URL: those can't override response headers.
-5. `MAILGUN_WEBHOOK_SIGNING_KEY` is Mailgun's **HTTP webhook signing key**, not the
-   sending API key — webhooks 401 with the wrong one. Replay-map tokens are released
-   on retryable 5xx so Mailgun's retry isn't rejected as a replay.
-6. In multi mode the env `INBOX_DOMAIN` default applies to EVERY org — with 2+ orgs
-   that's instant routing ambiguity. Give each org an explicit `inbound_domain`
-   override (settings) and treat the env var as the single-tenant default.
-7. Tests sign fixtures with the real signing key (global-setup pins
-   `MAILGUN_WEBHOOK_SIGNING_KEY`); there is no signature-skip seam. The sweep runs at
-   2s in tests via `INBOX_SEND_SWEEP_SECONDS`.
+5. Webhook signatures are the mail kernel's and the provider adapter's job; the inbox
+   never sees an unverified message.
+6. In multi mode without `INBOX_SLUG_ADDRESSES`, tokenless mail to a host domain is
+   dropped — an org receives new mail only on its own domain (or its slug address).
+7. Tests run the fake mail provider (`MAIL_FAKE_PROVIDER=1`): global setup creates a
+   fake-provider account and the host inbox domain on it, and the fixtures sign raw
+   MIME / JSON events with its signing key; there is no signature-skip seam. The env
+   account is left alone (every project's server rewrites it on boot). The sweep
+   runs at 2s in tests via `INBOX_SEND_SWEEP_SECONDS`.
 8. reka-ui rejects `''` select-item values — the assignee picker uses the `__none__`
    sentinel (see [Thread.vue](app/components/inbox/Thread.vue)).
 
 ## Dev workflow
 
 Run from `dev/`. Local mail lands in Mailpit (http://localhost:8025). Exercise inbound
-locally with a signed multipart POST — the fixture builder in
-[tests/helpers/index.ts](tests/helpers/index.ts) is the reference (HMAC-SHA256 of
-`timestamp + token` with the signing key; Mailgun-shaped fields incl. a
-`message-headers` JSON array with `Authentication-Results` for the authenticated
-path). Tests: `bun run test -- --project inbox`. The app seeds into the catalog as
+locally with `MAIL_FAKE_PROVIDER=1`: POST raw MIME to a fake account's inbound URL with
+`x-fake-signature` (HMAC-SHA256 of the body with its signing key) and
+`x-fake-envelope-to` — the fixture builder in
+[tests/helpers/index.ts](tests/helpers/index.ts) is the reference (an
+`Authentication-Results` header for the authenticated path). Tests: `bun run test -- --project inbox`. The app seeds into the catalog as
 `available` — enable it per org (host admin UI or an `org_apps` row).
 
 **Small deliberate choices.** Replies stamp a normalized `Re: ` subject prefix

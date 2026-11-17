@@ -1,16 +1,18 @@
 // Inbox-layer test helpers. Re-exports tenancy + core helpers (same package
 // export the crm helpers build on) and adds: org bootstrap with the inbox
-// app enabled + a claimed inbound domain, a signed Mailgun webhook fixture
-// builder, and prefix-scoped cleanup.
+// app enabled + its own receiving mail domain, raw-MIME inbound and delivery
+// event fixtures signed for the fake mail provider, and prefix-scoped
+// cleanup.
 //
 // All seeded data is prefixed `test-inbox-` (users, org slugs, domains) so
 // cleanup stays scoped. inbox_* rows cascade off orgs; channel identity rows
 // deliberately survive record deletion (crm registry semantics), so cleanup
 // relies on the org cascade wiping org-scoped channels.
 import type postgres from 'postgres'
-import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { S3Client } from '@bradenmacdonald/s3-lite-client'
-import { $fetch, url as nuxtUrl } from '@nuxt/test-utils/e2e'
+import { url as nuxtUrl } from '@nuxt/test-utils/e2e'
+import { fakeSignature } from '@nuxtinator/mail/test'
 import {
   createTestUser,
   getAuthHeaders,
@@ -19,6 +21,7 @@ import {
   type TestUser,
   createTestOrg,
   addTestMembership,
+  getHostAdminDb,
   type TestOrg
 } from '@nuxtinator/tenancy/test-helpers'
 
@@ -26,6 +29,9 @@ export * from '@nuxtinator/tenancy/test-helpers'
 export { waitForMailTo, clearMailhog } from '../../../../core/tests/helpers/mailhog'
 
 export const INBOX_TEST_SIGNING_KEY = 'test-inbox-signing-key'
+export const INBOX_TEST_API_KEY = 'test-inbox-api-key'
+// The host's inbox domain, routed to the inbox stream by global setup: under
+// slug addresses orgs without their own domain receive at <slug>@ it.
 export const INBOX_TEST_SHARED_DOMAIN = 'test-inbox-shared.test'
 
 export async function createInboxUser(
@@ -40,7 +46,7 @@ export async function createInboxUser(
 
 // A complete inbox-enabled org: user with the given roles, membership, the
 // inbox app enabled (the catalog seeds apps as 'available', so orgs opt in),
-// and a unique inbound domain claimed via the settings override.
+// and its own mail domain that can send and receive, routed to its inbox stream.
 export async function createInboxOrgWith(
   sql: ReturnType<typeof postgres>,
   roles: string[] = ['admin']
@@ -52,8 +58,9 @@ export async function createInboxOrgWith(
   })
   await addTestMembership(sql, { user_id: user.id, org_id: org.id, roles })
 
-  await sql`INSERT INTO apps (id, status) VALUES ('inbox', 'available') ON CONFLICT (id) DO NOTHING`
-  await sql`INSERT INTO apps (id, status) VALUES ('crm', 'available') ON CONFLICT (id) DO NOTHING`
+  // A row with no status falls back to the app's code default, which is off.
+  await sql`INSERT INTO apps (id, status) VALUES ('inbox', 'available') ON CONFLICT (id) DO UPDATE SET status = coalesce(apps.status, 'available')`
+  await sql`INSERT INTO apps (id, status) VALUES ('crm', 'available') ON CONFLICT (id) DO UPDATE SET status = coalesce(apps.status, 'available')`
   await sql`
     INSERT INTO org_apps (org_id, app_id, enabled, source)
     VALUES (${org.id}, 'inbox', true, 'org_admin'), (${org.id}, 'crm', true, 'org_admin')
@@ -61,8 +68,7 @@ export async function createInboxOrgWith(
   `
 
   const domain = `${org.slug}.test`
-  await setInboxOrgSetting(sql, org.id, 'inbound_domain', domain)
-  await setInboxOrgSetting(sql, org.id, 'contact_address', `contact@${domain}`)
+  await addOrgMailDomain(sql, org.id, domain)
 
   return { org, user, auth: getAuthHeaders(user), domain, opts: withOrgHeader(getAuthHeaders(user), org.slug) }
 }
@@ -83,15 +89,70 @@ export async function setInboxOrgSetting(
   `
 }
 
-// --- Signed Mailgun webhook fixtures -------------------------------------
+// --- Mail domains ----------------------------------------------------------
 
-function signedFields(): Record<string, string> {
-  const timestamp = String(Math.floor(Date.now() / 1000))
-  const token = randomUUID().replace(/-/g, '')
-  const signature = createHmac('sha256', INBOX_TEST_SIGNING_KEY)
-    .update(timestamp + token)
-    .digest('hex')
-  return { timestamp, token, signature }
+// The fake-provider account global setup creates for the inbox's domains.
+export function testMailAccountId(): string {
+  const id = process.env.INBOX_TEST_MAIL_ACCOUNT_ID
+  if (!id) throw new Error('The inbox global setup did not record its mail account')
+  return id
+}
+
+// An ownership-verified domain on the test mail account, sending verified
+// and receiving as asked, routed to the inbox stream: the org's own (orgId)
+// or the host's (null). Org rows cascade with the org; host rows are removed
+// by cleanup (their names start with test-inbox-).
+export async function addOrgMailDomain(
+  sql: ReturnType<typeof postgres>,
+  orgId: string | null,
+  domain: string,
+  opts: { receive?: boolean } = {}
+): Promise<string> {
+  const account = testMailAccountId()
+  const receive = opts.receive ?? true
+  const [row] = await sql<{ id: string }[]>`
+    INSERT INTO mail_domains (org_id, source, domain, ownership_status, send_account_id, receive_account_id, setup_mode, send_status, receive_status)
+    VALUES (${orgId}, 'ui', ${domain}, 'verified', ${account}, ${receive ? account : null}, 'manual', 'verified', ${receive ? 'verified' : 'pending'})
+    RETURNING id
+  `
+  await sql`INSERT INTO mail_stream_routes (org_id, stream, domain_id) VALUES (${orgId}, 'inbox', ${row!.id})`
+  return row!.id
+}
+
+export async function setMailDomainReceiving(sql: ReturnType<typeof postgres>, domainId: string, receive: boolean): Promise<void> {
+  const account = testMailAccountId()
+  await sql`
+    UPDATE mail_domains
+    SET receive_account_id = ${receive ? account : null}, receive_status = ${receive ? 'verified' : 'pending'}
+    WHERE id = ${domainId}
+  `
+}
+
+// The host's inbox domain (INBOX_TEST_SHARED_DOMAIN), set up by global setup.
+export function sharedMailDomainId(): string {
+  return process.env.INBOX_TEST_SHARED_DOMAIN_ID!
+}
+
+// --- Fake-provider webhook fixtures -----------------------------------------
+
+function webhookPath(kind: 'inbound' | 'events'): string {
+  const path = process.env[kind === 'inbound' ? 'INBOX_TEST_MAIL_INBOUND_PATH' : 'INBOX_TEST_MAIL_EVENTS_PATH']
+  if (!path) throw new Error('The inbox global setup did not record the fake provider webhook URLs')
+  return path
+}
+
+async function postWebhook(
+  kind: 'inbound' | 'events',
+  body: string,
+  headers: Record<string, string> = {}
+): Promise<{ status: number, body: Record<string, unknown> }> {
+  const res = await fetch(nuxtUrl(webhookPath(kind)), {
+    method: 'POST',
+    headers: { 'x-fake-signature': fakeSignature(INBOX_TEST_SIGNING_KEY, body), ...headers },
+    body
+  })
+  const json = await res.json().catch(() => ({})) as Record<string, unknown>
+  return { status: res.status, body: json }
 }
 
 export interface InboundFixtureOpts {
@@ -104,61 +165,163 @@ export interface InboundFixtureOpts {
   inReplyTo?: string
   references?: string
   authenticated?: boolean
+  // Extra MIME headers, e.g. ['X-Test-Fail', 'persist'] for the
+  // persistence-failure seam.
   headers?: [string, string][]
   signatureOverride?: string
-  // Raw MIME source. When present the webhook archives it to S3 and sets
-  // `inbox_messages.raw_s3_key`.
-  bodyMime?: string
-  // Extra top-level form fields (e.g. the x-test-fail persistence seam).
-  extraFields?: Record<string, string>
+  attachments?: { filename: string, contentType: string, content: string }[]
 }
 
-// POST a Mailgun-shaped inbound payload. The signature is computed with the
-// real signing key — verification code runs in every test.
-export async function postInbound(fixture: InboundFixtureOpts): Promise<{ status: number, body: Record<string, unknown> }> {
-  const headers: [string, string][] = [
-    ['Message-Id', fixture.messageId ?? `<test-inbox-${randomUUID()}@sender.example>`],
-    ['Date', new Date().toUTCString()]
+function buildMime(f: InboundFixtureOpts, messageId: string): string {
+  const alt = `alt-${randomUUID()}`
+  const text = f.text ?? 'Test body'
+  const html = f.html ?? `<p>${text}</p>`
+  const head = [
+    `From: ${f.from}`,
+    `To: ${f.recipient}`,
+    `Subject: ${f.subject ?? 'Test subject'}`,
+    `Date: ${new Date().toUTCString()}`,
+    `Message-Id: ${messageId}`,
+    'MIME-Version: 1.0'
   ]
-  if (fixture.authenticated !== false) {
-    headers.push(['Authentication-Results', 'mx.test; dkim=pass header.d=sender.example; dmarc=pass'])
+  if (f.authenticated !== false) head.push('Authentication-Results: mx.test; dkim=pass header.d=sender.example; dmarc=pass')
+  if (f.inReplyTo) head.push(`In-Reply-To: ${f.inReplyTo}`)
+  if (f.references) head.push(`References: ${f.references}`)
+  for (const [k, v] of f.headers ?? []) head.push(`${k}: ${v}`)
+  const alternative = [
+    `--${alt}`, 'Content-Type: text/plain; charset=utf-8', '', text,
+    `--${alt}`, 'Content-Type: text/html; charset=utf-8', '', html,
+    `--${alt}--`
+  ]
+  if (!f.attachments?.length) {
+    return [...head, `Content-Type: multipart/alternative; boundary="${alt}"`, '', ...alternative, ''].join('\r\n')
   }
-  if (fixture.inReplyTo) headers.push(['In-Reply-To', fixture.inReplyTo])
-  if (fixture.references) headers.push(['References', fixture.references])
-  for (const h of fixture.headers ?? []) headers.push(h)
+  const mixed = `mixed-${randomUUID()}`
+  const parts = [`--${mixed}`, `Content-Type: multipart/alternative; boundary="${alt}"`, '', ...alternative]
+  for (const a of f.attachments) {
+    parts.push(
+      `--${mixed}`,
+      `Content-Type: ${a.contentType}; name="${a.filename}"`,
+      `Content-Disposition: attachment; filename="${a.filename}"`,
+      'Content-Transfer-Encoding: base64',
+      '',
+      Buffer.from(a.content).toString('base64')
+    )
+  }
+  parts.push(`--${mixed}--`)
+  return [...head, `Content-Type: multipart/mixed; boundary="${mixed}"`, '', ...parts, ''].join('\r\n')
+}
 
-  const sig = signedFields()
-  if (fixture.signatureOverride !== undefined) sig.signature = fixture.signatureOverride
-
-  const form = new FormData()
-  for (const [k, v] of Object.entries(sig)) form.append(k, v)
-  form.append('recipient', fixture.recipient)
-  form.append('from', fixture.from)
-  form.append('subject', fixture.subject ?? 'Test subject')
-  form.append('stripped-text', fixture.text ?? 'Test body')
-  form.append('body-html', fixture.html ?? `<p>${fixture.text ?? 'Test body'}</p>`)
-  form.append('stripped-html', fixture.html ?? `<p>${fixture.text ?? 'Test body'}</p>`)
-  form.append('message-headers', JSON.stringify(headers))
-  if (fixture.bodyMime) form.append('body-mime', fixture.bodyMime)
-  for (const [k, v] of Object.entries(fixture.extraFields ?? {})) form.append(k, v)
-
-  try {
-    const body = await $fetch<Record<string, unknown>>('/api/inbox/webhooks/mailgun/inbound', {
-      method: 'POST',
-      body: form
-    })
-    return { status: 200, body }
-  } catch (err) {
-    const e = err as { statusCode?: number, response?: { status?: number } }
-    return { status: e.statusCode ?? e.response?.status ?? 0, body: {} }
+// POST raw MIME to the fake provider's inbound URL, signed with the test
+// account's signing key — the kernel's signature check and the inbox handler
+// run in every test. `body` reports what the inbox made of it: `status` is
+// 'contact' | 'held' | 'spam' | 'duplicate' with the conversation and message,
+// or 'ignored' when the mail was dropped; `kernel` is the webhook's own reply.
+export async function postInbound(fixture: InboundFixtureOpts): Promise<{ status: number, body: Record<string, unknown>, kernel: Record<string, unknown> }> {
+  const messageId = fixture.messageId ?? `<test-inbox-${randomUUID()}@sender.example>`
+  const sql = getInboxTestDb()
+  const existedBefore = await findInboundMessage(sql, messageId)
+  const raw = buildMime(fixture, messageId)
+  const res = await postWebhook('inbound', raw, {
+    'content-type': 'message/rfc822',
+    'x-fake-envelope-to': fixture.recipient,
+    ...(fixture.signatureOverride !== undefined ? { 'x-fake-signature': fixture.signatureOverride } : {})
+  })
+  if (res.status !== 200) return { status: res.status, body: {}, kernel: res.body }
+  const recipients = (res.body.recipients ?? []) as { outcome: string }[]
+  if (!recipients.some(r => r.outcome === 'handled')) {
+    return { status: 200, body: { status: 'ignored' }, kernel: res.body }
+  }
+  const row = await findInboundMessage(sql, messageId)
+  if (!row) return { status: 200, body: { status: 'ignored' }, kernel: res.body }
+  const status = existedBefore
+    ? 'duplicate'
+    : row.message_status === 'held' ? 'held' : row.conversation_status === 'spam' ? 'spam' : 'contact'
+  return {
+    status: 200,
+    body: { status, conversation_id: row.conversation_id, message_id: row.id },
+    kernel: res.body
   }
 }
 
-export async function postDeliveryEvent(eventData: Record<string, unknown>): Promise<Record<string, unknown>> {
-  return await $fetch<Record<string, unknown>>('/api/inbox/webhooks/mailgun/events', {
-    method: 'POST',
-    body: { signature: signedFields(), 'event-data': eventData }
+async function findInboundMessage(sql: ReturnType<typeof postgres>, messageId: string) {
+  const [row] = await sql<{ id: string, conversation_id: string, message_status: string, conversation_status: string }[]>`
+    SELECT m.id, m.conversation_id, m.status AS message_status, c.status AS conversation_status
+    FROM inbox_messages m JOIN inbox_conversations c ON c.id = m.conversation_id
+    WHERE m.email_message_id = ${messageId}
+  `
+  return row ?? null
+}
+
+let _db: ReturnType<typeof postgres> | null = null
+function getInboxTestDb(): ReturnType<typeof postgres> {
+  _db ??= getHostAdminDb()
+  return _db
+}
+
+export interface MailEventFixture {
+  type: 'delivered' | 'bounced' | 'deferred' | 'complained' | 'unsubscribed' | 'rejected' | 'dropped'
+  recipient: string
+  permanent?: boolean
+  detail?: string
+  orgId?: string | null
+  ref?: string | null
+  stream?: string | null
+}
+
+const eventRecipients = new Set<string>()
+
+// POST provider events to the fake provider's events URL, correlated to the
+// inbox stream unless told otherwise. Every recipient is remembered so cleanup
+// can drop the kernel suppressions the events create.
+export async function postMailEvents(events: MailEventFixture[]): Promise<{ status: number, body: Record<string, unknown> }> {
+  for (const e of events) eventRecipients.add(e.recipient.trim().toLowerCase())
+  const body = JSON.stringify({
+    events: events.map(e => ({
+      ...e,
+      stream: e.stream === undefined ? 'inbox' : e.stream,
+      permanent: e.permanent ?? (e.type === 'bounced' || e.type === 'rejected' || e.type === 'dropped'),
+      occurredAt: new Date().toISOString()
+    }))
   })
+  return await postWebhook('events', body, { 'content-type': 'application/json' })
+}
+
+export interface SentMail {
+  id: string
+  from: string
+  messageId: string
+  inReplyTo: string
+  replyTo: string
+}
+
+// Mail Mailpit caught for this recipient, newest first, with the headers the
+// inbox sets. Waits until at least `count` have arrived.
+export async function waitForMailsTo(address: string, count = 1, timeoutMs = 15_000): Promise<SentMail[]> {
+  const base = process.env.TEST_MAILHOG_URL || 'http://localhost:8025'
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const res = await fetch(`${base}/api/v1/search?query=${encodeURIComponent(`to:${address}`)}`)
+    const body = await res.json() as { messages: Array<{ ID: string, To: Array<{ Address: string }> }> }
+    const ids = (body.messages ?? [])
+      .filter(m => m.To.some(t => t.Address.toLowerCase() === address.toLowerCase()))
+      .map(m => m.ID)
+    if (ids.length >= count) {
+      const out: SentMail[] = []
+      for (const id of ids) {
+        const h = await (await fetch(`${base}/api/v1/message/${id}/headers`)).json() as Record<string, string[]>
+        const header = (name: string) => h[name]?.[0] ?? h[name.toLowerCase()]?.[0] ?? ''
+        out.push({ id, from: header('From'), messageId: header('Message-Id') || header('Message-ID'), inReplyTo: header('In-Reply-To'), replyTo: header('Reply-To') })
+      }
+      return out
+    }
+    await new Promise(r => setTimeout(r, 200))
+  }
+  throw new Error(`Fewer than ${count} mails to ${address} arrived within ${timeoutMs}ms`)
+}
+
+export function hashMailAddress(address: string): string {
+  return createHash('sha256').update(address.trim().toLowerCase()).digest('hex')
 }
 
 // --- Direct S3 assertions ---------------------------------------------------
@@ -265,6 +428,15 @@ export async function listMcpTools(token: string): Promise<Array<{ name: string,
 // core_settings, memberships). Users are wiped by prefix afterwards.
 export async function cleanupInboxTestData(sql: ReturnType<typeof postgres>): Promise<void> {
   await sql`DELETE FROM orgs WHERE slug LIKE 'test-inbox-%'`
+  // Host mail domains made by tests (routes cascade), not the shared one.
+  await sql`
+    DELETE FROM mail_domains
+    WHERE source = 'ui' AND org_id IS NULL AND domain LIKE 'test-inbox-%' AND domain <> ${INBOX_TEST_SHARED_DOMAIN}
+  `
+  if (eventRecipients.size) {
+    await sql`DELETE FROM mail_suppressions WHERE address_hash IN ${sql([...eventRecipients].map(hashMailAddress))}`
+    eventRecipients.clear()
+  }
   await sql`DELETE FROM users WHERE email LIKE 'test-inbox-%'`
   // OAuth clients minted by `issueMcpBearer`; their token families and
   // access tokens cascade off the users deleted above.

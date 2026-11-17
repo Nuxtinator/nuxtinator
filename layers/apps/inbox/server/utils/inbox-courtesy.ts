@@ -5,8 +5,11 @@
 // 3834 autoReply headers so responders don't loop. Callers enforce the
 // anti-backscatter gates: authenticated sender only, never to an
 // auto-responder/bounce.
+import { sendMail } from '#core/server/utils/mail'
 
 export interface InboxCourtesyContext {
+  // The org whose inbox stream sends it (null in single mode).
+  orgId: string | null
   toEmail: string
   toName: string | null
   subject: string | null
@@ -62,15 +65,18 @@ export async function inboxSendCourtesy(
   const subject = kind === 'auto_ack' && ctx.verificationUrl
     ? 'Please confirm your email — we received your message'
     : (ctx.subject ? `Re: ${ctx.subject}` : `We received your message`)
-  const result = await inboxSendEmail({
-    from: inboxBuildFromAddress({ displayName: ctx.brandName || null, contactAddress: ctx.contactAddress }),
+  const result = await sendMail({
+    stream: 'inbox',
+    orgId: ctx.orgId,
+    fromName: ctx.brandName || undefined,
+    fromLocal: ctx.contactAddress.slice(0, ctx.contactAddress.lastIndexOf('@')),
     to: ctx.toEmail,
     subject,
     html: inboxRenderMessageEmail({ bodyHtml, subject }),
     replyTo: inboxBuildReplyAddress(ctx.replyToken, ctx.contactAddress),
     autoReply: true
   })
-  if (!result.success) {
-    console.warn(`[inbox] ${kind} courtesy send to ${ctx.toEmail} failed: ${result.error}`)
+  if (result.status !== 'sent') {
+    console.warn(`[inbox] ${kind} courtesy send to ${ctx.toEmail} was not sent: ${result.status}${'error' in result ? ` (${result.error})` : ''}`)
   }
 }

@@ -98,11 +98,9 @@ const signatureNotice = computed(() => {
 // the editor — the preview is the only way to see what will actually go out.
 const showSignaturePreview = ref(false)
 
-// Every send needs the org's shared contact address for its From identity;
-// without one the sweep holds the message instead of delivering it. Send is
-// blocked here so nobody writes a reply believing it went out. Drafting and
-// saving stay open — the text is preserved either way.
-const hasSendAddress = computed(() => !!props.me?.contactAddress)
+// While no domain can receive mail, a sent reply is held in the queue and goes
+// out once one can; the composer says so.
+const repliesHeld = computed(() => !!props.me?.noReceivingDomain)
 
 // Deliverability of the reply target: badges in the header and on the
 // composer's To line, and the reason a send is blocked. The sweep fails any
@@ -271,7 +269,7 @@ const statusValue = computed({
 // (v-model) and clears them only after the send request succeeds, so a failed
 // send keeps the typed text for retry.
 function submitReply() {
-  if (props.sending || !hasSendAddress.value || !canDeliver.value) return
+  if (props.sending || !canDeliver.value) return
   const body = replyBody.value.trim()
   if (!body || body === '<p></p>') return
   emit('reply', replyBody.value, currentDraftId.value ?? undefined, props.me?.personalFrom ? fromIdentity.value : undefined)
@@ -623,15 +621,15 @@ const viewTabs = [
               icon="i-lucide-send"
               size="sm"
               :loading="props.sending"
-              :disabled="props.sending || !hasSendAddress || !canDeliver"
+              :disabled="props.sending || !canDeliver"
               @click="submitReply"
             />
           </div>
         </div>
       </div>
-      <p v-if="!hasSendAddress" class="flex items-center gap-1.5 text-xs text-(--ui-text-warning)">
+      <p v-if="repliesHeld" class="flex items-center gap-1.5 text-xs text-(--ui-text-warning)">
         <UIcon name="i-lucide-mail-warning" class="shrink-0" />
-        <span>Sending is unavailable until this inbox has a shared contact address. You can still save this as a draft.</span>
+        <span>No domain can receive mail yet: replies are held and go out once one can.</span>
       </p>
     </footer>
     </template>
