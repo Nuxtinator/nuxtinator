@@ -63,13 +63,11 @@ const NO_RLS = new Set([
   'invite_orgs', // invite acceptance runs before membership exists
   'activity_logs', // nullable org_id; host-wide events and the rate limiter read it without an org
   'groups', // nullable org_id; host groups have none, and handlers decide who sees a group
-  // The mail kernel's tables: nullable org_id for host rows, read by webhooks
-  // before any org is known and by processes outside Nuxt.
-  'mail_accounts',
-  'mail_domains',
-  'mail_stream_routes',
-  'mail_suppressions',
-  'mail_outbox'
+  'mail_accounts', // nullable org_id; every sending process reads the account a domain sends through, whoever owns it
+  'mail_domains', // nullable org_id; webhooks and inbound dispatch find the domain before any org is known
+  'mail_stream_routes', // nullable org_id; sender resolution reads the org's routes and the host's in one query
+  'mail_suppressions', // nullable org_id; global and host rows apply in every org, and events write rows before any org is known
+  'mail_outbox' // nullable org_id; the sweep and workers outside Nuxt claim every org's rows
 ])
 
 describe('RLS policy invariant', () => {

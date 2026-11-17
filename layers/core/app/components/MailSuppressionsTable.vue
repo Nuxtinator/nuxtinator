@@ -36,6 +36,7 @@ const rows = computed(() => data.value?.suppressions ?? [])
 
 const { data: domainsData } = useMailDomains(props.scope, () => props.orgSlug)
 const unmanaged = computed(() => (domainsData.value?.domains ?? []).filter(d => d.suppressionMode === 'unmanaged' && d.ownershipStatus === 'verified').map(d => d.domain))
+const mirrored = computed(() => (domainsData.value?.domains ?? []).filter(d => d.suppressionMode === 'mirrored' && d.ownershipStatus === 'verified').map(d => d.domain))
 
 const reasonItems = Object.entries(MAIL_SUPPRESSION_REASONS).map(([value, label]) => ({ value, label }))
 
@@ -50,18 +51,31 @@ const columns = computed<TableColumn<MailSuppression>[]>(() => [
 
 const clearing = ref<string | null>(null)
 async function clear(row: MailSuppression) {
+  // Only hashes are stored: a provider's list can be released only when the address was searched.
+  const providerNote = !row.address && mirrored.value.length
+    ? ` The provider's own list on ${mirrored.value.join(', ')} isn't touched unless you search for the address first.`
+    : ''
   if (!await confirmAction({
     title: 'Clear this suppression?',
-    description: 'Mail to this address is sent again. A later bounce or complaint suppresses it again.',
+    description: `Mail to this address is sent again. A later bounce or complaint suppresses it again.${providerNote}`,
     confirmLabel: 'Clear'
   })) return
   clearing.value = row.id
   try {
-    await $fetch(`${mailApiBase(props.scope, props.orgSlug)}/suppressions/${row.id}/clear`, {
+    const res = await $fetch<{ suppression: MailSuppression & { providerLists: { released: string[], notReleased: string[] } } }>(`${mailApiBase(props.scope, props.orgSlug)}/suppressions/${row.id}/clear`, {
       method: 'POST',
-      body: address.value ? { address: address.value } : {}
+      body: row.address ? { address: row.address } : {}
     })
-    toast.add({ title: 'Suppression cleared', color: 'success' })
+    const notReleased = res.suppression.providerLists?.notReleased ?? []
+    if (notReleased.length) {
+      toast.add({
+        title: 'Cleared here only',
+        description: `The provider's list on ${notReleased.join(', ')} may still block this address. Remove it there in the provider's dashboard.`,
+        color: 'warning'
+      })
+    } else {
+      toast.add({ title: 'Suppression cleared', color: 'success' })
+    }
     await refresh()
   } catch (err) {
     toast.add({ title: 'Not cleared', description: mailErrorMessage(err), color: 'error' })

@@ -3,10 +3,28 @@
 // only ever touch rows of that scope.
 import type { H3Event } from 'h3'
 import { z } from 'zod'
-import { ownershipRecord, probeAddress, type Mail, type MailAccountRow, type MailDomainRow } from '@nuxtinator/mail/kernel'
+import { ownershipRecord, probeAddress, type Mail, type MailAccountRow, type MailDomainRow, type ManualStep, type WebhookUrls } from '@nuxtinator/mail/kernel'
+import { db } from './database'
 import { hostOrgMailAccounts, mailAdmin, mailBaseUrl } from './mail-host'
 
-export type MailScope = { orgId: string | null }
+export type MailScope = { orgId: string | null, hostAccounts?: { send: string | null, receive: string | null } }
+
+// An org's domains may use its own accounts and, of the host's, only the
+// ones the host designates for org domains.
+async function domainScope(scope: MailScope): Promise<MailScope> {
+  return scope.orgId ? { ...scope, hostAccounts: await hostOrgMailAccounts() } : scope
+}
+
+// Steps done in an account the org can't reach: the org is told to hand
+// them to the host's admins, and the webhook URLs are left out.
+function hostSideSteps(steps: ManualStep[], providerLabel: string, urls: WebhookUrls): ManualStep[] {
+  if (!steps.length) return []
+  const hidden = new Set(Object.values(urls))
+  return [
+    { title: `These steps are done in the host's ${providerLabel} account`, detail: 'Send them to your host\'s admins. Add any DNS records they give you at your DNS provider, then choose Check now.' },
+    ...steps.map(step => ({ ...step, values: step.values?.filter(v => !hidden.has(v.value)) }))
+  ]
+}
 
 function providerCatalog(mail: Mail) {
   return mail.providers.map(p => ({
@@ -15,7 +33,8 @@ function providerCatalog(mail: Mail) {
     credentialFields: p.credentialFields.map(({ env: _env, ...f }) => f),
     domainCredentialFields: p.domainCredentialFields ?? [],
     supports: p.supports,
-    webhookScope: p.webhookScope
+    webhookScope: p.webhookScope,
+    notes: p.notes ?? {}
   }))
 }
 
@@ -30,11 +49,38 @@ function accountPayload(mail: Mail, account: MailAccountRow) {
   }
 }
 
+type OrgNames = (orgIds: string[]) => Promise<Map<string, string>>
+let orgNames: OrgNames | null = null
+
+// The tenancy layer tells core how to name an org on the host's pages.
+export function setMailOrgNameResolver(fn: OrgNames): void {
+  orgNames = fn
+}
+
+// Every org's own accounts, for the host's read-only view of them.
+async function orgOwnedAccounts(mail: Mail) {
+  const rows = await db.selectFrom('mail_accounts').selectAll().where('org_id', 'is not', null).orderBy('created_at').execute()
+  if (!rows.length) return []
+  const names = orgNames ? await orgNames([...new Set(rows.map(r => r.org_id!))]) : new Map<string, string>()
+  return rows.map(a => ({ ...mail.admin.accountView(a), webhookUrls: null, orgName: names.get(a.org_id!) ?? null }))
+}
+
+// The host account the host designates for receiving on org domains, as an org may pick it.
+async function hostReceiveOption(mail: Mail) {
+  const { receive } = await hostOrgMailAccounts()
+  if (!receive) return null
+  const row = await db.selectFrom('mail_accounts').select(['id', 'provider']).where('id', '=', receive).executeTakeFirst()
+  if (!row?.provider) return null
+  return { id: row.id, provider: row.provider }
+}
+
 export async function listMailAccounts(scope: MailScope) {
   return await mailAdmin(async (mail) => {
     const accounts = await mail.admin.listAccounts(scope)
     return {
       accounts: accounts.map(a => accountPayload(mail, a)),
+      orgAccounts: scope.orgId ? [] : await orgOwnedAccounts(mail),
+      hostReceiveAccount: scope.orgId ? await hostReceiveOption(mail) : null,
       providers: providerCatalog(mail),
       outboxPublicKey: scope.orgId ? null : mail.outboxPublicKey,
       transport: typeof mail.transport === 'object' ? 'smtp' : mail.transport
@@ -88,14 +134,23 @@ export async function rotateMailWebhooks(scope: MailScope, id: string) {
 async function domainPayload(mail: Mail, domain: MailDomainRow, accounts: Map<string, MailAccountRow>) {
   const send = domain.send_account_id ? accounts.get(domain.send_account_id) ?? null : null
   const receive = domain.receive_account_id ? accounts.get(domain.receive_account_id) ?? null : null
-  const events = await mail.admin.requiredEvents(domain)
+  const events = await mail.admin.postedEvents(domain)
   const webhooks = await mail.admin.webhookStatus(domain)
   const eventsAccount = send ?? receive
   const visible = (a: MailAccountRow | null) => !!a && (domain.org_id === null || a.org_id === domain.org_id)
   const urls = eventsAccount && visible(eventsAccount) ? mail.webhookUrls(eventsAccount, mailBaseUrl()) : null
   const provider = (a: MailAccountRow | null) => a?.provider ? mail.providers.find(p => p.id === a.provider) ?? null : null
+  const steps = (a: MailAccountRow | null, role: 'send' | 'receive'): ManualStep[] => {
+    if (!a) return []
+    const accountUrls = mail.webhookUrls(a, mailBaseUrl())
+    const list = mail.admin.manualSteps(a, domain, role, accountUrls, events)
+    return visible(a) ? list : hostSideSteps(list, provider(a)?.label ?? 'provider', accountUrls)
+  }
   const caps = (domain.capabilities ?? send?.capabilities ?? {}) as Record<string, boolean>
   const sendProvider = provider(send)
+  // A role set up automatically holds the provider's refs; one that fell back to manual doesn't.
+  const refs = (domain.provider_refs ?? {}) as Record<string, unknown>
+  const roleMode = (role: 'send' | 'receive') => domain.setup_mode === 'auto' && refs[role] ? 'auto' as const : 'manual' as const
   return {
     id: domain.id,
     orgId: domain.org_id,
@@ -105,6 +160,7 @@ async function domainPayload(mail: Mail, domain: MailDomainRow, accounts: Map<st
     ownershipStatus: domain.ownership_status,
     ownershipRecord: domain.ownership_token ? ownershipRecord(domain) : null,
     setupMode: domain.setup_mode,
+    roleModes: { send: roleMode('send'), receive: roleMode('receive') },
     sendAccountId: domain.send_account_id,
     receiveAccountId: domain.receive_account_id,
     sendProvider: sendProvider ? { id: sendProvider.id, label: sendProvider.label } : (send ? { id: null, label: 'None' } : null),
@@ -121,8 +177,8 @@ async function domainPayload(mail: Mail, domain: MailDomainRow, accounts: Map<st
     webhooks: { ...webhooks, configured: domain.webhook_events, urls: urls ?? null },
     requiredEvents: events,
     manualSteps: {
-      send: send && urls ? mail.admin.manualSteps(send, domain, 'send', urls, events) : [],
-      receive: receive && visible(receive) ? mail.admin.manualSteps(receive, domain, 'receive', mail.webhookUrls(receive, mailBaseUrl()), events) : []
+      send: steps(send, 'send'),
+      receive: steps(receive, 'receive')
     },
     lastCheckedAt: domain.last_checked_at,
     verifiedAt: domain.verified_at,
@@ -158,21 +214,31 @@ const domainBody = z.object({
 export async function createMailDomain(event: H3Event, scope: MailScope, opts: { useHostOrgAccounts?: boolean } = {}) {
   const body = domainBody.parse(await readBody(event))
   if (!body.domain) throw createError({ statusCode: 422, statusMessage: 'Enter a domain' })
-  if (opts.useHostOrgAccounts && body.sendAccountId === undefined && body.receiveAccountId === undefined) {
-    const host = await hostOrgMailAccounts()
-    body.sendAccountId = host.send
-    body.receiveAccountId = body.setupMode === 'manual' ? null : host.receive
-  }
+  const domainScoped = await domainScope(scope)
   return await mailAdmin(async (mail) => {
-    const res = await mail.admin.addDomain(scope, { ...body, domain: body.domain! }, mailBaseUrl())
+    if (opts.useHostOrgAccounts && body.sendAccountId === undefined && body.receiveAccountId === undefined) {
+      const host = domainScoped.hostAccounts ?? await hostOrgMailAccounts()
+      const rows = await mail.admin.accountsByIds([host.send, host.receive])
+      // An env account with no provider still sends under the local transports.
+      const supports = (id: string | null, role: 'send' | 'receive') => {
+        const row = id ? rows.get(id) : undefined
+        if (!row) return false
+        if (!row.provider) return role === 'send'
+        return !!mail.providers.find(p => p.id === row.provider)?.supports[role]
+      }
+      body.sendAccountId = supports(host.send, 'send') ? host.send : null
+      body.receiveAccountId = body.setupMode !== 'manual' && supports(host.receive, 'receive') ? host.receive : null
+    }
+    const res = await mail.admin.addDomain(domainScoped, { ...body, domain: body.domain! }, mailBaseUrl())
     return await domainResponse(mail, res.domain, { setup: res.setup })
   })
 }
 
 export async function patchMailDomain(event: H3Event, scope: MailScope, id: string) {
   const body = domainBody.parse(await readBody(event))
+  const domainScoped = await domainScope(scope)
   return await mailAdmin(async (mail) => {
-    const res = await mail.admin.patchDomain(scope, id, body, mailBaseUrl())
+    const res = await mail.admin.patchDomain(domainScoped, id, body, mailBaseUrl())
     return await domainResponse(mail, res.domain, { setup: res.setup })
   })
 }

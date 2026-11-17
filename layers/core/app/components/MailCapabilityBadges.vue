@@ -31,10 +31,9 @@ const items = computed(() => props.keys.map((key) => {
       :title="item.title"
       :class="item.value === undefined ? 'text-(--ui-text-dimmed)' : ''"
     >
-      {{ item.label }}<span
-        v-if="item.value === undefined"
-        class="sr-only"
-      > not tested</span>
+      {{ item.label }}<template v-if="item.value === undefined">
+        not tested
+      </template>
     </UBadge>
   </div>
 </template>

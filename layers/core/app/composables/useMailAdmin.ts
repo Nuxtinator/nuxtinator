@@ -22,6 +22,7 @@ export interface MailProviderInfo {
   domainCredentialFields: MailCredentialField[]
   supports: { send: boolean, receive: boolean, events: boolean }
   webhookScope: 'domain' | 'account'
+  notes: { send?: string, receive?: string }
 }
 
 export interface MailWebhookUrls {
@@ -42,10 +43,16 @@ export interface MailAccount {
   webhookTokenVersion: number
   createdAt: string
   webhookUrls: MailWebhookUrls | null
+  // Set on an org's own account when the host lists it
+  orgName?: string | null
 }
 
 export interface MailAccountsResponse {
   accounts: MailAccount[]
+  // Every org's own accounts; host scope only
+  orgAccounts: MailAccount[]
+  // The host's account an org may receive through; org scope only
+  hostReceiveAccount: { id: string, provider: string } | null
   providers: MailProviderInfo[]
   outboxPublicKey: string | null
   transport: string
@@ -78,6 +85,7 @@ export interface MailDomain {
   ownershipStatus: 'pending' | 'verified' | 'lapsed'
   ownershipRecord: { type: 'TXT', name: string, value: string } | null
   setupMode: 'auto' | 'manual'
+  roleModes: { send: 'auto' | 'manual', receive: 'auto' | 'manual' }
   sendAccountId: string | null
   receiveAccountId: string | null
   sendProvider: { id: string | null, label: string } | null
@@ -220,7 +228,7 @@ export function useMailAccounts(scope: MailScope, orgSlug?: MaybeRefOrGetter<str
   return useAsyncData<MailAccountsResponse>(
     mailDataKey(scope, 'accounts'),
     () => $fetch<MailAccountsResponse>(`${mailApiBase(scope, toValue(orgSlug))}/accounts`),
-    { default: () => ({ accounts: [], providers: [], outboxPublicKey: null, transport: '' }), watch: orgSlug ? [() => toValue(orgSlug)] : undefined }
+    { default: () => ({ accounts: [], orgAccounts: [], hostReceiveAccount: null, providers: [], outboxPublicKey: null, transport: '' }), watch: orgSlug ? [() => toValue(orgSlug)] : undefined }
   )
 }
 

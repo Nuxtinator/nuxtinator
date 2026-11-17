@@ -95,7 +95,7 @@ test('an org account appears in the add-domain provider picker', async ({ page }
 
   await page.goto(`/@${org.slug}/settings/email`)
   await page.getByRole('button', { name: 'Advanced' }).click()
-  await page.getByRole('button', { name: 'Add account' }).click()
+  await page.getByRole('button', { name: 'Use our own provider account' }).click()
   const panel = page.getByRole('dialog')
   await pickOption(page, /provider/i, 'Fake provider')
   await panel.getByLabel('Name').fill(label)
@@ -107,4 +107,16 @@ test('an org account appears in the add-domain provider picker', async ({ page }
   await page.getByRole('button', { name: 'Use our own domain' }).click()
   await page.getByRole('combobox', { name: 'Provider account' }).click()
   await expect(page.getByRole('option', { name: label })).toBeVisible()
+})
+
+test('empty states of a new org', async ({ page }) => {
+  const { org } = await loginIntoNewOrg(page)
+  await page.goto(`/@${org.slug}/settings/email`)
+  await expect(page.getByText(/^Your mail is sent from .+\. Add your own domain to send from it\.$/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Use our own domain' })).toBeVisible()
+  await expect(page.getByText('No suppressed addresses.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Advanced' }).click()
+  await expect(page.getByText('No accounts of your own. Your domains use the host\'s provider.')).toBeVisible()
+  await expect(page.getByText('Add a domain to send or receive mail on it.')).toBeVisible()
 })

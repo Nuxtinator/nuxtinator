@@ -23,7 +23,7 @@
   },
   "nuxtinator": {
     "requires": {
-      "@nuxtinator/mail": ">=1.0.0"
+      "@nuxtinator/mail": ">=0.0.0"
     }
   },
   "peerDependencies": {

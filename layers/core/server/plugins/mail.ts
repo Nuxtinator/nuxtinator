@@ -2,7 +2,9 @@
 // streams, then, once every plugin has run and migrations have finished,
 // builds the instance, syncs the env account and starts the outbox sweep.
 // A build that throws stops the process: a bad mail configuration should
-// fail the boot, not the first password reset.
+// fail the boot, not the first password reset. Missing keys and failed
+// migrations leave mail unavailable instead, with the reason logged and
+// given to every sender.
 import { Cron } from 'croner'
 import { mailgunProvider, sendgridProvider, sesProvider } from '@nuxtinator/mail/adapters'
 import { memoryDns } from '@nuxtinator/mail/kernel'
@@ -38,23 +40,40 @@ export default defineNitroPlugin((nitroApp) => {
   registerMailStream({ id: 'account', label: 'Account', defaultLocal: fromLocal(), orgAssignable: false, userInitiated: true, queued: true })
   registerMailStream({ id: 'system', label: 'System', defaultLocal: fromLocal(), orgAssignable: false, queued: true })
 
+  // Settles mail as unavailable, telling every later sender why.
+  const unavailable = (reason: string, cause?: unknown) => {
+    console.error(`[mail] ${reason}`, ...(cause === undefined ? [] : [cause]))
+    settleMail(null, new Error(`Mail is unavailable: ${reason}`, { cause }))
+  }
+
   const build = async () => {
-    const outcome = await migrationsReady()
+    let outcome
+    try {
+      outcome = await migrationsReady()
+    } catch (err) {
+      unavailable('migrations failed, so the mail kernel was not built', err)
+      return
+    }
     if (!outcome.database) {
       console.warn('[mail] no database: the mail kernel is not built and mail is unavailable')
       settleMail(null)
       return
     }
     const secretKey = process.env.NUXT_SECRET_ENCRYPTION_KEY || String(useRuntimeConfig().secretEncryptionKey || '') || undefined
+    const outboxPublicKey = process.env.MAIL_OUTBOX_PUBLIC_KEY || undefined
+    if (!secretKey && !outboxPublicKey) {
+      unavailable('NUXT_SECRET_ENCRYPTION_KEY is not set (nor MAIL_OUTBOX_PUBLIC_KEY), so this process can neither send nor queue mail')
+      return
+    }
     if (!secretKey) {
-      console.error('[mail] NUXT_SECRET_ENCRYPTION_KEY is not set: this process can only enqueue mail, and nothing will be sent')
+      console.error('[mail] NUXT_SECRET_ENCRYPTION_KEY is not set: this process only queues mail, and another process holding the key must send it')
     }
     const listenUrl = process.env.MAIL_LISTEN_DATABASE_URL
     const mail = buildMail({
       db,
       env: process.env,
       secretKey,
-      outboxPublicKey: process.env.MAIL_OUTBOX_PUBLIC_KEY || undefined,
+      outboxPublicKey,
       webhookSecret: process.env.MAIL_WEBHOOK_SECRET || undefined,
       sweepSeconds: Number.parseInt(process.env.MAIL_SWEEP_SECONDS || '30', 10),
       dns: mailFakeState.dns ?? undefined,
@@ -93,9 +112,13 @@ export default defineNitroPlugin((nitroApp) => {
     if (!mail?.canSend) return
     try {
       await mail.admin.runDailyJob({ baseUrl: getSiteUrl(), onAlert: notifyMailAlert })
-      await mail.purgeOutbox()
     } catch (err) {
       console.error('[mail] daily job failed:', err)
+    }
+    try {
+      await mail.purgeOutbox()
+    } catch (err) {
+      console.error('[mail] outbox purge failed:', err)
     }
   })
 })

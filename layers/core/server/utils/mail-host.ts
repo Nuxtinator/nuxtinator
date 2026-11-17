@@ -79,22 +79,29 @@ function alertText(alert: MailAlert): { subject: string, body: string } {
   }
   return {
     subject: `${alert.domain} can no longer ${alert.role === 'receive' ? 'receive' : 'send'} mail`,
-    body: `The daily check found that ${alert.domain} stopped passing its ${alert.role === 'receive' ? 'receiving' : 'sending'} check. Open Admin → Email → Domains to see what changed.`
+    body: `The daily check found that ${alert.domain} stopped passing its ${alert.role === 'receive' ? 'receiving' : 'sending'} check. ${alert.orgId ? 'Open the email settings of the organization that uses it' : 'Open Admin → Email → Domains'} to see what changed.`
   }
 }
 
+// A lapsed claim goes to the org's admins. A lost role goes to the host's
+// admins, and also to the org's admins when the domain is an org's.
 export async function notifyMailAlert(alert: MailAlert): Promise<void> {
-  const recipients = alert.orgId
-    ? (orgAdminEmails ? await orgAdminEmails(alert.orgId) : [])
-    : await hostAdminEmails()
+  const org = alert.orgId && orgAdminEmails ? await orgAdminEmails(alert.orgId) : []
+  const host = alert.kind === 'role_lost' || !alert.orgId ? await hostAdminEmails() : []
   const { subject, body } = alertText(alert)
-  const link = `${getSiteUrl()}${alert.orgId ? '' : '/admin/email?tab=domains'}`
-  for (const to of new Set(recipients)) {
-    await sendMail({
-      stream: 'system',
-      to,
-      subject,
-      html: `<p>${body}</p><p><a href="${link}">${link}</a></p>`
-    }).catch(err => console.error('[mail] alert send failed:', err))
+  const sent = new Set<string>()
+  const send = async (recipients: string[], link: string) => {
+    for (const to of recipients) {
+      if (sent.has(to)) continue
+      sent.add(to)
+      await sendMail({
+        stream: 'system',
+        to,
+        subject,
+        html: `<p>${body}</p><p><a href="${link}">${link}</a></p>`
+      }).catch(err => console.error('[mail] alert send failed:', err))
+    }
   }
+  await send(host, `${getSiteUrl()}${alert.orgId ? '/admin/orgs' : '/admin/email?tab=domains'}`)
+  await send(org, getSiteUrl())
 }

@@ -9,9 +9,13 @@ const props = withDefaults(defineProps<{
   orgSlug?: string | null
   domain: MailDomain
   accounts: MailAccount[]
+  // The host's account an org may receive through
+  hostReceiveAccount?: { id: string, provider: string } | null
   providers: MailProviderInfo[]
   setup?: MailDomainSetup | null
-}>(), { orgSlug: null, setup: null })
+  // Where the org's mail goes out while its domain can't be used
+  fallbackDomain?: string | null
+}>(), { orgSlug: null, hostReceiveAccount: null, setup: null, fallbackDomain: null })
 const emit = defineEmits<{ deleted: [] }>()
 
 const toast = useToast()
@@ -19,16 +23,20 @@ const confirmAction = useConfirm()
 const base = computed(() => mailApiBase(props.scope, props.orgSlug))
 const d = computed(() => props.domain)
 
-const lastSetup = ref<MailDomainSetup | null>(props.setup)
-watch(() => props.setup, (s) => {
-  if (s) lastSetup.value = s
-})
-const lastCheck = ref<MailDomainCheck | null>(null)
+// The last setup and check results per domain, kept for the session so
+// reopening the panel still shows the MX warning and the check ticks.
+const results = useState<Record<string, { setup?: MailDomainSetup | null, check?: MailDomainCheck | null }>>('mail-domain-results', () => ({}))
+function remember(patch: { setup?: MailDomainSetup | null, check?: MailDomainCheck | null }) {
+  results.value = { ...results.value, [props.domain.id]: { ...results.value[props.domain.id], ...patch } }
+}
+const lastSetup = computed(() => results.value[props.domain.id]?.setup ?? null)
+const lastCheck = computed(() => results.value[props.domain.id]?.check ?? null)
+watch(() => [props.domain.id, props.setup] as const, ([, s]) => {
+  if (s) remember({ setup: s })
+}, { immediate: true })
 const ownershipFailed = ref(false)
 const busy = ref<string | null>(null)
 watch(() => props.domain.id, () => {
-  lastSetup.value = props.setup
-  lastCheck.value = null
   ownershipFailed.value = false
 })
 
@@ -38,10 +46,18 @@ const ownAccountIds = computed(() => new Set(props.accounts.map(a => a.id)))
 // An org sees webhook URLs only for domains on its own accounts; the host's accounts are the host's to wire up.
 const showWebhooks = computed(() => props.scope === 'host'
   || [d.value.sendAccountId, d.value.receiveAccountId].some(id => id && ownAccountIds.value.has(id)))
-const receiveAccounts = computed(() => props.accounts
-  .filter(a => a.provider && props.providers.find(p => p.id === a.provider)?.supports.receive)
-  .map(a => ({ label: a.label, value: a.id })))
+const receiveAccounts = computed(() => [
+  ...(props.hostReceiveAccount && props.providers.find(p => p.id === props.hostReceiveAccount!.provider)?.supports.receive
+    ? [{ label: 'The host\'s provider account', value: props.hostReceiveAccount.id }]
+    : []),
+  ...props.accounts
+    .filter(a => a.provider && props.providers.find(p => p.id === a.provider)?.supports.receive)
+    .map(a => ({ label: a.label, value: a.id }))
+])
 const recordsFor = (role: 'send' | 'receive') => d.value.dnsRecords.filter(r => r.role === role)
+// A role whose automatic setup fell back shows the manual steps and checks.
+const manual = (role: 'send' | 'receive') => (d.value.roleModes?.[role] ?? d.value.setupMode) === 'manual'
+const receiveProvider = computed(() => props.providers.find(p => p.id === d.value.receiveProvider?.id) ?? null)
 const roleCheck = (role: 'send' | 'receive'): MailRoleCheck | undefined => lastCheck.value?.roles.find(r => r.role === role)
 const setupError = (role: 'send' | 'receive') => lastSetup.value?.roles.find(r => r.role === role)?.error
 
@@ -49,11 +65,8 @@ async function call(name: string, fn: () => Promise<MailDomainResponse>, success
   busy.value = name
   try {
     const res = await fn()
-    if (res.setup) lastSetup.value = res.setup
-    if (res.check) {
-      lastCheck.value = res.check
-      if (res.check.setup) lastSetup.value = res.check.setup
-    }
+    if (res.setup) remember({ setup: res.setup })
+    if (res.check) remember({ check: res.check, ...(res.check.setup ? { setup: res.check.setup } : {}) })
     await refreshMail(props.scope, 'domains', 'streams')
     if (success) toast.add({ title: success, color: 'success' })
     return res
@@ -136,10 +149,14 @@ async function remove() {
   }
 }
 
-const checkIcon = (ok: boolean | null) => ok === true
+// Missing DNS records don't fail sending, so they show as a warning.
+const ADVISORY_CHECKS = new Set(['dns', 'spf', 'dkim', 'dmarc'])
+const checkIcon = (ok: boolean | null, key?: string) => ok === true
   ? { name: 'i-lucide-circle-check', class: 'text-(--ui-success)' }
   : ok === false
-    ? { name: 'i-lucide-circle-x', class: 'text-(--ui-error)' }
+    ? (key && ADVISORY_CHECKS.has(key)
+        ? { name: 'i-lucide-triangle-alert', class: 'text-(--ui-warning)' }
+        : { name: 'i-lucide-circle-x', class: 'text-(--ui-error)' })
     : { name: 'i-lucide-clock', class: 'text-(--ui-text-dimmed)' }
 </script>
 
@@ -154,7 +171,8 @@ const checkIcon = (ok: boolean | null) => ok === true
         color="error"
         variant="subtle"
         icon="i-lucide-triangle-alert"
-        :title="`We can no longer confirm you control ${d.domain}.`"
+        :title="`We can no longer confirm you control ${d.domain}.${fallbackDomain ? ` Your mail is going out from ${fallbackDomain}.` : ''}`"
+        :actions="[{ label: 'Check now', icon: 'i-lucide-refresh-cw', color: 'neutral', variant: 'outline', loading: busy === 'ownership', onClick: () => { checkOwnership() } }]"
       />
       <h3 class="font-medium flex items-center gap-1">
         Confirm you own {{ d.domain }}
@@ -164,6 +182,7 @@ const checkIcon = (ok: boolean | null) => ok === true
         :record="d.ownershipRecord"
         :checking="busy === 'ownership'"
         :failed="ownershipFailed"
+        :show-check="d.ownershipStatus !== 'lapsed'"
         @check="checkOwnership"
       />
     </section>
@@ -222,8 +241,12 @@ const checkIcon = (ok: boolean | null) => ok === true
         class="space-y-3 pt-5 border-t border-(--ui-border)"
       >
         <div class="flex items-center gap-2">
-          <h3 class="font-medium">
+          <h3 class="font-medium flex items-center gap-1">
             Sending
+            <InfoTip
+              v-if="sendProvider?.notes.send"
+              :text="sendProvider.notes.send"
+            />
           </h3>
           <span class="text-sm text-(--ui-text-muted)">{{ d.sendProvider?.label }}</span>
           <UBadge
@@ -234,7 +257,7 @@ const checkIcon = (ok: boolean | null) => ok === true
             {{ MAIL_ROLE_STATUS[d.sendStatus].label }}
           </UBadge>
           <UButton
-            v-if="d.setupMode === 'manual'"
+            v-if="manual('send')"
             size="sm"
             class="ml-auto"
             :loading="busy === 'verify-send'"
@@ -250,7 +273,7 @@ const checkIcon = (ok: boolean | null) => ok === true
           Automatic setup failed: {{ setupError('send') }}. Follow the steps below instead.
         </p>
         <ul
-          v-if="d.setupMode === 'manual' && roleCheck('send')?.checks.length"
+          v-if="manual('send') && roleCheck('send')?.checks.length"
           class="space-y-1"
         >
           <li
@@ -259,9 +282,9 @@ const checkIcon = (ok: boolean | null) => ok === true
             class="flex items-start gap-2 text-sm"
           >
             <UIcon
-              :name="checkIcon(c.ok).name"
+              :name="checkIcon(c.ok, c.key).name"
               class="size-4 mt-0.5 shrink-0"
-              :class="checkIcon(c.ok).class"
+              :class="checkIcon(c.ok, c.key).class"
             />
             <div class="min-w-0">
               {{ c.label }}
@@ -281,11 +304,11 @@ const checkIcon = (ok: boolean | null) => ok === true
           {{ roleCheck('send')!.error }}
         </p>
         <MailDnsRecords
-          v-if="d.setupMode === 'auto' && recordsFor('send').length"
+          v-if="!manual('send') && recordsFor('send').length"
           :records="recordsFor('send')"
           :grouped="false"
         />
-        <template v-else-if="d.setupMode === 'manual'">
+        <template v-else-if="manual('send')">
           <MailManualSteps :steps="d.manualSteps.send" />
           <div class="flex items-center gap-2 text-sm">
             <span class="text-(--ui-text-muted)">DKIM selector</span>
@@ -336,8 +359,12 @@ const checkIcon = (ok: boolean | null) => ok === true
 
       <section class="space-y-3 pt-5 border-t border-(--ui-border)">
         <div class="flex items-center gap-2">
-          <h3 class="font-medium">
+          <h3 class="font-medium flex items-center gap-1">
             Receiving
+            <InfoTip
+              v-if="receiveProvider?.notes.receive"
+              :text="receiveProvider.notes.receive"
+            />
           </h3>
           <template v-if="d.receiveAccountId">
             <span class="text-sm text-(--ui-text-muted)">{{ d.receiveProvider?.label }}</span>
@@ -349,7 +376,7 @@ const checkIcon = (ok: boolean | null) => ok === true
               {{ MAIL_ROLE_STATUS[d.receiveStatus].label }}
             </UBadge>
             <UButton
-              v-if="d.setupMode === 'manual'"
+              v-if="manual('receive')"
               size="sm"
               class="ml-auto"
               :loading="busy === 'verify-receive'"
@@ -371,7 +398,7 @@ const checkIcon = (ok: boolean | null) => ok === true
             Automatic setup failed: {{ setupError('receive') }}. Follow the steps below instead.
           </p>
           <ul
-            v-if="d.setupMode === 'manual' && roleCheck('receive')?.checks.length"
+            v-if="manual('receive') && roleCheck('receive')?.checks.length"
             class="space-y-1"
           >
             <li
@@ -380,9 +407,9 @@ const checkIcon = (ok: boolean | null) => ok === true
               class="flex items-start gap-2 text-sm"
             >
               <UIcon
-                :name="checkIcon(c.ok).name"
+                :name="checkIcon(c.ok, c.key).name"
                 class="size-4 mt-0.5 shrink-0"
-                :class="checkIcon(c.ok).class"
+                :class="checkIcon(c.ok, c.key).class"
               />
               <div class="min-w-0">
                 {{ c.label }}
@@ -401,20 +428,21 @@ const checkIcon = (ok: boolean | null) => ok === true
             :value="d.probeAddress"
           />
           <MailDnsRecords
-            v-if="d.setupMode === 'auto' && recordsFor('receive').length"
+            v-if="!manual('receive') && recordsFor('receive').length"
             :records="recordsFor('receive')"
             :grouped="false"
           />
           <MailManualSteps
-            v-else-if="d.setupMode === 'manual'"
+            v-else-if="manual('receive')"
             :steps="d.manualSteps.receive"
           />
           <UButton
             v-if="d.source !== 'env'"
-            variant="link"
-            color="neutral"
+            variant="outline"
+            color="error"
             size="sm"
-            class="p-0"
+            icon="i-lucide-mail-x"
+            :loading="busy === 'receive'"
             @click="turnOffReceiving"
           >
             Stop receiving

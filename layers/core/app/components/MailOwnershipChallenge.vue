@@ -1,10 +1,12 @@
 <script setup lang="ts">
 // The TXT record an org adds to prove it controls a domain, with Check now.
-defineProps<{
+withDefaults(defineProps<{
   record: { type: string, name: string, value: string }
   checking?: boolean
   failed?: boolean
-}>()
+  // Off when the caller offers Check now itself
+  showCheck?: boolean
+}>(), { showCheck: true })
 defineEmits<{ check: [] }>()
 </script>
 
@@ -33,7 +35,10 @@ defineEmits<{ check: [] }>()
     >
       The record wasn't found yet.
     </p>
-    <div class="flex items-center gap-3">
+    <div
+      v-if="showCheck"
+      class="flex items-center gap-3"
+    >
       <UButton
         icon="i-lucide-refresh-cw"
         :loading="checking"

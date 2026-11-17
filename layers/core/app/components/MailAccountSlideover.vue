@@ -23,9 +23,12 @@ const saving = ref(false)
 const lastVerify = ref<MailVerifyResult>(null)
 
 const isNew = computed(() => !props.account)
-const readOnly = computed(() => props.account?.source === 'env')
+// The host sees an org's own account but only the org changes it.
+const orgOwned = computed(() => props.scope === 'host' && !!props.account?.orgId)
+const readOnly = computed(() => props.account?.source === 'env' || orgOwned.value)
 const provider = computed(() => props.providers.find(p => p.id === (props.account?.provider ?? providerId.value)) ?? null)
 const providerItems = computed(() => props.providers.map(p => ({ label: p.label, value: p.id })))
+const providerNotes = computed(() => [provider.value?.notes.send, provider.value?.notes.receive].filter(Boolean) as string[])
 
 function reset() {
   providerId.value = props.account?.provider ?? undefined
@@ -130,14 +133,23 @@ async function remove() {
           color="neutral"
           variant="subtle"
           icon="i-lucide-lock"
-          title="Set by environment variables"
+          :title="orgOwned ? `Belongs to ${account?.orgName ?? 'an organization'}` : 'Set by environment variables'"
         />
 
         <UFormField
           v-if="isNew"
-          label="Provider"
           required
         >
+          <template #label>
+            Provider <InfoTip v-if="providerNotes.length">
+              <p
+                v-for="note in providerNotes"
+                :key="note"
+              >
+                {{ note }}
+              </p>
+            </InfoTip>
+          </template>
           <USelect
             v-model="providerId"
             :items="providerItems"
@@ -145,10 +157,17 @@ async function remove() {
             class="w-full"
           />
         </UFormField>
-        <UFormField
-          v-else
-          label="Provider"
-        >
+        <UFormField v-else>
+          <template #label>
+            Provider <InfoTip v-if="providerNotes.length">
+              <p
+                v-for="note in providerNotes"
+                :key="note"
+              >
+                {{ note }}
+              </p>
+            </InfoTip>
+          </template>
           <span class="text-sm">{{ account?.providerLabel ?? 'None (local and log only)' }}</span>
         </UFormField>
 

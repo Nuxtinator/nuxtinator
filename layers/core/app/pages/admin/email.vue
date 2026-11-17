@@ -35,12 +35,26 @@ const { data: orgAccounts, refresh: refreshOrgAccounts } = useAsyncData<{ sendAc
 const providerOf = (id: string | null) => accountsData.value?.providers.find(p => p.id === id) ?? null
 const orgSendItems = computed(() => accounts.value.filter(a => a.source === 'ui' && providerOf(a.provider)?.supports.send).map(a => ({ label: a.label, value: a.id })))
 const orgReceiveItems = computed(() => accounts.value.filter(a => a.source === 'ui' && providerOf(a.provider)?.supports.receive).map(a => ({ label: a.label, value: a.id })))
+type OrgAccountField = 'sendAccountId' | 'receiveAccountId'
+const orgSendRow = useSettingsRow('mail-org-send-account')
+const orgReceiveRow = useSettingsRow('mail-org-receive-account')
+const orgAccountRows = computed(() => [
+  { field: 'sendAccountId' as const, label: 'Sending', items: orgSendItems.value, row: orgSendRow },
+  { field: 'receiveAccountId' as const, label: 'Receiving', items: orgReceiveItems.value, row: orgReceiveRow }
+])
+const accountLabel = (id: string | null | undefined) => id ? (accounts.value.find(a => a.id === id)?.label ?? 'Unknown account') : 'Environment account'
+const orgAccountDraft = ref<string | undefined>(undefined)
+function changeOrgAccount(field: OrgAccountField, row: ReturnType<typeof useSettingsRow>) {
+  orgAccountDraft.value = orgAccounts.value?.[field] ?? undefined
+  row.toggle()
+}
 const savingOrgAccounts = ref(false)
-async function setOrgAccount(field: 'sendAccountId' | 'receiveAccountId', value: string | null) {
+async function setOrgAccount(field: OrgAccountField, value: string | null, row: ReturnType<typeof useSettingsRow>) {
   savingOrgAccounts.value = true
   try {
     await $fetch('/api/admin/mail/org-accounts', { method: 'PUT', body: { [field]: value } })
     toast.add({ title: 'Saved', color: 'success' })
+    row.close()
   } catch (err) {
     toast.add({ title: 'Not saved', description: mailErrorMessage(err), color: 'error' })
   } finally {
@@ -148,34 +162,66 @@ const testSummary = computed(() => {
           </h2>
         </template>
         <div class="divide-y divide-(--ui-border)">
-          <div
-            v-for="row in [
-              { field: 'sendAccountId' as const, label: 'Sending', items: orgSendItems },
-              { field: 'receiveAccountId' as const, label: 'Receiving', items: orgReceiveItems }
-            ]"
-            :key="row.field"
-            class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-3 first:pt-0 last:pb-0"
+          <SettingsRow
+            v-for="r in orgAccountRows"
+            :key="r.field"
+            :label="r.label"
+            :value="accountLabel(orgAccounts[r.field])"
+            :open="r.row.open.value"
           >
-            <span class="font-medium">{{ row.label }}</span>
-            <div class="flex items-center gap-1 w-full sm:w-72">
-              <USelect
-                :model-value="orgAccounts[row.field] ?? undefined"
-                :items="row.items"
-                placeholder="Environment account"
-                :disabled="savingOrgAccounts || !row.items.length"
-                class="flex-1"
-                @update:model-value="(v: string) => setOrgAccount(row.field, v)"
-              />
+            <template #actions>
               <UButton
-                v-if="orgAccounts[row.field]"
-                icon="i-lucide-x"
+                variant="outline"
                 color="neutral"
-                variant="ghost"
-                aria-label="Use the environment account"
-                @click="setOrgAccount(row.field, null)"
-              />
-            </div>
-          </div>
+                size="sm"
+                :disabled="!r.items.length"
+                @click="changeOrgAccount(r.field, r.row)"
+              >
+                Change
+              </UButton>
+            </template>
+            <template #panel>
+              <form
+                class="flex flex-col sm:flex-row sm:items-center gap-2"
+                @submit.prevent="setOrgAccount(r.field, orgAccountDraft ?? null, r.row)"
+              >
+                <div class="flex items-center gap-1 w-full sm:w-72">
+                  <USelect
+                    v-model="orgAccountDraft"
+                    :items="r.items"
+                    placeholder="Environment account"
+                    class="flex-1"
+                    :aria-label="`${r.label} account`"
+                  />
+                  <UButton
+                    v-if="orgAccountDraft"
+                    icon="i-lucide-x"
+                    color="neutral"
+                    variant="ghost"
+                    aria-label="Use the environment account"
+                    @click="orgAccountDraft = undefined"
+                  />
+                </div>
+                <div class="flex gap-2">
+                  <UButton
+                    type="submit"
+                    size="sm"
+                    :loading="savingOrgAccounts"
+                  >
+                    Save
+                  </UButton>
+                  <UButton
+                    variant="ghost"
+                    color="neutral"
+                    size="sm"
+                    @click="r.row.close()"
+                  >
+                    Cancel
+                  </UButton>
+                </div>
+              </form>
+            </template>
+          </SettingsRow>
         </div>
       </UCard>
     </div>

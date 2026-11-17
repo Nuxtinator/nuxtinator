@@ -13,6 +13,7 @@ import {
   type OutgoingMail, type SendGuard, type SendResult
 } from '@nuxtinator/mail/kernel'
 import { afterCommit } from './after-commit'
+import { db } from './database'
 
 export type { Mail, MailStream, MailProvider, InboundHandler, MailEventHandler, SendGuard, OutgoingMail, SendResult }
 
@@ -64,9 +65,7 @@ function open(what: string): MailState {
 }
 
 export function registerMailProvider(provider: MailProvider): void {
-  const s = open('registerMailProvider')
-  if (s.providers.some(p => p.id === provider.id)) return
-  s.providers.push(provider)
+  open('registerMailProvider').providers.push(provider)
 }
 
 export function registerMailStream(stream: MailStream): void {
@@ -89,11 +88,12 @@ export function getRegisteredMailStreams(): MailStream[] {
   return [...state().streams]
 }
 
-// Builds the kernel from everything registered. Called once by core's plugin.
+// Builds the kernel from everything registered. Called once by core's plugin,
+// which hands the instance to callers through settleMail once it's ready.
 export function buildMail(opts: MailBuildOptions): Mail {
   const s = state()
   s.sealed = true
-  const mail = createMail({
+  return createMail({
     ...opts,
     providers: s.providers,
     streams: s.streams,
@@ -101,18 +101,17 @@ export function buildMail(opts: MailBuildOptions): Mail {
     inboundHandlers: s.inbound,
     eventHandlers: s.events
   })
-  s.instance = mail
-  return mail
 }
 
 export function settleMail(mail: Mail | null, error?: unknown): void {
   const s = state()
   s.sealed = true
+  s.instance = mail
   s.settle(mail, error)
 }
 
-// The kernel, once built. Throws when mail is unavailable (no database, or
-// the build failed).
+// The kernel, once built. Throws when mail is unavailable (no database, no
+// key, or the build failed).
 export async function useMail(): Promise<Mail> {
   const mail = state().instance ?? await state().ready
   if (!mail) throw new Error('Mail is unavailable: the mail kernel was not built (no database?)')
@@ -123,9 +122,15 @@ export function mailIfBuilt(): Mail | null {
   return state().instance
 }
 
-// Sends now. Never call inside a transaction: use enqueueMail.
+// Sends now. Never call inside a transaction: use enqueueMail. A process that
+// can only enqueue (no secret key) queues mail on a queued stream for a
+// sending process to deliver.
 export async function sendMail(m: OutgoingMail): Promise<SendResult> {
-  return await (await useMail()).send(m)
+  const mail = await useMail()
+  if (!mail.canSend && mail.streams.find(s => s.id === m.stream)?.queued) {
+    return await db.transaction().execute(tx => mail.enqueue(m, { tx }))
+  }
+  return await mail.send(m)
 }
 
 // Writes the mail to the outbox in `tx` and makes its first attempt right

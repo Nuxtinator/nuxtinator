@@ -6,12 +6,16 @@ const props = withDefaults(defineProps<{
   scope: MailScope
   orgSlug?: string | null
   title?: string
-}>(), { orgSlug: null, title: 'Accounts' })
+  addLabel?: string
+}>(), { orgSlug: null, title: 'Accounts', addLabel: 'Add account' })
 
 const toast = useToast()
 const confirmAction = useConfirm()
 const { data, pending, error, refresh } = useMailAccounts(props.scope, () => props.orgSlug)
 const accounts = computed(() => data.value?.accounts ?? [])
+const orgAccounts = computed(() => props.scope === 'host' ? data.value?.orgAccounts ?? [] : [])
+const rows = computed(() => [...accounts.value, ...orgAccounts.value])
+const isOrgOwned = (a: MailAccount) => props.scope === 'host' && !!a.orgId
 const providers = computed(() => data.value?.providers ?? [])
 const base = computed(() => mailApiBase(props.scope, props.orgSlug))
 
@@ -29,13 +33,15 @@ function statusOf(a: MailAccount): { color: string, label: string } {
   return { color: 'bg-(--ui-text-dimmed)', label: 'Not tested' }
 }
 
-const columns: TableColumn<MailAccount>[] = [
+// Owner is shown only when some account isn't the host's.
+const columns = computed<TableColumn<MailAccount>[]>(() => [
   { id: 'label', header: 'Account' },
   { id: 'provider', header: 'Provider' },
+  ...(orgAccounts.value.length ? [{ id: 'owner', header: 'Owner' }] : []),
   { id: 'capabilities', header: 'What the key can do' },
   { id: 'status', header: 'Status' },
   { id: 'actions', header: '' }
-]
+])
 
 const open = ref(false)
 const selected = ref<MailAccount | null>(null)
@@ -93,6 +99,7 @@ async function remove(a: MailAccount) {
 }
 
 function menu(a: MailAccount): DropdownMenuItem[][] {
+  if (isOrgOwned(a)) return []
   const main: DropdownMenuItem[] = []
   if (a.provider) main.push({ label: 'Check the key', icon: 'i-lucide-shield-check', onSelect: () => verify(a) })
   if (a.provider && a.webhookUrls) main.push({ label: 'Rotate webhook URLs', icon: 'i-lucide-refresh-cw', onSelect: () => rotate(a) })
@@ -119,7 +126,7 @@ function menu(a: MailAccount): DropdownMenuItem[][] {
       :actions="[{ label: 'Retry', color: 'neutral', variant: 'outline', onClick: () => { refresh() } }]"
     />
     <p
-      v-else-if="!pending && accounts.length === 0"
+      v-else-if="!pending && rows.length === 0"
       class="p-4 text-sm text-(--ui-text-muted)"
     >
       <template v-if="scope === 'host'">
@@ -131,9 +138,9 @@ function menu(a: MailAccount): DropdownMenuItem[][] {
     </p>
     <UTable
       v-else
-      :data="accounts"
+      :data="rows"
       :columns="columns"
-      :loading="pending && accounts.length === 0"
+      :loading="pending && rows.length === 0"
       :ui="{ tr: 'cursor-pointer' }"
       @select="(_e: Event, row: { original: MailAccount }) => openAccount(row.original)"
     >
@@ -172,6 +179,16 @@ function menu(a: MailAccount): DropdownMenuItem[][] {
           />
           None (local and log only)
         </div>
+      </template>
+      <template #owner-cell="{ row }">
+        <span
+          v-if="isOrgOwned(row.original)"
+          class="text-sm"
+        >{{ row.original.orgName ?? 'An organization' }}</span>
+        <span
+          v-else
+          class="text-sm text-(--ui-text-muted)"
+        >Host</span>
       </template>
       <template #capabilities-cell="{ row }">
         <MailCapabilityBadges
@@ -216,7 +233,7 @@ function menu(a: MailAccount): DropdownMenuItem[][] {
         :disabled="!providers.length"
         @click="openAccount(null)"
       >
-        Add account
+        {{ addLabel }}
       </UButton>
     </template>
 

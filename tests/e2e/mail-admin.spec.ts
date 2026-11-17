@@ -61,7 +61,8 @@ test('add an account: the key is checked and its capabilities are listed', async
   const label = `${E2E_MAIL_LABEL}-acct`
   const row = await addFakeAccount(page, label)
   await expect(row).toBeVisible()
-  await expect(row.getByText('Suppression lists')).toBeVisible()
+  // With no domain yet, nothing that needs one has been probed.
+  await expect(row.getByTitle('Not tested yet').filter({ hasText: 'Suppression lists' })).toBeVisible()
 
   await row.getByRole('button', { name: 'Account actions' }).click()
   await page.getByRole('menuitem', { name: 'Check the key' }).click()
@@ -72,6 +73,13 @@ test('add an account: the key is checked and its capabilities are listed', async
   const panel = page.getByRole('dialog')
   await expect(panel.getByText('••••-key').first()).toBeVisible()
   await expect(panel.getByRole('button', { name: 'Replace' }).first()).toBeVisible()
+
+  // Its first domain probes the rest, and the list shows what the key can do.
+  await addDomain(page, { domain: e2eDomain('caps'), account: label, manual: true })
+  await page.goto('/admin/email')
+  const probed = page.getByRole('row').filter({ hasText: label })
+  await expect(probed.getByTitle('Allowed').filter({ hasText: 'Send' })).toBeVisible()
+  await expect(probed.getByTitle('Allowed').filter({ hasText: 'Suppression lists' })).toBeVisible()
 })
 
 test('a manual domain shows steps, then verifies sending and receiving', async ({ page }) => {
@@ -171,19 +179,21 @@ test('a domain whose provider list is unmanaged shows the warning', async ({ pag
   await expect(page.getByText(domain)).toBeVisible()
 })
 
+// The env account and the other tests' rows mean the real lists are never
+// empty here, so the list endpoints answer as on a fresh database.
 test('empty states', async ({ page }) => {
+  await page.route('**/api/admin/mail/accounts', route => route.fulfill({ json: { accounts: [], orgAccounts: [], providers: [], outboxPublicKey: null, transport: 'provider' } }))
+  await page.route('**/api/admin/mail/domains', route => route.fulfill({ json: { domains: [] } }))
+  await page.route('**/api/admin/mail/suppressions**', route => route.fulfill({ json: { suppressions: [] } }))
+
+  await page.goto('/admin/email')
+  await expect(page.getByText('Mail isn\'t configured. Add an account to send password resets and invites.')).toBeVisible()
+
+  await page.goto('/admin/email?tab=domains')
+  await expect(page.getByText('Add a domain to send or receive mail on it.')).toBeVisible()
+
   await page.goto('/admin/email?tab=suppressions')
+  await expect(page.getByText('No suppressed addresses.')).toBeVisible()
   await page.getByRole('textbox', { name: 'Search an address' }).fill(`nobody-${Date.now()}@example.org`)
   await expect(page.getByText('Nothing is suppressed for that address.')).toBeVisible()
-
-  const domains = await (await page.request.get('/api/admin/mail/domains')).json() as { domains: unknown[] }
-  if (domains.domains.length === 0) {
-    await page.goto('/admin/email?tab=domains')
-    await expect(page.getByText('Add a domain to send or receive mail on it.')).toBeVisible()
-  }
-  const accounts = await (await page.request.get('/api/admin/mail/accounts')).json() as { accounts: unknown[] }
-  if (accounts.accounts.length === 0) {
-    await page.goto('/admin/email')
-    await expect(page.getByText('Mail isn\'t configured. Add an account to send password resets and invites.')).toBeVisible()
-  }
 })

@@ -27,6 +27,7 @@ const domain = computed(() => domainsData.value?.domains.find(d => d.id === prop
         :org-slug="orgSlug"
         :domain="domain"
         :accounts="accountsData?.accounts ?? []"
+        :host-receive-account="accountsData?.hostReceiveAccount ?? null"
         :providers="accountsData?.providers ?? []"
         :setup="setup"
         @deleted="open = false"

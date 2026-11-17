@@ -58,9 +58,12 @@ watch(autoAvailable, (v) => {
 })
 
 const modeItems = computed(() => [
-  { value: 'auto', label: 'Set it up for me', description: 'Registers the domain at the provider and lists the DNS records to add.', icon: 'i-lucide-wand-sparkles', disabled: !autoAvailable.value },
-  { value: 'manual', label: 'I\'ll set it up myself at the provider', description: 'Nothing is changed at the provider. You get the steps.', icon: 'i-lucide-list-checks' }
+  { value: 'auto', label: 'Set it up for me', icon: 'i-lucide-wand-sparkles', disabled: !autoAvailable.value },
+  { value: 'manual', label: 'I\'ll set it up myself at the provider', icon: 'i-lucide-list-checks' }
 ])
+const receiveProvider = computed(() => providerOf(receiveAccountId.value))
+// In org scope receiving goes through the same account as sending when its provider can receive.
+const orgNotes = computed(() => [sendProvider.value?.notes.send, sendProvider.value?.supports.receive ? sendProvider.value.notes.receive : undefined].filter(Boolean) as string[])
 
 async function submit() {
   if (!domain.value.trim()) return
@@ -118,7 +121,13 @@ async function submit() {
         </UFormField>
 
         <template v-if="scope === 'host'">
-          <UFormField label="Send through">
+          <UFormField>
+            <template #label>
+              Send through <InfoTip
+                v-if="sendProvider?.notes.send"
+                :text="sendProvider.notes.send"
+              />
+            </template>
             <USelect
               v-model="sendAccountId"
               :items="sendItems"
@@ -126,7 +135,13 @@ async function submit() {
               class="w-full"
             />
           </UFormField>
-          <UFormField label="Receive through">
+          <UFormField>
+            <template #label>
+              Receive through <InfoTip
+                v-if="receiveProvider?.notes.receive"
+                :text="receiveProvider.notes.receive"
+              />
+            </template>
             <div class="flex items-center gap-1">
               <USelect
                 v-model="receiveAccountId"
@@ -148,8 +163,17 @@ async function submit() {
         </template>
         <UFormField
           v-else-if="sendItems.length"
-          label="Provider account"
         >
+          <template #label>
+            Provider account <InfoTip v-if="orgNotes.length">
+              <p
+                v-for="note in orgNotes"
+                :key="note"
+              >
+                {{ note }}
+              </p>
+            </InfoTip>
+          </template>
           <div class="flex items-center gap-1">
             <USelect
               v-model="sendAccountId"
@@ -173,8 +197,14 @@ async function submit() {
           :items="modeItems"
           variant="card"
           indicator="hidden"
-          legend="Setup"
-        />
+        >
+          <template #legend>
+            Setup <InfoTip>
+              <p>Set it up for me: the domain is registered at the provider, and you get the DNS records to add.</p>
+              <p>Set it up yourself: nothing is changed at the provider, and you get the steps to follow there.</p>
+            </InfoTip>
+          </template>
+        </URadioGroup>
 
         <template v-if="setupMode === 'manual'">
           <UFormField

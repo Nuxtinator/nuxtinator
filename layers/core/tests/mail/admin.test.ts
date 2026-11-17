@@ -23,7 +23,7 @@ interface Domain {
   receiveAccountId: string | null
   probeAddress: string | null
   sendStatus: string
-  manualSteps: { send: unknown[], receive: { title: string }[] }
+  manualSteps: { send: { title: string, detail?: string }[], receive: { title: string }[] }
   webhooks: { state: string, required: string[], configured: string[] | null }
   requiredEvents: string[]
 }
@@ -135,6 +135,9 @@ describe('host mail admin', () => {
     expect(confirmed.domain.webhooks.configured).toEqual(confirmed.domain.requiredEvents)
     expect(confirmed.domain.webhooks.state).toBe('connected')
     expect(confirmed.domain.requiredEvents).not.toContain('delivered')
+    const stepText = (d: Domain) => d.manualSteps.send.map(step => step.detail ?? '').join(' ')
+    expect(stepText(confirmed.domain)).toContain('bounced')
+    expect(stepText(confirmed.domain)).not.toContain('delivered')
 
     await sql`UPDATE mail_domains SET send_status = 'verified' WHERE id = ${domain.id}`
     try {
@@ -143,6 +146,11 @@ describe('host mail admin', () => {
       expect(after.requiredEvents).toContain('delivered')
       expect(after.webhooks.state).toBe('needs_update')
       expect(after.webhooks.configured).toEqual(confirmed.domain.requiredEvents)
+      expect(stepText(after)).toContain('delivered')
+
+      const reconfirmed = await api<{ domain: Domain }>(`/api/admin/mail/domains/${domain.id}`, { method: 'PATCH', body: { confirmWebhooks: true }, ...auth })
+      expect(reconfirmed.domain.webhooks.state).toBe('connected')
+      expect(reconfirmed.domain.webhooks.configured).toContain('delivered')
     } finally {
       await api('/api/admin/mail/streams', { method: 'PUT', body: { routes: [{ stream: 'account', domainId: null }] }, ...auth })
     }
@@ -237,6 +245,31 @@ describe('host mail admin', () => {
     expect((await postRaw(before.events, body, headers)).status).toBe(404)
     expect((await postRaw(before.inboundMime, body, headers)).status).toBe(404)
     expect((await postRaw(after.events, body, headers)).status).toBe(200)
+  })
+
+  it('a role whose automatic setup was refused is set up and checked manually while the other stays automatic', async () => {
+    const { account } = await createAccount()
+    await sql`UPDATE mail_accounts SET capabilities = capabilities || '{"routes": false}'::jsonb WHERE id = ${account.id}`
+    const res = await api<{ domain: Domain & { setupMode: string, roleModes: { send: string, receive: string } }, setup: { roles: { role: string, mode: string, error?: string }[] } }>('/api/admin/mail/domains', {
+      method: 'POST', body: { domain: testDomain('fallback'), setupMode: 'auto', sendAccountId: account.id, receiveAccountId: account.id }, ...auth
+    })
+    expect(res.domain.setupMode).toBe('auto')
+    expect(res.domain.roleModes).toEqual({ send: 'auto', receive: 'manual' })
+    expect(res.setup.roles.find(r => r.role === 'receive')).toMatchObject({ mode: 'manual' })
+    expect(res.domain.manualSteps.receive.length).toBeGreaterThan(0)
+
+    const check = await api<{ check: { roles: { role: string, checks: { key: string }[] }[] } }>(`/api/admin/mail/domains/${res.domain.id}/check`, { method: 'POST', ...auth })
+    expect(check.check.roles.find(r => r.role === 'receive')!.checks.map(c => c.key)).toEqual(['probe'])
+    expect(check.check.roles.find(r => r.role === 'send')!.checks.map(c => c.key)).not.toContain('provider')
+  })
+
+  it('the provider catalog carries each provider\'s setup notes', async () => {
+    const res = await api<{ providers: { id: string, notes: { send?: string, receive?: string } }[] }>('/api/admin/mail/accounts', auth)
+    const notes = Object.fromEntries(res.providers.map(p => [p.id, p.notes]))
+    expect(notes.ses?.send).toContain('sandbox')
+    expect(notes.ses?.receive).toContain('us-east-1')
+    expect(notes.sendgrid?.receive).toContain('unsigned')
+    expect(notes.fake).toEqual({})
   })
 
   it('non-admins get 403 everywhere', async () => {
