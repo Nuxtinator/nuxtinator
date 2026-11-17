@@ -3,8 +3,9 @@
 // delivered), the kernel's suppression list on a bounce, and the trust rule
 // that an event only reaches messages of the org it names.
 import { describe, it, expect, afterEach } from 'vitest'
-import { $fetch } from '@nuxt/test-utils/e2e'
+import { $fetch, url as nuxtUrl } from '@nuxt/test-utils/e2e'
 import { randomUUID } from 'node:crypto'
+import { fakeSignature } from '@nuxtinator/mail/test'
 import {
   getHostAdminDb,
   cleanupInboxTestData,
@@ -118,3 +119,58 @@ describe('delivery events', () => {
     expect((await messageRow(messageId)).status).toBe('sent')
   })
 })
+
+// An org's own provider account holds its own signing key, so it can sign any
+// event; the kernel hands handlers the account's org instead of the one named.
+describe('events from an org-owned account', () => {
+  async function marketingOptIn(orgId: string, address: string): Promise<string> {
+    const [channel] = await sql<{ id: string }[]>`SELECT id FROM crm_channels WHERE org_id = ${orgId} AND value = ${address}`
+    await sql`
+      INSERT INTO crm_channel_consents (org_id, channel_id, purpose, status, granted_at, source)
+      VALUES (${orgId}, ${channel!.id}, 'marketing', 'opt_in', now(), 'test')
+    `
+    return channel!.id
+  }
+
+  async function consent(channelId: string): Promise<string> {
+    const [row] = await sql<{ status: string }[]>`SELECT status FROM crm_channel_consents WHERE channel_id = ${channelId} AND purpose = 'marketing'`
+    return row!.status
+  }
+
+  it('a forged nx-org changes nothing in that org: neither the inbox delivery state nor CRM consent', async () => {
+    const victim = await sentReply()
+    const victimChannel = await marketingOptIn(victim.org.id, victim.sender)
+
+    const attacker = await createInboxOrgWith(sql)
+    const signingKey = `test-inbox-org-${randomUUID().slice(0, 8)}`
+    const { account } = await $fetch<{ account: { webhookUrls: { events: string } } }>(`/api/o/${attacker.org.slug}/mail/accounts`, {
+      method: 'POST',
+      body: { provider: 'fake', label: 'test-inbox-org', credentials: { apiKey: 'k', signingKey } },
+      ...attacker.auth
+    })
+    const ownSender = uniqueSender('own')
+    await postInbound({ recipient: `hello@${attacker.domain}`, from: `O <${ownSender}>` })
+    const ownChannel = await marketingOptIn(attacker.org.id, ownSender)
+
+    const at = new Date().toISOString()
+    const body = JSON.stringify({
+      events: [
+        { type: 'delivered', recipient: victim.sender, orgId: victim.org.id, ref: victim.messageId, stream: 'inbox', permanent: false, occurredAt: at },
+        { type: 'unsubscribed', recipient: victim.sender, orgId: victim.org.id, stream: 'inbox', permanent: false, occurredAt: at },
+        { type: 'unsubscribed', recipient: ownSender, orgId: victim.org.id, stream: 'inbox', permanent: false, occurredAt: at }
+      ]
+    })
+    const res = await fetch(nuxtUrl(new URL(account.webhookUrls.events).pathname), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fake-signature': fakeSignature(signingKey, body) },
+      body
+    })
+    expect(res.status).toBe(200)
+
+    expect((await messageRow(victim.messageId)).status).toBe('sent')
+    expect(await consent(victimChannel)).toBe('opt_in')
+    // The handler did run, in the account's own org.
+    expect(await consent(ownChannel)).toBe('opt_out')
+  })
+})
+

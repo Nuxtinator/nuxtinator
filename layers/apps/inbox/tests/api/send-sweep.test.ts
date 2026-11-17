@@ -22,6 +22,7 @@ import {
   postMailEvents,
   setMailDomainReceiving,
   sharedMailDomainId,
+  testMailAccountId,
   waitForMailsTo,
   waitForMailTo
 } from '../helpers'
@@ -208,10 +209,25 @@ describe('send sweep hardening', () => {
         expect(still.attempts).toBe(0)
       }
 
-      // Receiving verified on the org's domain releases it with no manual
-      // intervention. (The hold pushes next_attempt_at a minute out; the test
-      // pulls it back rather than waiting for the production recheck interval.)
-      await setMailDomainReceiving(sql, own!.id, true)
+      // Receiving turned on for the org's domain stays pending until the
+      // probe arrives through the inbound webhook; that verifies it and
+      // releases the reply with no manual intervention. (The hold pushes
+      // next_attempt_at a minute out; the test pulls it back rather than
+      // waiting for the production recheck interval.)
+      const probeToken = `p${randomUUID().replace(/-/g, '').slice(0, 11)}`
+      await sql`
+        UPDATE mail_domains SET receive_account_id = ${testMailAccountId()}, receive_status = 'pending', probe_token = ${probeToken}
+        WHERE id = ${own!.id}
+      `
+      await sql`UPDATE inbox_messages SET next_attempt_at = now() - interval '1 second' WHERE id = ${msgId}`
+      await new Promise(r => setTimeout(r, 2_500))
+      expect((await getMessageRow(msgId)).status).toBe('queued')
+      expect((await $fetch<{ noReceivingDomain: boolean }>('/api/inbox/me', opts)).noReceivingDomain).toBe(true)
+
+      const probe = await postInbound({ recipient: `nx-probe-${probeToken}@${domain}`, from: `Probe <nx-probe-${probeToken}@${domain}>` })
+      expect(probe.status).toBe(200)
+      const [verified] = await sql<{ receive_status: string }[]>`SELECT receive_status FROM mail_domains WHERE id = ${own!.id}`
+      expect(verified!.receive_status).toBe('verified')
       await sql`UPDATE inbox_messages SET next_attempt_at = now() - interval '1 second' WHERE id = ${msgId}`
 
       const sent = await waitForMessage(msgId, r => r.status === 'sent')

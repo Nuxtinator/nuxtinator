@@ -235,14 +235,15 @@ export async function inboxHoldForConfig(tx: Tx, id: string, reason: string): Pr
     .execute()
 }
 
-// Mark an outbound message sent and store its RFC Message-Id — also as
-// email_message_id (when unset) so the contact's reply threads back to it.
-export async function inboxMarkSent(tx: Tx, id: string, messageId?: string | null): Promise<void> {
+// Mark an outbound message sent. The RFC Message-Id goes in email_message_id
+// (when unset) so the contact's reply threads back to it; the provider's own
+// id is kept for support.
+export async function inboxMarkSent(tx: Tx, id: string, messageId?: string | null, providerMessageId?: string | null): Promise<void> {
   await tx
     .updateTable('inbox_messages')
     .set({
       status: 'sent',
-      provider_message_id: sql`COALESCE(${messageId ?? null}, provider_message_id)`,
+      provider_message_id: sql`COALESCE(${providerMessageId ?? null}, provider_message_id)`,
       email_message_id: sql`COALESCE(email_message_id, ${messageId ?? null})`,
       updated_at: new Date()
     })

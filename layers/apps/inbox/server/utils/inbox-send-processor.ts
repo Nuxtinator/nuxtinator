@@ -280,7 +280,7 @@ export async function inboxRunSendSweep(): Promise<void> {
 async function inboxRecordSendResult(tx: Tx, claimed: InboxMessageRow, result: SendResult): Promise<void> {
   switch (result.status) {
     case 'sent':
-      await inboxMarkSent(tx, claimed.id, result.messageId)
+      await inboxMarkSent(tx, claimed.id, result.messageId, result.providerMessageId)
       return
     case 'unknown':
     case 'queued':
