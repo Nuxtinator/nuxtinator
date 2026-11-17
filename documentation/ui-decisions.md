@@ -144,3 +144,13 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
 - **A person without an avatar image gets their initials on a color of their own**, one of twelve soft hues (`USER_AVATAR_COLORS` in core, shown on `/kitchen`), so avatars that carry no name still differ at a glance. An uploaded image replaces it. The color is worked out from the user's id, the same everywhere, and nothing is stored. Saving a random color on each user was rejected: it would put a default in the database, and changing the palette would need a backfill. Saturated fills with white initials were rejected as too loud beside the app's subtle badges.
 - **A task can be assigned to several people.** Everyone named sees the task and is told about it. On a board grouped by assignee the card sits in each assignee's column, and dragging it swaps the person it was dragged from for the one it lands on.
 - **Another app shows a view inside its own page as an embedded panel** (meetings' Tasks tab shows the meeting's tasks through a parameterized built-in view). The panel drops the back button and title, keeps its active tab to itself rather than in the page's URL, and has an "Open in Views" link. Building a separate task list inside each app was rejected: two UIs for the same tasks would drift apart.
+
+## Email admin
+
+- **Mail accounts, domains and suppressions are tables in cards, and a domain's details open in a slideover**, not a page of their own: an admin moves between domains while setting up DNS, and a slideover keeps the list in view. The org settings page shows its one domain's details inline, since an org usually has one.
+- **A domain's details are one panel with ruled sections** (Sending, Receiving, Webhooks, Domain key, From domain, Remove). Tabs were rejected because setting up a domain is read top to bottom, and the receiving step depends on sending.
+- **No Owner column on the accounts table**: each page lists one owner's accounts, so it would repeat on every row. The environment account carries a "Read-only" badge with a lock.
+- **An account's status is a dot with a label worked out from what its key was seen to do** (Working, Limited key, Can't send, Not tested, Local only), so an admin sees a limited key before adding a domain to it.
+- **The add-domain choice between automatic and manual setup is two cards**; automatic is disabled when the account's key can't manage domains.
+- **The Streams tab saves as one form with a save bar**, because changing a stream's domain changes which webhook events the domain needs, and an admin usually moves several streams together.
+- **An org sees webhook URLs only for its own provider accounts.** The URLs carry the account's token, so on the host's accounts they stay with the host admin.

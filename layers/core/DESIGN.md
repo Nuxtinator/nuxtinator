@@ -67,6 +67,13 @@ Either way, destructive actions open behind an outlined error button and confirm
 - A choice among two or three kinds (a layout, how a board gets its columns) is a row of cards, each with an icon and a name: `URadioGroup` with `variant="card"` and `indicator="hidden"`. Plain radio buttons are for choices that need no picture.
 - Never use `alert()`, `confirm()` or `prompt()`. Confirm with `useConfirm()` / `ConfirmModal`; report success and errors with `useToast()`.
 
+## Admin lists with details
+
+- A list of things each with a details panel (mail accounts, domains) is a `UTable` inside a `UCard`, with the card's footer holding "Add …". Clicking a row opens its details in a `USlideover`; other per-row actions sit in a ⋯ menu.
+- A details panel with several parts is one scrolling panel split into ruled sections (heading, then its content), not tabs.
+- A small edit inside a details panel is a link button ("Change", "Replace") that opens its form under the row. A secret is never shown again: its masked value with "Replace".
+- A column that would say the same thing on every row is left out; mark the one row that differs with a badge instead.
+
 ## Colors and surfaces
 
 - Use theme tokens, never raw grays: `text-(--ui-text-muted)`, `text-(--ui-text-dimmed)`, `border-(--ui-border)`, `bg-(--ui-bg-elevated)`. Raw `neutral-*` / `slate-*` classes break in one of the two modes.
