@@ -206,18 +206,42 @@ export async function verifyAccount(k: Kernel, scope: Scope, id: string) {
   const result = await provider.verifyCredentials(accountCredentials(k, account), firstDomain?.domain, {
     probeAddress: firstDomain ? probeAddress(firstDomain) : undefined
   })
-  if (result.ok) {
-    await k.db.updateTable('mail_accounts')
-      .set({ capabilities: jsonb(mergeCapabilities({}, result.capabilities)), updated_at: sql`now()` })
-      .where('id', '=', id)
-      .execute()
-  }
+  if (result.ok) await storeAccountProbe(k, account, firstDomain ?? null, result.capabilities, {})
   return { account: await getAccount(k, scope, id), result }
 }
 
+// Whether `key` is stored on the domain row rather than the account.
+function perDomain(k: Kernel, account: MailAccountRow, domain: MailDomainRow | null, key: CapabilityKey): boolean {
+  if (!domain) return false
+  if (domain.credentials) return true
+  const provider = account.provider ? k.providers.get(account.provider) : undefined
+  return !!provider?.domainCapabilities?.includes(key)
+}
+
+// Stores what a probe of the account's key against `domain` found: the
+// provider's per-domain capabilities on that domain, the rest on the account
+// (merged over `base`).
+async function storeAccountProbe(k: Kernel, account: MailAccountRow, domain: MailDomainRow | null, found: Capabilities, base: Capabilities) {
+  const onAccount: Capabilities = {}
+  const onDomain: Capabilities = {}
+  for (const [key, value] of Object.entries(found) as [CapabilityKey, boolean | undefined][]) {
+    if (value === undefined) continue
+    if (domain && !domain.credentials && perDomain(k, account, domain, key)) onDomain[key] = value
+    else onAccount[key] = value
+  }
+  const caps = mergeCapabilities(base, onAccount)
+  await k.db.updateTable('mail_accounts').set({ capabilities: jsonb(caps), updated_at: sql`now()` }).where('id', '=', account.id).execute()
+  account.capabilities = caps
+  if (domain && Object.keys(onDomain).length) {
+    const own = mergeCapabilities((domain.capabilities as Capabilities | null) ?? {}, onDomain)
+    await k.db.updateTable('mail_domains').set({ capabilities: jsonb(own) }).where('id', '=', domain.id).execute()
+    domain.capabilities = own
+  }
+}
+
 async function recordCapability(k: Kernel, account: MailAccountRow, domain: MailDomainRow | null, key: CapabilityKey, value: boolean) {
-  if (domain?.capabilities) {
-    const caps = mergeCapabilities(domain.capabilities as Capabilities, { [key]: value })
+  if (domain && perDomain(k, account, domain, key)) {
+    const caps = mergeCapabilities((domain.capabilities as Capabilities | null) ?? {}, { [key]: value })
     await k.db.updateTable('mail_domains').set({ capabilities: jsonb(caps) }).where('id', '=', domain.id).execute()
     domain.capabilities = caps
   } else {
@@ -388,8 +412,8 @@ export async function addDomain(k: Kernel, scope: Scope, input: AddDomainInput, 
 }
 
 // Probes what needs a domain once the domain is ownership-verified: the
-// domain's own key when it has one, else the sending account's key when it
-// hasn't been probed against a domain yet.
+// domain's own key when it has one, else the sending account's key when the
+// account, or this domain's per-domain capabilities, haven't been probed yet.
 async function probeKeys(k: Kernel, domain: MailDomainRow): Promise<void> {
   if (domain.ownership_status !== 'verified' || !domain.send_account_id) return
   const account = await k.db.selectFrom('mail_accounts').selectAll().where('id', '=', domain.send_account_id).executeTakeFirst()
@@ -401,15 +425,10 @@ async function probeKeys(k: Kernel, domain: MailDomainRow): Promise<void> {
     if (res.ok) await k.db.updateTable('mail_domains').set({ capabilities: jsonb(res.capabilities) }).where('id', '=', domain.id).execute()
     return
   }
-  const caps = account.capabilities as Capabilities
-  if (k.transport !== 'provider' || (caps.send !== undefined && caps.suppressionLists !== undefined)) return
+  const known = (key: CapabilityKey) => ((perDomain(k, account, domain, key) ? domain.capabilities : account.capabilities) as Capabilities | null)?.[key] !== undefined
+  if (k.transport !== 'provider' || (known('send') && known('suppressionLists'))) return
   const res = await provider.verifyCredentials(accountCredentials(k, account), domain.domain, opts)
-  if (res.ok) {
-    await k.db.updateTable('mail_accounts')
-      .set({ capabilities: jsonb(mergeCapabilities(caps, res.capabilities)), updated_at: sql`now()` })
-      .where('id', '=', account.id)
-      .execute()
-  }
+  if (res.ok) await storeAccountProbe(k, account, domain, res.capabilities, account.capabilities as Capabilities)
 }
 
 // Role accounts and provider objects for a domain.
@@ -490,6 +509,8 @@ export async function patchDomain(k: Kernel, scope: Scope, id: string, input: Pa
   }
   const patch: Record<string, unknown> = {}
   let resetup = false
+  // Roles moving to another account lose the old account's provider refs and records.
+  const moved: ('send' | 'receive')[] = []
   if (input.sendAccountId !== undefined) {
     const account = await accountForDomain(k, scope, input.sendAccountId, input.sendAccountId === domain.send_account_id ? null : 'send')
     if (domain.source === 'env' && account?.id !== domain.send_account_id) throw new MailAdminError(409, 'The environment domain always sends through the environment account')
@@ -497,6 +518,11 @@ export async function patchDomain(k: Kernel, scope: Scope, id: string, input: Pa
     patch.send_status = 'pending'
     patch.send_error = null
     resetup = true
+    if ((account?.id ?? null) !== domain.send_account_id) {
+      moved.push('send')
+      // Per-domain capabilities of a keyless domain were the old account's.
+      if (!domain.credentials) patch.capabilities = null
+    }
   }
   if (input.receiveAccountId !== undefined) {
     const account = await accountForDomain(k, scope, input.receiveAccountId, input.receiveAccountId === domain.receive_account_id ? null : 'receive')
@@ -505,6 +531,13 @@ export async function patchDomain(k: Kernel, scope: Scope, id: string, input: Pa
     patch.receive_status = 'pending'
     patch.probe_token = account ? (domain.probe_token ?? randomToken(12).toLowerCase().replace(/[^a-z0-9]/g, '')) : null
     resetup = true
+    if ((account?.id ?? null) !== domain.receive_account_id) moved.push('receive')
+  }
+  if (moved.length) {
+    const refs = { ...(domain.provider_refs as Record<string, unknown>) }
+    for (const role of moved) delete refs[role]
+    patch.provider_refs = jsonb(refs)
+    patch.dns_records = jsonb((domain.dns_records as DnsRecord[]).filter(r => !(moved as string[]).includes(r.role)))
   }
   if (input.fromDomain !== undefined) {
     if (domain.source === 'env') throw new MailAdminError(409, 'The environment domain\'s From domain comes from SMTP_FROM')
@@ -527,7 +560,7 @@ export async function patchDomain(k: Kernel, scope: Scope, id: string, input: Pa
 
   let fresh = await getDomain(k, scope, id)
   // A key on an unproven domain is stored and probed once ownership is confirmed.
-  if (input.credentials && fresh.credentials && fresh.ownership_status === 'verified') {
+  if ((input.credentials !== undefined || moved.includes('send')) && fresh.ownership_status === 'verified') {
     await probeKeys(k, fresh)
     fresh = await getDomain(k, scope, id)
   }
@@ -687,6 +720,7 @@ export async function verifyOwnership(k: Kernel, scope: Scope, id: string, baseU
   if (domain.ownership_status === 'verified') return { ok: true, domain, setup: null }
   const ok = await checkOwnership(k, domain)
   if (!ok) return { ok: false, domain, setup: null }
+  const taken = () => new MailAdminError(409, 'Another organization has already verified this domain')
   await k.db.transaction().execute(async (tx) => {
     const holder = await tx.selectFrom('mail_domains').select(['id', 'org_id', 'source'])
       .where(sql`lower(domain)`, '=', domain.domain)
@@ -694,13 +728,22 @@ export async function verifyOwnership(k: Kernel, scope: Scope, id: string, baseU
       .where('id', '!=', domain.id)
       .executeTakeFirst()
     if (holder) {
-      throw new MailAdminError(409, holder.org_id === null || holder.source === 'env' ? 'This domain is in use by the host' : 'Another organization has already verified this domain')
+      throw holder.org_id === null || holder.source === 'env' ? new MailAdminError(409, 'This domain is in use by the host') : taken()
     }
-    await tx.deleteFrom('mail_domains').where(sql`lower(domain)`, '=', domain.domain).where('id', '!=', domain.id).execute()
+    // Only unproven rows go: a claim another org verifies meanwhile stays, and
+    // the unique index on verified names then refuses this one.
+    await tx.deleteFrom('mail_domains')
+      .where(sql`lower(domain)`, '=', domain.domain)
+      .where('id', '!=', domain.id)
+      .where('ownership_status', 'in', ['pending', 'lapsed'])
+      .execute()
     await tx.updateTable('mail_domains')
       .set({ ownership_status: 'verified', ownership_failures: 0 })
       .where('id', '=', domain.id)
       .execute()
+  }).catch((err) => {
+    if ((err as { code?: string })?.code === '23505') throw taken()
+    throw err
   })
   await probeKeys(k, await getDomain(k, scope, id))
   const setup = await setUpDomain(k, await getDomain(k, scope, id), baseUrl)
@@ -758,7 +801,12 @@ async function sendProbe(k: Kernel, domain: MailDomainRow, account: MailAccountR
   }
 }
 
-export async function checkDomain(k: Kernel, scope: Scope, id: string, baseUrl: string): Promise<DomainCheck> {
+// `providerTest: false` (the daily job) makes no provider send: a manual
+// sending role is judged by its DNS and the stored key status, and no
+// receiving probe goes out. A provider error that isn't a refusal never
+// changes a role's status; it is recorded and the status kept.
+export async function checkDomain(k: Kernel, scope: Scope, id: string, baseUrl: string, opts: { providerTest?: boolean } = {}): Promise<DomainCheck> {
+  const providerTest = opts.providerTest !== false
   let domain = await getDomain(k, scope, id)
   const result: DomainCheck = { roles: [] }
   if (domain.ownership_status !== 'verified') {
@@ -777,6 +825,14 @@ export async function checkDomain(k: Kernel, scope: Scope, id: string, baseUrl: 
     if (!account) continue
     const provider = account.provider ? k.providers.get(account.provider) : undefined
     const check: RoleCheck = { role, status: 'pending', checks: [] }
+    const previous = role === 'send' ? domain.send_status : domain.receive_status
+    let kept = false
+    const keep = (error: string) => {
+      check.status = previous
+      check.error = error
+      kept = true
+      k.log(`[mail] ${role} check of ${domain.domain} failed; status kept as ${previous}: ${error}`)
+    }
 
     // A role that fell back to manual (no refs), or whose key can't use the provider check, is checked the manual way.
     const roleRefs = (domain.provider_refs as Record<string, Record<string, unknown>>)[role]
@@ -795,8 +851,7 @@ export async function checkDomain(k: Kernel, scope: Scope, id: string, baseUrl: 
           await recordCapability(k, account, domain, err.capability, false)
           manual = true
         } else {
-          check.status = 'failed'
-          check.error = err instanceof Error ? err.message : String(err)
+          keep(err instanceof Error ? err.message : String(err))
         }
       }
     }
@@ -804,25 +859,66 @@ export async function checkDomain(k: Kernel, scope: Scope, id: string, baseUrl: 
       if (!provider || k.transport !== 'provider') {
         check.checks.push({ key: 'provider', label: 'Provider accepted a test', ok: k.transport !== 'provider' ? true : false, detail: k.transport !== 'provider' ? 'Local transport: nothing is sent to a provider' : 'No provider' })
         check.status = k.transport !== 'provider' ? 'verified' : 'failed'
+      } else if (!providerTest) {
+        const refused = effectiveCapabilities(account, domain).send === false || domain.send_error === 'key_rejected'
+        check.checks.push({ key: 'key', label: 'The provider hasn\'t refused the key', ok: !refused })
+        check.status = refused ? 'failed' : previous
+        if (refused) check.error = 'The provider refused the key'
       } else {
-        const res = await provider.verifyCredentials(domainCredentials(k, account, domain), domain.domain, { probeAddress: domain.probe_token ? probeAddress(domain) : `${PROBE_PREFIX}send@${domain.domain}` })
-        const accepted = res.ok && res.capabilities.send === true
-        check.checks.push({ key: 'provider', label: 'Provider accepted a test', ok: accepted, detail: res.ok ? undefined : res.error })
-        if (res.ok && domain.credentials) patch.capabilities = jsonb(res.capabilities)
-        check.status = accepted ? 'verified' : 'failed'
-        if (!accepted) check.error = res.ok ? 'The key can\'t send for this domain' : res.error
+        let res: Awaited<ReturnType<MailProvider['verifyCredentials']>>
+        try {
+          res = await provider.verifyCredentials(domainCredentials(k, account, domain), domain.domain, { probeAddress: domain.probe_token ? probeAddress(domain) : `${PROBE_PREFIX}send@${domain.domain}` })
+        } catch (err) {
+          res = { ok: false, error: err instanceof Error ? err.message : String(err), retryable: true }
+        }
+        if (!res.ok && res.retryable) {
+          check.checks.push({ key: 'provider', label: 'Provider accepted a test', ok: null, detail: res.error })
+          keep(res.error)
+        } else {
+          const accepted = res.ok && res.capabilities.send === true
+          check.checks.push({ key: 'provider', label: 'Provider accepted a test', ok: accepted, detail: res.ok ? undefined : res.error })
+          if (res.ok) {
+            if (domain.credentials) {
+              patch.capabilities = jsonb(res.capabilities)
+            } else {
+              const scoped = (Object.entries(res.capabilities) as [CapabilityKey, boolean | undefined][])
+                .filter(([key, value]) => value !== undefined && perDomain(k, account, domain, key))
+              if (scoped.length) patch.capabilities = jsonb(mergeCapabilities((domain.capabilities as Capabilities | null) ?? {}, Object.fromEntries(scoped)))
+            }
+          }
+          check.status = accepted ? 'verified' : 'failed'
+          if (!accepted) check.error = res.ok ? 'The key can\'t send for this domain' : res.error
+        }
       }
       const dns = await manualSendDnsChecks(k, domain)
       check.checks.push({ key: 'dns', label: 'DNS: SPF, DKIM and DMARC records found', ok: dns.every(d => d.ok !== false), detail: dns.filter(d => d.ok === false).map(d => d.label).join('; ') || undefined })
       check.checks.push(...dns)
     } else if (manual) {
-      if (domain.receive_status !== 'verified') {
+      if (domain.receive_status === 'verified') {
+        check.status = 'verified'
+        check.checks.push({ key: 'probe', label: 'Probe received', ok: true })
+        // Costs nothing: the MX records must still point at the provider.
+        if (provider?.receivesAt) {
+          const mx = await k.dns.mx(domain.domain).then(list => list.map(r => r.exchange.toLowerCase().replace(/\.$/, '')), () => null)
+          if (!mx) {
+            check.checks.push({ key: 'mx', label: `MX records of ${domain.domain}`, ok: null, detail: 'DNS lookup failed' })
+            keep('The MX lookup failed')
+          } else {
+            const pointed = mx.some(host => provider.receivesAt!(host))
+            check.checks.push({ key: 'mx', label: `MX records of ${domain.domain} point at ${provider.label}`, ok: pointed, detail: mx.join(', ') || 'No MX records' })
+            if (!pointed) {
+              check.status = 'failed'
+              check.error = `The MX records of ${domain.domain} no longer point at ${provider.label}`
+            }
+          }
+        }
+      } else if (!providerTest) {
+        check.status = previous
+        check.checks.push({ key: 'probe', label: 'No probe sent', ok: null, detail: 'Choose Check to send one' })
+      } else {
         const error = await sendProbe(k, domain, accounts.send)
         check.checks.push({ key: 'probe', label: `Probe sent to ${probeAddress(domain)}`, ok: error ? false : null, detail: error ?? 'Waiting for it to arrive' })
         check.status = 'pending'
-      } else {
-        check.status = 'verified'
-        check.checks.push({ key: 'probe', label: 'Probe received', ok: true })
       }
     }
 
@@ -830,7 +926,13 @@ export async function checkDomain(k: Kernel, scope: Scope, id: string, baseUrl: 
       // The receiving probe below may go out from this domain.
       domain.send_status = check.status
       patch.send_status = check.status
-      if (check.status === 'verified') patch.send_error = null
+      if (kept) {
+        if (domain.send_error !== 'key_rejected') patch.send_error = check.error ?? null
+      } else if (check.status === 'verified') {
+        patch.send_error = null
+      }
+    } else if (kept) {
+      patch.receive_status = previous
     } else if (check.status !== 'pending' || domain.receive_status !== 'verified') {
       patch.receive_status = domain.receive_status === 'verified' && check.status === 'pending' ? 'verified' : check.status
     }
@@ -904,7 +1006,7 @@ export async function setStreamRoute(k: Kernel, scope: Scope, streamId: string, 
   // Event lists follow which streams a domain carries.
   const touched = [before?.domain_id, domainId, ...resolvedBefore, ...await resolvedIds()].filter(Boolean) as string[]
   for (const id of new Set(touched)) {
-    const domain = await k.db.selectFrom('mail_domains').selectAll().where('id', '=', id).executeTakeFirst()
+    const domain = await k.db.selectFrom('mail_domains').selectAll().where('id', '=', id).where('ownership_status', '=', 'verified').executeTakeFirst()
     if (!domain || domain.setup_mode !== 'auto' || domain.webhook_events === null) continue
     const accounts = await roleAccounts(k, domain)
     const account = accounts.send ?? accounts.receive
@@ -1080,7 +1182,7 @@ export async function runDailyJob(k: Kernel, opts: { baseUrl: string, onAlert?: 
   for (const domain of verified) {
     const before = { send: domain.send_status, receive: domain.receive_status }
     try {
-      await checkDomain(k, { orgId: domain.org_id }, domain.id, opts.baseUrl)
+      await checkDomain(k, { orgId: domain.org_id }, domain.id, opts.baseUrl, { providerTest: false })
       const after = await getDomain(k, { orgId: domain.org_id }, domain.id)
       for (const [role, status] of [['send', after.send_status], ['receive', after.receive_status]] as const) {
         if (before[role] === 'verified' && status !== 'verified') {

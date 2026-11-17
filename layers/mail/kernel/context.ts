@@ -58,8 +58,12 @@ export function domainCredentials(k: Kernel, account: MailAccountRow, domain: Ma
   return merged
 }
 
+// A domain with its own key has its own capabilities. A domain without one
+// layers its per-domain capabilities (MailProvider.domainCapabilities) over the account's.
 export function effectiveCapabilities(account: MailAccountRow, domain: MailDomainRow | null): Capabilities {
-  return (domain?.capabilities as Capabilities | null) ?? (account.capabilities as Capabilities) ?? {}
+  const own = (domain?.capabilities as Capabilities | null) ?? null
+  if (domain?.credentials && own) return own
+  return { ...((account.capabilities as Capabilities | null) ?? {}), ...(own ?? {}) }
 }
 
 export function suppressionMode(k: Kernel, account: MailAccountRow, domain: MailDomainRow | null): ProviderSuppressionMode {

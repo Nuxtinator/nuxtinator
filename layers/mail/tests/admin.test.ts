@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import { encryptJson, MailAdminError, ProviderPermissionError, type InboundMail, type MailStream } from '../kernel'
 import { jsonb } from '../kernel/json'
-import { db, harness, insertAccount, insertDomain, mailFor, orgId, resetTables, route, SECRET } from './helpers'
+import { db, harness, insertAccount, insertDomain, mailFor, orgId, pg, resetTables, route, SECRET } from './helpers'
 
 beforeEach(resetTables)
 afterAll(async () => {
@@ -106,6 +106,40 @@ describe('org domains: ownership', () => {
     await db().updateTable('mail_domains').set({ created_at: sql`now() - interval '8 days'` }).where('id', '=', stale.id).execute()
     await h.mail.admin.runDailyJob({ baseUrl: BASE })
     expect(await db().selectFrom('mail_domains').select('id').where('id', '=', stale.id).executeTakeFirst()).toBeUndefined()
+  })
+
+  it('a claim another org verifies while this one is verifying isn\'t deleted; this one gets a 409', async () => {
+    const h = harness()
+    const acct = await hostAccount()
+    const a = await orgId()
+    const b = await orgId()
+    const { domain: ca } = await h.mail.admin.addDomain({ orgId: a }, { domain: 'race.test', sendAccountId: acct.id }, BASE)
+    const { domain: cb } = await h.mail.admin.addDomain({ orgId: b }, { domain: 'race.test', sendAccountId: acct.id }, BASE)
+    txt(h, '_nx-verify.race.test', `nx-verify=${ca.ownership_token}`)
+
+    // Org b's verification is in flight (row locked, not committed) while org a verifies.
+    let commit!: () => void
+    let updated!: () => void
+    const gate = new Promise<void>(resolve => (commit = resolve))
+    const locked = new Promise<void>(resolve => (updated = resolve))
+    const other = pg().begin(async (t) => {
+      await t`update mail_domains set ownership_status = 'verified' where id = ${cb.id}`
+      updated()
+      await gate
+    })
+    await locked
+    const racing = h.mail.admin.verifyOwnership({ orgId: a }, ca.id, BASE).then(r => r, (e: unknown) => e)
+    for (let i = 0; i < 200; i++) {
+      const waiting = await sql<{ n: number }>`select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock' and query ilike '%mail_domains%'`.execute(db())
+      if (waiting.rows[0]!.n > 0) break
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    commit()
+    await other
+
+    expect(await racing).toMatchObject({ statusCode: 409 })
+    const rows = await db().selectFrom('mail_domains').select(['id', 'ownership_status']).where('domain', '=', 'race.test').orderBy('ownership_status').execute()
+    expect(rows).toEqual([{ id: ca.id, ownership_status: 'pending' }, { id: cb.id, ownership_status: 'verified' }])
   })
 
   it('the daily recheck lapses after three failures, alerts once, and a passing check restores it', async () => {
@@ -380,7 +414,7 @@ describe('domain checks and the daily job', () => {
     expect((await h.mail.admin.getAccount({ orgId: null }, acct.id)).capabilities).toMatchObject({ domains: false })
   })
 
-  it('the daily recheck covers manual and env domains, and alerts when a role leaves verified for any state', async () => {
+  it('the daily recheck covers manual and env domains without a provider send, and alerts when a role leaves verified for any state', async () => {
     const h = harness()
     await h.mail.syncEnvAccount()
     const acct = await hostAccount()
@@ -391,18 +425,119 @@ describe('domain checks and the daily job', () => {
 
     const alerts: unknown[] = []
     h.fake.verifyCalls.length = 0
+    const sent = h.fake.sent.length
     await h.mail.admin.runDailyJob({ baseUrl: BASE, onAlert: async a => void alerts.push(a) })
     expect(alerts).toEqual([])
-    expect(h.fake.verifyCalls.map(c => c.domain).sort()).toEqual(['daily.manual.test', 'mg.example.org'])
+    expect(h.fake.verifyCalls).toEqual([])
+    expect(h.fake.sent).toHaveLength(sent)
+    expect((await h.mail.admin.getDomain({ orgId: null }, manual.id)).send_status).toBe('verified')
 
+    // The stored key status: the account's key can no longer send.
     h.fake.control.domainStatus = 'pending'
-    h.fake.control.capabilities = { ...h.fake.control.capabilities, send: false }
+    const caps = (await h.mail.admin.getAccount({ orgId: null }, acct.id)).capabilities
+    await db().updateTable('mail_accounts').set({ capabilities: jsonb({ ...caps, send: false }) }).where('id', '=', acct.id).execute()
     await h.mail.admin.runDailyJob({ baseUrl: BASE, onAlert: async a => void alerts.push(a) })
+    expect(h.fake.verifyCalls).toEqual([])
     expect(alerts).toEqual(expect.arrayContaining([
       { kind: 'role_lost', orgId: null, domain: 'daily.auto.test', role: 'send' },
       { kind: 'role_lost', orgId: null, domain: 'daily.manual.test', role: 'send' }
     ]))
     expect((await h.mail.admin.getDomain({ orgId: null }, auto.id)).send_status).toBe('pending')
+  })
+
+  it('a provider error that isn\'t a refusal keeps a verified role\'s status and records the error', async () => {
+    const h = harness()
+    const acct = await hostAccount()
+    const { domain: auto } = await h.mail.admin.addDomain({ orgId: null }, { domain: 'flaky.auto.test', sendAccountId: acct.id }, BASE)
+    const { domain: manual } = await h.mail.admin.addDomain({ orgId: null }, { domain: 'flaky.manual.test', sendAccountId: acct.id, setupMode: 'manual' }, BASE)
+    await h.mail.admin.checkDomain({ orgId: null }, auto.id, BASE)
+    await h.mail.admin.checkDomain({ orgId: null }, manual.id, BASE)
+
+    h.fake.checkDomain = async () => {
+      throw new Error('Fake responded 503')
+    }
+    const alerts: unknown[] = []
+    await h.mail.admin.runDailyJob({ baseUrl: BASE, onAlert: async a => void alerts.push(a) })
+    expect(alerts).toEqual([])
+    expect(await h.mail.admin.getDomain({ orgId: null }, auto.id)).toMatchObject({ send_status: 'verified', send_error: 'Fake responded 503' })
+
+    h.fake.verifyCredentials = async () => ({ ok: false, error: 'Fake responded 500', retryable: true })
+    const check = await h.mail.admin.checkDomain({ orgId: null }, manual.id, BASE)
+    expect(check.roles.find(r => r.role === 'send')).toMatchObject({ status: 'verified', error: 'Fake responded 500' })
+    h.fake.verifyCredentials = async () => {
+      throw new Error('socket hang up')
+    }
+    await h.mail.admin.checkDomain({ orgId: null }, manual.id, BASE)
+    expect(await h.mail.admin.getDomain({ orgId: null }, manual.id)).toMatchObject({ send_status: 'verified', send_error: 'socket hang up' })
+
+    // A refusal still fails the role.
+    h.fake.verifyCredentials = async () => ({ ok: false, error: 'Unauthorized' })
+    await h.mail.admin.checkDomain({ orgId: null }, manual.id, BASE)
+    expect((await h.mail.admin.getDomain({ orgId: null }, manual.id)).send_status).toBe('failed')
+  })
+
+  it('the daily recheck of a manual receiving role checks its MX records and sends no probe', async () => {
+    const h = harness()
+    h.fake.receivesAt = exchange => exchange === 'mx.fake.example'
+    const acct = await hostAccount()
+    const { domain } = await h.mail.admin.addDomain({ orgId: null }, { domain: 'in.manual.test', sendAccountId: acct.id, receiveAccountId: acct.id, setupMode: 'manual' }, BASE)
+    await db().updateTable('mail_domains').set({ send_status: 'verified', receive_status: 'verified' }).where('id', '=', domain.id).execute()
+    h.dns.records.set('in.manual.test', { mx: [{ exchange: 'mx.fake.example.', priority: 10 }] })
+    const sent = h.fake.sent.length
+
+    const alerts: unknown[] = []
+    await h.mail.admin.runDailyJob({ baseUrl: BASE, onAlert: async a => void alerts.push(a) })
+    expect(alerts).toEqual([])
+    expect((await h.mail.admin.getDomain({ orgId: null }, domain.id)).receive_status).toBe('verified')
+
+    h.dns.records.set('in.manual.test', { mx: [{ exchange: 'mx.elsewhere.test', priority: 10 }] })
+    await h.mail.admin.runDailyJob({ baseUrl: BASE, onAlert: async a => void alerts.push(a) })
+    expect(alerts).toEqual([{ kind: 'role_lost', orgId: null, domain: 'in.manual.test', role: 'receive' }])
+    expect((await h.mail.admin.getDomain({ orgId: null }, domain.id)).receive_status).toBe('failed')
+
+    // An unverified receiving role gets its probe only from Check.
+    await h.mail.admin.runDailyJob({ baseUrl: BASE })
+    expect(h.fake.sent).toHaveLength(sent)
+    await h.mail.admin.checkDomain({ orgId: null }, domain.id, BASE)
+    expect(h.fake.sent.map(m => m.to)).toEqual([expect.stringMatching(/^nx-probe-.*@in\.manual\.test$/)])
+  })
+
+  it('moving a domain onto an account that was never probed probes the account\'s key against it', async () => {
+    const h = harness()
+    const first = await hostAccount()
+    const fresh = await insertAccount({ credentials: encryptJson(SECRET, { apiKey: 'k2' }) })
+    const { domain } = await h.mail.admin.addDomain({ orgId: null }, { domain: 'moving.test', sendAccountId: first.id }, BASE)
+    h.fake.verifyCalls.length = 0
+    await h.mail.admin.patchDomain({ orgId: null }, domain.id, { sendAccountId: fresh.id }, BASE)
+    expect(h.fake.verifyCalls).toContainEqual({ domain: 'moving.test' })
+    expect((await h.mail.admin.getAccount({ orgId: null }, fresh.id)).capabilities).toMatchObject({ send: true, suppressionLists: true })
+  })
+
+  it('a role moved to another account loses the old account\'s refs when its setup there falls back to manual', async () => {
+    const h = harness()
+    const first = await hostAccount()
+    const other = await insertAccount({ credentials: encryptJson(SECRET, { apiKey: 'k2' }) })
+    const { domain } = await h.mail.admin.addDomain({ orgId: null }, { domain: 'refs.test', sendAccountId: first.id, receiveAccountId: first.id }, BASE)
+    expect(Object.keys((await h.mail.admin.getDomain({ orgId: null }, domain.id)).provider_refs as object).sort()).toEqual(['receive', 'send'])
+
+    const provision = h.fake.provisionDomain!
+    h.fake.provisionDomain = async (creds, name, role, urls) => {
+      if (role === 'send') throw new Error('Fake responded 400')
+      return await provision(creds, name, role, urls)
+    }
+    const res = await h.mail.admin.patchDomain({ orgId: null }, domain.id, { sendAccountId: other.id }, BASE)
+    expect(res.setup?.roles).toEqual([{ role: 'send', mode: 'manual', error: 'Fake responded 400' }, { role: 'receive', mode: 'auto' }])
+    expect(res.domain.setup_mode).toBe('auto')
+    expect(Object.keys(res.domain.provider_refs as object)).toEqual(['receive'])
+
+    const checked: string[] = []
+    h.fake.checkDomain = async (_c, _d, role) => {
+      checked.push(role)
+      return { status: 'verified', records: [] }
+    }
+    const check = await h.mail.admin.checkDomain({ orgId: null }, domain.id, BASE)
+    expect(checked).toEqual(['receive'])
+    expect(check.roles.find(r => r.role === 'send')!.checks.map(c => c.key)).toContain('provider')
   })
 
   it('inbound for a lapsed domain is dropped; once another org verifies the name, it reaches the new owner', async () => {
@@ -447,6 +582,17 @@ describe('webhook event lists', () => {
     await h.mail.admin.setStreamRoute({ orgId: null }, 'account', null, BASE)
     expect(h.fake.webhooksConfigured.filter(w => w.domain === 'fallback.test').at(-1)!.events).toContain('delivered')
     expect((await h.mail.admin.webhookStatus(await h.mail.admin.getDomain({ orgId: null }, fallback.id))).state).toBe('connected')
+  })
+
+  it('a route change doesn\'t reconfigure the webhooks of a domain that isn\'t ownership-verified', async () => {
+    const h = harness({ env: {}, streams })
+    const acct = await hostAccount()
+    const org = await orgId()
+    const lapsed = await insertDomain({ org_id: org, domain: 'lapsed.route.test', ownership_status: 'lapsed', send_account_id: acct.id, setup_mode: 'auto' })
+    await db().updateTable('mail_domains').set({ webhook_events: jsonb(['bounced']), provider_refs: jsonb({ send: { id: 'x' } }) }).where('id', '=', lapsed.id).execute()
+    await route(org, '*', lapsed.id)
+    await h.mail.admin.setStreamRoute({ orgId: org }, '*', null, BASE)
+    expect(h.fake.webhooksConfigured).toEqual([])
   })
 
   it('with an account-level webhook, the event list spans the account\'s domains and a bulk stream on any of them warns', async () => {

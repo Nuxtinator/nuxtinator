@@ -186,29 +186,34 @@ describe('outbox', () => {
   })
 
   it('a flush that outlives its lease can\'t send a row the same process re-claimed', async () => {
-    const gates: Record<string, { open: () => void, wait: Promise<void> }> = {}
-    const gate = (name: string) => {
+    const latch = () => {
       let open!: () => void
       const wait = new Promise<void>((r) => {
         open = r
       })
-      gates[name] = { open, wait }
+      return { open, wait }
     }
-    gate('a')
-    gate('b')
-    const calls: Record<string, number> = {}
-    const entered: Record<string, () => void> = {}
-    const enteredP = (name: string) => new Promise<void>((r) => {
-      entered[name] = r
-    })
-    const aEntered = enteredP('a')
-    const bEntered = enteredP('b')
-    const { mail, fake } = harness({ guards: [{ id: 'slow', check: async (m) => {
-      const name = m.to.split('@')[0]!
-      calls[name] = (calls[name] ?? 0) + 1
-      if (calls[name] === 1 && gates[name]) {
-        entered[name]!()
-        await gates[name].wait
+    const aInGuard = latch()
+    const aGuard = latch()
+    const bInSend = latch()
+    const bSend = latch()
+
+    // The flush stops in a's guard; the sweep stops inside b's provider call.
+    const fake = createFakeProvider()
+    const providerSend = fake.send.bind(fake)
+    let bSends = 0
+    fake.send = async (creds, msg) => {
+      if (msg.to === 'b@x.test' && ++bSends === 1) {
+        bInSend.open()
+        await bSend.wait
+      }
+      return providerSend(creds, msg)
+    }
+    let aChecks = 0
+    const { mail } = harness({ fake, guards: [{ id: 'slow', check: async (m) => {
+      if (m.to === 'a@x.test' && ++aChecks === 1) {
+        aInGuard.open()
+        await aGuard.wait
       }
       return { ok: true }
     } }] })
@@ -218,14 +223,15 @@ describe('outbox', () => {
     const b = await db().transaction().execute(tx => mail.enqueue(mailFor('b@x.test'), { tx }))
 
     const flushing = mail.flush([a.outboxId, b.outboxId])
-    await aEntered
-    // Row b's lease runs out while the flush is stuck on a; the same process's sweep takes b.
+    await aInGuard.wait
+    // Row b's lease runs out while the flush is stuck on a; the same process's
+    // sweep re-claims b and is mid-send when the flush reaches it.
     await db().updateTable('mail_outbox').set({ claimed_until: sql`now() - interval '1 second'` }).where('id', '=', b.outboxId).execute()
     const sweeping = mail.runOutboxSweep()
-    await bEntered
-    gates.a!.open()
+    await bInSend.wait
+    aGuard.open()
     await flushing
-    gates.b!.open()
+    bSend.open()
     await sweeping
     expect(fake.sent.map(m => m.to).sort()).toEqual(['a@x.test', 'b@x.test'])
     expect((await outbox()).map(r => [r.status, r.attempts])).toEqual([['sent', 1], ['sent', 1]])

@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { createServer as createNetServer, type AddressInfo, type Socket } from 'node:net'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { sql } from 'kysely'
 import { __setEndpointCheck } from '../adapters/http'
@@ -272,6 +272,27 @@ describe('transports', () => {
       expect((await mail.send(mailFor('a@x.test'))).status).toBe('sent')
       expect((await mail.send(mailFor('a@x.test', { stream: 'newsletter' }))).status).toBe('sent')
       expect(fake.sent).toHaveLength(0)
+    }
+  })
+
+  it('an SMTP server that accepts and never answers times out within the request timeout as unknown', async () => {
+    const sockets = new Set<Socket>()
+    const hung = createNetServer((s) => {
+      sockets.add(s)
+    })
+    await new Promise<void>(r => hung.listen(0, '127.0.0.1', r))
+    const { port } = hung.address() as AddressInfo
+    try {
+      const { mail } = harness({ transport: { smtp: { host: '127.0.0.1', port } }, requestTimeoutMs: 500 })
+      await mail.syncEnvAccount()
+      const started = Date.now()
+      const res = await mail.send(mailFor('hang@x.test'))
+      expect(res.status).toBe('unknown')
+      expect(Date.now() - started).toBeLessThan(1500)
+      expect(sockets.size).toBe(1)
+    } finally {
+      for (const s of sockets) s.destroy()
+      await new Promise(r => hung.close(r))
     }
   })
 

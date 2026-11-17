@@ -15,8 +15,10 @@ import { $fetch } from '@nuxt/test-utils/e2e'
 import { randomUUID } from 'node:crypto'
 import {
   getHostAdminDb,
+  getAuthHeaders,
   cleanupInboxTestData,
   createInboxOrgWith,
+  createInboxUser,
   setInboxOrgSetting,
   postInbound,
   postMailEvents,
@@ -182,6 +184,8 @@ describe('send sweep hardening', () => {
     const [own] = await sql<{ id: string }[]>`SELECT id FROM mail_domains WHERE org_id = ${org.id}`
     await setMailDomainReceiving(sql, own!.id, false)
     await setMailDomainReceiving(sql, sharedMailDomainId(), false)
+    const hostAuth = getAuthHeaders(await createInboxUser(sql, { is_admin: true }))
+    const lent = await $fetch<{ receiveAccountId: string | null }>('/api/admin/mail/org-accounts', hostAuth)
     try {
       const me = await $fetch<{ noReceivingDomain: boolean, contactAddress: string | null }>('/api/inbox/me', opts)
       expect(me).toMatchObject({ noReceivingDomain: true, contactAddress: null })
@@ -209,22 +213,25 @@ describe('send sweep hardening', () => {
         expect(still.attempts).toBe(0)
       }
 
-      // Receiving turned on for the org's domain stays pending until the
-      // probe arrives through the inbound webhook; that verifies it and
-      // releases the reply with no manual intervention. (The hold pushes
-      // next_attempt_at a minute out; the test pulls it back rather than
-      // waiting for the production recheck interval.)
-      const probeToken = `p${randomUUID().replace(/-/g, '').slice(0, 11)}`
-      await sql`
-        UPDATE mail_domains SET receive_account_id = ${testMailAccountId()}, receive_status = 'pending', probe_token = ${probeToken}
-        WHERE id = ${own!.id}
-      `
+      // An org admin turns receiving on for the org's domain through the host
+      // account lent to orgs. It stays pending until the probe arrives through
+      // the inbound webhook; that verifies it and releases the reply with no
+      // manual intervention. (The hold pushes next_attempt_at a minute out;
+      // the test pulls it back rather than waiting for the production recheck
+      // interval.)
+      await $fetch('/api/admin/mail/org-accounts', { method: 'PUT', body: { receiveAccountId: testMailAccountId() }, ...hostAuth })
+      const patched = await $fetch<{ domain: { receiveStatus: string, probeAddress: string | null } }>(`/api/o/${org.slug}/mail/domains/${own!.id}`, {
+        method: 'PATCH', body: { receiveAccountId: testMailAccountId() }, ...opts
+      })
+      expect(patched.domain.receiveStatus).toBe('pending')
+      const probeAddress = patched.domain.probeAddress!
+      expect(probeAddress).toMatch(new RegExp(`^nx-probe-[a-z0-9]+@${domain.replace(/\./g, '\\.')}$`))
       await sql`UPDATE inbox_messages SET next_attempt_at = now() - interval '1 second' WHERE id = ${msgId}`
       await new Promise(r => setTimeout(r, 2_500))
       expect((await getMessageRow(msgId)).status).toBe('queued')
       expect((await $fetch<{ noReceivingDomain: boolean }>('/api/inbox/me', opts)).noReceivingDomain).toBe(true)
 
-      const probe = await postInbound({ recipient: `nx-probe-${probeToken}@${domain}`, from: `Probe <nx-probe-${probeToken}@${domain}>` })
+      const probe = await postInbound({ recipient: probeAddress, from: `Probe <${probeAddress}>` })
       expect(probe.status).toBe(200)
       const [verified] = await sql<{ receive_status: string }[]>`SELECT receive_status FROM mail_domains WHERE id = ${own!.id}`
       expect(verified!.receive_status).toBe('verified')
@@ -238,6 +245,7 @@ describe('send sweep hardening', () => {
       expect((await $fetch<{ noReceivingDomain: boolean }>('/api/inbox/me', opts)).noReceivingDomain).toBe(false)
     } finally {
       await setMailDomainReceiving(sql, sharedMailDomainId(), true)
+      await $fetch('/api/admin/mail/org-accounts', { method: 'PUT', body: { receiveAccountId: lent.receiveAccountId }, ...hostAuth })
     }
   })
 

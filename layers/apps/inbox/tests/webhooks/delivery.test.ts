@@ -24,13 +24,14 @@ function uniqueSender(tag: string) {
 }
 
 async function messageRow(id: string) {
-  const [row] = await sql<{ status: string, failed_reason: string | null, provider_message_id: string | null, delivered_at: Date | null }[]>`
-    SELECT status, failed_reason, provider_message_id, delivered_at FROM inbox_messages WHERE id = ${id}
+  const [row] = await sql<{ status: string, failed_reason: string | null, email_message_id: string | null, delivered_at: Date | null }[]>`
+    SELECT status, failed_reason, email_message_id, delivered_at FROM inbox_messages WHERE id = ${id}
   `
   return row!
 }
 
-// A conversation with one staff reply the sweep has sent.
+// A conversation with one staff reply the sweep has sent. The claim already
+// reads 'sent'; the send's own Message-Id lands once the kernel answers.
 async function sentReply(opts: { authenticated?: boolean } = {}) {
   const ctx = await createInboxOrgWith(sql)
   await setInboxOrgSetting(sql, ctx.org.id, 'auto_ack_enabled', false)
@@ -42,10 +43,10 @@ async function sentReply(opts: { authenticated?: boolean } = {}) {
   })
   for (let i = 0; i < 60; i++) {
     const row = await messageRow(queued.id)
-    if (row.status === 'sent' && row.provider_message_id) break
+    if (row.status === 'sent' && row.email_message_id) break
     await new Promise(r => setTimeout(r, 250))
   }
-  expect((await messageRow(queued.id)).status).toBe('sent')
+  expect(await messageRow(queued.id)).toMatchObject({ status: 'sent', email_message_id: expect.any(String) })
   return { ...ctx, sender, convId, messageId: queued.id }
 }
 

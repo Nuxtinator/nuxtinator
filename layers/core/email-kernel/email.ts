@@ -1,8 +1,9 @@
 // Core's `#email` implementation: renders core's templates and sends them
 // through the mail kernel. Mail the person just asked for (password reset,
 // verification) goes on the `account` stream, which skips suppressions;
-// everything else goes on `system`. Returns true when the mail was sent or
-// queued for a retry.
+// everything else goes on `system`. Returns true when the mail was sent,
+// queued for a retry, or handed to a provider that didn't answer in time (it
+// may have gone out and is never retried, so callers keep its link valid).
 //
 // Lives outside `server/utils/` so Nuxt's auto-imports don't double up on it.
 // `modules/email-kernel.ts` points the `#email` alias here unless another
@@ -71,7 +72,9 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
         fromLocal: from.local,
         expiresInMinutes: options.expiresInMinutes
       })
-      if (res.status !== 'sent' && res.status !== 'queued') {
+      if (res.status === 'unknown') {
+        if (!process.env.VITEST) console.warn(`[email] outcome unknown: ${res.error}`)
+      } else if (res.status !== 'sent' && res.status !== 'queued') {
         ok = false
         if (!process.env.VITEST) console.warn(`[email] not sent (${res.status}${'error' in res ? `: ${res.error}` : 'reason' in res ? `: ${res.reason}` : ''})`)
       }

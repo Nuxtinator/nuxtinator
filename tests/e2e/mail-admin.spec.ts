@@ -78,8 +78,8 @@ test('add an account: the key is checked and its capabilities are listed', async
   await addDomain(page, { domain: e2eDomain('caps'), account: label, manual: true })
   await page.goto('/admin/email')
   const probed = page.getByRole('row').filter({ hasText: label })
-  await expect(probed.getByTitle('Allowed').filter({ hasText: 'Send' })).toBeVisible()
-  await expect(probed.getByTitle('Allowed').filter({ hasText: 'Suppression lists' })).toBeVisible()
+  await expect(probed.getByTitle('Allowed', { exact: true }).filter({ hasText: 'Send' })).toBeVisible()
+  await expect(probed.getByTitle('Allowed', { exact: true }).filter({ hasText: 'Suppression lists' })).toBeVisible()
 })
 
 test('a manual domain shows steps, then verifies sending and receiving', async ({ page }) => {

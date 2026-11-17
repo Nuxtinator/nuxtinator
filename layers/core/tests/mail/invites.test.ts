@@ -66,26 +66,29 @@ describe('invites to a suppressed address', () => {
     expect(err.data?.data).toEqual({ reason: 'complaint' })
   })
 
-  it('host admin resend: 422; the invite keeps its link and nothing is sent', async () => {
+  it('host admin resend: 422; the invite keeps its link, nothing is sent or released', async () => {
     const { auth } = await createMailAdmin(sql)
     const email = testAddress('bounced')
     const invite = await emailInvite(email)
     await suppress(sql, email, 'hard_bounce')
+    const releasedBefore = (await fakeState()).released.length
 
     const err = await apiError(`/api/admin/invites/${invite.inviteId}/resend`, { method: 'POST', ...auth })
     expect(err.statusCode).toBe(422)
     expect(err.data?.message ?? err.statusMessage).toBe(BOUNCE)
     await unchanged(invite.inviteId, invite.before)
     expect(await sentTo(email)).toHaveLength(0)
+    expect((await fakeState()).released.length).toBe(releasedBefore)
   })
 
-  it('org invite: 422; no invite and no mail', async (ctx) => {
+  it('org invite: 422; no invite, no mail, nothing released', async (ctx) => {
     if (!multi) ctx.skip()
     const org = await createMailOrg(sql)
     const { user, auth } = await createMailUser(sql)
     await addMembership(sql, user.id, org.id, ['admin'])
     const email = testAddress('bounced')
     await suppress(sql, email, 'hard_bounce')
+    const releasedBefore = (await fakeState()).released.length
 
     const err = await apiError(`/api/o/${org.slug}/invite`, {
       method: 'POST',
@@ -96,9 +99,10 @@ describe('invites to a suppressed address', () => {
     expect(err.data?.message ?? err.statusMessage).toBe(BOUNCE)
     expect(await sql`SELECT 1 FROM invites WHERE email = ${email}`).toHaveLength(0)
     expect(await sentTo(email)).toHaveLength(0)
+    expect((await fakeState()).released.length).toBe(releasedBefore)
   })
 
-  it('org resend: 422; the invite keeps its link and nothing is sent', async (ctx) => {
+  it('org resend: 422; the invite keeps its link, nothing is sent or released', async (ctx) => {
     if (!multi) ctx.skip()
     const org = await createMailOrg(sql)
     const { user, auth } = await createMailUser(sql)
@@ -106,6 +110,7 @@ describe('invites to a suppressed address', () => {
     const email = testAddress('bounced')
     const invite = await emailInvite(email, org.id)
     await suppress(sql, email, 'hard_bounce')
+    const releasedBefore = (await fakeState()).released.length
 
     const err = await apiError(`/api/o/${org.slug}/invites/${invite.inviteId}/resend`, {
       method: 'POST',
@@ -115,6 +120,7 @@ describe('invites to a suppressed address', () => {
     expect(err.data?.message ?? err.statusMessage).toBe(BOUNCE)
     await unchanged(invite.inviteId, invite.before)
     expect(await sentTo(email)).toHaveLength(0)
+    expect((await fakeState()).released.length).toBe(releasedBefore)
   })
 
   it('an invite to an unsuppressed address still goes out', async () => {

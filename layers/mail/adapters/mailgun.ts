@@ -164,6 +164,7 @@ export const mailgunProvider: MailProvider = {
   ],
   supports: { send: true, receive: true, events: true },
   webhookScope: 'domain',
+  receivesAt: exchange => /^mx[ab]\.(eu\.)?mailgun\.org$/.test(exchange),
 
   async verifyCredentials(creds, domain, opts) {
     const caps: Capabilities = {}
@@ -181,7 +182,7 @@ export const mailgunProvider: MailProvider = {
     if (creds.apiKey) {
       const res = await call(creds, creds.apiKey, 'GET', '/v4/domains?limit=1')
       if (res.ok) accountKeyWorks = true
-      else if (!refused(res)) return { ok: false, error: `Mailgun responded ${res.status}` }
+      else if (!refused(res)) return { ok: false, error: `Mailgun responded ${res.status}`, retryable: res.status === 429 || res.status >= 500 }
     }
 
     if (domain) {
@@ -196,7 +197,7 @@ export const mailgunProvider: MailProvider = {
       const res = await call(creds, key, 'POST', `/v3/${domain}/messages`, form)
       if (res.ok) caps.send = true
       else if (refused(res)) caps.send = false
-      else return { ok: false, error: `Mailgun test send responded ${res.status}: ${res.text.slice(0, 200)}` }
+      else return { ok: false, error: `Mailgun test send responded ${res.status}: ${res.text.slice(0, 200)}`, retryable: res.status === 429 || res.status >= 500 }
 
       if (accountKeyWorks) {
         // No role can read a suppression list without being able to change it.

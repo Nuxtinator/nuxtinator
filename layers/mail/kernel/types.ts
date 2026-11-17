@@ -233,7 +233,14 @@ export interface MailProvider {
   // Caveats per role, shown where an admin picks the provider or sets up a domain on it
   notes?: { send?: string, receive?: string }
 
-  verifyCredentials: (creds: Credentials, domain?: string, opts?: { probeAddress?: string }) => Promise<VerifyResult | { ok: false, error: string }>
+  // Capabilities that hold per domain rather than per key (SES's configuration
+  // set): stored on the domain row even when the domain has no key of its own.
+  domainCapabilities?: CapabilityKey[]
+  // Whether an MX host is one of the provider's inbound mail servers.
+  receivesAt?: (exchange: string) => boolean
+
+  // `retryable` marks a failure that says nothing about the key (5xx, 429).
+  verifyCredentials: (creds: Credentials, domain?: string, opts?: { probeAddress?: string }) => Promise<VerifyResult | { ok: false, error: string, retryable?: boolean }>
   manualSetup: (domain: string, role: 'send' | 'receive', urls: WebhookUrls, opts: { events: MailEventType[] }) => ManualStep[]
 
   send: (creds: Credentials, msg: ProviderMessage) => Promise<ProviderSendResult>

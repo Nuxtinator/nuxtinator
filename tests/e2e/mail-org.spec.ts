@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { closeTestDatabases, cleanupCoreTestData, getHostAdminDb } from '@nuxtinator/core/test-helpers'
 import { cleanupTenancyTestData } from '@nuxtinator/tenancy/test-helpers'
 import { loginAsNewUser, loginIntoNewOrg } from './helpers/login'
-import { E2E_MAIL_LABEL, cleanupMailTestData, e2eDomain, fakeAvailable, fakeControl, pickOption } from './helpers/mail'
+import { E2E_MAIL_LABEL, cleanupMailTestData, deliverInbound, e2eDomain, fakeAvailable, fakeControl, pickOption } from './helpers/mail'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 loadDotenv({ path: resolve(__dirname, '../../dev/.env') })
@@ -30,7 +30,7 @@ test.afterAll(async () => {
 })
 
 // Points organizations' domains at a fake host account, as a host admin.
-async function useFakeHostAccountForOrgs(browser: Browser) {
+async function useFakeHostAccountForOrgs(browser: Browser): Promise<{ id: string, webhookUrls: { inboundMime: string } }> {
   const context = await browser.newContext()
   const page = await context.newPage()
   await loginAsNewUser(page, { is_admin: true })
@@ -38,10 +38,11 @@ async function useFakeHostAccountForOrgs(browser: Browser) {
     data: { provider: 'fake', label: `${E2E_MAIL_LABEL}-host-for-orgs`, credentials: { apiKey: 'e2e-api-key', signingKey: 'e2e-signing-key' } }
   })
   expect(res.ok()).toBeTruthy()
-  const { account } = await res.json() as { account: { id: string } }
+  const { account } = await res.json() as { account: { id: string, webhookUrls: { inboundMime: string } } }
   const put = await page.request.put('/api/admin/mail/org-accounts', { data: { sendAccountId: account.id, receiveAccountId: account.id } })
   expect(put.ok()).toBeTruthy()
   await context.close()
+  return account
 }
 
 test('own domain: ownership record, DNS records, the switch, and the stream picker', async ({ page, browser }) => {
@@ -112,11 +113,52 @@ test('an org account appears in the add-domain provider picker', async ({ page }
 test('empty states of a new org', async ({ page }) => {
   const { org } = await loginIntoNewOrg(page)
   await page.goto(`/@${org.slug}/settings/email`)
-  await expect(page.getByText(/^Your mail is sent from .+\. Add your own domain to send from it\.$/)).toBeVisible()
+  await expect(page.getByText(/Your mail is sent from \S+\. Add your own domain to send from it\./)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Use our own domain' })).toBeVisible()
   await expect(page.getByText('No suppressed addresses.')).toBeVisible()
 
   await page.getByRole('button', { name: 'Advanced' }).click()
   await expect(page.getByText('No accounts of your own. Your domains use the host\'s provider.')).toBeVisible()
   await expect(page.getByText('Add a domain to send or receive mail on it.')).toBeVisible()
+})
+
+test('the inbox shows the no-receiving banner until the org\'s domain can receive', async ({ page, browser }) => {
+  const host = await useFakeHostAccountForOrgs(browser)
+  const { org } = await loginIntoNewOrg(page)
+  const sql = getHostAdminDb()
+  for (const app of ['inbox', 'crm']) {
+    await sql`INSERT INTO apps (id, status) VALUES (${app}, 'available') ON CONFLICT (id) DO UPDATE SET status = coalesce(apps.status, 'available')`
+    await sql`INSERT INTO org_apps (org_id, app_id, enabled, source) VALUES (${org.id}, ${app}, true, 'org_admin') ON CONFLICT DO NOTHING`
+  }
+  const banner = page.getByText('No domain can receive mail yet', { exact: true })
+
+  const firstLoad = page.waitForResponse(r => r.url().includes('/api/inbox/me') && r.ok())
+  await page.goto(`/@${org.slug}/inbox`)
+  await firstLoad
+  await expect(banner).toBeVisible()
+
+  // The org proves a domain, it receives through the host's account, and the inbox stream goes to it.
+  const domain = e2eDomain('ib')
+  const added = await page.request.post(`/api/o/${org.slug}/mail/domains`, { data: { domain } })
+  expect(added.ok()).toBeTruthy()
+  const { domain: row } = await added.json() as { domain: { id: string, ownershipRecord: { name: string, value: string } } }
+  await fakeControl(page.request, { dns: [{ name: row.ownershipRecord.name, txt: [row.ownershipRecord.value] }] })
+  expect((await page.request.post(`/api/o/${org.slug}/mail/domains/${row.id}/verify-ownership`)).ok()).toBeTruthy()
+  const checked = await page.request.post(`/api/o/${org.slug}/mail/domains/${row.id}/check`)
+  expect(checked.ok()).toBeTruthy()
+  const { domain: afterCheck } = await checked.json() as { domain: { sendStatus: string, receiveStatus: string, probeAddress: string | null } }
+  expect(afterCheck.sendStatus).toBe('verified')
+  if (afterCheck.receiveStatus !== 'verified') {
+    await deliverInbound(page.request, host.webhookUrls.inboundMime, 'e2e-signing-key', afterCheck.probeAddress!)
+  }
+  const routed = await page.request.put(`/api/o/${org.slug}/mail/streams`, { data: { routes: [{ stream: 'inbox', domainId: row.id }] } })
+  expect(routed.ok()).toBeTruthy()
+  const domains = await (await page.request.get(`/api/o/${org.slug}/mail/domains`)).json() as { domains: { id: string, receiveStatus: string }[] }
+  expect(domains.domains.find(d => d.id === row.id)?.receiveStatus).toBe('verified')
+
+  const reload = page.waitForResponse(r => r.url().includes('/api/inbox/me') && r.ok())
+  await page.reload()
+  const me = await (await reload).json() as { noReceivingDomain: boolean }
+  expect(me.noReceivingDomain).toBe(false)
+  await expect(banner).toHaveCount(0)
 })

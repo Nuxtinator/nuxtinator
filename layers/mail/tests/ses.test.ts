@@ -3,12 +3,13 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net'
 import { createSign } from 'node:crypto'
 import { resolve } from 'node:path'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  __setSnsUrlCheck, configurationSetName, isAwsSnsUrl, mapSesEvent, sesEventTypes, sesProvider, sesTags, signingKey,
+  __setAwsServiceBase, __setSnsUrlCheck, configurationSetName, isAwsSnsUrl, mapSesEvent, sesEventTypes, sesProvider, sesTags, signingKey,
   signV4, snsStringToSign
 } from '../adapters/ses'
 import { __setEndpointCheck } from '../adapters/http'
+import { effectiveCapabilities } from '../kernel/context'
 import { ProviderPermissionError, type MailAccountRow, type ProviderMessage, type WebhookRequest } from '../kernel/types'
 import { db, harness, resetTables } from './helpers'
 
@@ -107,10 +108,12 @@ beforeAll(async () => {
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done))
   endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   __setEndpointCheck(url => url.hostname === '127.0.0.1')
+  __setAwsServiceBase(() => endpoint)
 })
 
 afterAll(async () => {
   __setEndpointCheck(null)
+  __setAwsServiceBase(null)
   await new Promise<void>(done => server.close(() => done()))
 })
 
@@ -429,6 +432,51 @@ describe('provisioning', () => {
     }
   })
 
+  it('refuses any region that isn\'t an AWS region name, before any request', async () => {
+    for (const bad of ['evil.example/x', 'us-east-1.evil.example', 'US-EAST-1', 'eu-west-1/']) {
+      expect(await sesProvider.verifyCredentials(creds({ region: bad }), 'example.org')).toMatchObject({ ok: false, error: expect.stringContaining('AWS region') })
+      expect(await sesProvider.verifyCredentials(creds({ receiveRegion: bad }), 'example.org')).toMatchObject({ ok: false, error: expect.stringContaining('AWS region') })
+      expect(await sesProvider.send(creds({ region: bad }), message())).toMatchObject({ status: 'failed', retryable: false })
+      await expect(sesProvider.provisionDomain!(creds({ region: bad }), 'example.org', 'send', urls)).rejects.toThrow('AWS region')
+      await expect(sesProvider.provisionDomain!(creds({ receiveRegion: bad, inboundBucket: 'b' }), 'example.org', 'receive', urls)).rejects.toThrow('AWS region')
+      await expect(sesProvider.checkDomain!(creds(), 'example.org', 'receive', { region: bad, rule: 'r', ruleSet: 's' })).rejects.toThrow('AWS region')
+      await expect(sesProvider.configureWebhooks!(creds({ region: bad }), 'example.org', urls, { delivered: false, events: ['bounced'] })).rejects.toThrow('AWS region')
+      await expect(sesProvider.deprovisionDomain!(creds(), 'example.org', { region: bad, rule: 'r', ruleSet: 's' })).rejects.toThrow('AWS region')
+    }
+    expect(seen).toHaveLength(0)
+  })
+
+  it('a 5xx from SES while verifying is marked retryable', async () => {
+    override = s => s.path === '/v2/email/account' ? { status: 503, json: { message: 'unavailable' } } : undefined
+    expect(await sesProvider.verifyCredentials(creds(), 'example.org')).toMatchObject({ ok: false, retryable: true })
+    override = s => s.path === '/v2/email/account' ? { status: 400, json: { message: 'bad' } } : undefined
+    expect(await sesProvider.verifyCredentials(creds(), 'example.org')).toMatchObject({ ok: false, retryable: false })
+  })
+
+  it('the endpoint override moves only the SES email API; SNS and STS keep their own hosts', async () => {
+    __setAwsServiceBase(null)
+    const hosts: string[] = []
+    const real = globalThis.fetch
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = new URL(String(input))
+      if (url.host === new URL(endpoint).host) return await real(input, init)
+      hosts.push(url.host)
+      const action = new URLSearchParams(String(init?.body ?? '')).get('Action')
+      const body = action === 'CreateTopic'
+        ? `<CreateTopicResponse><CreateTopicResult><TopicArn>arn:aws:sns:${REGION}:123456789012:nx-example-org-events</TopicArn></CreateTopicResult></CreateTopicResponse>`
+        : `<${action}Response/>`
+      return new Response(body, { status: 200, headers: { 'content-type': 'text/xml' } })
+    })
+    try {
+      await sesProvider.configureWebhooks!(creds(), 'example.org', urls, { delivered: false, events: ['bounced'] })
+    } finally {
+      spy.mockRestore()
+      __setAwsServiceBase(() => endpoint)
+    }
+    expect(hosts).toEqual([`sns.${REGION}.amazonaws.com`, `sns.${REGION}.amazonaws.com`])
+    expect(seen.map(s => s.path)).toEqual(['/v2/email/configuration-sets/nx-example-org/event-destinations'])
+  })
+
   it('manual steps name the configuration set and the SES event types', () => {
     const send = sesProvider.manualSetup('example.org', 'send', urls, { events: ['delivered', 'bounced', 'deferred'] })
     const text = JSON.stringify(send)
@@ -458,9 +506,35 @@ describe('kernel: refused configuration set', () => {
     const { account: acct } = await mail.admin.createAccount({ orgId: null }, { provider: 'ses', credentials: creds() })
     const { setup } = await mail.admin.addDomain({ orgId: null }, { domain: 'example.org', sendAccountId: acct.id }, 'https://app.example.org')
     expect(setup?.roles).toEqual([{ role: 'send', mode: 'auto' }])
-    const row = await db().selectFrom('mail_accounts').select('capabilities').where('id', '=', acct.id).executeTakeFirstOrThrow()
+    const row = await db().selectFrom('mail_domains').selectAll().where('domain', '=', 'example.org').executeTakeFirstOrThrow()
+    const account = await db().selectFrom('mail_accounts').selectAll().where('id', '=', acct.id).executeTakeFirstOrThrow()
     expect(row.capabilities).toMatchObject({ suppressionLists: false })
-    expect(sesProvider.providerSuppression.mode(row.capabilities as never)).toBe('unmanaged')
+    expect(sesProvider.providerSuppression.mode(effectiveCapabilities(account, row))).toBe('unmanaged')
+  })
+
+  it('keeps each domain\'s configuration-set result on the domain, so two domains on one account don\'t share a mode', async () => {
+    override = (s) => {
+      if (s.method === 'POST' && s.path === '/v2/email/configuration-sets' && s.json().ConfigurationSetName === 'nx-a-example-org') return { status: 403, json: { message: 'not authorized' } }
+      if (s.method === 'GET' && s.path === '/v2/email/configuration-sets/nx-a-example-org') return { status: 404, json: { message: 'not found' } }
+      return undefined
+    }
+    const { mail } = harness({ providers: [sesProvider], env: {} })
+    const { account: acct } = await mail.admin.createAccount({ orgId: null }, { provider: 'ses', credentials: creds() })
+    await mail.admin.addDomain({ orgId: null }, { domain: 'a.example.org', sendAccountId: acct.id }, 'https://app.example.org')
+    await mail.admin.addDomain({ orgId: null }, { domain: 'b.example.org', sendAccountId: acct.id }, 'https://app.example.org')
+    const account = await db().selectFrom('mail_accounts').selectAll().where('id', '=', acct.id).executeTakeFirstOrThrow()
+    expect(account.capabilities).not.toHaveProperty('suppressionLists')
+    const mode = async (name: string) => {
+      const row = await db().selectFrom('mail_domains').selectAll().where('domain', '=', name).executeTakeFirstOrThrow()
+      return sesProvider.providerSuppression.mode(effectiveCapabilities(account, row))
+    }
+    expect(await mode('a.example.org')).toBe('unmanaged')
+    expect(await mode('b.example.org')).toBe('disabled')
+
+    // Re-verifying the account probes one domain; the other keeps its own result.
+    await mail.admin.verifyAccount({ orgId: null }, acct.id)
+    expect(await mode('a.example.org')).toBe('unmanaged')
+    expect(await mode('b.example.org')).toBe('disabled')
   })
 
   it('still learns of bounces: the check routes them through the identity\'s notification topics', async () => {

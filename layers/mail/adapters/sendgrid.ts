@@ -256,6 +256,7 @@ export const sendgridProvider: MailProvider = {
   ],
   supports: { send: true, receive: true, events: true },
   webhookScope: 'account',
+  receivesAt: exchange => exchange === INBOUND_MX,
   notes: {
     receive: 'Inbound Parse posts are unsigned, so the inbound URL is the only check. Keep it private.'
   },
@@ -266,7 +267,7 @@ export const sendgridProvider: MailProvider = {
     if (badEndpoint) return { ok: false, error: badEndpoint }
     const res = await call(creds, 'GET', '/v3/scopes')
     if (refused(res)) return { ok: false, error: 'SendGrid rejected the key' }
-    if (!res.ok) return { ok: false, error: `SendGrid responded ${res.status}: ${res.text.slice(0, 200)}` }
+    if (!res.ok) return { ok: false, error: `SendGrid responded ${res.status}: ${res.text.slice(0, 200)}`, retryable: res.status === 429 || res.status >= 500 }
     const scopes = new Set((res.json() as { scopes?: string[] }).scopes ?? [])
     const capabilities: Capabilities = {}
     for (const [cap, needed] of Object.entries(SENDGRID_CAPABILITY_SCOPES)) {

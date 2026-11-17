@@ -79,23 +79,35 @@ export function signV4(input: SignV4Input): Record<string, string> {
 
 // ---------- AWS calls ----------
 
+// Regions go into hostnames, so anything but an AWS region name is refused.
+const REGION = /^[a-z]{2}(-[a-z]+)+-\d$/
+
+function awsRegion(value: string): string {
+  if (!REGION.test(value)) throw new EndpointError(`"${value}" isn't an AWS region`)
+  return value
+}
+
 function sendRegion(creds: Credentials): string {
-  return creds.region || 'us-east-1'
+  return awsRegion(creds.region || 'us-east-1')
 }
 
 function receiveRegion(creds: Credentials): string {
-  return creds.receiveRegion || sendRegion(creds)
+  return awsRegion(creds.receiveRegion || sendRegion(creds))
 }
 
-const AWS_HOST = /^(email|email-fips|sns|sts)\.[a-z0-9-]+\.amazonaws\.com(\.cn)?$/
+const SES_HOST = /^(email|email-fips)\.[a-z0-9-]+\.amazonaws\.com(\.cn)?$/
 
-// The endpoint override, when set and allowed.
+// The endpoint override, when set and allowed. It applies to the SES email
+// API only; SNS, STS and S3 keep their own hosts.
 function endpointOverride(creds: Credentials): string | null {
-  return providerEndpoint(creds.endpoint, AWS_HOST, 'Amazon SES')
+  return providerEndpoint(creds.endpoint, SES_HOST, 'Amazon SES')
 }
 
-function endpointProblem(creds: Credentials): string | null {
+// Null when the regions and endpoint override are usable, else why not.
+function configProblem(creds: Credentials): string | null {
   try {
+    sendRegion(creds)
+    receiveRegion(creds)
     endpointOverride(creds)
     return null
   } catch (err) {
@@ -104,11 +116,20 @@ function endpointProblem(creds: Credentials): string | null {
   }
 }
 
-function serviceUrl(creds: Credentials, host: 'email' | 'sns' | 'sts', region: string): string {
-  return endpointOverride(creds) ?? `https://${host}.${region}.amazonaws.com`
+let serviceBase: ((service: 'sns' | 'sts' | 's3') => string) | null = null
+
+// Tests only: sends SNS, STS and S3 calls to another base URL. null restores AWS's hosts.
+export function __setAwsServiceBase(fn: ((service: 'sns' | 'sts' | 's3') => string) | null): void {
+  serviceBase = fn
+}
+
+function serviceUrl(creds: Credentials, host: 'email' | 'sns' | 'sts', at: string): string {
+  const fallback = `https://${host}.${awsRegion(at)}.amazonaws.com`
+  return (host === 'email' ? endpointOverride(creds) : serviceBase?.(host)) ?? fallback
 }
 
 async function aws(creds: Credentials, opts: { service: 'ses' | 'sns' | 's3' | 'sts', region: string, url: string, method: string, headers?: Record<string, string>, body?: string, signal?: AbortSignal }): Promise<HttpResult> {
+  awsRegion(opts.region)
   const headers = signV4({
     method: opts.method,
     url: opts.url,
@@ -167,9 +188,9 @@ async function requestBytes(url: string, init: RequestInit & { timeoutMs?: numbe
 async function s3Get(creds: Credentials, bucket: string, key: string) {
   const region = receiveRegion(creds)
   const path = awsEncode(key, true)
-  const override = endpointOverride(creds)
-  const url = override
-    ? `${override}/${bucket}/${path}`
+  const base = serviceBase?.('s3')
+  const url = base
+    ? `${base}/${bucket}/${path}`
     : bucket.includes('.')
       ? `https://s3.${region}.amazonaws.com/${bucket}/${path}`
       : `https://${bucket}.s3.${region}.amazonaws.com/${path}`
@@ -535,10 +556,13 @@ export const sesProvider: MailProvider = {
     { key: 'sessionToken', label: 'Session token', secret: true, optional: true, env: 'MAIL_SES_SESSION_TOKEN', help: 'Only for temporary credentials' },
     { key: 'receiveRegion', label: 'Receiving region', secret: false, optional: true, env: 'MAIL_SES_RECEIVE_REGION', help: 'Where SES receives mail, when it isn\'t the sending region (SES receives mail only in some regions)' },
     { key: 'inboundBucket', label: 'Inbound S3 bucket', secret: false, optional: true, env: 'MAIL_SES_INBOUND_BUCKET', help: 'Bucket in the receiving region that SES may write to, for mail up to 40 MB. Needed to set up receiving automatically; without it SES can only pass mail inside the SNS notification, and bounces anything over 150 KB.' },
-    { key: 'endpoint', label: 'Endpoint override', secret: false, optional: true, help: 'Sends every AWS call to this https base URL on amazonaws.com (e.g. a FIPS endpoint). Leave empty.' }
+    { key: 'endpoint', label: 'Endpoint override', secret: false, optional: true, help: 'Sends SES email API calls to this https base URL on amazonaws.com (e.g. a FIPS endpoint); SNS and STS keep their own hosts. Leave empty.' }
   ],
   supports: { send: true, receive: true, events: true },
   webhookScope: 'domain',
+  // Each domain has its own configuration set.
+  domainCapabilities: ['suppressionLists'],
+  receivesAt: exchange => /^inbound-smtp\.[a-z0-9-]+\.amazonaws\.com$/.test(exchange),
   notes: {
     send: 'New SES accounts start in the sandbox and send only to verified addresses until AWS grants production access.',
     receive: 'SES receives mail only in some regions, including us-east-1, us-west-2 and eu-west-1. In the sandbox, replies to outside addresses fail.'
@@ -552,8 +576,8 @@ export const sesProvider: MailProvider = {
     if (!creds.accessKeyId || !creds.secretAccessKey || !creds.region) {
       return { ok: false, error: 'Enter an access key ID, a secret access key and a region' }
     }
-    const badEndpoint = endpointProblem(creds)
-    if (badEndpoint) return { ok: false, error: badEndpoint }
+    const badConfig = configProblem(creds)
+    if (badConfig) return { ok: false, error: badConfig }
     const caps: Capabilities = {}
     const account = await sesv2(creds, 'GET', '/v2/email/account')
     if (keyInvalid(account)) return { ok: false, error: 'AWS rejected the access key' }
@@ -563,7 +587,7 @@ export const sesProvider: MailProvider = {
       sendingEnabled = a.SendingEnabled !== false && a.EnforcementStatus !== 'SHUTDOWN'
       if (!sendingEnabled) caps.send = false
     } else if (!denied(account)) {
-      return { ok: false, error: `Amazon SES responded ${account.status}: ${account.text.slice(0, 200)}` }
+      return { ok: false, error: `Amazon SES responded ${account.status}: ${account.text.slice(0, 200)}`, retryable: account.status === 429 || account.status >= 500 }
     }
     if (domain) {
       const identity = await sesv2(creds, 'GET', `/v2/email/identities/${awsEncode(domain)}`)
@@ -621,8 +645,8 @@ export const sesProvider: MailProvider = {
 
   async send(creds, msg): Promise<ProviderSendResult> {
     if (!creds.accessKeyId || !creds.secretAccessKey) return { status: 'failed', retryable: false, error: 'No AWS access key for this domain', keyRejected: true }
-    const badEndpoint = endpointProblem(creds)
-    if (badEndpoint) return { status: 'failed', retryable: false, error: badEndpoint }
+    const badConfig = configProblem(creds)
+    if (badConfig) return { status: 'failed', retryable: false, error: badConfig }
     const raw = await buildMime(msg)
     const body: Record<string, unknown> = {
       Destination: { ToAddresses: [msg.to] },
@@ -708,7 +732,7 @@ export const sesProvider: MailProvider = {
       const status = body.VerifiedForSendingStatus === true && dkim === 'SUCCESS' ? 'verified' : dkim === 'FAILED' ? 'failed' : 'pending'
       return { status, records, ...(status === 'failed' ? { error: 'SES could not find the DKIM records' } : {}) }
     }
-    const region = typeof refs.region === 'string' ? refs.region : receiveRegion(creds)
+    const region = typeof refs.region === 'string' ? awsRegion(refs.region) : receiveRegion(creds)
     if (typeof refs.rule === 'string' && typeof refs.ruleSet === 'string') {
       const rule = await query(creds, 'ses', region, { Action: 'DescribeReceiptRule', RuleSetName: refs.ruleSet, RuleName: refs.rule })
       if (/RuleDoesNotExist|RuleSetDoesNotExist/.test(rule.text)) return { status: 'failed', records: [receivingMx(region, domain)], error: 'The receipt rule no longer exists in Amazon SES' }
@@ -751,7 +775,7 @@ export const sesProvider: MailProvider = {
 
   async deprovisionDomain(creds, domain, refs) {
     if (typeof refs.rule === 'string' && typeof refs.ruleSet === 'string') {
-      await query(creds, 'ses', typeof refs.region === 'string' ? refs.region : receiveRegion(creds), { Action: 'DeleteReceiptRule', RuleSetName: refs.ruleSet, RuleName: refs.rule })
+      await query(creds, 'ses', typeof refs.region === 'string' ? awsRegion(refs.region) : receiveRegion(creds), { Action: 'DeleteReceiptRule', RuleSetName: refs.ruleSet, RuleName: refs.rule })
     }
     if (refs.identityCreated) await sesv2(creds, 'DELETE', `/v2/email/identities/${awsEncode(domain)}`)
     if (typeof refs.configurationSet === 'string') await sesv2(creds, 'DELETE', `/v2/email/configuration-sets/${refs.configurationSet}`)
