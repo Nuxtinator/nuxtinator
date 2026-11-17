@@ -37,6 +37,7 @@ in production and Mailpit (`localhost:1025`, UI on `:8025`) in development.
 | Variable | Required | Purpose |
 |---|---|---|
 | `MAILGUN_API_KEY` / `MAILGUN_DOMAIN` / `MAILGUN_HOST` | prod | Sending (shared with the email-mailgun layer) |
+| `INBOX_MAILGUN_DOMAIN` | no | Mailgun sending domain for inbox mail, when it differs from `MAILGUN_DOMAIN` (falls back to it) |
 | `MAILGUN_WEBHOOK_SIGNING_KEY` | prod | Webhook HMAC verification — the **HTTP webhook signing key** (Settings → API Keys), NOT the sending key |
 | `INBOX_DOMAIN` | yes | Domain inbound mail is addressed to (single-tenant default; per-org override via settings) |
 | `INBOX_CONTACT_ADDRESS` | yes | Shared From identity + base of `contact+<token>` reply addresses |
