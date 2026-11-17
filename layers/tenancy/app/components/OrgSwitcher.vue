@@ -78,7 +78,7 @@ function pathForOrg(targetSlug: string): string {
 
         <ul
           v-else
-          class="flex flex-col gap-1"
+          class="flex flex-col gap-1 max-h-[60vh] overflow-y-auto"
         >
           <li
             v-for="org in orgs"
@@ -90,13 +90,8 @@ function pathForOrg(targetSlug: string): string {
               :class="{ 'bg-(--ui-bg-accented)': org.slug === activeOrg?.slug }"
               @click="open = false"
             >
-              <div class="min-w-0">
-                <div class="text-sm text-(--ui-text) truncate">
-                  {{ org.name }}
-                </div>
-                <div class="text-xs text-(--ui-text-muted) truncate">
-                  /@{{ org.slug }}
-                </div>
+              <div class="min-w-0 text-sm text-(--ui-text) truncate">
+                {{ org.name }}
               </div>
               <UIcon
                 v-if="org.slug === activeOrg?.slug"
