@@ -33,7 +33,7 @@ import {
   type RecordsListPatch,
   type RecordsRefTarget
 } from './records-registry'
-import { getRecordType, getRecordTypeFields, recordsAccessGrantingKeys, recordsConnectionReverseKeys, recordsHierarchy, recordsStatusDefault, type RecordsFieldSetting } from './definition-settings'
+import { getRecordType, getRecordTypeFields, recordsAccessGrantingKeys, recordsConnectionReverseKeys, recordsHierarchyOf, recordsStatusDefault, type RecordsFieldSetting } from './definition-settings'
 import { applyHierarchyOp, lockRecordsHierarchy, type RecordsHierarchyMove } from './hierarchy'
 import { normalizeChannelValue } from './normalize'
 import { recordRecordsActivity } from './records-activity'
@@ -190,7 +190,7 @@ export async function hydrateRecords(
     // their writer's def named via reverseKey.
     const reverseMap = new Map<string, string[]>()
     for (const def of connDefs) {
-      for (const source of recordsConnectionReverseKeys(typeKey, def.key)) {
+      for (const source of recordsConnectionReverseKeys(typeKey, def)) {
         const targets = reverseMap.get(source) ?? []
         targets.push(def.key)
         reverseMap.set(source, targets)
@@ -659,7 +659,7 @@ async function applyConnectionsOp(
 ): Promise<void> {
   // Rows surfaced in reverse under this field belong to the other side —
   // deletes must reach them too, or the UI could never remove them.
-  const reverseSources = recordsConnectionReverseKeys(typeKey, def.key)
+  const reverseSources = recordsConnectionReverseKeys(typeKey, def)
   if (list.force) {
     await tx
       .deleteFrom('records_connections')
@@ -964,10 +964,10 @@ export async function applyFieldPatch(
   await assertUsersExist(tx, defsByKey, listOps)
   await assertConnectionTargetsExist(tx, defsByKey, listOps)
 
-  const hierarchy = recordsHierarchy(typeKey)
+  const hierarchy = recordsHierarchyOf(defs)
   // Before the request writes any row, so two moves never wait on each other's rows.
   if (hierarchy && [...listOps.keys()].some(key => defsByKey.get(key)!.hierarchy)) {
-    await lockRecordsHierarchy(tx, ctx, typeKey)
+    await lockRecordsHierarchy(tx, ctx)
   }
 
   let id: string
@@ -1054,7 +1054,7 @@ export async function applyFieldPatch(
         break
       case 'connections':
         if (hierarchy && def.hierarchy) {
-          moves.push(...await applyHierarchyOp(tx, ctx, typeKey, hierarchy, id, def, list, isCreate))
+          moves.push(...await applyHierarchyOp(tx, ctx, hierarchy, id, def, list, isCreate))
         } else {
           await applyConnectionsOp(tx, typeKey, id, def, list)
         }
@@ -1084,7 +1084,7 @@ export async function applyFieldPatch(
   }
   // Putting a record under a parent shares it with whoever sees the parent.
   if (opts.sharing && moves.length > 0) {
-    await requireMoveConfirmation(tx, ctx, typeKey, moves, opts.sharing)
+    await requireMoveConfirmation(tx, ctx, moves, opts.sharing)
   }
 
   // Images in rich text are files on the record, so a write to either side

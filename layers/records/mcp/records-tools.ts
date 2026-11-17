@@ -498,7 +498,8 @@ const fieldSpecInput = z.object({
   required: z.boolean().optional(),
   options: optionsInput.optional(),
   channelType: z.string().max(41).optional().describe('Address fields only: "email" or "phone".'),
-  target: z.string().max(41).optional().describe('Connection fields only: the record type it links to, e.g. "milestones".')
+  target: z.string().max(41).optional().describe('Connection fields only: the record type it links to, e.g. "milestones".'),
+  nesting: z.enum(['parent', 'children']).optional().describe('Connection fields only: makes the link a hierarchy. "children" puts the linked records under this type\'s records (a deliverable\'s tasks); "parent" puts this type\'s records under the linked one. The matching field is added to the other type, and whoever can see a record sees what sits under it.')
 }).strict()
 
 async function addFieldTo(tx: Tx, tenant: TenantContext, typeKey: string, spec: z.infer<typeof fieldSpecInput>) {
@@ -513,7 +514,8 @@ async function addFieldTo(tx: Tx, tenant: TenantContext, typeKey: string, spec: 
     required: spec.required,
     options: spec.options,
     channelType: spec.channelType,
-    target: spec.target
+    target: spec.target,
+    nesting: spec.nesting
   })
 }
 

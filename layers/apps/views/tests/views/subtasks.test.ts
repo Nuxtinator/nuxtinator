@@ -145,6 +145,48 @@ describe('subtasks board', () => {
     expect(moved.fields.parent.map(p => p.id)).toEqual([b.id])
   })
 
+  it('a record of another type opens as a board of the tasks nested under it', async () => {
+    const { org, auth } = await createViewsOrgWith(sql)
+    const me = withOrgHeader(auth, org.slug)
+    await $fetch('/api/records/schema/types', {
+      method: 'POST',
+      body: { typeKey: 'test_deliverable', label: 'Deliverables', labelSingular: 'Deliverable' },
+      ...me
+    })
+    await $fetch('/api/records/schema/types/test_deliverable/fields', {
+      method: 'POST',
+      body: { fieldKey: 'work', kind: 'connection', label: 'Work', target: 'task', nesting: 'children' },
+      ...me
+    })
+    const big = await $fetch<{ id: string }>('/api/records/entries/test_deliverable', {
+      method: 'POST', body: { fields: { name: 'test-views Big deliverable' } }, ...me
+    })
+    const api = await createTask(me, { name: 'test-views API', test_deliverable: [big.id] })
+    await createTask(me, { name: 'test-views Endpoints', parent: [api.id], status: 'done' })
+
+    const top = await $fetch<Detail & { recordTypeKey: string }>(`/api/views/builtin.subtasks.${big.id}`, me)
+    expect(top).toMatchObject({ name: 'test-views Big deliverable', recordTypeKey: 'task', recordId: big.id, trail: [] })
+    expect(await feed(me, top.id, top.tabs[0]!.id)).toEqual(['test-views API'])
+    expect(await feed(me, top.id, top.tabs[1]!.id)).toEqual(['test-views API', 'test-views Endpoints'])
+
+    // The task's own board names the deliverable above it.
+    const inner = await $fetch<Detail>(`/api/views/builtin.subtasks.${api.id}`, me)
+    expect(inner.trail).toEqual([{ id: `builtin.subtasks.${big.id}`, name: 'test-views Big deliverable' }])
+
+    // A view of the deliverables shows each one's progress through its tasks.
+    const view = await $fetch<Detail>('/api/views', {
+      method: 'POST',
+      body: {
+        name: 'test-views Deliverables',
+        recordTypeKey: 'test_deliverable',
+        tab: { layout: 'kanban', definition: { groupField: 'status', cardFields: ['status', 'work'], cardConnections: { work: 'progress' } } }
+      },
+      ...me
+    })
+    const cards = await $fetch<Feed>(`/api/views/${view.id}/records`, me)
+    expect(cards.items[0]!.progress).toEqual({ work: { total: 1, done: 0 } })
+  })
+
   it('a copy keeps showing what sits under the task', async () => {
     const { org, auth } = await createViewsOrgWith(sql, ['member'])
     const me = withOrgHeader(auth, org.slug)

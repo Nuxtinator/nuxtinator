@@ -4,7 +4,8 @@
 // fields too. Kind is locked after create; only kinds whose storage resolves
 // to jsonb, entries, connection edges or a storage driver are allowed
 // (connection requires a target record type, communication_channel a
-// channelType from the merged catalog). Returns { field } in the same shape as
+// channelType from the merged catalog). A connection with `nesting` makes the
+// link a hierarchy and creates its other half on the target type. Returns { field } in the same shape as
 // GET /api/records/schema/types/:type/fields entries. 409 on key collision with
 // a manifest or existing custom field. Permission: records.schema.manage.
 
@@ -34,7 +35,9 @@ const Body = z.object({
   // communication_channel only; must exist in the merged channel-type catalog.
   channelType: z.string().trim().min(1).max(60).optional(),
   // connection only; an existing record type key.
-  target: z.string().trim().min(1).max(41).optional()
+  target: z.string().trim().min(1).max(41).optional(),
+  // connection only: 'children' = the linked records sit under this type's, 'parent' = the reverse.
+  nesting: z.enum(['parent', 'children']).optional()
 })
 
 export default defineEventHandler(async (event) => {
@@ -61,6 +64,8 @@ export default defineEventHandler(async (event) => {
         orphan: field.orphan,
         channelType: field.channelType ?? null,
         target: field.target ?? null,
+        hierarchy: field.hierarchy ?? null,
+        reverseKey: field.reverseKey ?? null,
         source: field.source ?? null,
         multiple: field.multiple ?? false,
         column: field.column ?? null

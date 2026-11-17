@@ -44,7 +44,8 @@ export {
   getRecordType,
   getRecordTypeFields,
   recordsAccessGrantingKeys,
-  recordsHierarchy,
+  getRecordsHierarchy,
+  recordsHierarchyOf,
   RECORDS_DEFAULT_PERMISSION_PREFIX
 } from '../utils/definition-settings'
 export type { RecordTypeSetting, RecordsFieldSetting, RecordsHierarchy } from '../utils/definition-settings'

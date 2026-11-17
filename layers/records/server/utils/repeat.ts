@@ -7,7 +7,7 @@ import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
 import { RECORDS_REPEAT_INTERVALS, RECORDS_REPEAT_KEY } from '#records'
 import type { RecordsConnectedRecord, RecordsRefValue } from '#records'
-import { recordsHierarchy, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
+import { recordsHierarchyOf, type RecordsFieldSetting, type RecordTypeSetting } from './definition-settings'
 import { closingRulesOf } from './closing'
 import { applyFieldPatch, getRecord, type RecordsHydratedRecord } from './record-storage'
 import { recordRecordsActivity } from './records-activity'
@@ -155,9 +155,10 @@ export async function repeatClosedRecord(
   const reasonKey = closingRulesOf(type, defs).reasonKey
   const skip = new Set(reasonKey ? [reasonKey] : [])
   const next = await copyRecord(tx, ctx, type.key, record, defs, skip, shift, {})
-  const hierarchy = recordsHierarchy(type.key)
-  if (hierarchy?.childrenKey) {
-    await copyChildren(tx, ctx, type.key, defs, hierarchy.parentKey, hierarchy.childrenKey, record, next.id, shift)
+  // What sits under it of its own type (a task's subtasks) is copied along.
+  const own = recordsHierarchyOf(defs)?.children.find(c => c.target === type.key)
+  if (own) {
+    await copyChildren(tx, ctx, type.key, defs, own.parentKey, own.key, record, next.id, shift)
   }
 
   await tx
