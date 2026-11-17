@@ -33,6 +33,12 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 - Show on the page only what the user needs right now: short labels, validation errors, and a short note on why a control is disabled (`help="Set by the platform operator."`).
 - No subtitle that repeats the page title.
 
+## Containers and rows
+
+- **Content sits in cards, not loose on the page background.** Each list, form section or group of controls is a `UCard`: its title (with any badge or actions) in `#header`, its rows or fields in the body, its main action ("Add …") in `#footer` when it has one. The page background holds only the page title and the cards.
+- **A row shows its value first and at most one action button**, usually Change. Its other actions go in a ⋯ menu (`UDropdownMenu`), destructive ones last in their own group with `color: 'error'`. Don't put a card-header ⋯ menu directly above a row's ⋯ menu.
+- **Finished items sort last.** Ended, archived or closed items go below the active ones, with a neutral badge and a muted title.
+
 ## Settings pages
 
 Use one of two patterns per page or tab.
@@ -73,6 +79,7 @@ Either way, destructive actions open behind an outlined error button and confirm
 - Headers and sidebars use `bg-(--chrome-bg)` (`SidebarPanel` already does).
 - Cards: plain `<UCard>` — core sets its fill and outline; don't restyle it. A hand-built card-like tile uses `bg-(--ui-bg-elevated)/50 hover:bg-(--ui-bg-elevated) dark:border-(--ui-border-accented)`.
 - A layer never overrides theme tokens. A host may, with plain `:root { … }` / `.dark { … }` rules in its own CSS.
+- A host that overrides `--ui-primary` overrides `--ui-text-inverted` with it, in both `:root` and `.dark`, and checks 4.5:1 between them. A brand color lightened for dark mode needs dark text.
 
 ## Nuxt UI gotchas
 

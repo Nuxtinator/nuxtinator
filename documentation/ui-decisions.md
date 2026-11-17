@@ -30,12 +30,19 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
 ## Overridability
 
 - **Core's token overrides are unlayered and use plain `:root` / `.dark` selectors.** A host overrides any of them with an ordinary `:root { … }` or `.dark { … }` rule in its own CSS (host CSS loads after layer CSS). Don't use higher-specificity selectors like `:root:not(.dark)` — they silently beat host overrides.
+- **`--ui-primary` and `--ui-text-inverted` are overridden as a pair, per mode.** Solid buttons, switches and `bg-inverted` surfaces draw `--ui-text-inverted` on them. A host that lightened its brand color for dark mode but set the text color once (white, for the light-mode brand) shipped dark-mode buttons at about 3:1; setting both tokens in `:root` and `.dark` fixed it.
 - **Prefer a named variable over editing a shared Nuxt UI token** when only some surfaces should change (see `--chrome-bg`). Shared tokens like `--ui-bg-elevated` and `--ui-border` are used by many Nuxt UI components.
 
 ## Surfaces
 
 - **Cards have a subtle fill.** `UCard` defaults to Nuxt UI's `subtle` variant (`bg-elevated/50` + ring) via `app.config`. Card-like tiles built by hand use `bg-(--ui-bg-elevated)/50 hover:bg-(--ui-bg-elevated)`. Transparent cards with only a border blended into the page.
 - **Card outlines are brighter in dark mode only** (neutral-700, i.e. `--ui-border-accented`): `dark:ring-accented` on `UCard`, `dark:border-(--ui-border-accented)` on hand-built tiles.
+- **Content sits in cards, not loose on the page background.** Each list, form section or group of controls is a `UCard` with its title in `#header`, rows or fields in the body, and its main action ("Add …") in `#footer`.
+  - Sections separated only by headings, whitespace and divider lines were rejected: on a wide screen the inputs and text read as floating in the middle of the page, with nothing showing what belonged together.
+- **A row shows one action button; the rest go in a ⋯ menu.** The value comes first (a time, a name), then usually Change; pause, export and the like sit in a `UDropdownMenu`, destructive items last in their own group in the error color.
+  - Four outline buttons per row (Change, Pause, Remove, Add to calendar) were rejected: every row looked like a toolbar, and Remove sat next to everyday actions.
+  - A ⋯ menu on the card header directly above a row's ⋯ menu was rejected: two identical buttons stacked, with no way to tell which acted on what. A card-level action goes in the footer instead.
+- **Finished items sort last**, with a neutral badge and a muted title, so active work leads.
 - **Labelled dividers use `<USeparator label="…">`**, never a label `<span>` painted with a background over a line. A painted span only matches one surface, so it shows as a box on filled cards.
 - **The global border stays at Nuxt UI's default** (neutral-800 in dark). Brightening `--ui-border` globally was tried and rejected: header, sidebar and divider lines became too prominent.
 
