@@ -7,7 +7,7 @@ import { parseInbound } from '../kernel/inbound-parse'
 import { buildMime } from '../kernel/mime'
 import {
   ProviderPermissionError, type Capabilities, type CheckResult, type Correlation, type Credentials, type DnsRecord,
-  type MailEvent, type MailEventType, type MailProvider, type ManualStep, type ProviderSendResult, type WebhookResult
+  type DomainInspection, type MailEvent, type MailEventType, type MailProvider, type ManualStep, type ProviderSendResult, type WebhookResult
 } from '../kernel/types'
 import { EndpointError, providerEndpoint, request, type HttpResult } from './http'
 
@@ -222,10 +222,43 @@ function fail(res: HttpResult, what: string): Error {
   return new Error(`Amazon SES ${what} responded ${res.status}: ${res.text.slice(0, 300)}`)
 }
 
+function xmlDecode(text: string): string {
+  return text.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, '\'').replace(/&amp;/g, '&')
+}
+
 function xmlValue(text: string, tag: string): string | null {
   const m = text.match(new RegExp(`<${tag}>([^<]*)</${tag}>`))
-  if (!m) return null
-  return m[1]!.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, '\'').replace(/&amp;/g, '&')
+  return m ? xmlDecode(m[1]!) : null
+}
+
+// Enough of an XML reader for the Query APIs' replies: elements, their children and text.
+interface XmlNode { name: string, children: XmlNode[], text: string }
+function parseXml(text: string): XmlNode {
+  const root: XmlNode = { name: '', children: [], text: '' }
+  const stack = [root]
+  for (const m of text.matchAll(/<(\/?)([A-Za-z][\w.:-]*)[^>]*?(\/?)>|([^<]+)/g)) {
+    const top = stack[stack.length - 1]!
+    if (m[4] !== undefined) {
+      top.text += xmlDecode(m[4])
+    } else if (m[1]) {
+      if (stack.length > 1) stack.pop()
+    } else {
+      const node: XmlNode = { name: m[2]!, children: [], text: '' }
+      top.children.push(node)
+      if (!m[3]) stack.push(node)
+    }
+  }
+  return root
+}
+const xmlChild = (node: XmlNode | undefined, name: string) => node?.children.find(c => c.name === name)
+const xmlChildren = (node: XmlNode | undefined, name: string) => node?.children.filter(c => c.name === name) ?? []
+function xmlFind(node: XmlNode, name: string): XmlNode | undefined {
+  for (const c of node.children) {
+    if (c.name === name) return c
+    const deeper = xmlFind(c, name)
+    if (deeper) return deeper
+  }
+  return undefined
 }
 
 // ---------- Names, tags, records ----------
@@ -544,6 +577,58 @@ async function activeRuleSet(creds: Credentials, region: string): Promise<string
   return name
 }
 
+// ---------- Reading what is set up ----------
+
+// The event type names the SES console shows.
+const EVENT_LABELS: Record<string, string> = {
+  BOUNCE: 'Hard bounces',
+  COMPLAINT: 'Complaints',
+  DELIVERY: 'Deliveries',
+  DELIVERY_DELAY: 'Delivery delays',
+  REJECT: 'Rejects',
+  OPEN: 'Opens',
+  CLICK: 'Clicks'
+}
+const eventLabel = (type: string) => EVENT_LABELS[type] ?? type
+
+// Addresses of this app's own webhooks.
+const OWN_WEBHOOK = /\/api\/mail\/webhooks\//
+
+const topicNameOf = (arn: unknown) => typeof arn === 'string' ? arn.split(':').pop() ?? '' : ''
+
+// A topic's subscriptions (the first page), or null when the key can't list them.
+async function subscriptions(creds: Credentials, region: string, topicArn: string): Promise<{ endpoint: string, confirmed: boolean }[] | null> {
+  const res = await query(creds, 'sns', region, { Action: 'ListSubscriptionsByTopic', TopicArn: topicArn })
+  if (!res.ok) return null
+  return xmlChildren(xmlFind(parseXml(res.text), 'Subscriptions'), 'member').map(m => ({
+    endpoint: xmlChild(m, 'Endpoint')?.text.trim() ?? '',
+    confirmed: (xmlChild(m, 'SubscriptionArn')?.text.trim() ?? '').startsWith('arn:')
+  }))
+}
+
+function subscriptionCheck(subs: { endpoint: string, confirmed: boolean }[], url: string, role: 'send' | 'receive', key: string, topic: string) {
+  const sub = subs.find(s => s.endpoint === url)
+  return {
+    role, key, label: `SNS topic ${topic} sends to this app`, ok: !!sub?.confirmed,
+    detail: !sub ? 'No subscription to the URL yet' : sub.confirmed ? undefined : 'The subscription waits for confirmation, which this app sends once SNS reaches the URL'
+  }
+}
+
+interface ReceiptRule { name: string, enabled: boolean, recipients: string[], actions: { type: string, topicArn: string | null }[] }
+function receiptRules(text: string): ReceiptRule[] {
+  return xmlChildren(xmlFind(parseXml(text), 'Rules'), 'member').map(r => ({
+    name: xmlChild(r, 'Name')?.text.trim() ?? '',
+    enabled: xmlChild(r, 'Enabled')?.text.trim() === 'true',
+    recipients: xmlChildren(xmlChild(r, 'Recipients'), 'member').map(m => m.text.trim().toLowerCase()),
+    actions: xmlChildren(xmlChild(r, 'Actions'), 'member').flatMap(m => m.children.map(a => ({ type: a.name, topicArn: xmlChild(a, 'TopicArn')?.text.trim() ?? null })))
+  }))
+}
+
+// Whether a rule's recipients take mail for the domain: none (all mail), the domain, one of its addresses, or a parent `.domain`.
+function ruleMatches(rule: ReceiptRule, domain: string): boolean {
+  return !rule.recipients.length || rule.recipients.some(r => r === domain || r.endsWith(`@${domain}`) || (r.startsWith('.') && domain.endsWith(r)))
+}
+
 // ---------- Provider ----------
 
 export const sesProvider: MailProvider = {
@@ -613,34 +698,106 @@ export const sesProvider: MailProvider = {
     if (role === 'send') {
       const types = sesEventTypes(events)
       const steps: ManualStep[] = [
-        { title: `In Amazon SES, create the domain identity ${domain}`, detail: 'Configuration → Identities → Create identity → Domain, in the region you send from. Use Easy DKIM and add the three CNAME records SES shows.' },
-        { title: 'Set a custom MAIL FROM domain', detail: `On the identity, set the MAIL FROM domain to mail.${domain} and add the MX and TXT records SES shows.` },
+        { title: `In Amazon SES, create the domain identity ${domain}`, detail: 'Configuration → Identities → Create identity → Domain, in the region you send from, with Easy DKIM. Skip this if it is already there.', check: 'provider-domain' },
+        { title: 'Set a custom MAIL FROM domain', detail: `On the identity, set the MAIL FROM domain to mail.${domain}.` },
+        { title: 'Add the DNS records SES shows', detail: 'At your DNS host: the three DKIM CNAME records and, for the MAIL FROM domain, an MX and a TXT record. SES checks them on its own; they are listed here once SES has the identity.', check: 'provider-dns' },
         {
           title: `Create the configuration set ${configSet}`,
           detail: 'Configuration → Configuration sets → Create set, named exactly as below, in the same region. Under suppression list settings, override the account-level settings and leave both Bounce and Complaint unticked: the app keeps its own suppression list and names this set on every send.',
-          values: [{ label: 'Configuration set', value: configSet }]
+          values: [{ label: 'Configuration set', value: configSet }],
+          check: 'configuration-set'
         }
       ]
       if (types.length) {
         steps.push({
           title: 'Send events to this app',
-          detail: `Create an SNS topic named ${snsTopicName(domain, 'events')} in the same region and AWS account, with an HTTPS subscription to the URL below (the app confirms it, and ignores topics with other names). Then add an event destination to ${configSet} that publishes to the topic, with these event types: ${types.join(', ')}.`,
-          values: [{ label: 'SNS topic', value: snsTopicName(domain, 'events') }, { label: 'Events URL', value: urls.events }]
+          detail: `Create an SNS topic named ${snsTopicName(domain, 'events')} in the same region and AWS account, with an HTTPS subscription to the URL below (the app confirms it, and ignores topics with other names). Then add an event destination to ${configSet} that publishes to the topic, with these event types: ${types.map(eventLabel).join(', ')}.`,
+          values: [{ label: 'SNS topic', value: snsTopicName(domain, 'events') }, { label: 'Events URL', value: urls.events }],
+          check: 'webhooks'
         })
       }
-      steps.push({ title: 'Request production access', detail: 'New SES accounts are in the sandbox and can only send to verified identities. Account dashboard → Request production access.' })
+      steps.push({ title: 'Request production access', detail: 'New SES accounts are in the sandbox and can only send to verified identities. Account dashboard → Request production access.', check: 'production-access' })
       return steps
     }
     return [
       { title: 'Receive in a region where SES receives mail', detail: 'SES receives mail only in some regions, including us-east-1, us-west-2 and eu-west-1 (see "Email receiving endpoints" in the SES documentation). Set the account\'s receiving region to that region.' },
-      { title: `Point the MX record of ${domain} at SES`, detail: 'One MX record, priority 10.', values: [{ label: 'MX', value: 'inbound-smtp.<receiving region>.amazonaws.com' }] },
-      { title: 'Create an SNS topic for incoming mail', detail: 'Named as below, in the receiving region and the same AWS account, with an HTTPS subscription to the URL below (the app confirms it, and ignores topics with other names).', values: [{ label: 'SNS topic', value: snsTopicName(domain, 'inbound') }, { label: 'Inbound URL', value: urls.inbound }] },
+      { title: `Point the MX record of ${domain} at SES`, detail: 'One MX record, priority 10.', values: [{ label: 'MX', value: 'inbound-smtp.<receiving region>.amazonaws.com' }], check: 'mx' },
+      { title: 'Create an SNS topic for incoming mail', detail: 'Named as below, in the receiving region and the same AWS account, with an HTTPS subscription to the URL below (the app confirms it, and ignores topics with other names).', values: [{ label: 'SNS topic', value: snsTopicName(domain, 'inbound') }, { label: 'Inbound URL', value: urls.inbound }], check: 'inbound-topic' },
       {
         title: 'Add a receipt rule',
-        detail: `Email receiving → the active rule set → Create rule for the recipient ${domain}. Add an S3 action that stores mail in the account's inbound bucket and notifies the topic above (mail up to 40 MB). Without a bucket, use an SNS action with Base64 encoding instead, which only carries mail up to 150 KB.`
+        detail: `Email receiving → the active rule set → Create rule for the recipient ${domain}. Add an S3 action that stores mail in the account's inbound bucket and notifies the topic above (mail up to 40 MB). Without a bucket, use an SNS action with Base64 encoding instead, which only carries mail up to 150 KB.`,
+        check: 'route'
       },
-      { title: 'Sandbox note', detail: 'In the sandbox SES only sends to verified identities. The receiving probe still arrives, because the domain itself is verified, but replies to outside addresses fail until the account has production access.' }
+      { title: 'Sandbox note', detail: 'In the sandbox SES only sends to verified identities. The receiving probe still arrives, because the domain itself is verified, but replies to outside addresses fail until the account has production access.' },
+      { title: 'Verify receiving', detail: 'Press Verify receiving once the steps above are done: a probe message goes to the domain, and receiving is verified when it arrives here.', check: 'probe' }
     ]
+  },
+
+  // Reads only: the identity, the account, the configuration set and its
+  // event destinations, the active receipt rule set and the topics' subscriptions.
+  async inspectDomain(creds, domain, urls, { events, receive }): Promise<DomainInspection> {
+    const seen: DomainInspection = { domain: null, webhooks: null, route: null, checks: [] }
+    if (!creds.accessKeyId || !creds.secretAccessKey || !creds.region || configProblem(creds)) return seen
+    const region = sendRegion(creds)
+
+    const identity = await sesv2(creds, 'GET', `/v2/email/identities/${awsEncode(domain)}`)
+    if (identity.status === 404) seen.domain = { exists: false, records: [] }
+    else if (identity.ok) {
+      const receiving = receive ? [receivingMx(receiveRegion(creds), domain)] : []
+      seen.domain = { exists: true, records: [...sendRecords(region, domain, identity.json() as Record<string, any>), ...receiving] }
+    }
+
+    const account = await sesv2(creds, 'GET', '/v2/email/account')
+    if (account.ok) {
+      const production = (account.json() as { ProductionAccessEnabled?: boolean }).ProductionAccessEnabled === true
+      seen.checks!.push({ role: 'send', key: 'production-access', label: 'The SES account has production access', ok: production, detail: production ? undefined : 'Still in the sandbox: mail only goes to verified addresses' })
+    }
+
+    const configSet = configurationSetName(domain)
+    const types = sesEventTypes(events)
+    const set = await sesv2(creds, 'GET', `/v2/email/configuration-sets/${configSet}`)
+    if (set.status === 404) {
+      seen.checks!.push({ role: 'send', key: 'configuration-set', label: `Configuration set ${configSet} exists`, ok: false, detail: 'Not created yet' })
+      if (types.length) seen.webhooks = { missing: types.map(eventLabel), stale: [] }
+    } else if (set.ok) {
+      const reasons = (set.json() as { SuppressionOptions?: { SuppressedReasons?: string[] } }).SuppressionOptions?.SuppressedReasons
+      const off = Array.isArray(reasons) && reasons.length === 0
+      seen.checks!.push({ role: 'send', key: 'configuration-set', label: `Configuration set ${configSet} exists`, ok: off, detail: off ? undefined : 'It still suppresses bounces or complaints: override the account-level settings and untick both' })
+      const dests = types.length ? await sesv2(creds, 'GET', `/v2/email/configuration-sets/${configSet}/event-destinations`) : null
+      if (dests?.ok) {
+        const topic = snsTopicName(domain, 'events')
+        const list = (dests.json() as { EventDestinations?: { Enabled?: boolean, MatchingEventTypes?: string[], SnsDestination?: { TopicArn?: string } }[] }).EventDestinations ?? []
+        const dest = list.find(d => d.Enabled !== false && topicNameOf(d.SnsDestination?.TopicArn) === topic)
+        if (!dest) {
+          seen.webhooks = { missing: types.map(eventLabel), stale: [] }
+        } else {
+          const subs = await subscriptions(creds, region, dest.SnsDestination!.TopicArn!)
+          const covered = new Set(dest.MatchingEventTypes ?? [])
+          const confirmed = !!subs?.some(s => s.endpoint === urls.events && s.confirmed)
+          // Nothing arrives until the topic's subscription to the events URL is confirmed.
+          const missing = subs && !confirmed ? types : types.filter(t => !covered.has(t))
+          seen.webhooks = { missing: missing.map(eventLabel), stale: (subs ?? []).filter(s => s.endpoint !== urls.events && OWN_WEBHOOK.test(s.endpoint)).map(s => s.endpoint) }
+          if (subs) seen.checks!.push(subscriptionCheck(subs, urls.events, 'send', 'events-topic', topic))
+        }
+      }
+    }
+
+    if (receive) {
+      const rregion = receiveRegion(creds)
+      const rules = await query(creds, 'ses', rregion, { Action: 'DescribeActiveReceiptRuleSet' })
+      if (rules.ok) {
+        const topic = snsTopicName(domain, 'inbound')
+        const list = receiptRules(rules.text)
+        const at = list.findIndex(r => r.enabled && ruleMatches(r, domain) && r.actions.some(a => (a.type === 'S3Action' || a.type === 'SNSAction') && topicNameOf(a.topicArn) === topic))
+        // An earlier rule for the same mail that stops or bounces keeps it from reaching ours.
+        const blocker = list.slice(0, at === -1 ? list.length : at).find(r => r.enabled && ruleMatches(r, domain) && r.actions.some(a => a.type === 'StopAction' || a.type === 'BounceAction'))
+        seen.route = { ok: at !== -1 && !blocker, ...(blocker ? { conflict: blocker.name } : {}) }
+        const arn = at === -1 ? null : list[at]!.actions.find(a => topicNameOf(a.topicArn) === topic)!.topicArn!
+        const subs = arn ? await subscriptions(creds, rregion, arn) : null
+        if (subs) seen.checks!.push(subscriptionCheck(subs, urls.inbound, 'receive', 'inbound-topic', topic))
+      }
+    }
+    return seen
   },
 
   async send(creds, msg): Promise<ProviderSendResult> {

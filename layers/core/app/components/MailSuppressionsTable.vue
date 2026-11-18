@@ -95,8 +95,8 @@ const canClear = (row: MailSuppression) => props.scope === 'host' || row.scope =
       color="warning"
       variant="subtle"
       icon="i-lucide-list-x"
-      title="Provider suppression list active"
-      :description="`Clearing here won't unblock sends on ${unmanaged.join(', ')}.`"
+      :title="`The provider also blocks addresses on ${unmanaged.join(', ')}`"
+      description="The provider keeps its own list of addresses that bounced, complained or unsubscribed, and drops mail to them. The key can't change that list, so clearing an address here won't get mail through on those domains: remove it at the provider too."
     />
     <UCard :ui="{ body: 'p-0 sm:p-0' }">
       <template #header>

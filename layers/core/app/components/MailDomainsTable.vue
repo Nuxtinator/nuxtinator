@@ -55,7 +55,12 @@ const status = (s: MailRoleStatus) => MAIL_ROLE_STATUS[s]
       v-else-if="!pending && domains.length === 0"
       class="p-4 text-sm text-(--ui-text-muted)"
     >
-      Add a domain to send or receive mail on it.
+      <template v-if="scope === 'host'">
+        Mail isn't configured. Add a domain to send password resets and invites.
+      </template>
+      <template v-else>
+        Add a domain to send or receive mail on it.
+      </template>
     </p>
     <UTable
       v-else
@@ -104,14 +109,6 @@ const status = (s: MailRoleStatus) => MAIL_ROLE_STATUS[s]
               leading-icon="i-lucide-key-round"
             >
               Key rejected
-            </UBadge>
-            <UBadge
-              v-if="row.original.suppressionMode === 'unmanaged'"
-              color="warning"
-              variant="subtle"
-              size="sm"
-            >
-              Provider list in charge
             </UBadge>
           </div>
         </div>

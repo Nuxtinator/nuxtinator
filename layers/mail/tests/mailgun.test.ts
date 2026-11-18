@@ -57,6 +57,7 @@ beforeEach(() => {
   reply = () => ({ status: 200, body: {} })
 })
 
+const SIGNING_PATH = '/v5/accounts/http_signing_key'
 const basic = (key: string) => `Basic ${Buffer.from(`api:${key}`).toString('base64')}`
 const calls = () => seen.map(s => `${s.method} ${s.path}`)
 
@@ -343,33 +344,45 @@ describe('verifyCredentials', () => {
     expect((await fields(seen.find(s => s.method === 'POST')!))['o:testmode']).toBe('yes')
   })
 
-  it('an account key: send and suppression lists are proven; domains, routes and webhooks stay untested', async () => {
-    reply = s => ({ status: s.path.includes('/bounces/') ? 404 : 200, body: {} })
+  it('an account key that isn\'t Admin: send and suppression lists are proven; domains, routes and webhooks are refused', async () => {
+    reply = s => ({ status: s.path.includes('/bounces/') ? 404 : s.path === SIGNING_PATH ? 401 : 200, body: {} })
     const res = await mailgunProvider.verifyCredentials({ apiKey: 'key-acct', host: endpoint }, 'mg.example.org')
-    expect(res).toEqual({ ok: true, capabilities: { send: true, suppressionLists: true } })
+    expect(res).toEqual({ ok: true, capabilities: { send: true, suppressionLists: true, domains: false, routes: false, webhooks: false } })
     expect(calls().map(c => c.replace(/nx-probe-none-\d+/, 'X'))).toEqual([
       'GET /v4/domains?limit=1',
+      `GET ${SIGNING_PATH}`,
       'POST /v3/mg.example.org/messages',
       'GET /v3/mg.example.org/bounces/X%40mg.example.org'
     ])
   })
 
-  it('a key refused on the suppression list records it as false', async () => {
-    reply = s => ({ status: s.path.includes('/bounces/') ? 403 : 200, body: {} })
-    const res = await mailgunProvider.verifyCredentials({ apiKey: 'key-acct', host: endpoint }, 'mg.example.org')
-    expect(res).toEqual({ ok: true, capabilities: { send: true, suppressionLists: false } })
+  it('an Admin key: domains, routes and webhooks are allowed, and the signing key is read', async () => {
+    reply = s => ({ status: s.path.includes('/bounces/') ? 404 : 200, body: s.path === SIGNING_PATH ? { http_signing_key: 'sig-from-api' } : {} })
+    const res = await mailgunProvider.verifyCredentials({ apiKey: 'key-admin', host: endpoint }, 'mg.example.org')
+    expect(res).toEqual({
+      ok: true,
+      capabilities: { send: true, suppressionLists: true, domains: true, routes: true, webhooks: true },
+      credentials: { webhookSigningKey: 'sig-from-api' }
+    })
   })
 
-  it('with no domain, only the domain-free probe runs', async () => {
+  it('a key refused on the suppression list records it as false', async () => {
+    reply = s => ({ status: s.path.includes('/bounces/') || s.path === SIGNING_PATH ? 403 : 200, body: {} })
+    const res = await mailgunProvider.verifyCredentials({ apiKey: 'key-acct', host: endpoint }, 'mg.example.org')
+    expect(res).toMatchObject({ ok: true, capabilities: { send: true, suppressionLists: false } })
+  })
+
+  it('with no domain, only the domain-free probes run', async () => {
+    reply = s => ({ status: s.path === SIGNING_PATH ? 401 : 200, body: {} })
     const res = await mailgunProvider.verifyCredentials({ apiKey: 'key-acct', host: endpoint })
-    expect(res).toEqual({ ok: true, capabilities: {} })
-    expect(calls()).toEqual(['GET /v4/domains?limit=1'])
+    expect(res).toEqual({ ok: true, capabilities: { domains: false, routes: false, webhooks: false } })
+    expect(calls()).toEqual(['GET /v4/domains?limit=1', `GET ${SIGNING_PATH}`])
   })
 
   it('a sending key beside an account key: send is the sending key\'s, the rest the account key\'s', async () => {
-    reply = s => ({ status: s.path.includes('/bounces/') ? 404 : 200, body: {} })
+    reply = s => ({ status: s.path.includes('/bounces/') ? 404 : s.path === SIGNING_PATH ? 401 : 200, body: {} })
     const res = await mailgunProvider.verifyCredentials({ apiKey: 'key-acct', sendingKey: 'key-domain', host: endpoint }, 'mg.example.org')
-    expect(res).toEqual({ ok: true, capabilities: { send: true, suppressionLists: true } })
+    expect(res).toEqual({ ok: true, capabilities: { send: true, suppressionLists: true, domains: false, routes: false, webhooks: false } })
     expect(seen.find(s => s.method === 'POST')!.auth).toBe(basic('key-domain'))
     expect(seen.filter(s => s.method === 'GET').every(s => s.auth === basic('key-acct'))).toBe(true)
 
@@ -509,15 +522,15 @@ describe('with the kernel', () => {
   const accountRow = (id: string) => db().selectFrom('mail_accounts').selectAll().where('id', '=', id).executeTakeFirstOrThrow()
   const domainRow = (id: string) => db().selectFrom('mail_domains').selectAll().where('id', '=', id).executeTakeFirstOrThrow()
 
-  it('a key that can list domains but not change them: untested after verify, false after the refused write, manual steps returned', async () => {
-    reply = s => ({ status: s.method === 'GET' ? 200 : 403, body: {} })
+  it('a key that can read but isn\'t Admin: known refused after verify, so an automatic add writes nothing and falls back to manual steps', async () => {
+    reply = s => ({ status: s.method === 'GET' && s.path !== SIGNING_PATH ? 200 : 403, body: {} })
     const mail = kernel()
     const { account, verify } = await mail.admin.createAccount({ orgId: null }, { provider: 'mailgun', credentials: { apiKey: 'key-read', host: endpoint, webhookSigningKey: SIGNING_KEY } })
-    expect(verify).toEqual({ ok: true, capabilities: {} })
-    expect(account.capabilities).toEqual({})
+    expect(verify).toEqual({ ok: true, capabilities: { domains: false, routes: false, webhooks: false } })
+    expect(account.capabilities).toEqual({ domains: false, routes: false, webhooks: false })
 
     const added = await mail.admin.addDomain({ orgId: null }, { domain: 'mg.example.org', sendAccountId: account.id, setupMode: 'auto' }, BASE)
-    expect(calls()).toContain('POST /v4/domains')
+    expect(calls()).not.toContain('POST /v4/domains')
     expect(added.setup?.roles).toEqual([{ role: 'send', mode: 'manual', error: expect.any(String) }])
     expect(added.domain.setup_mode).toBe('manual')
     expect((await accountRow(account.id)).capabilities).toMatchObject({ domains: false })
@@ -549,12 +562,12 @@ describe('with the kernel', () => {
 
   it('a domain with its own key gets its own capabilities, probed against it, and its suppression mode follows them', async () => {
     // The account key may read shared.example.org's lists but not own.example.org's.
-    reply = s => ({ status: s.path.includes('/own.example.org/bounces/') ? 403 : s.path.includes('/bounces/') ? 404 : 200, body: {} })
+    reply = s => ({ status: s.path.includes('/own.example.org/bounces/') || s.path === SIGNING_PATH ? 403 : s.path.includes('/bounces/') ? 404 : 200, body: {} })
     const mail = kernel()
     const { account } = await mail.admin.createAccount({ orgId: null }, { provider: 'mailgun', credentials: { apiKey: 'key-acct', host: endpoint, webhookSigningKey: SIGNING_KEY } })
     const shared = await mail.admin.addDomain({ orgId: null }, { domain: 'shared.example.org', sendAccountId: account.id, setupMode: 'manual' }, BASE)
     await mail.admin.verifyAccount({ orgId: null }, account.id)
-    expect((await accountRow(account.id)).capabilities).toEqual({ send: true, suppressionLists: true })
+    expect((await accountRow(account.id)).capabilities).toEqual({ send: true, suppressionLists: true, domains: false, routes: false, webhooks: false })
 
     const own = await mail.admin.addDomain({ orgId: null }, { domain: 'own.example.org', sendAccountId: account.id, setupMode: 'manual' }, BASE)
     seen.length = 0
@@ -565,7 +578,7 @@ describe('with the kernel', () => {
     expect((await fields(probe))['o:testmode']).toBe('yes')
     expect(seen.find(s => s.path.includes('/own.example.org/bounces/'))!.auth).toBe(basic('key-acct'))
     const ownCaps = (await domainRow(own.domain.id)).capabilities!
-    expect(ownCaps).toEqual({ send: true, suppressionLists: false })
+    expect(ownCaps).toMatchObject({ send: true, suppressionLists: false })
     expect(mailgunProvider.providerSuppression.mode(ownCaps)).toBe('unmanaged')
     expect((await domainRow(shared.domain.id)).capabilities).toBeNull()
 
@@ -580,21 +593,90 @@ describe('with the kernel', () => {
   })
 
   it('a domain added with its own key is probed when it is added', async () => {
-    reply = s => ({ status: s.path.includes('/bounces/') ? 404 : 200, body: {} })
+    reply = s => ({ status: s.path.includes('/bounces/') ? 404 : s.path === SIGNING_PATH ? 401 : 200, body: {} })
     const mail = kernel()
     const { account } = await mail.admin.createAccount({ orgId: null }, { provider: 'mailgun', credentials: { apiKey: 'key-acct', host: endpoint } })
     seen.length = 0
     const { domain } = await mail.admin.addDomain({ orgId: null }, { domain: 'own.example.org', sendAccountId: account.id, setupMode: 'manual', credentials: { sendingKey: 'key-own' } }, BASE)
     expect(seen.find(s => s.method === 'POST')).toMatchObject({ path: '/v3/own.example.org/messages', auth: basic('key-own') })
     // The account key still serves the domain for everything but sending, so its capabilities count.
-    expect(domain.capabilities).toEqual({ send: true, suppressionLists: true })
+    expect(domain.capabilities).toMatchObject({ send: true, suppressionLists: true })
     expect(mailgunProvider.providerSuppression.mode(domain.capabilities!)).toBe('mirrored')
   })
 
   it('an account verified with no domain records only the domain-free probes', async () => {
+    reply = s => ({ status: s.path === SIGNING_PATH ? 401 : 200, body: {} })
     const mail = kernel()
     const { account } = await mail.admin.createAccount({ orgId: null }, { provider: 'mailgun', credentials: { apiKey: 'key-acct', host: endpoint } })
-    expect(calls()).toEqual(['GET /v4/domains?limit=1'])
-    expect(account.capabilities).toEqual({})
+    expect(calls()).toEqual(['GET /v4/domains?limit=1', `GET ${SIGNING_PATH}`])
+    expect(account.capabilities).toEqual({ domains: false, routes: false, webhooks: false })
+  })
+
+  it('a sending key on the domain beside an account holding only the signing key: a refused one is recorded, a good one reads the setup', async () => {
+    const mail = kernel()
+    const { account } = await mail.admin.createAccount({ orgId: null }, { provider: 'mailgun', credentials: { webhookSigningKey: SIGNING_KEY, host: endpoint } })
+    reply = () => ({ status: 401 })
+    const refused = await mail.admin.addDomain({ orgId: null }, { domain: 'bad.example.org', sendAccountId: account.id, setupMode: 'manual', credentials: { sendingKey: 'key-wrong' } }, BASE)
+    expect(refused.domain.capabilities).toEqual({ send: false })
+
+    reply = s => ({ status: s.path.startsWith('/v4/domains/good.example.org') ? 200 : s.method === 'POST' ? 200 : 401, body: {} })
+    const { domain } = await mail.admin.addDomain({ orgId: null }, { domain: 'good.example.org', sendAccountId: account.id, setupMode: 'manual', credentials: { sendingKey: 'key-domain' } }, BASE)
+    expect(domain.capabilities).toMatchObject({ send: true })
+    seen.length = 0
+    const check = await mail.admin.checkDomain({ orgId: null }, domain.id, BASE)
+    expect(check.roles[0]!.checks).toContainEqual(expect.objectContaining({ key: 'provider-domain', ok: true }))
+    expect(seen.find(s => s.path === '/v4/domains/good.example.org')!.auth).toBe(basic('key-domain'))
+    expect(mail.admin.domainKeyView(await accountRow(account.id), await domainRow(domain.id))).toEqual({ sendingKey: expect.stringMatching(/^•+/) })
+  })
+
+  it('an Admin key stores the signing key it reads, so nobody has to paste it', async () => {
+    reply = s => ({ status: 200, body: s.path === SIGNING_PATH ? { http_signing_key: 'sig-from-api' } : {} })
+    const mail = kernel()
+    const { account } = await mail.admin.createAccount({ orgId: null }, { provider: 'mailgun', credentials: { apiKey: 'key-admin', host: endpoint } })
+    expect(mail.admin.accountView(await accountRow(account.id)).credentials).toMatchObject({ webhookSigningKey: expect.any(String) })
+    expect(account.capabilities).toMatchObject({ domains: true, routes: true, webhooks: true })
+  })
+
+  it('checking a domain set up by hand reads the domain, webhooks and routes, and ticks off the steps that are done', async () => {
+    const mail = kernel()
+    reply = s => ({ status: s.path === SIGNING_PATH ? 401 : 200, body: {} })
+    const { account } = await mail.admin.createAccount({ orgId: null }, { provider: 'mailgun', credentials: { apiKey: 'key-read', host: endpoint, webhookSigningKey: SIGNING_KEY } })
+    const { domain } = await mail.admin.addDomain({ orgId: null }, { domain: 'in.example.org', sendAccountId: account.id, receiveAccountId: account.id, setupMode: 'manual' }, BASE)
+    const urls = mail.webhookUrls(account, BASE)
+
+    let webhooks: Record<string, { urls: string[] }> = { permanent_fail: { urls: ['https://app.test/api/inbox/webhooks/mailgun/events', 'https://other.test/hook'] } }
+    let routes = [{ description: 'Old', expression: 'match_recipient(".*@in.example.org")', actions: ['forward("https://old.test/in")', 'stop()'], priority: 0 }]
+    reply = (s) => {
+      if (s.path === SIGNING_PATH) return { status: 401 }
+      if (s.path === '/v4/domains/in.example.org') return { status: 200, body: { sending_dns_records: [{ record_type: 'TXT', name: 'in.example.org', value: 'v=spf1 include:mailgun.org ~all', valid: 'valid' }, { record_type: 'TXT', name: 'k1._domainkey.in.example.org', value: 'k=rsa', valid: 'unknown' }] } }
+      if (s.path === '/v3/domains/in.example.org/webhooks') return { status: 200, body: { webhooks } }
+      if (s.path.startsWith('/v3/routes')) return { status: 200, body: { items: routes } }
+      return { status: 200, body: {} }
+    }
+    seen.length = 0
+    const first = await mail.admin.checkDomain({ orgId: null }, domain.id, BASE)
+    const send = first.roles.find(r => r.role === 'send')!.checks
+    expect(send).toContainEqual(expect.objectContaining({ key: 'provider-domain', ok: true }))
+    expect(send).toContainEqual(expect.objectContaining({ key: 'provider-dns', ok: null, detail: 'TXT k1._domainkey.in.example.org' }))
+    expect(send).toContainEqual(expect.objectContaining({ key: 'webhooks', ok: false, detail: expect.stringContaining('Remove: https://app.test/api/inbox/webhooks/mailgun/events') }))
+    expect(send).toContainEqual(expect.objectContaining({ key: 'webhooks', detail: expect.stringContaining('Not sent here yet: Permanent failure, Spam complaints, Unsubscribes.') }))
+    expect(send).toContainEqual(expect.objectContaining({ key: 'credential:webhookSigningKey', ok: true }))
+    const receive = first.roles.find(r => r.role === 'receive')!.checks
+    expect(receive).toContainEqual(expect.objectContaining({ key: 'route', ok: false, detail: '"Old" takes this domain\'s mail first' }))
+    // Only the key's test-mode send goes out: no receiving probe while the route is missing.
+    const posts = seen.filter(x => x.method === 'POST' && x.path === '/v3/in.example.org/messages')
+    expect(await Promise.all(posts.map(async x => (await fields(x))['o:testmode']))).toEqual(['yes'])
+    expect((await domainRow(domain.id)).webhook_events).toBeNull()
+
+    // Done by hand at Mailgun: our webhooks for every needed event and a route of our own.
+    webhooks = Object.fromEntries(['permanent_fail', 'complained', 'unsubscribed'].map(kind => [kind, { urls: [urls.events, 'https://other.test/hook'] }]))
+    // As Mailgun's form saves it, from the recipient *@in.example.org.
+    routes = [{ description: 'Ours', expression: 'match_recipient("*@in.example.org")', actions: [`forward("${urls.inboundMime}")`, 'stop()'], priority: 0 }]
+    const second = await mail.admin.checkDomain({ orgId: null }, domain.id, BASE)
+    expect(second.roles.find(r => r.role === 'send')!.checks).toContainEqual(expect.objectContaining({ key: 'webhooks', ok: true }))
+    expect(second.roles.find(r => r.role === 'receive')!.checks).toContainEqual(expect.objectContaining({ key: 'route', ok: true }))
+    expect((await mail.admin.webhookStatus(await domainRow(domain.id))).state).toBe('connected')
+    const steps = mail.admin.manualSteps(await accountRow(account.id), await domainRow(domain.id), 'receive', urls, [])
+    expect(steps.map(s => s.check)).toEqual(['mx', 'route', 'probe'])
   })
 })

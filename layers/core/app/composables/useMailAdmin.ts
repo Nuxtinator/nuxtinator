@@ -13,6 +13,8 @@ export interface MailCredentialField {
   secret: boolean
   optional?: boolean
   help?: string
+  forWebhooks?: boolean
+  advanced?: boolean
 }
 
 export interface MailProviderInfo {
@@ -39,6 +41,7 @@ export interface MailAccount {
   providerLabel: string | null
   label: string
   credentials: Record<string, string>
+  hasKey: boolean
   capabilities: MailCapabilities
   webhookTokenVersion: number
   createdAt: string
@@ -74,6 +77,8 @@ export interface MailManualStep {
   title: string
   detail?: string
   values?: { label: string, value: string }[]
+  // Key of the check that confirms the step
+  check?: string
 }
 
 export interface MailDomain {
@@ -86,6 +91,7 @@ export interface MailDomain {
   ownershipRecord: { type: 'TXT', name: string, value: string } | null
   setupMode: 'auto' | 'manual'
   roleModes: { send: 'auto' | 'manual', receive: 'auto' | 'manual' }
+  canAutoSetup: boolean
   sendAccountId: string | null
   receiveAccountId: string | null
   sendProvider: { id: string | null, label: string } | null
@@ -94,6 +100,8 @@ export interface MailDomain {
   receiveStatus: MailRoleStatus
   sendError: string | null
   hasOwnCredentials: boolean
+  // The key the domain sends with, masked; null when it has none
+  key: { source: 'domain' | 'account', label: string, value: string, accountLabel?: string | null } | null
   capabilities: MailCapabilities
   suppressionMode: 'disabled' | 'mirrored' | 'unmanaged' | null
   dkimSelector: string | null

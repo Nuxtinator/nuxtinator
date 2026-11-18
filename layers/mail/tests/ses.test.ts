@@ -10,7 +10,7 @@ import {
 } from '../adapters/ses'
 import { __setEndpointCheck } from '../adapters/http'
 import { effectiveCapabilities } from '../kernel/context'
-import { ProviderPermissionError, type MailAccountRow, type ProviderMessage, type WebhookRequest } from '../kernel/types'
+import { ProviderPermissionError, type MailAccountRow, type MailEventType, type ProviderMessage, type WebhookRequest } from '../kernel/types'
 import { db, harness, resetTables } from './helpers'
 
 const CERT = readFileSync(resolve(__dirname, 'fixtures/sns-test-cert.pem'), 'utf8')
@@ -481,7 +481,7 @@ describe('provisioning', () => {
     const send = sesProvider.manualSetup('example.org', 'send', urls, { events: ['delivered', 'bounced', 'deferred'] })
     const text = JSON.stringify(send)
     expect(text).toContain('nx-example-org')
-    expect(text).toContain('BOUNCE, DELIVERY, DELIVERY_DELAY')
+    expect(text).toContain('Hard bounces, Deliveries, Delivery delays')
     expect(text).toContain(urls.events)
     const receive = JSON.stringify(sesProvider.manualSetup('example.org', 'receive', urls, { events: [] }))
     expect(receive).toContain('us-east-1, us-west-2 and eu-west-1')
@@ -494,6 +494,83 @@ describe('provisioning', () => {
     const long = configurationSetName(`${'a'.repeat(70)}.example.org`)
     expect(long.length).toBeLessThanOrEqual(64)
     expect(long).toMatch(/^[a-z0-9-]+$/)
+  })
+})
+
+describe('inspectDomain', () => {
+  const eventsTopic = `arn:aws:sns:${REGION}:123456789012:nx-example-org-events`
+  const inboundTopic = `arn:aws:sns:${REGION}:123456789012:nx-example-org-inbound`
+  const subs = (url: string, arn: string) => xml('ListSubscriptionsByTopic', `<Subscriptions><member><TopicArn>t</TopicArn><Protocol>https</Protocol><SubscriptionArn>${arn}</SubscriptionArn><Endpoint>${url}</Endpoint></member></Subscriptions>`)
+  const rule = (name: string, recipients: string[], actions: string) =>
+    `<member><Name>${name}</Name><Enabled>true</Enabled><Recipients>${recipients.map(r => `<member>${r}</member>`).join('')}</Recipients><Actions>${actions}</Actions><ScanEnabled>true</ScanEnabled></member>`
+  const ruleSet = (rules: string) => xml('DescribeActiveReceiptRuleSet', `<Metadata><Name>main</Name></Metadata><Rules>${rules}</Rules>`)
+  const READ_ACTIONS = new Set(['ListSubscriptionsByTopic', 'DescribeActiveReceiptRuleSet'])
+  const readsOnly = () => seen.every(s => s.action ? READ_ACTIONS.has(s.action) : s.method === 'GET')
+  const opts = { events: ['bounced', 'complained'] as MailEventType[], receive: true }
+
+  it('a domain set up by hand: reads the identity, account, configuration set, event destination, rules and subscriptions, and changes nothing', async () => {
+    override = (s) => {
+      if (s.path.endsWith('/event-destinations')) return { status: 200, json: { EventDestinations: [{ Name: 'nx-events', Enabled: true, MatchingEventTypes: ['BOUNCE', 'COMPLAINT'], SnsDestination: { TopicArn: eventsTopic } }] } }
+      if (s.action === 'ListSubscriptionsByTopic') {
+        const topic = new URLSearchParams(s.body).get('TopicArn')
+        return topic === eventsTopic ? subs(urls.events, `${eventsTopic}:sub1`) : subs(urls.inbound, `${inboundTopic}:sub2`)
+      }
+      if (s.action === 'DescribeActiveReceiptRuleSet') {
+        return ruleSet(rule('other', ['other.org'], '<member><StopAction><Scope>RuleSet</Scope></StopAction></member>')
+          + rule('nx-example-org', ['example.org'], `<member><S3Action><BucketName>b</BucketName><TopicArn>${inboundTopic}</TopicArn></S3Action></member>`))
+      }
+      return undefined
+    }
+    const seenDomain = await sesProvider.inspectDomain!(creds(), 'example.org', urls, opts)
+    expect(seenDomain.domain).toMatchObject({ exists: true })
+    expect(seenDomain.domain!.records.filter(r => r.role === 'send').every(r => r.status === 'verified')).toBe(true)
+    expect(seenDomain.webhooks).toEqual({ missing: [], stale: [] })
+    expect(seenDomain.route).toEqual({ ok: true })
+    expect(seenDomain.checks!.map(c => [c.key, c.ok])).toEqual([
+      ['production-access', true], ['configuration-set', true], ['events-topic', true], ['inbound-topic', true]
+    ])
+    expect(readsOnly()).toBe(true)
+  })
+
+  it('nothing set up yet: no identity, no set, sandbox, and an earlier catch-all rule that stops the mail', async () => {
+    override = (s) => {
+      if (s.method === 'GET' && s.path.startsWith('/v2/email/identities/')) return { status: 404, json: { message: 'not found' } }
+      if (s.method === 'GET' && s.path.startsWith('/v2/email/configuration-sets/')) return { status: 404, json: { message: 'not found' } }
+      if (s.path === '/v2/email/account') return { status: 200, json: { SendingEnabled: true, ProductionAccessEnabled: false } }
+      if (s.action === 'DescribeActiveReceiptRuleSet') return ruleSet(rule('catch-all', [], '<member><StopAction><Scope>RuleSet</Scope></StopAction></member>'))
+      return undefined
+    }
+    const seenDomain = await sesProvider.inspectDomain!(creds(), 'example.org', urls, opts)
+    expect(seenDomain.domain).toEqual({ exists: false, records: [] })
+    expect(seenDomain.webhooks).toEqual({ missing: ['Hard bounces', 'Complaints'], stale: [] })
+    expect(seenDomain.route).toEqual({ ok: false, conflict: 'catch-all' })
+    expect(seenDomain.checks).toContainEqual(expect.objectContaining({ key: 'production-access', ok: false }))
+    expect(seenDomain.checks).toContainEqual(expect.objectContaining({ key: 'configuration-set', ok: false, detail: 'Not created yet' }))
+    expect(readsOnly()).toBe(true)
+  })
+
+  it('a subscription waiting for confirmation means no events arrive yet; a set that still suppresses is flagged', async () => {
+    override = (s) => {
+      if (s.path.endsWith('/event-destinations')) return { status: 200, json: { EventDestinations: [{ Enabled: true, MatchingEventTypes: ['BOUNCE'], SnsDestination: { TopicArn: eventsTopic } }] } }
+      if (s.method === 'GET' && s.path.startsWith('/v2/email/configuration-sets/')) return { status: 200, json: { SuppressionOptions: { SuppressedReasons: ['BOUNCE'] } } }
+      if (s.action === 'ListSubscriptionsByTopic') return subs(urls.events, 'PendingConfirmation')
+      return undefined
+    }
+    const seenDomain = await sesProvider.inspectDomain!(creds(), 'example.org', urls, { ...opts, receive: false })
+    expect(seenDomain.webhooks).toEqual({ missing: ['Hard bounces', 'Complaints'], stale: [] })
+    expect(seenDomain.checks).toContainEqual(expect.objectContaining({ key: 'events-topic', ok: false, detail: expect.stringContaining('waits for confirmation') }))
+    expect(seenDomain.checks).toContainEqual(expect.objectContaining({ key: 'configuration-set', ok: false, detail: expect.stringContaining('still suppresses') }))
+    expect(seenDomain.route).toBeNull()
+  })
+
+  it('a key that may read nothing reports nothing, so the checklist falls back to DNS, the test send and the probe', async () => {
+    override = () => ({ status: 403, json: { message: 'AccessDenied' } })
+    expect(await sesProvider.inspectDomain!(creds(), 'example.org', urls, opts)).toEqual({ domain: null, webhooks: null, route: null, checks: [] })
+  })
+
+  it('every manual step that the reads can confirm names its check', () => {
+    expect(sesProvider.manualSetup('example.org', 'send', urls, { events: ['bounced'] }).map(s => s.check)).toEqual(['provider-domain', undefined, 'provider-dns', 'configuration-set', 'webhooks', 'production-access'])
+    expect(sesProvider.manualSetup('example.org', 'receive', urls, { events: [] }).map(s => s.check)).toEqual([undefined, 'mx', 'inbound-topic', 'route', undefined, 'probe'])
   })
 })
 

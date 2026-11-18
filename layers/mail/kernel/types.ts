@@ -110,6 +110,10 @@ export interface CredentialField {
   optional?: boolean
   env?: string
   help?: string
+  // Needed to accept the provider's webhooks (e.g. a signing key); its absence is a setup step.
+  forWebhooks?: boolean
+  // Rarely needed when adding a domain; the form keeps it under More options
+  advanced?: boolean
 }
 
 export type Credentials = Record<string, string>
@@ -119,6 +123,8 @@ export interface ManualStep {
   detail?: string
   // Values to copy, e.g. a URL or a DNS record
   values?: { label: string, value: string }[]
+  // Key of the check that confirms this step is done
+  check?: string
 }
 
 export interface WebhookUrls {
@@ -198,6 +204,20 @@ export type ProviderList = 'bounce' | 'complaint' | 'unsubscribe'
 export interface VerifyResult {
   ok: true
   capabilities: Capabilities
+  // Credentials the key could read from the provider (e.g. a webhook signing key); stored on the account
+  credentials?: Credentials
+}
+
+// What the provider has set up for a domain, read without changing anything.
+// Each part is null when the key can't read it.
+export interface DomainInspection {
+  domain: { exists: boolean, records: DnsRecord[] } | null
+  // The provider's names for the events not yet posted to the events URL, and other URLs to remove
+  webhooks: { missing: string[], stale: string[] } | null
+  // Whether a route forwards the domain's mail to the inbound URL; `conflict` names a route that takes it first
+  route: { ok: boolean, conflict?: string } | null
+  // Further provider checks, each listed under its role and named by the provider's manual steps
+  checks?: { role: 'send' | 'receive', key: string, label: string, ok: boolean | null, detail?: string }[]
 }
 
 export interface ProvisionResult {
@@ -246,6 +266,7 @@ export interface MailProvider {
   send: (creds: Credentials, msg: ProviderMessage) => Promise<ProviderSendResult>
   provisionDomain?: (creds: Credentials, domain: string, role: 'send' | 'receive', urls: WebhookUrls) => Promise<ProvisionResult>
   checkDomain?: (creds: Credentials, domain: string, role: 'send' | 'receive', refs: Record<string, unknown>) => Promise<CheckResult>
+  inspectDomain?: (creds: Credentials, domain: string, urls: WebhookUrls, opts: { events: MailEventType[], receive: boolean }) => Promise<DomainInspection>
   // May return credentials the provider issued (e.g. a webhook verification
   // key); the kernel stores them on the account.
   configureWebhooks?: (creds: Credentials, domain: string, urls: WebhookUrls, opts: { delivered: boolean, events: MailEventType[] }) => Promise<void | { credentials?: Credentials }>

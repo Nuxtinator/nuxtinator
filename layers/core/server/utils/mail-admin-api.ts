@@ -43,8 +43,12 @@ async function accountsById(mail: Mail, ids: (string | null)[]) {
 }
 
 function accountPayload(mail: Mail, account: MailAccountRow) {
+  const view = mail.admin.accountView(account)
+  const provider = account.provider ? mail.providers.find(p => p.id === account.provider) : undefined
   return {
-    ...mail.admin.accountView(account),
+    ...view,
+    // Whether the account holds a key of its own, beyond what webhooks need; without one its domains bring their own keys
+    hasKey: !!provider?.credentialFields.some(f => f.secret && !f.forWebhooks && view.credentials[f.key]),
     webhookUrls: account.provider ? mail.webhookUrls(account, mailBaseUrl()) : null
   }
 }
@@ -62,7 +66,7 @@ async function orgOwnedAccounts(mail: Mail) {
   const rows = await db.selectFrom('mail_accounts').selectAll().where('org_id', 'is not', null).orderBy('created_at').execute()
   if (!rows.length) return []
   const names = orgNames ? await orgNames([...new Set(rows.map(r => r.org_id!))]) : new Map<string, string>()
-  return rows.map(a => ({ ...mail.admin.accountView(a), webhookUrls: null, orgName: names.get(a.org_id!) ?? null }))
+  return rows.map(a => ({ ...accountPayload(mail, a), webhookUrls: null, orgName: names.get(a.org_id!) ?? null }))
 }
 
 // The host account the host designates for receiving on org domains, as an org may pick it.
@@ -148,6 +152,16 @@ async function domainPayload(mail: Mail, domain: MailDomainRow, accounts: Map<st
   }
   const caps = (send ? effectiveCapabilities(send, domain) : domain.capabilities ?? {}) as Record<string, boolean>
   const sendProvider = provider(send)
+  // The key the domain sends with: its own, else its account's first secret that isn't a webhook key.
+  const ownKey = Object.entries(mail.admin.domainKeyView(send, domain))[0]
+  const accountView = send && visible(send) ? mail.admin.accountView(send) : null
+  const accountCreds = accountView?.credentials ?? {}
+  const accountField = sendProvider?.credentialFields.find(f => f.secret && !f.forWebhooks && accountCreds[f.key])
+  const key = ownKey
+    ? { source: 'domain' as const, label: sendProvider?.domainCredentialFields?.find(f => f.key === ownKey[0])?.label ?? ownKey[0], value: ownKey[1] }
+    : accountField
+      ? { source: 'account' as const, label: accountField.label, value: accountCreds[accountField.key]!, accountLabel: accountView?.label ?? null }
+      : null
   // A role set up automatically holds the provider's refs; one that fell back to manual doesn't.
   const refs = (domain.provider_refs ?? {}) as Record<string, unknown>
   const roleMode = (role: 'send' | 'receive') => domain.setup_mode === 'auto' && refs[role] ? 'auto' as const : 'manual' as const
@@ -161,6 +175,9 @@ async function domainPayload(mail: Mail, domain: MailDomainRow, accounts: Map<st
     ownershipRecord: domain.ownership_token ? ownershipRecord(domain) : null,
     setupMode: domain.setup_mode,
     roleModes: { send: roleMode('send'), receive: roleMode('receive') },
+    // Whether the key is known to let the provider set the domain up itself
+    canAutoSetup: domain.setup_mode !== 'auto' && domain.source !== 'env' && visible(send) && !!sendProvider?.provisionDomain
+      && caps.domains === true && (!receive || (provider(receive)?.id === sendProvider.id && caps.routes === true)),
     sendAccountId: domain.send_account_id,
     receiveAccountId: domain.receive_account_id,
     sendProvider: sendProvider ? { id: sendProvider.id, label: sendProvider.label } : (send ? { id: null, label: 'None' } : null),
@@ -169,6 +186,7 @@ async function domainPayload(mail: Mail, domain: MailDomainRow, accounts: Map<st
     receiveStatus: domain.receive_status,
     sendError: domain.send_error,
     hasOwnCredentials: !!domain.credentials,
+    key,
     capabilities: caps,
     suppressionMode: sendProvider ? sendProvider.providerSuppression.mode(caps) : null,
     dkimSelector: domain.dkim_selector,
@@ -208,6 +226,8 @@ const domainBody = z.object({
   dkimSelector: z.string().max(100).nullable().optional(),
   fromDomain: z.string().max(253).nullable().optional(),
   makeDefault: z.boolean().optional(),
+  // On an org's add through the host's accounts: false leaves receiving off
+  receive: z.boolean().optional(),
   confirmWebhooks: z.boolean().optional()
 })
 
@@ -227,7 +247,7 @@ export async function createMailDomain(event: H3Event, scope: MailScope, opts: {
         return !!mail.providers.find(p => p.id === row.provider)?.supports[role]
       }
       body.sendAccountId = supports(host.send, 'send') ? host.send : null
-      body.receiveAccountId = body.setupMode !== 'manual' && supports(host.receive, 'receive') ? host.receive : null
+      body.receiveAccountId = body.receive !== false && body.setupMode !== 'manual' && supports(host.receive, 'receive') ? host.receive : null
     }
     const res = await mail.admin.addDomain(domainScoped, { ...body, domain: body.domain! }, mailBaseUrl())
     return await domainResponse(mail, res.domain, { setup: res.setup })
@@ -238,7 +258,7 @@ export async function patchMailDomain(event: H3Event, scope: MailScope, id: stri
   const body = domainBody.parse(await readBody(event))
   const domainScoped = await domainScope(scope)
   return await mailAdmin(async (mail) => {
-    const res = await mail.admin.patchDomain(domainScoped, id, body, mailBaseUrl())
+    const res = await mail.admin.patchDomain(domainScoped, id, { ...body, setupMode: body.setupMode === 'auto' ? 'auto' : undefined }, mailBaseUrl())
     return await domainResponse(mail, res.domain, { setup: res.setup })
   })
 }

@@ -5,7 +5,7 @@ import { parseInbound } from '../kernel/inbound-parse'
 import { systemDns } from '../kernel/dns'
 import {
   ProviderPermissionError, type Capabilities, type CapabilityKey, type CheckResult, type Credentials, type DnsRecord,
-  type MailEvent, type MailEventType, type MailProvider, type ManualStep, type ProviderList, type ProviderSendResult
+  type DomainInspection, type MailEvent, type MailEventType, type MailProvider, type ManualStep, type ProviderList, type ProviderSendResult
 } from '../kernel/types'
 import { baseUrl, EndpointError, formString, lowerHeaders, parseForm } from './http'
 
@@ -13,6 +13,8 @@ const SIGNATURE_SKEW_SECONDS = 15 * 60
 const SIGNATURE_HEADER = 'x-twilio-email-event-webhook-signature'
 const TIMESTAMP_HEADER = 'x-twilio-email-event-webhook-timestamp'
 const INBOUND_MX = 'mx.sendgrid.net'
+// Addresses of this app's own webhooks.
+const OWN_WEBHOOK = /\/api\/mail\/webhooks\//
 
 // A capability holds when the key has every scope listed for it.
 export const SENDGRID_CAPABILITY_SCOPES: Record<CapabilityKey, string[]> = {
@@ -251,7 +253,7 @@ export const sendgridProvider: MailProvider = {
   label: 'SendGrid',
   credentialFields: [
     { key: 'apiKey', label: 'API key', secret: true, env: 'MAIL_SENDGRID_API_KEY', help: 'Settings → API Keys. Full access, or Mail Send plus the scopes for automatic setup.' },
-    { key: 'webhookPublicKey', label: 'Webhook verification key', secret: true, optional: true, env: 'MAIL_SENDGRID_WEBHOOK_PUBLIC_KEY', help: 'Mail Settings → Event Webhook → Signed Event Webhook → Verification Key' },
+    { key: 'webhookPublicKey', label: 'Webhook verification key', secret: true, optional: true, env: 'MAIL_SENDGRID_WEBHOOK_PUBLIC_KEY', help: 'Mail Settings → Event Webhook → Signed Event Webhook → Verification Key. Read automatically from a key that may read the event webhook settings.', forWebhooks: true },
     { key: 'endpoint', label: 'API endpoint', secret: false, optional: true, help: 'Leave empty for api.sendgrid.com; api.eu.sendgrid.com for EU regional subusers' }
   ],
   supports: { send: true, receive: true, events: true },
@@ -273,6 +275,12 @@ export const sendgridProvider: MailProvider = {
     for (const [cap, needed] of Object.entries(SENDGRID_CAPABILITY_SCOPES)) {
       capabilities[cap as CapabilityKey] = needed.every(s => scopes.has(s))
     }
+    // A key that may read the event webhook settings can read the signed webhook's verification key too.
+    if (scopes.has('user.webhooks.event.settings.read')) {
+      const signed = await call(creds, 'GET', '/v3/user/webhooks/event/settings/signed')
+      const publicKey = signed.ok ? (signed.json() as { public_key?: string }).public_key : undefined
+      if (publicKey) return { ok: true, capabilities, credentials: { webhookPublicKey: publicKey } }
+    }
     return { ok: true, capabilities }
   },
 
@@ -281,23 +289,70 @@ export const sendgridProvider: MailProvider = {
       const toggles = eventToggles(events, events.includes('delivered'))
       const ticked = Object.entries(toggles).filter(([, on]) => on).map(([k]) => TOGGLE_LABELS[k] ?? k)
       return [
-        { title: `In SendGrid, authenticate the domain ${domain}`, detail: 'Settings → Sender Authentication → Authenticate Your Domain. Add the CNAME records SendGrid shows and verify them.' },
+        { title: `In SendGrid, authenticate the domain ${domain}`, detail: 'Settings → Sender Authentication → Authenticate Your Domain. Skip this if it is already there.', check: 'provider-domain' },
+        { title: 'Add the DNS records SendGrid shows', detail: 'Add the CNAME records at your DNS host, then press Verify in SendGrid. They are listed here once SendGrid has the domain.', check: 'provider-dns' },
         {
           title: 'Turn on the event webhook',
           detail: `Settings → Mail Settings → Event Webhook. The webhook belongs to the whole SendGrid account, so it serves every domain on it. Post to the URL below and tick only: ${ticked.join(', ')}.${toggles.delivered ? '' : ' Leave "Delivered" unticked.'}`,
-          values: [{ label: 'Events URL', value: urls.events }]
+          values: [{ label: 'Events URL', value: urls.events }],
+          check: 'webhooks'
         },
-        { title: 'Turn on the Signed Event Webhook', detail: 'On the same page, enable signature verification and copy the Verification Key into this account\'s "Webhook verification key" field.' }
+        { title: 'Turn on the Signed Event Webhook', detail: 'On the same page, turn on signature verification.', check: 'signed-webhook' },
+        { title: 'Save the verification key here', detail: 'Copy the Signed Event Webhook\'s Verification Key into this domain\'s account under Email → Accounts. A key that may read the event webhook settings fills it in by itself.', check: 'credential:webhookPublicKey' }
       ]
     }
     return [
-      { title: `Point the MX record of ${domain} at SendGrid`, detail: `One MX record, priority 10: ${INBOUND_MX}.` },
+      { title: `Point the MX record of ${domain} at SendGrid`, detail: `One MX record, priority 10: ${INBOUND_MX}.`, check: 'mx' },
       {
         title: 'Add an Inbound Parse host',
         detail: `Settings → Inbound Parse → Add Host & URL. Host ${domain}, the URL below, and tick "POST the raw, full MIME message". Inbound Parse posts are unsigned, so the URL is the only secret: don't share it.`,
-        values: [{ label: 'Destination URL', value: urls.inboundMime }]
-      }
+        values: [{ label: 'Destination URL', value: urls.inboundMime }],
+        check: 'route'
+      },
+      { title: 'Verify receiving', detail: 'Press Verify receiving once the steps above are done: a probe message goes to the domain, and receiving is verified when it arrives here.', check: 'probe' }
     ]
+  },
+
+  // Reads only: domain authentication, the event webhook and its signing, and Inbound Parse.
+  async inspectDomain(creds, domain, urls, { events, receive }): Promise<DomainInspection> {
+    const seen: DomainInspection = { domain: null, webhooks: null, route: null, checks: [] }
+    if (!creds.apiKey || endpointProblem(creds)) return seen
+
+    const auth = await call(creds, 'GET', `/v3/whitelabel/domains?domain=${encodeURIComponent(domain)}`)
+    if (auth.ok) {
+      const list = auth.json()
+      const found = Array.isArray(list) ? list.find((d: Record<string, unknown>) => d.domain === domain) as Record<string, unknown> | undefined : undefined
+      seen.domain = found ? { exists: true, records: [...mapDns(found.dns), ...(receive ? receivingMx(domain) : [])] } : { exists: false, records: [] }
+    }
+
+    const hook = await call(creds, 'GET', '/v3/user/webhooks/event/settings')
+    if (hook.ok) {
+      const current = hook.json() as Record<string, unknown>
+      const needed = Object.entries(eventToggles(events, events.includes('delivered'))).filter(([, on]) => on).map(([k]) => k)
+      const here = current.enabled === true && current.url === urls.events
+      const url = typeof current.url === 'string' && current.url ? current.url : null
+      seen.webhooks = {
+        missing: (here ? needed.filter(k => current[k] !== true) : needed).map(k => TOGGLE_LABELS[k] ?? k),
+        stale: !here && url && OWN_WEBHOOK.test(url) ? [url] : []
+      }
+      if (!here && url && !OWN_WEBHOOK.test(url)) {
+        seen.checks!.push({ role: 'send', key: 'event-webhook-elsewhere', label: 'The event webhook posts elsewhere', ok: false, detail: `It posts to ${url}. SendGrid has one event webhook per account, so pointing it here stops that.` })
+      }
+      const signed = await call(creds, 'GET', '/v3/user/webhooks/event/settings/signed')
+      if (signed.ok) seen.checks!.push({ role: 'send', key: 'signed-webhook', label: 'The Signed Event Webhook is on', ok: (signed.json() as { enabled?: boolean }).enabled === true })
+    }
+
+    if (receive) {
+      const parse = await call(creds, 'GET', '/v3/user/webhooks/parse/settings')
+      if (parse.ok) {
+        const hosts = (parse.json() as { result?: { hostname?: string, url?: string, send_raw?: boolean }[] }).result ?? []
+        const host = hosts.find(h => (h.hostname ?? '').toLowerCase() === domain)
+        const ours = !!host && host.url === urls.inboundMime
+        seen.route = { ok: ours && host!.send_raw === true, ...(host && !ours ? { conflict: `Inbound Parse to ${host.url ?? 'another URL'}` } : {}) }
+        if (ours && host!.send_raw !== true) seen.checks!.push({ role: 'receive', key: 'parse-raw', label: 'Inbound Parse posts the raw MIME message', ok: false, detail: 'Tick "POST the raw, full MIME message" on the host' })
+      }
+    }
+    return seen
   },
 
   async send(creds, msg): Promise<ProviderSendResult> {

@@ -6,7 +6,7 @@ import { addressHash } from './address'
 import {
   accountCredentials, domainCredentials, effectiveCapabilities, requireSecret, type Kernel
 } from './context'
-import { encryptJson, randomToken } from './crypto'
+import { decryptJson, encryptJson, randomToken } from './crypto'
 import { jsonb } from './json'
 import { mirroredTargets, PROBE_STREAM, releaseOn } from './events'
 import { PROBE_PREFIX } from './inbound'
@@ -15,7 +15,7 @@ import { domainQualifies, resolveSenderRow } from './resolve'
 import { webhookUrls } from './webhooks'
 import type { Capabilities, DnsRecord, MailAccountRow, MailDomainRow, MailSuppressionRow, SuppressionReason } from './schema'
 import {
-  ProviderPermissionError, type CapabilityKey, type Credentials, type MailEventType, type MailProvider, type ManualStep,
+  ProviderPermissionError, type CapabilityKey, type Credentials, type DomainInspection, type MailEventType, type MailProvider, type ManualStep,
   type WebhookUrls
 } from './types'
 
@@ -70,6 +70,17 @@ export function maskCredentials(provider: MailProvider | undefined, creds: Crede
     out[field.key] = field.secret ? mask(value) : value
   }
   return out
+}
+
+// A domain's own key, masked for display.
+export function domainKeyView(k: Kernel, account: MailAccountRow | null, domain: MailDomainRow): Record<string, string> {
+  const provider = account?.provider ? k.providers.get(account.provider) : undefined
+  if (!domain.credentials || !provider?.domainCredentialFields) return {}
+  try {
+    return maskCredentials(provider, decryptJson<Credentials>(requireSecret(k, 'read provider credentials'), domain.credentials), provider.domainCredentialFields)
+  } catch {
+    return {}
+  }
 }
 
 export function accountView(k: Kernel, account: MailAccountRow): AccountView {
@@ -206,7 +217,10 @@ export async function verifyAccount(k: Kernel, scope: Scope, id: string) {
   const result = await provider.verifyCredentials(accountCredentials(k, account), firstDomain?.domain, {
     probeAddress: firstDomain ? probeAddress(firstDomain) : undefined
   })
-  if (result.ok) await storeAccountProbe(k, account, firstDomain ?? null, result.capabilities, {})
+  if (result.ok) {
+    await storeAccountProbe(k, account, firstDomain ?? null, result.capabilities, {})
+    if (result.credentials) await storeIssuedCredentials(k, account, result.credentials)
+  }
   return { account: await getAccount(k, scope, id), result }
 }
 
@@ -422,13 +436,17 @@ async function probeKeys(k: Kernel, domain: MailDomainRow): Promise<void> {
   const opts = { probeAddress: domain.probe_token ? probeAddress(domain) : undefined }
   if (domain.credentials) {
     const res = await provider.verifyCredentials(domainCredentials(k, account, domain), domain.domain, opts)
-    if (res.ok) await k.db.updateTable('mail_domains').set({ capabilities: jsonb(res.capabilities) }).where('id', '=', domain.id).execute()
+    // A key the provider refused outright can't send.
+    const found = res.ok ? res.capabilities : res.retryable ? null : { send: false }
+    if (found) await k.db.updateTable('mail_domains').set({ capabilities: jsonb(found) }).where('id', '=', domain.id).execute()
+    if (res.ok && res.credentials) await storeIssuedCredentials(k, account, res.credentials)
     return
   }
   const known = (key: CapabilityKey) => ((perDomain(k, account, domain, key) ? domain.capabilities : account.capabilities) as Capabilities | null)?.[key] !== undefined
   if (k.transport !== 'provider' || (known('send') && known('suppressionLists'))) return
   const res = await provider.verifyCredentials(accountCredentials(k, account), domain.domain, opts)
   if (res.ok) await storeAccountProbe(k, account, domain, res.capabilities, account.capabilities as Capabilities)
+  if (res.ok && res.credentials) await storeIssuedCredentials(k, account, res.credentials)
 }
 
 // Role accounts and provider objects for a domain.
@@ -454,8 +472,10 @@ async function setUpDomain(k: Kernel, domain: MailDomainRow, baseUrl: string): P
   const accounts = await roleAccounts(k, domain)
   const setup: DomainSetup = { mxConflict: [], roles: [] }
   if (accounts.receive) {
+    // MX records already at the receiving provider are where its mail should go; anything else would lose mail.
+    const receiver = accounts.receive.provider ? k.providers.get(accounts.receive.provider) : undefined
     const mx = await k.dns.mx(domain.domain).catch(() => [])
-    setup.mxConflict = mx.map(r => r.exchange)
+    setup.mxConflict = mx.map(r => r.exchange).filter(host => !receiver?.receivesAt?.(host.toLowerCase().replace(/\.$/, '')))
   }
   let records: DnsRecord[] = []
   const refs: Record<string, unknown> = { ...(domain.provider_refs as Record<string, unknown>) }
@@ -500,11 +520,13 @@ export interface PatchDomainInput {
   fromDomain?: string | null
   dkimSelector?: string | null
   confirmWebhooks?: boolean
+  // 'auto' has the provider set up a domain that was being set up by hand
+  setupMode?: 'auto'
 }
 
 export async function patchDomain(k: Kernel, scope: Scope, id: string, input: PatchDomainInput, baseUrl: string) {
   const domain = await getDomain(k, scope, id)
-  if (domain.ownership_status === 'pending' && (input.sendAccountId !== undefined || input.receiveAccountId !== undefined || input.confirmWebhooks)) {
+  if (domain.ownership_status === 'pending' && (input.sendAccountId !== undefined || input.receiveAccountId !== undefined || input.confirmWebhooks || input.setupMode)) {
     throw new MailAdminError(409, 'Confirm you own this domain first')
   }
   const patch: Record<string, unknown> = {}
@@ -556,6 +578,11 @@ export async function patchDomain(k: Kernel, scope: Scope, id: string, input: Pa
     patch.send_error = null
   }
   if (input.confirmWebhooks) patch.webhook_events = jsonb(await postedEvents(k, domain))
+  if (input.setupMode === 'auto' && domain.setup_mode !== 'auto') {
+    if (domain.source === 'env') throw new MailAdminError(409, 'The environment domain is set up outside the app')
+    patch.setup_mode = 'auto'
+    resetup = true
+  }
   if (Object.keys(patch).length) await k.db.updateTable('mail_domains').set(patch).where('id', '=', id).execute()
 
   let fresh = await getDomain(k, scope, id)
@@ -657,6 +684,19 @@ export async function postedEvents(k: Kernel, domain: MailDomainRow): Promise<Ma
   return await webhookEventsFor(k, provider, account, domain)
 }
 
+// Credentials the provider handed over or the key could read, kept on the account.
+async function storeIssuedCredentials(k: Kernel, account: MailAccountRow, issued: Credentials) {
+  if (!Object.keys(issued).length) return
+  if (account.source !== 'ui') {
+    k.log(`[mail] ${account.provider} issued credentials (${Object.keys(issued).join(', ')}) for the environment account; set them in its environment variables`)
+    return
+  }
+  const merged = { ...accountCredentials(k, account), ...issued }
+  const encrypted = encryptJson(requireSecret(k, 'store provider credentials'), merged)
+  await k.db.updateTable('mail_accounts').set({ credentials: encrypted, updated_at: sql`now()` }).where('id', '=', account.id).execute()
+  account.credentials = encrypted
+}
+
 async function configureDomainWebhooks(k: Kernel, account: MailAccountRow, domain: MailDomainRow, baseUrl: string) {
   const provider = account.provider ? k.providers.get(account.provider) : undefined
   if (!provider?.configureWebhooks || !provider.supports.events) return { ok: false as const, refused: false, error: 'not supported' }
@@ -665,15 +705,7 @@ async function configureDomainWebhooks(k: Kernel, account: MailAccountRow, domai
     provider.configureWebhooks!(domainCredentials(k, account, domain), domain.domain, webhookUrls(k, account, baseUrl), { delivered: events.includes('delivered'), events }))
   if (!res.ok) return res
   const issued = res.value && typeof res.value === 'object' ? res.value.credentials : undefined
-  if (issued && account.source === 'ui') {
-    const merged = { ...accountCredentials(k, account), ...issued }
-    await k.db.updateTable('mail_accounts')
-      .set({ credentials: encryptJson(requireSecret(k, 'store provider credentials'), merged), updated_at: sql`now()` })
-      .where('id', '=', account.id)
-      .execute()
-  } else if (issued) {
-    k.log(`[mail] ${provider.label} issued credentials (${Object.keys(issued).join(', ')}) for the environment account; set them in its environment variables`)
-  }
+  if (issued) await storeIssuedCredentials(k, account, issued)
   if (provider.webhookScope === 'account') {
     await k.db.updateTable('mail_domains').set({ webhook_events: jsonb(events) })
       .where(eb => eb.or([eb('send_account_id', '=', account.id), eb('receive_account_id', '=', account.id)]))
@@ -820,6 +852,29 @@ export async function checkDomain(k: Kernel, scope: Scope, id: string, baseUrl: 
   const patch: Record<string, unknown> = { last_checked_at: sql`now()` }
   let records = [...(domain.dns_records as DnsRecord[])]
 
+  // What the provider shows for a domain set up by hand, read with its key; only on an admin's check.
+  const inspections = new Map<string, DomainInspection | null>()
+  const inspect = async (account: MailAccountRow): Promise<DomainInspection | null> => {
+    const provider = account.provider ? k.providers.get(account.provider) : undefined
+    if (!providerTest || !provider?.inspectDomain) return null
+    if (!inspections.has(account.id)) {
+      let seen: DomainInspection | null = null
+      try {
+        seen = await provider.inspectDomain(domainCredentials(k, account, domain), domain.domain, webhookUrls(k, account, baseUrl), {
+          events: await postedEvents(k, domain),
+          receive: accounts.receive?.id === account.id
+        })
+      } catch (err) {
+        k.log(`[mail] reading ${domain.domain} at ${provider.label} failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      inspections.set(account.id, seen)
+    }
+    return inspections.get(account.id) ?? null
+  }
+  const mxAt = async (provider: MailProvider) => provider.receivesAt
+    ? await k.dns.mx(domain.domain).then(list => list.map(r => r.exchange.toLowerCase().replace(/\.$/, '')), () => null)
+    : undefined
+
   for (const role of ['send', 'receive'] as const) {
     const account = accounts[role]
     if (!account) continue
@@ -893,13 +948,41 @@ export async function checkDomain(k: Kernel, scope: Scope, id: string, baseUrl: 
       const dns = await manualSendDnsChecks(k, domain)
       check.checks.push({ key: 'dns', label: 'DNS: SPF, DKIM and DMARC records found', ok: dns.every(d => d.ok !== false), detail: dns.filter(d => d.ok === false).map(d => d.label).join('; ') || undefined })
       check.checks.push(...dns)
+      if (provider) {
+        const creds = domainCredentials(k, account, domain)
+        for (const field of provider.credentialFields.filter(f => f.forWebhooks)) {
+          check.checks.push({ key: `credential:${field.key}`, label: `${field.label} saved`, ok: !!creds[field.key] })
+        }
+        const seen = await inspect(account)
+        if (seen?.domain) {
+          check.checks.push({ key: 'provider-domain', label: `${provider.label} has ${domain.domain}`, ok: seen.domain.exists })
+          const own = seen.domain.records.filter(r => r.role === 'send')
+          if (seen.domain.exists && own.length) {
+            const waiting = own.filter(r => r.status !== 'verified')
+            check.checks.push({
+              key: 'provider-dns',
+              label: `${provider.label} verified the DNS records`,
+              ok: !waiting.length ? true : waiting.some(r => r.status === 'failed') ? false : null,
+              detail: waiting.map(r => `${r.type} ${r.name}`).join('; ') || undefined
+            })
+            records = [...records.filter(r => r.role !== 'send'), ...own]
+          }
+        }
+        if (seen?.webhooks) {
+          const { missing, stale } = seen.webhooks
+          const detail = [missing.length ? `Not sent here yet: ${missing.join(', ')}` : '', stale.length ? `Remove: ${stale.join(', ')}` : ''].filter(Boolean).join('. ')
+          check.checks.push({ key: 'webhooks', label: 'Event webhooks point here', ok: !missing.length && !stale.length, detail: detail || undefined })
+          if (!missing.length) patch.webhook_events = jsonb(await postedEvents(k, domain))
+        }
+        for (const { role: _role, ...c } of seen?.checks?.filter(c => c.role === 'send') ?? []) check.checks.push(c)
+      }
     } else if (manual) {
       if (domain.receive_status === 'verified') {
         check.status = 'verified'
         check.checks.push({ key: 'probe', label: 'Probe received', ok: true })
         // Costs nothing: the MX records must still point at the provider.
         if (provider?.receivesAt) {
-          const mx = await k.dns.mx(domain.domain).then(list => list.map(r => r.exchange.toLowerCase().replace(/\.$/, '')), () => null)
+          const mx = await mxAt(provider)
           if (!mx) {
             check.checks.push({ key: 'mx', label: `MX records of ${domain.domain}`, ok: null, detail: 'DNS lookup failed' })
             keep('The MX lookup failed')
@@ -916,8 +999,29 @@ export async function checkDomain(k: Kernel, scope: Scope, id: string, baseUrl: 
         check.status = previous
         check.checks.push({ key: 'probe', label: 'No probe sent', ok: null, detail: 'Choose Check to send one' })
       } else {
-        const error = await sendProbe(k, domain, accounts.send)
-        check.checks.push({ key: 'probe', label: `Probe sent to ${probeAddress(domain)}`, ok: error ? false : null, detail: error ?? 'Waiting for it to arrive' })
+        let ready = true
+        const mx = provider ? await mxAt(provider) : undefined
+        if (provider && mx !== undefined) {
+          const pointed = !!mx?.some(host => provider.receivesAt!(host))
+          check.checks.push({ key: 'mx', label: `MX records of ${domain.domain} point at ${provider.label}`, ok: mx ? pointed : null, detail: mx ? (mx.join(', ') || 'No MX records') : 'DNS lookup failed' })
+          if (mx && !pointed) ready = false
+        }
+        const seen = await inspect(account)
+        if (seen?.domain?.exists) records = [...records.filter(r => r.role !== 'receive'), ...seen.domain.records.filter(r => r.role === 'receive')]
+        if (seen?.route) {
+          check.checks.push({ key: 'route', label: `A route forwards ${domain.domain}'s mail here`, ok: seen.route.ok, detail: seen.route.conflict ? `"${seen.route.conflict}" takes this domain's mail first` : undefined })
+          if (!seen.route.ok) ready = false
+        }
+        for (const { role: _role, ...c } of seen?.checks?.filter(c => c.role === 'receive') ?? []) {
+          check.checks.push(c)
+          if (c.ok === false) ready = false
+        }
+        if (ready) {
+          const error = await sendProbe(k, domain, accounts.send)
+          check.checks.push({ key: 'probe', label: `Probe sent to ${probeAddress(domain)}`, ok: error ? false : null, detail: error ?? 'Waiting for it to arrive' })
+        } else {
+          check.checks.push({ key: 'probe', label: 'Probe message', ok: null, detail: 'Sent once the steps above are done' })
+        }
         check.status = 'pending'
       }
     }

@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import type { MailDomainResponse, MailScope } from '#core/app/composables/useMailAdmin'
+// Adds a domain in one step: provider, domain, its key, and whether it
+// receives. A key that belongs to the domain (a Mailgun sending key) is saved
+// on the domain; what the provider account shares across domains (a signing
+// key, the region) is saved once as an account and reused by the next domain.
+// The domain is saved for setup by hand and checked at once; its panel then
+// shows what is still missing at the provider.
+import type { MailAccount, MailCredentialField, MailDomainCheck, MailDomainResponse, MailDomainSetup, MailProviderInfo, MailScope } from '#core/app/composables/useMailAdmin'
 
 const props = withDefaults(defineProps<{
   scope: MailScope
@@ -12,78 +18,121 @@ const toast = useToast()
 const { data: accountsData } = useMailAccounts(props.scope, () => props.orgSlug)
 const { data: streamsData } = useMailStreams(props.scope, () => props.orgSlug)
 const accounts = computed(() => accountsData.value?.accounts ?? [])
-const providers = computed(() => accountsData.value?.providers ?? [])
-const providerOf = (accountId?: string) => {
-  const a = accounts.value.find(x => x.id === accountId)
-  return a?.provider ? providers.value.find(p => p.id === a.provider) ?? null : null
-}
+const providers = computed(() => (accountsData.value?.providers ?? []).filter(p => p.supports.send))
+// The check results the domain's panel shows, keyed by domain id.
+const results = useState<Record<string, { setup?: MailDomainSetup | null, check?: MailDomainCheck | null }>>('mail-domain-results', () => ({}))
 
-const envAccount = computed(() => accounts.value.find(a => a.source === 'env') ?? null)
-const sendItems = computed(() => accounts.value
-  .filter(a => !a.provider || providerOf(a.id)?.supports.send)
-  .map(a => ({ label: a.provider ? a.label : `${a.label} (local and log only)`, value: a.id })))
-const receiveItems = computed(() => accounts.value
-  .filter(a => providerOf(a.id)?.supports.receive)
-  .map(a => ({ label: a.label, value: a.id })))
+const HOST = 'host'
+const LOCAL = 'local'
+const NEW_ACCOUNT = 'new'
+const localAccount = computed(() => props.scope === 'host' ? accounts.value.find(a => !a.provider) ?? null : null)
+const providerItems = computed(() => [
+  ...(props.scope === 'org' ? [{ value: HOST, label: 'Through the host', icon: 'i-lucide-server' }] : []),
+  ...providers.value.map(p => ({ value: p.id, label: p.label, icon: 'i-lucide-mail' })),
+  ...(localAccount.value ? [{ value: LOCAL, label: 'No provider', icon: 'i-lucide-terminal' }] : [])
+])
 
+const providerId = ref<string>('')
 const domain = ref('')
-const sendAccountId = ref<string | undefined>(undefined)
-const receiveAccountId = ref<string | undefined>(undefined)
-const setupMode = ref<'auto' | 'manual'>('auto')
+const accountChoice = ref<string>(NEW_ACCOUNT)
+const accountValues = ref<Record<string, string>>({})
+const domainKeyValues = ref<Record<string, string>>({})
 const dkimSelector = ref('')
-const keyValues = ref<Record<string, string>>({})
+const receive = ref(false)
 const makeDefault = ref(false)
+const moreOpen = ref(false)
 const saving = ref(false)
+const keyError = ref<string | null>(null)
+
+const provider = computed<MailProviderInfo | null>(() => providers.value.find(p => p.id === providerId.value) ?? null)
+const savedAccounts = computed<MailAccount[]>(() => provider.value ? accounts.value.filter(a => a.provider === provider.value!.id) : [])
+const accountItems = computed(() => [
+  ...savedAccounts.value.map(a => ({ value: a.id, label: a.source === 'env' ? `${a.label} (environment)` : a.label })),
+  { value: NEW_ACCOUNT, label: `Another ${provider.value?.label ?? ''} account` }
+])
+const newAccount = computed(() => !!provider.value && accountChoice.value === NEW_ACCOUNT)
+const domainFields = computed<MailCredentialField[]>(() => provider.value?.domainCredentialFields ?? [])
+const accountFields = computed(() => (provider.value?.credentialFields ?? []).filter(f => !f.advanced))
+const advancedFields = computed(() => (provider.value?.credentialFields ?? []).filter(f => f.advanced))
+const canReceive = computed(() => providerId.value === HOST || !!provider.value?.supports.receive)
 
 watch(open, (v) => {
   if (!v) return
+  providerId.value = String(providerItems.value[0]?.value ?? '')
   domain.value = ''
-  sendAccountId.value = props.scope === 'host' ? (envAccount.value?.id ?? sendItems.value[0]?.value) : undefined
-  receiveAccountId.value = undefined
-  setupMode.value = 'auto'
+  accountValues.value = {}
+  domainKeyValues.value = {}
   dkimSelector.value = ''
-  keyValues.value = {}
-  makeDefault.value = props.scope === 'host' && !envAccount.value && !streamsData.value?.defaultDomainId
+  receive.value = false
+  moreOpen.value = false
+  keyError.value = null
+  makeDefault.value = props.scope === 'host' && !accounts.value.some(a => a.source === 'env') && !streamsData.value?.defaultDomainId
 }, { immediate: true })
-
-const chosenSend = computed(() => accounts.value.find(a => a.id === sendAccountId.value) ?? null)
-const sendProvider = computed(() => providerOf(sendAccountId.value))
-// Automatic setup needs a provider whose key hasn't been refused domain management.
-const autoAvailable = computed(() => {
-  if (props.scope === 'org' && !sendAccountId.value) return true
-  return !!chosenSend.value?.provider && chosenSend.value.capabilities.domains !== false
-})
-watch(autoAvailable, (v) => {
-  if (!v) setupMode.value = 'manual'
+watch(providerId, () => {
+  accountChoice.value = String(accountItems.value[0]?.value ?? NEW_ACCOUNT)
+  accountValues.value = {}
+  domainKeyValues.value = {}
+  keyError.value = null
+  if (!canReceive.value) receive.value = false
 })
 
-const modeItems = computed(() => [
-  { value: 'auto', label: 'Set it up for me', icon: 'i-lucide-wand-sparkles', disabled: !autoAvailable.value },
-  { value: 'manual', label: 'I\'ll set it up myself at the provider', icon: 'i-lucide-list-checks' }
-])
-const receiveProvider = computed(() => providerOf(receiveAccountId.value))
-// In org scope receiving goes through the same account as sending when its provider can receive.
-const orgNotes = computed(() => [sendProvider.value?.notes.send, sendProvider.value?.supports.receive ? sendProvider.value.notes.receive : undefined].filter(Boolean) as string[])
+const base = computed(() => mailApiBase(props.scope, props.orgSlug))
+const trimmed = (values: Record<string, string>) =>
+  Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v))
+
+// A new account is named after the provider; one the provider refuses is removed again.
+async function accountId(): Promise<{ id: string | null, created: boolean } | null> {
+  if (providerId.value === HOST) return { id: null, created: false }
+  if (providerId.value === LOCAL) return { id: localAccount.value?.id ?? null, created: false }
+  if (!newAccount.value) return { id: accountChoice.value, created: false }
+  const label = savedAccounts.value.length ? `${provider.value!.label} ${savedAccounts.value.length + 1}` : provider.value!.label
+  const res = await $fetch<{ account: MailAccount, verify: { ok: boolean, error?: string } | null }>(`${base.value}/accounts`, {
+    method: 'POST',
+    body: { provider: providerId.value, label, credentials: trimmed(accountValues.value) }
+  })
+  if (res.verify && !res.verify.ok) {
+    keyError.value = res.verify.error ?? `${provider.value!.label} didn't accept the key`
+    await $fetch(`${base.value}/accounts/${res.account.id}`, { method: 'DELETE' }).catch(() => {})
+    return null
+  }
+  return { id: res.account.id, created: true }
+}
 
 async function submit() {
   if (!domain.value.trim()) return
   saving.value = true
+  keyError.value = null
+  let createdAccount: string | null = null
+  let createdDomain: string | null = null
   try {
-    const body: Record<string, unknown> = { domain: domain.value.trim(), setupMode: setupMode.value }
-    if (props.scope === 'host') {
-      body.sendAccountId = sendAccountId.value ?? null
-      body.receiveAccountId = receiveAccountId.value ?? null
-      body.makeDefault = makeDefault.value
-    } else if (sendAccountId.value) {
-      body.sendAccountId = sendAccountId.value
-      body.receiveAccountId = sendProvider.value?.supports.receive ? sendAccountId.value : null
-    }
-    if (setupMode.value === 'manual') {
-      const creds = Object.fromEntries(Object.entries(keyValues.value).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v))
+    const account = await accountId()
+    if (!account) return
+    if (account.created) createdAccount = account.id
+    const body: Record<string, unknown> = { domain: domain.value.trim() }
+    if (providerId.value === HOST) {
+      body.receive = receive.value
+    } else {
+      body.sendAccountId = account.id
+      body.receiveAccountId = receive.value ? account.id : null
+      body.setupMode = 'manual'
+      const creds = trimmed(domainKeyValues.value)
       if (Object.keys(creds).length) body.credentials = creds
       if (dkimSelector.value.trim()) body.dkimSelector = dkimSelector.value.trim()
     }
-    const res = await $fetch<MailDomainResponse>(`${mailApiBase(props.scope, props.orgSlug)}/domains`, { method: 'POST', body })
+    if (props.scope === 'host') body.makeDefault = makeDefault.value
+    const res = await $fetch<MailDomainResponse>(`${base.value}/domains`, { method: 'POST', body })
+    createdDomain = res.domain.id
+    // The domain's own key is tried against the provider when the domain is added.
+    if (res.domain.ownershipStatus === 'verified' && res.domain.hasOwnCredentials && res.domain.capabilities.send === false) {
+      keyError.value = `${provider.value?.label ?? 'The provider'} didn't accept the ${domainFields.value[0]?.label.toLowerCase() ?? 'key'} for ${res.domain.domain}`
+      return
+    }
+    createdAccount = null
+    createdDomain = null
+    if (res.domain.ownershipStatus === 'verified') {
+      const checked = await $fetch<MailDomainResponse>(`${base.value}/domains/${res.domain.id}/check`, { method: 'POST' }).catch(() => null)
+      results.value = { ...results.value, [res.domain.id]: { setup: res.setup ?? null, check: checked?.check ?? null } }
+    }
     await refreshMail(props.scope, 'domains', 'streams', 'accounts')
     toast.add({ title: `${res.domain.domain} added`, color: 'success' })
     open.value = false
@@ -91,6 +140,8 @@ async function submit() {
   } catch (err) {
     toast.add({ title: 'Domain not added', description: mailErrorMessage(err), color: 'error' })
   } finally {
+    if (createdDomain) await $fetch(`${base.value}/domains/${createdDomain}`, { method: 'DELETE' }).catch(() => {})
+    if (createdAccount) await $fetch(`${base.value}/accounts/${createdAccount}`, { method: 'DELETE' }).catch(() => {})
     saving.value = false
   }
 }
@@ -108,6 +159,15 @@ async function submit() {
         class="space-y-5"
         @submit.prevent="submit"
       >
+        <URadioGroup
+          v-model="providerId"
+          :items="providerItems"
+          variant="card"
+          indicator="hidden"
+          orientation="horizontal"
+          legend="Provider"
+        />
+
         <UFormField
           label="Domain"
           required
@@ -120,123 +180,125 @@ async function submit() {
           />
         </UFormField>
 
-        <template v-if="scope === 'host'">
-          <UFormField>
-            <template #label>
-              Send through <InfoTip
-                v-if="sendProvider?.notes.send"
-                :text="sendProvider.notes.send"
-              />
-            </template>
-            <USelect
-              v-model="sendAccountId"
-              :items="sendItems"
-              placeholder="Choose an account"
-              class="w-full"
-            />
-          </UFormField>
-          <UFormField>
-            <template #label>
-              Receive through <InfoTip
-                v-if="receiveProvider?.notes.receive"
-                :text="receiveProvider.notes.receive"
-              />
-            </template>
-            <div class="flex items-center gap-1">
-              <USelect
-                v-model="receiveAccountId"
-                :items="receiveItems"
-                placeholder="Don't receive mail"
-                :disabled="!receiveItems.length"
-                class="flex-1"
-              />
-              <UButton
-                v-if="receiveAccountId"
-                icon="i-lucide-x"
-                color="neutral"
-                variant="ghost"
-                aria-label="Don't receive mail"
-                @click="receiveAccountId = undefined"
-              />
-            </div>
-          </UFormField>
-        </template>
-        <UFormField
-          v-else-if="sendItems.length"
-        >
-          <template #label>
-            Provider account <InfoTip v-if="orgNotes.length">
-              <p
-                v-for="note in orgNotes"
-                :key="note"
-              >
-                {{ note }}
-              </p>
-            </InfoTip>
-          </template>
-          <div class="flex items-center gap-1">
-            <USelect
-              v-model="sendAccountId"
-              :items="sendItems"
-              placeholder="The host's account"
-              class="flex-1"
-            />
-            <UButton
-              v-if="sendAccountId"
-              icon="i-lucide-x"
-              color="neutral"
-              variant="ghost"
-              aria-label="Use the host's account"
-              @click="sendAccountId = undefined"
-            />
-          </div>
-        </UFormField>
-
-        <URadioGroup
-          v-model="setupMode"
-          :items="modeItems"
-          variant="card"
-          indicator="hidden"
-        >
-          <template #legend>
-            Setup <InfoTip>
-              <p>Set it up for me: the domain is registered at the provider, and you get the DNS records to add.</p>
-              <p>Set it up yourself: nothing is changed at the provider, and you get the steps to follow there.</p>
-            </InfoTip>
-          </template>
-        </URadioGroup>
-
-        <template v-if="setupMode === 'manual'">
+        <template v-if="provider">
           <UFormField
-            v-for="field in sendProvider?.domainCredentialFields ?? []"
+            v-for="field in domainFields"
             :key="field.key"
-            :label="field.label"
           >
+            <template #label>
+              {{ field.label }} <InfoTip
+                v-if="field.help"
+                :text="field.help"
+              />
+            </template>
             <UInput
-              v-model="keyValues[field.key]"
+              v-model="domainKeyValues[field.key]"
               :type="field.secret ? 'password' : 'text'"
               autocomplete="off"
-              placeholder="Optional"
               class="w-full"
             />
           </UFormField>
-          <UFormField>
-            <template #label>
-              DKIM selector <InfoTip text="The name before ._domainkey in the provider's DKIM record, so the check can find it." />
-            </template>
-            <UInput
-              v-model="dkimSelector"
-              placeholder="Optional"
+
+          <UFormField
+            v-if="savedAccounts.length"
+            :label="`${provider.label} account`"
+          >
+            <USelect
+              v-model="accountChoice"
+              :items="accountItems"
               class="w-full"
             />
           </UFormField>
+          <template v-if="newAccount">
+            <UFormField
+              v-for="field in accountFields"
+              :key="field.key"
+              :required="!field.optional"
+            >
+              <template #label>
+                {{ field.label }} <InfoTip
+                  v-if="field.help"
+                  :text="field.help"
+                />
+              </template>
+              <UInput
+                v-model="accountValues[field.key]"
+                :type="field.secret ? 'password' : 'text'"
+                autocomplete="off"
+                :placeholder="field.optional ? 'Optional' : undefined"
+                class="w-full"
+              />
+            </UFormField>
+          </template>
+          <p
+            v-if="keyError"
+            class="text-sm text-(--ui-error)"
+          >
+            {{ keyError }}
+          </p>
         </template>
+
+        <USwitch
+          v-if="canReceive"
+          v-model="receive"
+        >
+          <template #label>
+            Receive email on this domain <InfoTip
+              v-if="provider?.notes.receive"
+              :text="provider.notes.receive"
+            />
+          </template>
+        </USwitch>
 
         <UCheckbox
           v-if="scope === 'host'"
           v-model="makeDefault"
           label="Make this the default domain"
         />
+
+        <template v-if="provider">
+          <UButton
+            variant="link"
+            color="neutral"
+            class="p-0"
+            :trailing-icon="moreOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+            @click="moreOpen = !moreOpen"
+          >
+            More options
+          </UButton>
+          <template v-if="moreOpen">
+            <template v-if="newAccount">
+              <UFormField
+                v-for="field in advancedFields"
+                :key="field.key"
+              >
+                <template #label>
+                  {{ field.label }} <InfoTip
+                    v-if="field.help"
+                    :text="field.help"
+                  />
+                </template>
+                <UInput
+                  v-model="accountValues[field.key]"
+                  :type="field.secret ? 'password' : 'text'"
+                  autocomplete="off"
+                  placeholder="Optional"
+                  class="w-full"
+                />
+              </UFormField>
+            </template>
+            <UFormField>
+              <template #label>
+                DKIM selector <InfoTip text="The name before ._domainkey in the provider's DKIM record, so the check can find it." />
+              </template>
+              <UInput
+                v-model="dkimSelector"
+                placeholder="Optional"
+                class="w-full"
+              />
+            </UFormField>
+          </template>
+        </template>
       </form>
     </template>
     <template #footer>
@@ -252,9 +314,9 @@ async function submit() {
           type="submit"
           form="mail-add-domain-form"
           :loading="saving"
-          :disabled="!domain.trim()"
+          :disabled="!domain.trim() || !providerId"
         >
-          Add
+          Next
         </UButton>
       </div>
     </template>

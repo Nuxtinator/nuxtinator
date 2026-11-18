@@ -80,6 +80,7 @@ Either way, destructive actions open behind an outlined error button and confirm
 - A details panel with several parts is one scrolling panel split into ruled sections (heading, then its content), not tabs.
 - A small edit inside a details panel is a link button ("Change", "Replace") that opens its form under the row. A secret is never shown again: its masked value with "Replace".
 - A column that would say the same thing on every row is left out; mark the one row that differs with a badge instead.
+- Setting something up at an outside service (a mail provider) is a checklist of steps a person can do there: where to click, values to copy, and each step's state from the last check (green tick when done, amber with what's missing). Doing it automatically is an extra button, shown only when the key is known to allow it, and it confirms first.
 
 ## Colors and surfaces
 

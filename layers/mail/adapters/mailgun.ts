@@ -7,7 +7,7 @@ import { constantTimeEqual } from '../kernel/crypto'
 import { parseInbound } from '../kernel/inbound-parse'
 import { PROBE_STREAM } from '../kernel/events'
 import {
-  ProviderPermissionError, type Capabilities, type CheckResult, type Credentials, type DnsRecord, type MailEvent,
+  ProviderPermissionError, type Capabilities, type CheckResult, type Credentials, type DnsRecord, type DomainInspection, type MailEvent,
   type MailEventType, type MailProvider, type ManualStep, type ProviderList, type ProviderSendResult
 } from '../kernel/types'
 import { basicAuth, baseUrl, EndpointError, formString, lowerHeaders, parseForm, request, type HttpResult } from './http'
@@ -120,6 +120,20 @@ function webhookKinds(events: MailEventType[]): string[] {
   return [...kinds]
 }
 
+// The event names Mailgun's Webhooks page shows for each kind.
+const KIND_LABELS: Record<string, string> = {
+  delivered: 'Delivered messages',
+  permanent_fail: 'Permanent failure',
+  temporary_fail: 'Temporary failure',
+  complained: 'Spam complaints',
+  unsubscribed: 'Unsubscribes',
+  opened: 'Opens',
+  clicked: 'Clicks'
+}
+
+// Addresses of this app's own webhooks: the kernel's, and the inbox's before it.
+const OWN_WEBHOOK = /\/api\/mail\/webhooks\/|\/api\/inbox\/webhooks\/mailgun\//
+
 const ALL_KINDS = ['delivered', 'permanent_fail', 'temporary_fail', 'complained', 'unsubscribed', 'opened', 'clicked']
 
 function sendKey(creds: Credentials): string | undefined {
@@ -155,12 +169,12 @@ export const mailgunProvider: MailProvider = {
   id: 'mailgun',
   label: 'Mailgun',
   credentialFields: [
-    { key: 'apiKey', label: 'API key', secret: true, optional: true, env: 'MAILGUN_API_KEY', help: 'An account API key. Leave empty if each domain has its own sending key.' },
+    { key: 'apiKey', label: 'Account API key', secret: true, optional: true, env: 'MAILGUN_API_KEY', help: 'Only if you use one key for every domain instead of a sending key per domain. Settings → API Keys. An Admin key also lets the app set domains up for you.', advanced: true },
     { key: 'host', label: 'API host', secret: false, optional: true, env: 'MAILGUN_HOST', help: 'api.eu.mailgun.net for the EU region' },
-    { key: 'webhookSigningKey', label: 'Webhook signing key', secret: true, optional: true, env: 'MAILGUN_WEBHOOK_SIGNING_KEY', help: 'Settings → API Keys → HTTP webhook signing key' }
+    { key: 'webhookSigningKey', label: 'Webhook signing key', secret: true, optional: true, env: 'MAILGUN_WEBHOOK_SIGNING_KEY', help: 'Sending → Webhooks → HTTP webhook signing key. Read automatically from an Admin key.', forWebhooks: true }
   ],
   domainCredentialFields: [
-    { key: 'sendingKey', label: 'Domain sending key', secret: true, optional: true, help: 'A key that can only send for this domain' }
+    { key: 'sendingKey', label: 'Sending key', secret: true, optional: true, help: 'In Mailgun, open the domain → Domain settings → Sending API keys → Add sending key. It sends only for this domain.' }
   ],
   supports: { send: true, receive: true, events: true },
   webhookScope: 'domain',
@@ -179,10 +193,22 @@ export const mailgunProvider: MailProvider = {
     // The account key is probed even beside a domain sending key: the domain
     // still uses it for everything but sending.
     let accountKeyWorks = false
+    let issued: Credentials | undefined
     if (creds.apiKey) {
       const res = await call(creds, creds.apiKey, 'GET', '/v4/domains?limit=1')
       if (res.ok) accountKeyWorks = true
       else if (!refused(res)) return { ok: false, error: `Mailgun responded ${res.status}`, retryable: res.status === 429 || res.status >= 500 }
+    }
+    if (accountKeyWorks) {
+      // Only an Admin key may read the signing key, and only an Admin key may change domains, routes and webhooks.
+      const signing = await call(creds, creds.apiKey, 'GET', '/v5/accounts/http_signing_key')
+      if (signing.ok) {
+        Object.assign(caps, { domains: true, routes: true, webhooks: true })
+        const value = (signing.json() as { http_signing_key?: string }).http_signing_key
+        if (value) issued = { webhookSigningKey: value }
+      } else if (refused(signing)) {
+        Object.assign(caps, { domains: false, routes: false, webhooks: false })
+      }
     }
 
     if (domain) {
@@ -212,31 +238,74 @@ export const mailgunProvider: MailProvider = {
       // Only a domain sending key works: it can send and nothing else.
       Object.assign(caps, { domains: false, routes: false, webhooks: false, suppressionLists: false })
     }
-    return { ok: true, capabilities: caps }
+    return { ok: true, capabilities: caps, ...(issued ? { credentials: issued } : {}) }
   },
 
   manualSetup(domain, role, urls, { events }): ManualStep[] {
     if (role === 'send') {
       const kinds = webhookKinds(events)
       return [
-        { title: `In Mailgun, add the sending domain ${domain}`, detail: 'Sending → Domains → Add new domain. Add the DNS records Mailgun shows and wait until it says the domain is verified.' },
-        { title: 'Create a sending key for the domain (optional)', detail: 'Domain settings → Sending API keys. Paste it into this domain\'s "Domain sending key" field here if the account key is limited.' },
+        { title: `Add ${domain} in Mailgun`, detail: 'Send → Sending → Domains → Add new domain, in the region that matches the API host here. Skip this if it is already there.', check: 'provider-domain' },
+        { title: 'Add the DNS records Mailgun shows', detail: 'Add each record at your DNS host, then press Verify in Mailgun. They are listed here too once Mailgun has the domain.', check: 'provider-dns' },
         {
-          title: 'Add the event webhooks',
-          detail: `Sending → Webhooks for ${domain}: add the URL below for each of these events: ${kinds.join(', ')}.${kinds.includes('delivered') ? '' : ' Leave "Delivered" unticked.'}`,
-          values: [{ label: 'Events URL', value: urls.events }]
+          title: 'Send its events here',
+          detail: `Send → Sending → Webhooks, with ${domain} picked at the top. For each event, Add webhook, choose the event and paste the URL: ${kinds.map(k => KIND_LABELS[k] ?? k).join(', ')}.${kinds.includes('delivered') ? '' : ' Delivered messages isn\'t needed.'} Delete webhooks that still point at an old address of this app.`,
+          values: [{ label: 'Events URL', value: urls.events }],
+          check: 'webhooks'
         },
-        { title: 'Copy the webhook signing key into the account here', detail: 'Settings → API Keys → HTTP webhook signing key.' }
+        { title: 'Save the webhook signing key here', detail: 'It is on the same Webhooks page, under HTTP webhook signing key. Paste it into this domain\'s account under Email → Accounts.', check: 'credential:webhookSigningKey' }
       ]
     }
     return [
-      { title: `Point the MX records of ${domain} at Mailgun`, detail: 'Two MX records, priority 10: mxa.mailgun.org and mxb.mailgun.org (mxa.eu.mailgun.org / mxb.eu.mailgun.org in the EU region).' },
+      { title: `Point the MX records of ${domain} at Mailgun`, detail: 'At your DNS host, two MX records with priority 10: mxa.mailgun.org and mxb.mailgun.org (mxa.eu.mailgun.org and mxb.eu.mailgun.org in the EU region).', check: 'mx' },
       {
-        title: 'Create a receiving route',
-        detail: `Receiving → Create route. Expression type "Match recipient", recipient .*@${domain}, forward to the URL below, and tick "Stop".`,
-        values: [{ label: 'Forward URL', value: urls.inboundMime }]
-      }
+        title: 'Forward its mail here with a route',
+        detail: 'Receive → Routes → Create route. Expression type: Match recipient, with the recipient below. Tick Forward and paste the URL below, and tick Stop. Leave the priority at 0 and save.',
+        values: [{ label: 'Recipient', value: `*@${domain}` }, { label: 'Forward URL', value: urls.inboundMime }],
+        check: 'route'
+      },
+      { title: 'Verify receiving', detail: 'Press Verify receiving once the steps above are done: a probe message goes to the domain, and receiving is verified when it arrives here.', check: 'probe' }
     ]
+  },
+
+  async inspectDomain(creds, domain, urls, { events, receive }): Promise<DomainInspection> {
+    const seen: DomainInspection = { domain: null, webhooks: null, route: null }
+    // A domain's sending key can read its setup too.
+    const key = creds.apiKey || creds.sendingKey
+    if (!key || endpointProblem(creds)) return seen
+    const d = await call(creds, key, 'GET', `/v4/domains/${domain}`)
+    if (d.status === 404) seen.domain = { exists: false, records: [] }
+    else if (d.ok) {
+      const body = d.json() as { sending_dns_records?: unknown }
+      seen.domain = { exists: true, records: [...mapDnsRecords('send', body.sending_dns_records), ...(receive ? receivingMx(creds, domain) : [])] }
+    }
+    if (seen.domain?.exists) {
+      const w = await call(creds, key, 'GET', `/v3/domains/${domain}/webhooks`)
+      if (w.ok) {
+        const current = (w.json() as { webhooks?: Record<string, { urls?: string[] }> }).webhooks ?? {}
+        const has = (kind: string) => (current[kind]?.urls ?? []).includes(urls.events)
+        const missing = webhookKinds(events).filter(kind => !has(kind)).map(kind => KIND_LABELS[kind] ?? kind)
+        const stale = [...new Set(Object.values(current).flatMap(v => v.urls ?? []).filter(u => u !== urls.events && OWN_WEBHOOK.test(u)))]
+        seen.webhooks = { missing, stale }
+      }
+    }
+    if (receive) {
+      const r = await call(creds, key, 'GET', '/v3/routes?limit=1000')
+      if (r.ok) {
+        const routes = ((r.json() as { items?: { description?: string, expression?: string, actions?: string[], priority?: number }[] }).items) ?? []
+        // Typed by hand the domain's dots may or may not be escaped.
+        const mentions = (x: { expression?: string }) => [domain, domain.replace(/\./g, '\\.')].some(name => (x.expression ?? '').includes(name))
+        const ours = routes.filter(x => (x.actions ?? []).some(a => a.includes(urls.inboundMime)) && mentions(x))
+        const best = Math.min(...ours.map(x => x.priority ?? 0))
+        // A route for the same recipients that stops first keeps the mail from reaching ours.
+        const conflict = routes.find(x => !ours.includes(x)
+          && mentions(x)
+          && (x.actions ?? []).some(a => a.startsWith('stop'))
+          && (!ours.length || (x.priority ?? 0) <= best))
+        seen.route = { ok: ours.length > 0 && !conflict, ...(conflict ? { conflict: conflict.description || conflict.expression } : {}) }
+      }
+    }
+    return seen
   },
 
   async send(creds, msg): Promise<ProviderSendResult> {

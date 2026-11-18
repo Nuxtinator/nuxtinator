@@ -31,7 +31,7 @@ test.afterAll(async () => {
 })
 
 async function addFakeAccount(page: Page, label: string) {
-  await page.goto('/admin/email')
+  await page.goto('/admin/email?tab=accounts')
   await page.getByRole('button', { name: 'Add account' }).click()
   const panel = page.getByRole('dialog')
   await pickOption(page, /provider/i, 'Fake provider')
@@ -43,18 +43,24 @@ async function addFakeAccount(page: Page, label: string) {
   return page.getByRole('row').filter({ hasText: label })
 }
 
-async function addDomain(page: Page, opts: { domain: string, account: string, receive?: boolean, manual?: boolean }) {
+async function addDomain(page: Page, opts: { domain: string, account: string, receive?: boolean, auto?: boolean }) {
   await page.goto('/admin/email?tab=domains')
   await page.getByRole('button', { name: 'Add domain' }).click()
   const modal = page.getByRole('dialog')
+  await modal.getByText('Fake provider', { exact: true }).click()
   await modal.getByRole('textbox', { name: /^Domain/ }).fill(opts.domain)
-  await pickOption(page, 'Send through', opts.account)
-  if (opts.receive) await pickOption(page, 'Receive through', opts.account)
-  if (opts.manual) await modal.getByText('I\'ll set it up myself at the provider').click()
+  await pickOption(page, 'Fake provider account', opts.account)
+  if (opts.receive) await modal.getByRole('switch', { name: /Receive email on this domain/ }).click()
   await modal.getByRole('checkbox', { name: 'Make this the default domain' }).setChecked(false)
-  await modal.getByRole('button', { name: 'Add', exact: true }).click()
+  await modal.getByRole('button', { name: 'Next', exact: true }).click()
   await expect(page.getByText(`${opts.domain} added`, { exact: true })).toBeVisible()
-  return page.getByRole('dialog', { name: opts.domain })
+  const panel = page.getByRole('dialog', { name: opts.domain })
+  if (opts.auto) {
+    await panel.getByRole('button', { name: 'Set it up for me' }).click()
+    await page.getByRole('button', { name: 'Set it up', exact: true }).click()
+    await expect(page.getByText('Set up at the provider', { exact: true })).toBeVisible()
+  }
+  return panel
 }
 
 test('add an account: the key is checked and its capabilities are listed', async ({ page }) => {
@@ -75,8 +81,8 @@ test('add an account: the key is checked and its capabilities are listed', async
   await expect(panel.getByRole('button', { name: 'Replace' }).first()).toBeVisible()
 
   // Its first domain probes the rest, and the list shows what the key can do.
-  await addDomain(page, { domain: e2eDomain('caps'), account: label, manual: true })
-  await page.goto('/admin/email')
+  await addDomain(page, { domain: e2eDomain('caps'), account: label })
+  await page.goto('/admin/email?tab=accounts')
   const probed = page.getByRole('row').filter({ hasText: label })
   await expect(probed.getByTitle('Allowed', { exact: true }).filter({ hasText: 'Send' })).toBeVisible()
   await expect(probed.getByTitle('Allowed', { exact: true }).filter({ hasText: 'Suppression lists' })).toBeVisible()
@@ -86,7 +92,7 @@ test('a manual domain shows steps, then verifies sending and receiving', async (
   const label = `${E2E_MAIL_LABEL}-manual`
   await addFakeAccount(page, label)
   const domain = e2eDomain('m')
-  const panel = await addDomain(page, { domain, account: label, receive: true, manual: true })
+  const panel = await addDomain(page, { domain, account: label, receive: true })
 
   await expect(panel.getByText(`Add ${domain} at the fake provider`)).toBeVisible()
   await expect(panel.getByText('Priority')).toHaveCount(0)
@@ -112,10 +118,11 @@ test('a manual domain shows steps, then verifies sending and receiving', async (
 
 test('an automatic domain shows its DNS records and goes green on Check now', async ({ page }) => {
   const label = `${E2E_MAIL_LABEL}-auto`
+  await fakeControl(page.request, { adminKey: true })
   await addFakeAccount(page, label)
   const domain = e2eDomain('a')
   await fakeControl(page.request, { domainStatus: 'verified', dns: [{ name: domain, mx: [{ exchange: 'mx.elsewhere.example', priority: 10 }] }] })
-  const panel = await addDomain(page, { domain, account: label, receive: true })
+  const panel = await addDomain(page, { domain, account: label, receive: true, auto: true })
 
   await expect(panel.getByText(`${domain} already receives mail`)).toBeVisible()
   await expect(panel.getByText('v=spf1 include:fake.example ~all')).toBeVisible()
@@ -130,14 +137,14 @@ test('the inbox stream offers only domains that receive, and a pick persists', a
   const streams = await (await page.request.get('/api/admin/mail/streams')).json() as { streams: { id: string }[] }
   test.skip(!streams.streams.some(s => s.id === 'inbox'), 'no inbox stream registered')
   const label = `${E2E_MAIL_LABEL}-streams`
+  await fakeControl(request, { adminKey: true, domainStatus: 'verified' })
   await addFakeAccount(page, label)
-  await fakeControl(request, { domainStatus: 'verified' })
   const sendOnly = e2eDomain('s')
   const both = e2eDomain('b')
-  await addDomain(page, { domain: sendOnly, account: label })
+  await addDomain(page, { domain: sendOnly, account: label, auto: true })
   await page.getByRole('dialog', { name: sendOnly }).getByRole('button', { name: 'Check now' }).click()
   await expect(page.getByRole('dialog', { name: sendOnly }).getByText('Verified').first()).toBeVisible()
-  await addDomain(page, { domain: both, account: label, receive: true })
+  await addDomain(page, { domain: both, account: label, receive: true, auto: true })
   await page.getByRole('dialog', { name: both }).getByRole('button', { name: 'Check now' }).click()
   await expect(page.getByRole('dialog', { name: both }).getByText('Verified').first()).toBeVisible()
 
@@ -173,9 +180,9 @@ test('a domain whose provider list is unmanaged shows the warning', async ({ pag
   await addFakeAccount(page, label)
   await fakeControl(request, { mode: 'unmanaged' })
   const domain = e2eDomain('u')
-  await addDomain(page, { domain, account: label, manual: true })
+  await addDomain(page, { domain, account: label })
   await page.goto('/admin/email?tab=suppressions')
-  await expect(page.getByText('Provider suppression list active')).toBeVisible()
+  await expect(page.getByText(`The provider also blocks addresses on`)).toBeVisible()
   await expect(page.getByText(domain)).toBeVisible()
 })
 
@@ -187,10 +194,10 @@ test('empty states', async ({ page }) => {
   await page.route('**/api/admin/mail/suppressions**', route => route.fulfill({ json: { suppressions: [] } }))
 
   await page.goto('/admin/email')
-  await expect(page.getByText('Mail isn\'t configured. Add an account to send password resets and invites.')).toBeVisible()
+  await expect(page.getByText('Mail isn\'t configured. Add a domain to send password resets and invites.')).toBeVisible()
 
-  await page.goto('/admin/email?tab=domains')
-  await expect(page.getByText('Add a domain to send or receive mail on it.')).toBeVisible()
+  await page.goto('/admin/email?tab=accounts')
+  await expect(page.getByText('No provider keys yet. Adding a domain saves its key here.')).toBeVisible()
 
   await page.goto('/admin/email?tab=suppressions')
   await expect(page.getByText('No suppressed addresses.')).toBeVisible()

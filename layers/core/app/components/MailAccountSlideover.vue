@@ -225,7 +225,7 @@ async function remove() {
         </UFormField>
 
         <div
-          v-if="account?.provider || lastVerify"
+          v-if="(account?.provider && account.hasKey) || lastVerify"
           class="space-y-2"
         >
           <h3 class="text-sm font-medium">

@@ -99,7 +99,7 @@
     },
     "layers/apps/crm": {
       "name": "@nuxtinator/crm",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "optionalDependencies": {
         "@nuxtinator/core": "*",
         "@nuxtinator/records": "*",
@@ -180,7 +180,7 @@
     },
     "layers/apps/inbox": {
       "name": "@nuxtinator/inbox",
-      "version": "0.11.1",
+      "version": "1.0.0",
       "dependencies": {
         "croner": "^10.0.1",
         "dompurify": "^3.4.13",
@@ -282,7 +282,7 @@
     },
     "layers/core": {
       "name": "@nuxtinator/core",
-      "version": "3.5.0",
+      "version": "4.0.0",
       "dependencies": {
         "@bradenmacdonald/s3-lite-client": "^1.0.0",
         "@nuxtjs/i18n": "^10.6.0",
@@ -323,14 +323,14 @@
     },
     "layers/email-mailgun": {
       "name": "@nuxtinator/email-mailgun",
-      "version": "1.0.2",
+      "version": "2.0.0",
       "peerDependencies": {
         "nuxt": "^4.0.0",
       },
     },
     "layers/mail": {
       "name": "@nuxtinator/mail",
-      "version": "0.0.0",
+      "version": "1.0.0",
       "dependencies": {
         "nodemailer": "^10.1.0",
         "postal-mime": "^4.2.1",
@@ -417,7 +417,7 @@
     },
     "layers/tenancy": {
       "name": "@nuxtinator/tenancy",
-      "version": "3.8.0",
+      "version": "3.9.0",
       "optionalDependencies": {
         "@nuxtinator/core": "*",
       },

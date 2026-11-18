@@ -4,7 +4,7 @@ import { generateKeyPairSync, sign, type KeyObject } from 'node:crypto'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { mapSendgridEvent, sendgridProvider, verifySendgridSignature } from '../adapters/sendgrid'
 import { __setEndpointCheck } from '../adapters/http'
-import type { MailAccountRow, ProviderMessage, WebhookRequest } from '../kernel/types'
+import type { MailAccountRow, MailEventType, ProviderMessage, WebhookRequest } from '../kernel/types'
 
 interface Seen { method: string, path: string, headers: IncomingMessage['headers'], body: string }
 type Reply = { status: number, body?: unknown, headers?: Record<string, string> }
@@ -197,7 +197,8 @@ describe('verifyCredentials', () => {
     reply = () => ({ status: 200, body: { scopes: ['mail.send', 'whitelabel.create', 'whitelabel.read', 'whitelabel.update', 'user.webhooks.event.settings.read', 'user.webhooks.event.settings.update'] } })
     const res = await sendgridProvider.verifyCredentials(creds(), 'mail.example.org')
     expect(res).toEqual({ ok: true, capabilities: { send: true, domains: true, routes: false, webhooks: true, suppressionLists: false } })
-    expect(seen.map(s => `${s.method} ${s.path}`)).toEqual(['GET /v3/scopes'])
+    expect(seen.map(s => `${s.method} ${s.path}`)).toEqual(['GET /v3/scopes', 'GET /v3/user/webhooks/event/settings/signed'])
+    expect(seen.every(s => s.method === 'GET')).toBe(true)
   })
 
   it('a key without the suppression scopes gives unmanaged; with them, mirrored', async () => {
@@ -233,6 +234,76 @@ describe('verifyCredentials', () => {
     } finally {
       __setEndpointCheck(url => url.hostname === '127.0.0.1')
     }
+  })
+})
+
+describe('inspectDomain', () => {
+  const urls = { events: 'https://app.test/api/mail/webhooks/a/t/events', inbound: 'https://app.test/api/mail/webhooks/a/t/inbound', inboundMime: 'https://app.test/api/mail/webhooks/a/t/inbound/mime' }
+  const opts = { events: ['bounced', 'complained'] as MailEventType[], receive: true }
+  const authenticated = [{ id: 7, domain: 'mail.example.org', valid: true, dns: { mail_cname: { type: 'cname', host: 'em1.mail.example.org', data: 'u1.wl.sendgrid.net', valid: true }, dkim1: { type: 'cname', host: 's1._domainkey.mail.example.org', data: 's1.domainkey.u1.wl.sendgrid.net', valid: false } } }]
+
+  it('a domain set up by hand: reads domain authentication, the event webhook, its signing and Inbound Parse, and changes nothing', async () => {
+    reply = (s) => {
+      if (s.path.startsWith('/v3/whitelabel/domains')) return { status: 200, body: authenticated }
+      if (s.path === '/v3/user/webhooks/event/settings') return { status: 200, body: { enabled: true, url: urls.events, bounce: true, dropped: true, spam_report: true, unsubscribe: true, group_unsubscribe: true } }
+      if (s.path === '/v3/user/webhooks/event/settings/signed') return { status: 200, body: { enabled: true, public_key: 'pk' } }
+      if (s.path === '/v3/user/webhooks/parse/settings') return { status: 200, body: { result: [{ hostname: 'mail.example.org', url: urls.inboundMime, send_raw: true }] } }
+      return { status: 404 }
+    }
+    const res = await sendgridProvider.inspectDomain!(creds(), 'mail.example.org', urls, opts)
+    expect(res.domain).toMatchObject({ exists: true })
+    expect(res.domain!.records.map(r => [r.name, r.status])).toEqual([['em1.mail.example.org', 'verified'], ['s1._domainkey.mail.example.org', 'pending'], ['mail.example.org', 'pending']])
+    expect(res.webhooks).toEqual({ missing: [], stale: [] })
+    expect(res.route).toEqual({ ok: true })
+    expect(res.checks).toEqual([expect.objectContaining({ key: 'signed-webhook', ok: true })])
+    expect(seen.every(s => s.method === 'GET')).toBe(true)
+  })
+
+  it('nothing set up: no authentication, the webhook posts to another app, signing off, and Inbound Parse posts elsewhere', async () => {
+    reply = (s) => {
+      if (s.path.startsWith('/v3/whitelabel/domains')) return { status: 200, body: [] }
+      if (s.path === '/v3/user/webhooks/event/settings') return { status: 200, body: { enabled: true, url: 'https://crm.example.com/hooks', bounce: true } }
+      if (s.path === '/v3/user/webhooks/event/settings/signed') return { status: 200, body: { enabled: false } }
+      if (s.path === '/v3/user/webhooks/parse/settings') return { status: 200, body: { result: [{ hostname: 'mail.example.org', url: 'https://crm.example.com/in', send_raw: false }] } }
+      return { status: 404 }
+    }
+    const res = await sendgridProvider.inspectDomain!(creds(), 'mail.example.org', urls, opts)
+    expect(res.domain).toEqual({ exists: false, records: [] })
+    expect(res.webhooks!.missing).toEqual(expect.arrayContaining(['Bounced', 'Spam Reports']))
+    expect(res.webhooks!.stale).toEqual([])
+    expect(res.checks).toContainEqual(expect.objectContaining({ key: 'event-webhook-elsewhere', ok: false, detail: expect.stringContaining('https://crm.example.com/hooks') }))
+    expect(res.checks).toContainEqual(expect.objectContaining({ key: 'signed-webhook', ok: false }))
+    expect(res.route).toEqual({ ok: false, conflict: 'Inbound Parse to https://crm.example.com/in' })
+  })
+
+  it('an old address of this app is listed to remove; a host of ours that isn\'t raw is flagged', async () => {
+    reply = (s) => {
+      if (s.path === '/v3/user/webhooks/event/settings') return { status: 200, body: { enabled: true, url: 'https://app.test/api/mail/webhooks/a/old/events' } }
+      if (s.path === '/v3/user/webhooks/parse/settings') return { status: 200, body: { result: [{ hostname: 'mail.example.org', url: urls.inboundMime, send_raw: false }] } }
+      return { status: 403 }
+    }
+    const res = await sendgridProvider.inspectDomain!(creds(), 'mail.example.org', urls, opts)
+    expect(res.webhooks!.stale).toEqual(['https://app.test/api/mail/webhooks/a/old/events'])
+    expect(res.route).toEqual({ ok: false })
+    expect(res.checks).toContainEqual(expect.objectContaining({ key: 'parse-raw', ok: false }))
+    expect(res.domain).toBeNull()
+  })
+
+  it('a Mail Send only key reads nothing', async () => {
+    reply = () => ({ status: 403, body: { errors: [{ message: 'access forbidden' }] } })
+    expect(await sendgridProvider.inspectDomain!(creds(), 'mail.example.org', urls, opts)).toEqual({ domain: null, webhooks: null, route: null, checks: [] })
+  })
+
+  it('verifying a key that may read the event webhook stores the verification key', async () => {
+    reply = s => s.path === '/v3/scopes'
+      ? { status: 200, body: { scopes: ['mail.send', 'user.webhooks.event.settings.read'] } }
+      : { status: 200, body: { enabled: true, public_key: 'MFkw-verification' } }
+    expect(await sendgridProvider.verifyCredentials(creds())).toMatchObject({ ok: true, credentials: { webhookPublicKey: 'MFkw-verification' } })
+  })
+
+  it('every manual step that the reads can confirm names its check', () => {
+    expect(sendgridProvider.manualSetup('mail.example.org', 'send', urls, { events: ['bounced'] }).map(s => s.check)).toEqual(['provider-domain', 'provider-dns', 'webhooks', 'signed-webhook', 'credential:webhookPublicKey'])
+    expect(sendgridProvider.manualSetup('mail.example.org', 'receive', urls, { events: [] }).map(s => s.check)).toEqual(['mx', 'route', 'probe'])
   })
 })
 

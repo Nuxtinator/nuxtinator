@@ -54,7 +54,8 @@ test('own domain: ownership record, DNS records, the switch, and the stream pick
   await page.getByRole('button', { name: 'Use our own domain' }).click()
   const modal = page.getByRole('dialog')
   await modal.getByRole('textbox', { name: /^Domain/ }).fill(domain)
-  await modal.getByRole('button', { name: 'Add', exact: true }).click()
+  await modal.getByRole('switch', { name: /Receive email on this domain/ }).click()
+  await modal.getByRole('button', { name: 'Next', exact: true }).click()
   await expect(page.getByText(`${domain} added`, { exact: true })).toBeVisible()
 
   // Ownership comes first: one TXT record, nothing else yet.
@@ -106,7 +107,8 @@ test('an org account appears in the add-domain provider picker', async ({ page }
   await expect(page.getByRole('row').filter({ hasText: label })).toBeVisible()
 
   await page.getByRole('button', { name: 'Use our own domain' }).click()
-  await page.getByRole('combobox', { name: 'Provider account' }).click()
+  await page.getByRole('dialog').getByText('Fake provider', { exact: true }).click()
+  await page.getByRole('combobox', { name: 'Fake provider account' }).click()
   await expect(page.getByRole('option', { name: label })).toBeVisible()
 })
 

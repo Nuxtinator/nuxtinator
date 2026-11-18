@@ -7,7 +7,7 @@ import { constantTimeEqual } from '../kernel/crypto'
 import { parseInbound } from '../kernel/inbound-parse'
 import { sendViaSmtp } from '../kernel/mime'
 import {
-  ProviderPermissionError, type Capabilities, type CheckResult, type Credentials, type MailEvent, type MailProvider,
+  ProviderPermissionError, type Capabilities, type CheckResult, type Credentials, type DomainInspection, type MailEvent, type MailProvider,
   type ProviderList, type ProviderMessage, type ProviderSendResult, type ProviderSuppressionMode
 } from '../kernel/types'
 
@@ -23,6 +23,10 @@ export interface FakeControl {
   domainStatus: CheckResult['status']
   deliver: boolean
   smtp: { host: string, port: number }
+  // What inspectDomain reports; null parts mean the key can't read them
+  inspection: DomainInspection
+  // Whether verifying an account key reports what it may set up (domains, routes, webhooks)
+  adminKey: boolean
 }
 
 export interface FakeProvider extends MailProvider {
@@ -48,7 +52,9 @@ function defaults(): FakeControl {
     hangFor: new Set(),
     domainStatus: 'verified',
     deliver: true,
-    smtp: { host: process.env.SMTP_HOST || 'localhost', port: Number.parseInt(process.env.SMTP_PORT || '1025', 10) }
+    smtp: { host: process.env.SMTP_HOST || 'localhost', port: Number.parseInt(process.env.SMTP_PORT || '1025', 10) },
+    inspection: { domain: null, webhooks: null, route: null },
+    adminKey: false
   }
 }
 
@@ -73,7 +79,7 @@ export function createFakeProvider(id = 'fake'): FakeProvider {
     label: 'Fake provider',
     credentialFields: [
       { key: 'apiKey', label: 'API key', secret: true, optional: true, env: 'MAIL_FAKE_API_KEY' },
-      { key: 'signingKey', label: 'Webhook signing key', secret: true, optional: true, env: 'MAIL_FAKE_SIGNING_KEY' }
+      { key: 'signingKey', label: 'Webhook signing key', secret: true, optional: true, env: 'MAIL_FAKE_SIGNING_KEY', forWebhooks: true }
     ],
     domainCredentialFields: [
       { key: 'sendingKey', label: 'Domain sending key', secret: true, optional: true }
@@ -108,17 +114,24 @@ export function createFakeProvider(id = 'fake'): FakeProvider {
       }
       if (domain) caps.send = c.send !== false && hasKey(creds)
       if (domain && c.suppressionLists !== undefined) caps.suppressionLists = c.suppressionLists
+      if (fake.control.adminKey && creds.apiKey) {
+        for (const key of ['domains', 'routes', 'webhooks'] as const) caps[key] = c[key] !== false
+      }
       return { ok: true, capabilities: caps }
     },
 
     manualSetup(domain, role, urls, opts) {
       if (role === 'send') {
         return [
-          { title: `Add ${domain} at the fake provider` },
-          { title: 'Subscribe the events webhook', detail: `Events: ${opts.events.join(', ')}`, values: [{ label: 'Events URL', value: urls.events }] }
+          { title: `Add ${domain} at the fake provider`, check: 'provider-domain' },
+          { title: 'Subscribe the events webhook', detail: `Events: ${opts.events.join(', ')}`, values: [{ label: 'Events URL', value: urls.events }], check: 'webhooks' }
         ]
       }
-      return [{ title: 'Forward inbound mail as raw MIME', values: [{ label: 'Inbound URL', value: urls.inboundMime }] }]
+      return [{ title: 'Forward inbound mail as raw MIME', values: [{ label: 'Inbound URL', value: urls.inboundMime }], check: 'route' }]
+    },
+
+    async inspectDomain() {
+      return fake.control.inspection
     },
 
     async send(creds, msg) {

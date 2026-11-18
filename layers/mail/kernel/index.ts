@@ -207,6 +207,7 @@ type Bound<T> = { [K in keyof T]: T[K] extends (k: Kernel, ...args: infer A) => 
 
 const ADMIN_FNS = {
   accountView: admin.accountView,
+  domainKeyView: admin.domainKeyView,
   listAccounts: admin.listAccounts,
   getAccount: admin.getAccount,
   accountsByIds: admin.accountsByIds,

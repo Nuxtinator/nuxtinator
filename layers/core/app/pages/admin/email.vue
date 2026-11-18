@@ -11,15 +11,16 @@ const toast = useToast()
 const { user } = useAuth()
 const tenancyEnabled = computed(() => useRuntimeConfig().public.tenancy === true)
 
+// Domains come first: adding one saves its provider key, so Accounts is for rotating or sharing keys.
 const TABS = [
-  { label: 'Accounts', value: 'accounts', icon: 'i-lucide-key-round' },
   { label: 'Domains', value: 'domains', icon: 'i-lucide-globe' },
   { label: 'Streams', value: 'streams', icon: 'i-lucide-git-fork' },
-  { label: 'Suppressions', value: 'suppressions', icon: 'i-lucide-ban' }
+  { label: 'Suppressions', value: 'suppressions', icon: 'i-lucide-ban' },
+  { label: 'Accounts', value: 'accounts', icon: 'i-lucide-key-round' }
 ]
 const tab = computed({
-  get: () => TABS.some(t => t.value === route.query.tab) ? route.query.tab as string : 'accounts',
-  set: (v: string | number) => navigateTo({ query: { ...route.query, tab: v === 'accounts' ? undefined : String(v) } }, { replace: true })
+  get: () => TABS.some(t => t.value === route.query.tab) ? route.query.tab as string : 'domains',
+  set: (v: string | number) => navigateTo({ query: { ...route.query, tab: v === 'domains' ? undefined : String(v) } }, { replace: true })
 })
 
 const { data: accountsData } = useMailAccounts('host')

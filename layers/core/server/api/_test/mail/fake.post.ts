@@ -1,5 +1,5 @@
 // Test-only control of the fake mail provider and DNS (MAIL_FAKE_PROVIDER=1).
-import type { MailAlert } from '@nuxtinator/mail/kernel'
+import type { DomainInspection, MailAlert } from '@nuxtinator/mail/kernel'
 import { mailFakeState, notifyMailAlert, requireMailFakeProvider } from '#core/server/utils/mail-host'
 
 export default defineEventHandler(async (event) => {
@@ -13,6 +13,8 @@ export default defineEventHandler(async (event) => {
     deliver?: boolean
     dns?: { name: string, txt?: string[], mx?: { exchange: string, priority: number }[], cname?: string[] }[]
     alert?: MailAlert
+    inspection?: DomainInspection
+    adminKey?: boolean
   }
   if (body.reset) {
     fake.reset()
@@ -23,6 +25,8 @@ export default defineEventHandler(async (event) => {
   if (body.domainStatus) fake.control.domainStatus = body.domainStatus
   if (body.nextResults) fake.control.nextResults.push(...body.nextResults)
   if (body.deliver !== undefined) fake.control.deliver = body.deliver
+  if (body.inspection) fake.control.inspection = body.inspection
+  if (body.adminKey !== undefined) fake.control.adminKey = body.adminKey
   for (const r of body.dns ?? []) {
     mailFakeState.dns?.records.set(r.name.toLowerCase(), { txt: r.txt, mx: r.mx, cname: r.cname })
   }

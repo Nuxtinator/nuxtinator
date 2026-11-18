@@ -247,6 +247,45 @@ describe('host domains', () => {
     await expect(h.mail.admin.patchDomain({ orgId: null }, envDomain.id, { fromDomain: 'x.test' }, BASE)).rejects.toMatchObject({ statusCode: 409 })
   })
 
+  it('a provider\'s own checks are listed under their role, and a failing receive check holds the probe back', async () => {
+    const h = harness()
+    h.fake.receivesAt = exchange => exchange === 'mx.fake.example'
+    const acct = await hostAccount()
+    const { domain } = await h.mail.admin.addDomain({ orgId: null }, { domain: 'in.checks.test', sendAccountId: acct.id, receiveAccountId: acct.id, setupMode: 'manual' }, BASE)
+    h.dns.records.set('in.checks.test', { mx: [{ exchange: 'mx.fake.example', priority: 10 }] })
+    const probes = () => h.fake.sent.filter(m => m.to.startsWith('nx-probe-') && m.to.endsWith('@in.checks.test'))
+    h.fake.control.inspection = {
+      domain: null,
+      webhooks: null,
+      route: { ok: true },
+      checks: [
+        { role: 'send', key: 'production-access', label: 'Production access', ok: false },
+        { role: 'receive', key: 'inbound-topic', label: 'Topic sends here', ok: false, detail: 'No subscription' }
+      ]
+    }
+    const first = await h.mail.admin.checkDomain({ orgId: null }, domain.id, BASE)
+    expect(first.roles.find(r => r.role === 'send')!.checks).toContainEqual({ key: 'production-access', label: 'Production access', ok: false })
+    expect(first.roles.find(r => r.role === 'receive')!.checks).toContainEqual({ key: 'inbound-topic', label: 'Topic sends here', ok: false, detail: 'No subscription' })
+    expect(probes()).toHaveLength(0)
+
+    h.fake.control.inspection = { ...h.fake.control.inspection, checks: [{ role: 'receive', key: 'inbound-topic', label: 'Topic sends here', ok: true }] }
+    await h.mail.admin.checkDomain({ orgId: null }, domain.id, BASE)
+    expect(probes()).toHaveLength(1)
+  })
+
+  it('setup warns about MX records elsewhere, not about ones already at the receiving provider', async () => {
+    const h = harness()
+    h.fake.receivesAt = exchange => exchange === 'mx.fake.example'
+    const acct = await hostAccount()
+    h.dns.records.set('in.ours.test', { mx: [{ exchange: 'mx.fake.example.', priority: 10 }] })
+    const ours = await h.mail.admin.addDomain({ orgId: null }, { domain: 'in.ours.test', sendAccountId: acct.id, receiveAccountId: acct.id, setupMode: 'auto' }, BASE)
+    expect(ours.setup!.mxConflict).toEqual([])
+
+    h.dns.records.set('in.theirs.test', { mx: [{ exchange: 'mx.fake.example', priority: 10 }, { exchange: 'mx.elsewhere.test', priority: 20 }] })
+    const theirs = await h.mail.admin.addDomain({ orgId: null }, { domain: 'in.theirs.test', sendAccountId: acct.id, receiveAccountId: acct.id, setupMode: 'auto' }, BASE)
+    expect(theirs.setup!.mxConflict).toEqual(['mx.elsewhere.test'])
+  })
+
   it('a needsReceive stream refuses a send-only domain; the default route sends everything', async () => {
     const h = harness({ env: {} })
     const acct = await hostAccount()
@@ -498,6 +537,11 @@ describe('domain checks and the daily job', () => {
     // An unverified receiving role gets its probe only from Check.
     await h.mail.admin.runDailyJob({ baseUrl: BASE })
     expect(h.fake.sent).toHaveLength(sent)
+    // Nor while its MX records point elsewhere.
+    const elsewhere = await h.mail.admin.checkDomain({ orgId: null }, domain.id, BASE)
+    expect(h.fake.sent).toHaveLength(sent)
+    expect(elsewhere.roles.find(r => r.role === 'receive')!.checks).toContainEqual(expect.objectContaining({ key: 'mx', ok: false }))
+    h.dns.records.set('in.manual.test', { mx: [{ exchange: 'mx.fake.example', priority: 10 }] })
     await h.mail.admin.checkDomain({ orgId: null }, domain.id, BASE)
     expect(h.fake.sent.map(m => m.to)).toEqual([expect.stringMatching(/^nx-probe-.*@in\.manual\.test$/)])
   })

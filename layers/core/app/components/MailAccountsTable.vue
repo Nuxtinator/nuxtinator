@@ -27,6 +27,7 @@ const PROVIDER_ICONS: Record<string, string> = {
 
 function statusOf(a: MailAccount): { color: string, label: string } {
   if (!a.provider) return { color: 'bg-(--ui-text-dimmed)', label: 'Local only' }
+  if (!a.hasKey) return { color: 'bg-(--ui-text-dimmed)', label: 'Keys on domains' }
   if (a.capabilities.send === false) return { color: 'bg-(--ui-error)', label: 'Can\'t send' }
   if (Object.values(a.capabilities).includes(false)) return { color: 'bg-(--ui-warning)', label: 'Limited key' }
   if (Object.keys(a.capabilities).length) return { color: 'bg-(--ui-success)', label: 'Working' }
@@ -130,7 +131,7 @@ function menu(a: MailAccount): DropdownMenuItem[][] {
       class="p-4 text-sm text-(--ui-text-muted)"
     >
       <template v-if="scope === 'host'">
-        Mail isn't configured. Add an account to send password resets and invites.
+        No provider keys yet. Adding a domain saves its key here.
       </template>
       <template v-else>
         No accounts of your own. Your domains use the host's provider.
@@ -192,9 +193,13 @@ function menu(a: MailAccount): DropdownMenuItem[][] {
       </template>
       <template #capabilities-cell="{ row }">
         <MailCapabilityBadges
-          v-if="row.original.provider"
+          v-if="row.original.provider && row.original.hasKey"
           :capabilities="row.original.capabilities"
         />
+        <span
+          v-else-if="row.original.provider"
+          class="text-sm text-(--ui-text-muted)"
+        >Each domain has its own key</span>
       </template>
       <template #status-cell="{ row }">
         <span class="flex items-center gap-2 text-sm whitespace-nowrap">

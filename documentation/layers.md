@@ -807,13 +807,14 @@ registerMailProvider(postmarkProvider)
 | Member | What it does |
 |---|---|
 | `id`, `label` | the stored provider id (unique) and its name in the UI |
-| `credentialFields` | the account form: `{ key, label, secret, optional?, help?, env? }`. `env` names the variable that fills the field for the Environment account |
+| `credentialFields` | the account form: `{ key, label, secret, optional?, help?, env?, forWebhooks?, advanced? }`. `env` names the variable that fills the field for the Environment account; `forWebhooks` marks a field needed to accept the provider's webhooks (a signing key), which a domain's check lists as a step until it's saved; `advanced` keeps a rarely needed field (Mailgun's account-wide API key) under More options when adding a domain |
 | `domainCredentialFields` | optional per-domain key (a Mailgun sending key) |
 | `supports` | `{ send, receive, events }`: which roles a domain may give it |
 | `webhookScope` | `domain` (webhooks set per domain) or `account` (one webhook for the whole account, like SendGrid's); the kernel works out the event list across the account's domains |
 | `notes` | optional `{ send?, receive? }` caveats, shown where an admin picks the provider or sets a domain up on it |
-| `verifyCredentials(creds, domain?, opts?)` | checks the key with calls that change nothing and returns the capabilities it proved (`send`, `domains`, `routes`, `webhooks`, `suppressionLists`) |
-| `manualSetup(domain, role, urls, { events })` | the steps an admin follows at the provider when setup isn't automatic |
+| `verifyCredentials(creds, domain?, opts?)` | checks the key with calls that change nothing and returns the capabilities it proved (`send`, `domains`, `routes`, `webhooks`, `suppressionLists`), and any `credentials` the key could read (Mailgun's webhook signing key, readable by an Admin key), which the kernel stores on the account |
+| `manualSetup(domain, role, urls, { events })` | the steps an admin follows at the provider when setup isn't automatic. A step's `check` names the check that confirms it, so the domain's panel ticks it off |
+| `inspectDomain?(creds, domain, urls, { events, receive })` | reads, without changing anything, what is set up at the provider for a domain set up by hand: whether the domain exists and the provider's verdict on its DNS records, which events don't post to the events URL yet (and old URLs of this app to remove), and whether a route forwards its mail here. Each part is `null` when the key can't read it. `checks` adds the provider's own named checks per role (SES: the configuration set, production access, each SNS topic's subscription; SendGrid: the signed event webhook, an event webhook that posts elsewhere, Inbound Parse in raw mode); a failing receive check holds the receiving probe back. Called only by an admin's Check; a webhook list that's complete marks the webhooks as set up. Mailgun, SES and SendGrid implement it |
 | `send(creds, msg)` | one attempt; returns `sent` (with the provider's id), `failed` (`retryable`, and `keyRejected` when the key itself was refused) or `unknown` |
 | `provisionDomain?`, `checkDomain?`, `configureWebhooks?`, `deprovisionDomain?` | automatic setup. Throw `ProviderPermissionError(capability)` when the key isn't allowed: the kernel records the capability as false and falls back to the manual steps |
 | `providerSuppression` | `mode(capabilities)` (`disabled`, `mirrored`, `unmanaged`) and an optional `release(creds, domain, address, list)` |

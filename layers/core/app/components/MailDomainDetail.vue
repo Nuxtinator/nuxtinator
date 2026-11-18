@@ -54,12 +54,41 @@ const receiveAccounts = computed(() => [
     .filter(a => a.provider && props.providers.find(p => p.id === a.provider)?.supports.receive)
     .map(a => ({ label: a.label, value: a.id }))
 ])
+// Receiving goes through the domain's sending account when that can receive, else the only account that can.
+const defaultReceiveAccount = computed(() => {
+  const ids = receiveAccounts.value.map(a => a.value)
+  if (d.value.sendAccountId && ids.includes(d.value.sendAccountId)) return d.value.sendAccountId
+  return ids.length === 1 ? ids[0]! : null
+})
+const pickReceiveAccount = ref(false)
+watch(() => props.domain.id, () => {
+  pickReceiveAccount.value = false
+})
 const recordsFor = (role: 'send' | 'receive') => d.value.dnsRecords.filter(r => r.role === role)
 // A role whose automatic setup fell back shows the manual steps and checks.
 const manual = (role: 'send' | 'receive') => (d.value.roleModes?.[role] ?? d.value.setupMode) === 'manual'
 const receiveProvider = computed(() => props.providers.find(p => p.id === d.value.receiveProvider?.id) ?? null)
 const roleCheck = (role: 'send' | 'receive'): MailRoleCheck | undefined => lastCheck.value?.roles.find(r => r.role === role)
 const setupError = (role: 'send' | 'receive') => lastSetup.value?.roles.find(r => r.role === role)?.error
+// Checks a step names show on that step; the rest are listed above the steps.
+const DNS_PARTS = new Set(['spf', 'dkim', 'dmarc'])
+const looseChecks = (role: 'send' | 'receive') => {
+  const onSteps = new Set(d.value.manualSteps[role].map(s => s.check).filter(Boolean))
+  return (roleCheck(role)?.checks ?? []).filter(c => !onSteps.has(c.key) && !DNS_PARTS.has(c.key))
+}
+const stepChecks = (role: 'send' | 'receive') => roleCheck(role)?.checks ?? []
+const webhookStep = computed(() => stepChecks('send').some(c => c.key === 'webhooks'))
+
+async function autoSetup() {
+  if (!await confirmAction({
+    title: `Let ${d.value.sendProvider?.label ?? 'the provider'} set up ${d.value.domain}?`,
+    description: d.value.receiveAccountId
+      ? 'The app adds the domain there, points its event webhooks here and adds a route that forwards its mail here.'
+      : 'The app adds the domain there and points its event webhooks here.',
+    confirmLabel: 'Set it up'
+  })) return
+  await patch('auto', { setupMode: 'auto' }, 'Set up at the provider')
+}
 
 async function call(name: string, fn: () => Promise<MailDomainResponse>, success?: string) {
   busy.value = name
@@ -93,29 +122,32 @@ async function checkOwnership() {
 }
 
 const receiveAccountId = ref<string | undefined>(undefined)
-async function turnOnReceiving() {
-  if (!receiveAccountId.value) return
-  await patch('receive', { receiveAccountId: receiveAccountId.value }, 'Receiving turned on')
+async function turnOnReceiving(id: string | null | undefined = receiveAccountId.value) {
+  if (!id) return
+  await patch('receive', { receiveAccountId: id }, 'Receiving turned on')
   receiveAccountId.value = undefined
+  pickReceiveAccount.value = false
 }
 async function turnOffReceiving() {
   if (!await confirmAction({ title: `Stop receiving mail on ${d.value.domain}?`, confirmLabel: 'Stop receiving' })) return
   await patch('receive', { receiveAccountId: null }, 'Receiving turned off')
 }
 
+// The domain's own key field (a Mailgun sending key), when the provider has one.
+const domainKeyLabel = computed(() => sendProvider.value?.domainCredentialFields[0]?.label ?? 'Domain key')
 const keyOpen = ref(false)
 const keyValues = ref<Record<string, string>>({})
 async function saveKey() {
   const creds = Object.fromEntries(Object.entries(keyValues.value).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v))
   if (!Object.keys(creds).length) return
-  if (await patch('key', { credentials: creds }, 'Domain key replaced')) {
+  if (await patch('key', { credentials: creds }, `${domainKeyLabel.value} saved`)) {
     keyOpen.value = false
     keyValues.value = {}
   }
 }
 async function removeKey() {
-  if (!await confirmAction({ title: 'Remove the domain\'s own key?', description: 'The domain goes back to sending with the account\'s key.', confirmLabel: 'Remove key' })) return
-  await patch('key', { credentials: null }, 'Domain key removed')
+  if (!await confirmAction({ title: `Remove the ${domainKeyLabel.value.toLowerCase()}?`, description: 'Without it the domain sends with its account\'s API key, if the account has one.', confirmLabel: 'Remove key' })) return
+  await patch('key', { credentials: null }, `${domainKeyLabel.value} removed`)
 }
 
 const fromOpen = ref(false)
@@ -197,6 +229,16 @@ const checkIcon = (ok: boolean | null, key?: string) => ok === true
         >
           Check now
         </UButton>
+        <UButton
+          v-if="d.canAutoSetup"
+          icon="i-lucide-wand-sparkles"
+          variant="outline"
+          color="neutral"
+          :loading="busy === 'auto'"
+          @click="autoSetup"
+        >
+          Set it up for me
+        </UButton>
         <span
           v-if="d.lastCheckedAt"
           class="text-xs text-(--ui-text-muted)"
@@ -218,14 +260,6 @@ const checkIcon = (ok: boolean | null, key?: string) => ok === true
         icon="i-lucide-key-round"
         title="The provider rejected the key"
         description="Replace the key on the account or on this domain, then check again."
-      />
-      <UAlert
-        v-if="d.suppressionMode === 'unmanaged'"
-        color="warning"
-        variant="subtle"
-        icon="i-lucide-list-x"
-        title="Provider suppression list active"
-        description="Clearing a suppression here won't unblock sends on this domain."
       />
       <UAlert
         v-if="lastCheck?.webhooks && !lastCheck.webhooks.ok && lastCheck.webhooks.error !== 'not supported'"
@@ -273,11 +307,11 @@ const checkIcon = (ok: boolean | null, key?: string) => ok === true
           Automatic setup failed: {{ setupError('send') }}. Follow the steps below instead.
         </p>
         <ul
-          v-if="manual('send') && roleCheck('send')?.checks.length"
+          v-if="manual('send') && looseChecks('send').length"
           class="space-y-1"
         >
           <li
-            v-for="c in roleCheck('send')!.checks.filter(c => c.key === 'provider' || c.key === 'dns')"
+            v-for="c in looseChecks('send')"
             :key="c.key"
             class="flex items-start gap-2 text-sm"
           >
@@ -309,7 +343,16 @@ const checkIcon = (ok: boolean | null, key?: string) => ok === true
           :grouped="false"
         />
         <template v-else-if="manual('send')">
-          <MailManualSteps :steps="d.manualSteps.send" />
+          <MailManualSteps
+            :steps="d.manualSteps.send"
+            :checks="stepChecks('send')"
+            :records="recordsFor('send')"
+          />
+          <MailDnsRecords
+            v-if="recordsFor('send').length && !d.manualSteps.send.some(s => s.check === 'provider-dns')"
+            :records="recordsFor('send')"
+            :grouped="false"
+          />
           <div class="flex items-center gap-2 text-sm">
             <span class="text-(--ui-text-muted)">DKIM selector</span>
             <template v-if="!dkimOpen">
@@ -398,11 +441,11 @@ const checkIcon = (ok: boolean | null, key?: string) => ok === true
             Automatic setup failed: {{ setupError('receive') }}. Follow the steps below instead.
           </p>
           <ul
-            v-if="manual('receive') && roleCheck('receive')?.checks.length"
+            v-if="manual('receive') && looseChecks('receive').length"
             class="space-y-1"
           >
             <li
-              v-for="c in roleCheck('receive')!.checks"
+              v-for="c in looseChecks('receive')"
               :key="c.key"
               class="flex items-start gap-2 text-sm"
             >
@@ -435,6 +478,7 @@ const checkIcon = (ok: boolean | null, key?: string) => ok === true
           <MailManualSteps
             v-else-if="manual('receive')"
             :steps="d.manualSteps.receive"
+            :checks="stepChecks('receive')"
           />
           <UButton
             v-if="d.source !== 'env'"
@@ -448,10 +492,32 @@ const checkIcon = (ok: boolean | null, key?: string) => ok === true
             Stop receiving
           </UButton>
         </template>
+        <div
+          v-else-if="defaultReceiveAccount && !pickReceiveAccount"
+          class="flex items-center gap-3"
+        >
+          <UButton
+            icon="i-lucide-inbox"
+            :loading="busy === 'receive'"
+            @click="turnOnReceiving(defaultReceiveAccount)"
+          >
+            Turn on receiving
+          </UButton>
+          <UButton
+            v-if="receiveAccounts.length > 1"
+            variant="link"
+            color="neutral"
+            size="sm"
+            class="p-0"
+            @click="pickReceiveAccount = true"
+          >
+            Receive through another account
+          </UButton>
+        </div>
         <form
           v-else-if="receiveAccounts.length"
           class="flex items-center gap-2"
-          @submit.prevent="turnOnReceiving"
+          @submit.prevent="turnOnReceiving()"
         >
           <USelect
             v-model="receiveAccountId"
@@ -470,7 +536,7 @@ const checkIcon = (ok: boolean | null, key?: string) => ok === true
       </section>
 
       <section
-        v-if="showWebhooks && d.webhooks.urls && (d.setupMode === 'manual' || d.webhooks.state !== 'connected')"
+        v-if="showWebhooks && d.webhooks.urls && (d.setupMode === 'manual' ? !webhookStep : d.webhooks.state !== 'connected')"
         class="space-y-3 pt-5 border-t border-(--ui-border)"
       >
         <div class="flex items-center gap-2">
@@ -525,27 +591,35 @@ const checkIcon = (ok: boolean | null, key?: string) => ok === true
       </div>
 
       <section
-        v-if="d.sendAccountId && sendProvider?.domainCredentialFields.length && d.source !== 'env'"
+        v-if="d.sendAccountId && sendProvider && d.source !== 'env'"
         class="space-y-3 pt-5 border-t border-(--ui-border)"
       >
         <div class="flex items-center gap-2">
-          <h3 class="font-medium flex items-center gap-1">
-            Domain key
-            <InfoTip text="A key that only works for this domain. Without one, the domain sends with the account's key." />
+          <h3 class="font-medium">
+            Key
           </h3>
-          <span class="text-sm text-(--ui-text-muted)">{{ d.hasOwnCredentials ? 'Set' : 'Uses the account\'s key' }}</span>
+          <span
+            v-if="d.key"
+            class="text-sm text-(--ui-text-muted)"
+          >
+            {{ d.key.label }} <code class="font-mono">{{ d.key.value }}</code><template v-if="d.key.source === 'account'"> ({{ d.key.accountLabel }})</template>
+          </span>
+          <span
+            v-else
+            class="text-sm text-(--ui-warning)"
+          >None</span>
           <UButton
-            v-if="!keyOpen"
+            v-if="!keyOpen && sendProvider.domainCredentialFields.length"
             variant="link"
             size="sm"
             class="p-0 ml-auto"
             @click="keyOpen = true"
           >
-            {{ d.hasOwnCredentials ? 'Replace' : 'Add' }}
+            {{ d.hasOwnCredentials ? 'Replace' : `Add a ${domainKeyLabel.toLowerCase()}` }}
           </UButton>
         </div>
         <MailCapabilityBadges
-          v-if="d.hasOwnCredentials"
+          v-if="d.key"
           :capabilities="d.capabilities"
         />
         <form

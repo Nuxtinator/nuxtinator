@@ -263,6 +263,39 @@ describe('host mail admin', () => {
     expect(check.check.roles.find(r => r.role === 'send')!.checks.map(c => c.key)).not.toContain('provider')
   })
 
+  it('a domain set up by hand offers automatic setup only once the key is known to allow it, and switching sets it up', async () => {
+    const { account } = await createAccount()
+    const { domain } = await addDomain({ domain: testDomain('handmade'), sendAccountId: account.id, receiveAccountId: account.id })
+    const view = async () => (await domains()).find(d => d.id === domain.id) as Domain & { canAutoSetup: boolean, setupMode: string, roleModes: { send: string, receive: string }, manualSteps: { send: { check?: string }[], receive: { check?: string }[] } }
+    expect((await view()).canAutoSetup).toBe(false)
+    expect((await view()).manualSteps.receive.map(s => s.check)).toEqual(['route'])
+
+    await sql`UPDATE mail_accounts SET capabilities = capabilities || '{"domains": true, "routes": true}'::jsonb WHERE id = ${account.id}`
+    expect((await view()).canAutoSetup).toBe(true)
+
+    const res = await api<{ domain: { setupMode: string, roleModes: { send: string, receive: string } } }>(`/api/admin/mail/domains/${domain.id}`, { method: 'PATCH', body: { setupMode: 'auto' }, ...auth })
+    expect(res.domain.setupMode).toBe('auto')
+    expect(res.domain.roleModes).toEqual({ send: 'auto', receive: 'auto' })
+    expect((await view()).canAutoSetup).toBe(false)
+  })
+
+  it('an account with only a signing key says it holds no key, so its capabilities aren\'t listed', async () => {
+    const withKey = (await createAccount()).account as Account & { hasKey: boolean }
+    const signingOnly = (await createAccount({ signingKey: 'test-core-mail-sig-only' })).account as Account & { hasKey: boolean }
+    expect(withKey.hasKey).toBe(true)
+    expect(signingOnly.hasKey).toBe(false)
+  })
+
+  it('a domain reports the key it sends with: its own sending key, else its account\'s API key', async () => {
+    const { account } = await createAccount()
+    const viaAccount = await addDomain({ domain: testDomain('acctkey'), sendAccountId: account.id })
+    const own = await addDomain({ domain: testDomain('ownkey'), sendAccountId: account.id, credentials: { sendingKey: 'test-core-mail-domain-key' } })
+    const keyOf = async (id: string) => ((await domains()).find(d => d.id === id) as Domain & { key: unknown }).key
+    expect(await keyOf(viaAccount.domain.id)).toEqual({ source: 'account', label: 'API key', value: expect.stringMatching(/^•+/), accountLabel: account.label })
+    expect(await keyOf(own.domain.id)).toEqual({ source: 'domain', label: 'Domain sending key', value: expect.stringMatching(/^•+/) })
+    expect(JSON.stringify(await domains())).not.toContain('test-core-mail-domain-key')
+  })
+
   it('the provider catalog carries each provider\'s setup notes', async () => {
     const res = await api<{ providers: { id: string, notes: { send?: string, receive?: string } }[] }>('/api/admin/mail/accounts', auth)
     const notes = Object.fromEntries(res.providers.map(p => [p.id, p.notes]))
