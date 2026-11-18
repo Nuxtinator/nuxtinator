@@ -1,6 +1,6 @@
 {
   "name": "@nuxtinator/core",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -23,7 +23,7 @@
   },
   "nuxtinator": {
     "requires": {
-      "@nuxtinator/mail": ">=1.0.0"
+      "@nuxtinator/mail": ">=1.0.1"
     }
   },
   "peerDependencies": {
