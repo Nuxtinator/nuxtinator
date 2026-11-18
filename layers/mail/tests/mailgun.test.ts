@@ -670,8 +670,7 @@ describe('with the kernel', () => {
 
     // Done by hand at Mailgun: our webhooks for every needed event and a route of our own.
     webhooks = Object.fromEntries(['permanent_fail', 'complained', 'unsubscribed'].map(kind => [kind, { urls: [urls.events, 'https://other.test/hook'] }]))
-    // As Mailgun's form saves it, from the recipient *@in.example.org.
-    routes = [{ description: 'Ours', expression: 'match_recipient("*@in.example.org")', actions: [`forward("${urls.inboundMime}")`, 'stop()'], priority: 0 }]
+    routes = [{ description: 'Ours', expression: 'match_recipient(".*@in.example.org")', actions: [`forward("${urls.inboundMime}")`, 'stop()'], priority: 0 }]
     const second = await mail.admin.checkDomain({ orgId: null }, domain.id, BASE)
     expect(second.roles.find(r => r.role === 'send')!.checks).toContainEqual(expect.objectContaining({ key: 'webhooks', ok: true }))
     expect(second.roles.find(r => r.role === 'receive')!.checks).toContainEqual(expect.objectContaining({ key: 'route', ok: true }))

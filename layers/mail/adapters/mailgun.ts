@@ -260,8 +260,8 @@ export const mailgunProvider: MailProvider = {
       { title: `Point the MX records of ${domain} at Mailgun`, detail: 'At your DNS host, two MX records with priority 10: mxa.mailgun.org and mxb.mailgun.org (mxa.eu.mailgun.org and mxb.eu.mailgun.org in the EU region).', check: 'mx' },
       {
         title: 'Forward its mail here with a route',
-        detail: 'Receive → Routes → Create route. Expression type: Match recipient, with the recipient below. Tick Forward and paste the URL below, and tick Stop. Leave the priority at 0 and save.',
-        values: [{ label: 'Recipient', value: `*@${domain}` }, { label: 'Forward URL', value: urls.inboundMime }],
+        detail: 'Receive → Routes → Create route (a route, not a forwarding rule). Expression type: Match recipient, with the recipient below. Tick Forward and paste the URL below, and tick Stop. Leave the priority at 0 and save.',
+        values: [{ label: 'Recipient', value: `.*@${domain}` }, { label: 'Forward URL', value: urls.inboundMime }],
         check: 'route'
       },
       { title: 'Verify receiving', detail: 'Press Verify receiving once the steps above are done: a probe message goes to the domain, and receiving is verified when it arrives here.', check: 'probe' }
