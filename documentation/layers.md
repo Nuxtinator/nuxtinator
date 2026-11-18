@@ -864,7 +864,7 @@ process.on('SIGTERM', () => mail.stop())
 Pin core to `^3` first if the host tracks `latest`, so the major arrives deliberately. Then:
 
 1. `layers.ts`: swap `email-mailgun` for `mail`, raise core to `^4` and inbox to `^1`.
-2. Runtime env: keep `MAILGUN_API_KEY` / `MAILGUN_DOMAIN` (and `MAILGUN_HOST` in the EU) and `NUXT_SECRET_ENCRYPTION_KEY`; add `MAIL_WEBHOOK_SECRET`; remove `INBOX_DOMAIN`, `INBOX_CONTACT_ADDRESS` and `INBOX_MAILGUN_*`. Every value goes in the runtime environment, not the image build.
+2. Runtime env: keep `MAILGUN_API_KEY` / `MAILGUN_DOMAIN` (and `MAILGUN_HOST` in the EU) and `NUXT_SECRET_ENCRYPTION_KEY`; add `MAIL_WEBHOOK_SECRET` and `MAILGUN_WEBHOOK_SIGNING_KEY` (the Environment account stores no credentials, so without it Mailgun's events for the env domain are rejected as unsigned); remove `INBOX_DOMAIN`, `INBOX_CONTACT_ADDRESS` and `INBOX_MAILGUN_*`. Every value goes in the runtime environment, not the image build.
 3. Deploy. The boot fails loudly if a provider is missing.
 4. `/admin/email`: add the inbox domain for sending and receiving (manual setup, with its own sending key if the key is domain-scoped), assign it to the Inbox stream, copy the webhook URLs. A host whose inbox used a second Mailgun account adds that account first and puts the inbox domain on it. Until a domain can receive, inbox replies are held.
 5. Mailgun dashboard: point the inbound route at the new `/inbound/mime` URL and the webhooks at the new events URL; remove the old `/api/inbox/webhooks/mailgun/*` targets.
