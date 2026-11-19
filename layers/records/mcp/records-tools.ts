@@ -44,6 +44,7 @@ import {
   resolveTypeCapabilities,
   runRecordsPatchGuards,
   updateField,
+  updateRecordType,
   RECORDS_OPTION_KEY_RE,
   RECORDS_SCHEMA_SLUG_RE,
   type RecordsAdminFieldKind,
@@ -51,6 +52,7 @@ import {
   type RecordsHydratedRecord,
   type RecordTypeSetting
 } from '#records/server'
+import type { RecordsFieldOption } from '#records'
 
 type Tx = Transaction<Database>
 
@@ -569,10 +571,19 @@ export const addFieldTool = defineMcpTool({
   }
 })
 
+const optionsPatchInput = z.record(
+  z.string().regex(RECORDS_OPTION_KEY_RE),
+  z.object({
+    label: z.string().trim().min(1).max(80).optional(),
+    color: z.string().max(20).optional(),
+    closed: z.boolean().optional().describe('Status field only: whether this status closes the record (done, abandoned). A status keeps at least one open and one closed option.')
+  }).strict()
+).describe('Choices keyed by option key (lowercase slug). A new choice needs a label; for an existing one pass only what changes.')
+
 export const updateFieldTool = defineMcpTool({
   name: 'records_update_field',
   title: 'Update Field',
-  description: 'Rename a field or add choices to a dropdown, multi-select or tags field — e.g. add a new quarter to a milestones field. Pass only what changes; options you pass are added or relabeled, others stay.',
+  description: 'Rename a field, add or relabel choices of a dropdown, multi-select, tags or status field — e.g. add a new quarter to a milestones field — mark which statuses close a record, or put the choices in order. Pass only what changes; options you pass are added or changed, others stay.',
   appId: 'records',
   scope: 'records.schema.manage',
   input: z.object({
@@ -580,7 +591,8 @@ export const updateFieldTool = defineMcpTool({
     type: typeInput,
     field: z.string().max(41).describe('The field key.'),
     label: z.string().trim().min(1).max(80).optional(),
-    options: optionsInput.optional()
+    options: optionsPatchInput.optional(),
+    optionOrder: z.array(z.string().regex(RECORDS_OPTION_KEY_RE)).max(100).optional().describe('Option keys in display order (a status field\'s order is its board\'s column order); keys left out follow in their current order.')
   }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.schema.manage', async (tx, tenant) => {
@@ -589,11 +601,15 @@ export const updateFieldTool = defineMcpTool({
       const current = (await getRecordTypeFields(tx, input.type)).find(f => f.key === input.field && !f.orphan)
       if (!current) throw createError({ statusCode: 404, statusMessage: `${input.type} has no field ${input.field}` })
       const options = input.options
-        ? Object.fromEntries(Object.entries({ ...(current.options ?? {}), ...input.options }))
+        ? {
+            ...(current.options ?? {}),
+            ...Object.fromEntries(Object.entries(input.options).map(([key, patch]) => [key, { ...current.options?.[key], ...patch } as RecordsFieldOption]))
+          }
         : undefined
       const field = await updateField(tx, tenant, input.type, input.field, {
         ...(input.label ? { label: input.label } : {}),
-        ...(options ? { options } : {})
+        ...(options ? { options } : {}),
+        ...(input.optionOrder ? { optionOrder: input.optionOrder } : {})
       })
       return text(`Updated ${field.label}.`, {
         field: {
@@ -602,6 +618,35 @@ export const updateFieldTool = defineMcpTool({
           kind: field.kind,
           options: field.options ? Object.fromEntries(Object.entries(field.options).filter(([, o]) => !o.deleted).map(([k, o]) => [k, o.label])) : undefined
         }
+      })
+    })
+  }
+})
+
+export const updateRecordTypeTool = defineMcpTool({
+  name: 'records_update_type',
+  title: 'Update Record Type',
+  description: 'Rename a record type, change its icon, or set which date field says when its records are due. A type with a due date gets Reminder and Repeat fields (see records_list_types → dueField).',
+  appId: 'records',
+  scope: 'records.schema.manage',
+  input: z.object({
+    org: orgInput,
+    type: typeInput,
+    label: z.string().trim().min(1).max(80).optional().describe('Plural label, e.g. "Events".'),
+    labelSingular: z.string().trim().min(1).max(80).optional(),
+    icon: z.string().max(80).optional().describe('A Lucide icon name, e.g. "i-lucide-calendar".'),
+    dueField: z.string().max(41).nullable().optional().describe('Key of a date or date-and-time field holding when a record is due; null removes the due date.')
+  }).strict(),
+  handler: async (input, ctx) => {
+    return await run(ctx, input.org, 'records.schema.manage', async (tx, tenant) => {
+      const type = await updateRecordType(tx, tenant, input.type, {
+        ...(input.label ? { label: input.label } : {}),
+        ...(input.labelSingular ? { labelSingular: input.labelSingular } : {}),
+        ...(input.icon ? { icon: input.icon } : {}),
+        ...(input.dueField !== undefined ? { dueField: input.dueField } : {})
+      })
+      return text(`Updated ${type.label}.`, {
+        type: { key: type.key, label: type.label, labelSingular: type.labelSingular, icon: type.icon ?? null, dueField: type.dueField ?? null }
       })
     })
   }
@@ -618,5 +663,6 @@ export const recordsMcpTools = [
   addCommentTool,
   createRecordTypeTool,
   addFieldTool,
-  updateFieldTool
+  updateFieldTool,
+  updateRecordTypeTool
 ]

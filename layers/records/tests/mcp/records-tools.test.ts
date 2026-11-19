@@ -338,6 +338,55 @@ describe('schema and views tools', () => {
     expect(mine?.tabs).toEqual([{ id: expect.any(String), name: 'Board', layout: 'kanban' }, { id: tabId, name: 'Planned', layout: 'list' }])
   })
 
+  it('orders and closes statuses, sets a type\'s due date, and picks how a tab shows connection fields', async () => {
+    const { org, user } = await createRecordsOrgWith(sql, ['admin'])
+    const { token } = await issueMcpBearer(sql, user.id, [...ALL_SCOPES, 'records.schema.manage', 'views.use'])
+    const type = 'test_records_deliverables'
+    ok(await callMcpTool(token, 'records_create_type', {
+      org: org.slug,
+      key: type,
+      label: 'Deliverables',
+      labelSingular: 'Deliverable',
+      fields: [
+        { key: 'delivery_date', label: 'Delivery Date', kind: 'date' },
+        { key: 'tasks', label: 'Tasks', kind: 'connection', target: 'task', nesting: 'children' }
+      ]
+    }))
+
+    ok(await callMcpTool(token, 'records_update_field', {
+      org: org.slug,
+      type,
+      field: 'status',
+      options: { open: { label: 'Wonder' }, doing: { label: 'Doing' }, abandoned: { label: 'Abandoned', closed: true } },
+      optionOrder: ['open', 'doing', 'done', 'abandoned']
+    }))
+    ok(await callMcpTool(token, 'records_update_type', { org: org.slug, type, dueField: 'delivery_date' }))
+    const notDate = await callMcpTool(token, 'records_update_type', { org: org.slug, type, dueField: 'name' })
+    expect(notDate.isError).toBe(true)
+
+    const types = data(await callMcpTool(token, 'records_list_types', { org: org.slug }))
+    const made = (types.types as Array<{ key: string, closedStatuses: string[], dueField: string | null, fields: Array<{ key: string, options?: Record<string, { label: string }> }> }>)
+      .find(t => t.key === type)!
+    expect([...made.closedStatuses].sort()).toEqual(['abandoned', 'done'])
+    expect(made.dueField).toBe('delivery_date')
+    expect(made.fields.map(f => f.key)).toEqual(expect.arrayContaining(['reminder', 'repeat']))
+    const status = made.fields.find(f => f.key === 'status')!
+    expect(Object.keys(status.options!)).toEqual(['open', 'doing', 'done', 'abandoned'])
+    expect(status.options!.open!.label).toBe('Wonder')
+
+    const board = data(await callMcpTool(token, 'views_create', {
+      org: org.slug, name: 'Deliverables', recordType: type, layout: 'kanban', groupField: 'status', cardFields: ['tasks'], cardConnections: { tasks: 'progress' }
+    }))
+    const view = board.view as { id: string, tabs: Array<{ id: string, definition: Record<string, unknown> }> }
+    expect(view.tabs[0]!.definition.cardConnections).toEqual({ tasks: 'progress' })
+    const counted = data(await callMcpTool(token, 'views_update_tab', { org: org.slug, view: view.id, tab: view.tabs[0]!.id, cardConnections: { tasks: 'count' } }))
+    expect((counted.tab as { definition: Record<string, unknown> }).definition.cardConnections).toEqual({ tasks: 'count' })
+    const named = data(await callMcpTool(token, 'views_update_tab', { org: org.slug, view: view.id, tab: view.tabs[0]!.id, cardConnections: null }))
+    expect((named.tab as { definition: Record<string, unknown> }).definition.cardConnections).toBeUndefined()
+    const notConnection = await callMcpTool(token, 'views_update_tab', { org: org.slug, view: view.id, tab: view.tabs[0]!.id, cardFields: ['delivery_date'], cardConnections: { delivery_date: 'count' } })
+    expect(notConnection.isError).toBe(true)
+  })
+
   it('refuses schema changes to a token without records.schema.manage', async () => {
     const { org, user } = await createRecordsOrgWith(sql, ['admin'])
     const { token } = await issueMcpBearer(sql, user.id, ALL_SCOPES)

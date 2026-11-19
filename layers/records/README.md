@@ -100,7 +100,7 @@ A person's write that newly mentions someone in a rich text field ("@" in a task
 |---|---|
 | `records_list_types`, `records_search`, `records_get`, `records_list_timeline` | `records.read` |
 | `records_create`, `records_update` (`share: true` to assign someone who can't see the record yet, or to move a task under one other people can see), `records_close`, `records_add_comment` | `records.write` |
-| `records_create_type`, `records_add_field`, `records_update_field` | `records.schema.manage` |
+| `records_create_type`, `records_add_field`, `records_update_field` (options, which statuses close a record, option order), `records_update_type` (label, icon, due-date field) | `records.schema.manage` |
 
 The schema tools tell agents to reuse or extend an existing type before creating one. Admin-created connection fields are forward-only.
 

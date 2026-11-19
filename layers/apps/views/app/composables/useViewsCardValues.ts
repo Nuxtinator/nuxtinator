@@ -5,7 +5,8 @@
 // field of the type or the view can be shown. Each value carries the icon
 // that stands for its field. Files show as a count. User
 // fields carry ids to render as people; connection fields shown as a count
-// or progress carry the totals. Refs show their resolved label. The due date
+// or progress carry the totals, and otherwise the names of the linked
+// records the viewer can open. Refs show their resolved label. The due date
 // of an open record is marked when it is near or past.
 import type { RecordsFieldSetting } from '#records/client'
 import { viewsIsSubtasksField, type ViewsBoardItem, type ViewsConnectionDisplay } from '../utils/views-types'
@@ -102,6 +103,12 @@ export function useViewsCardValues(source: () => ViewsCardValueSource) {
         const drill = viewsIsSubtasksField(field) ? { drill: true as const } : {}
         if (display === 'count') out.push({ key, label: field.label, icon, text: String(progress.total), ...drill })
         else out.push({ key, label: field.label, icon, text: `${progress.done}/${progress.total}`, progress, ...drill })
+        continue
+      }
+
+      if (field.kind === 'connection' && Array.isArray(raw) && raw.length > 0 && raw.every(v => v && typeof v === 'object')) {
+        const names = (raw as Array<{ name?: string }>).map(v => v.name ?? '').filter(Boolean)
+        if (names.length > 0) out.push({ key, label: field.label, icon, text: names.join(', ') })
         continue
       }
 
