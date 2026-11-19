@@ -27,6 +27,12 @@ const props = defineProps<{
   cardConnections?: Record<string, ViewsConnectionDisplay>
   /** An attachments field whose first image tops each card. */
   coverKey?: string | null
+  /** Card fields kept on the cards when empty, and set from them. */
+  showEmpty?: string[]
+  /** The caller can change the view's own fields. */
+  canEditViewFields?: boolean
+  /** The record type, for the tags editor's suggestions. */
+  typeKey?: string
   groupFieldKey: string | null
   /** Caller may create records of this type (server re-enforces). */
   canQuickAdd: boolean
@@ -55,6 +61,7 @@ const emit = defineEmits<{
   columnDrop: [payload: { fromKey: string, toKey: string, after: boolean }]
   addExisting: []
   removeCard: [recordId: string]
+  setField: [payload: { recordId: string, field: RecordsFieldSetting, value: unknown, previous: unknown }]
 }>()
 
 // Payload type of a column drag. Cards carry 'application/json'; the
@@ -345,10 +352,14 @@ const menuItems = computed(() => [[
               :card-fields="cardFields"
               :card-connections="cardConnections"
               :cover-key="coverKey"
+              :show-empty="showEmpty"
+              :can-edit-view-fields="canEditViewFields"
+              :type-key="typeKey"
               :group-field-key="groupFieldKey"
               @open="emit('open', $event)"
               @dragstart="onCardDragStart($event, card)"
               @dragend="onCardDragEnd"
+              @set-field="emit('setField', { recordId: card.id, ...$event })"
             />
             <UButton
               v-if="isCustom && canManage && picked"

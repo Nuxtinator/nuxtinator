@@ -203,6 +203,13 @@ const openRecordId = computed<string | null>({
     }
   }
 })
+// The record a board stands for can be of another type than its cards (a
+// deliverable over its tasks).
+const openTypeKey = computed(() => {
+  const v = view.value
+  if (v?.recordId && v.recordType && openRecordId.value === v.recordId) return v.recordType
+  return v?.recordTypeKey ?? ''
+})
 // Opening another view from the details (a card's subtasks board) closes them.
 watch(viewId, () => {
   embeddedRecordId.value = null
@@ -387,6 +394,43 @@ async function onToggleDone({ recordId, done }: { recordId: string, done: boolea
   }
 }
 
+// A field set from a card: the record's own fields go to the record, the
+// view's own to the view. A connection changes by the links added and
+// removed, so links the viewer can't see on the card stay.
+function connectionChanges(previous: unknown, next: unknown) {
+  const ids = (list: unknown) => new Set(Array.isArray(list)
+    ? list.map(v => String(v && typeof v === 'object' ? (v as { id: unknown }).id : v))
+    : [])
+  const was = ids(previous)
+  const now = ids(next)
+  return {
+    values: [
+      ...[...now].filter(id => !was.has(id)).map(value => ({ value })),
+      ...[...was].filter(id => !now.has(id)).map(value => ({ value, delete: true }))
+    ]
+  }
+}
+
+async function onSetField({ recordId, field, value, previous }: { recordId: string, field: RecordsFieldSetting, value: unknown, previous: unknown }) {
+  const v = view.value
+  if (!v) return
+  try {
+    if (viewsIsViewField(field)) {
+      await $fetch(`/api/views/${v.id}/values/${recordId}`, { method: 'PATCH', body: { values: { [field.key]: value } } })
+    } else {
+      const fields = { [field.key]: field.kind === 'connection' ? connectionChanges(previous, value) : value }
+      await shareConfirm(confirmShare => $fetch(`/api/records/entries/${v.recordTypeKey}/${recordId}`, {
+        method: 'PATCH',
+        body: { fields, ...(confirmShare ? { confirmShare: true } : {}) }
+      }))
+    }
+  } catch (err) {
+    toast.add({ color: 'error', title: recordsErrorMessage(err, `Failed to update ${field.label}`) })
+  } finally {
+    refreshRecords()
+  }
+}
+
 // --- calendar ---------------------------------------------------------------
 
 // A record dragged to another day (or out of the Unscheduled tray) takes its
@@ -525,13 +569,15 @@ function onColumnsChange(columns: ViewsColumnDef[]) {
 
 const cardFieldsOpen = ref(false)
 
-function onCardFieldsChange(layout: { cardFields: string[], cardConnections: Record<string, ViewsConnectionDisplay> } | null) {
+function onCardFieldsChange(layout: { cardFields: string[], cardConnections: Record<string, ViewsConnectionDisplay>, cardShowEmpty: string[] } | null) {
   patchTabDefinition((d) => {
     delete d.cardFields
     delete d.cardConnections
+    delete d.cardShowEmpty
     if (layout) {
       d.cardFields = layout.cardFields
       if (Object.keys(layout.cardConnections).length > 0) d.cardConnections = layout.cardConnections
+      if (layout.cardShowEmpty.length > 0) d.cardShowEmpty = layout.cardShowEmpty
     }
   }, 'Failed to update the fields')
 }
@@ -1063,6 +1109,7 @@ const menuItems = computed(() => {
         @columns-change="onColumnsChange"
         @add-target-column="onAddTargetColumn"
         @remove-card="onRemoveCard"
+        @set-field="onSetField"
         @dragstart="beginDrag"
         @dragend="endDrag"
       />
@@ -1142,7 +1189,7 @@ const menuItems = computed(() => {
     <ViewsRecordDetails
       v-if="view"
       v-model:record-id="openRecordId"
-      :type-key="view.recordTypeKey"
+      :type-key="openTypeKey"
       :view-id="view.id"
       :view-name="view.name"
       :view-fields="viewFields"

@@ -2,7 +2,7 @@
 // storage class; renderers need it to know which values the list feed can
 // actually show. Derived through the kernel's own storageOf so the routing
 // table lives in one place.
-import { isRecordsFilterGroup, storageOf } from '#records'
+import { isRecordsFilterGroup, RECORDS_REMINDER_KEY, RECORDS_REPEAT_KEY, storageOf } from '#records'
 import type { RecordsStorage } from '#records'
 import type { RecordsFieldSetting, RecordsFilterGroup } from '#records/client'
 import { VIEWS_GROUPABLE_KINDS } from './views-types'
@@ -48,6 +48,24 @@ export const VIEWS_DEFAULT_CARD_FIELDS: Record<ViewsLayout, string[]> = {
   calendar: []
 }
 
+// Kinds whose editor fits in a card's popover. Long text, files and widget
+// kinds are set from the card's details.
+const CARD_SETTABLE_KINDS = new Set([
+  'text', 'textarea', 'number', 'boolean', 'date', 'datetime', 'key_select',
+  'multi_select', 'tags', 'user_select', 'connection', 'link'
+])
+
+/**
+ * Whether a board card can set `field` itself. Status always has a value,
+ * parent and subtask links move cards between boards, and repeat and
+ * reminder wait for a due date, so those are set from the details.
+ */
+export function viewsCardSettable(field: RecordsFieldSetting): boolean {
+  return CARD_SETTABLE_KINDS.has(field.kind)
+    && !field.column && !field.hidden && !field.orphan && !field.hierarchy
+    && field.key !== RECORDS_REPEAT_KEY && field.key !== RECORDS_REMINDER_KEY
+}
+
 /** How records order when a view saves no sort — the list engine's own fallback. */
 export const VIEWS_DEFAULT_SORT: { field: string, dir: 'asc' | 'desc' } = {
   field: 'updated_at',
@@ -91,6 +109,10 @@ export function viewsPruneDefinition(
   const known = (key: string) => INTRINSIC_KEYS.has(key) || fields.some(f => f.key === key)
   const next: ViewsDefinition = { ...definition }
   if (next.cardFields) next.cardFields = next.cardFields.filter(known)
+  if (next.cardShowEmpty) {
+    next.cardShowEmpty = next.cardShowEmpty.filter(key => next.cardFields?.includes(key))
+    if (next.cardShowEmpty.length === 0) delete next.cardShowEmpty
+  }
   if (next.cardConnections) {
     next.cardConnections = Object.fromEntries(
       Object.entries(next.cardConnections).filter(([key]) => fields.some(f => f.key === key && f.kind === 'connection')))

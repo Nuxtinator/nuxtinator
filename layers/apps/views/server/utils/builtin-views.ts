@@ -43,6 +43,8 @@ export interface ViewsBuiltInTarget {
   name: string
   /** The record the view stands for: its header opens it. */
   recordId?: string
+  /** That record's type, which can differ from the type the view shows (a deliverable's tasks). */
+  recordType?: string
   /** The same built-in's views above this one, outermost first, by parameter. */
   trail?: Array<{ param: string, name: string }>
   /** The record type the view shows for this parameter, when not the view's own. */
@@ -110,6 +112,8 @@ export interface ResolvedBuiltInView {
   tabs: ViewTabRow[]
   /** The record a parameterized view stands for, when it names one. */
   recordId: string | null
+  /** That record's type. */
+  recordType: string | null
   /** The views above it, outermost first. */
   trail: Array<{ id: string, name: string }>
 }
@@ -170,6 +174,7 @@ function build(id: string, def: ViewsBuiltInView, target: ViewsBuiltInTarget, pa
     view,
     tabs,
     recordId: target.recordId ?? null,
+    recordType: target.recordId ? target.recordType ?? target.recordTypeKey ?? def.recordTypeKey : null,
     trail: (target.trail ?? []).map(t => ({ id: builtInViewId(def.key, t.param), name: t.name }))
   }
   _resolved.set(view, resolved)

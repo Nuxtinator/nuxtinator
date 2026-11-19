@@ -28,7 +28,7 @@ const props = defineProps<{
   view: ViewsTabView
   records: ViewRecords
   fields: RecordsFieldSetting[]
-  /** edit/owner on the view — column management on custom boards. */
+  /** edit/owner on the view — column management on custom boards, and the view's own fields on cards. */
   canEditDefinition: boolean
   /** The caller may create records of this type (server re-enforces). */
   canCreate: boolean
@@ -43,6 +43,8 @@ const emit = defineEmits<{
   /** Connection-grouped boards: create a target record named `label` as a new column. */
   addTargetColumn: [label: string]
   removeCard: [recordId: string]
+  /** A field was set from a card; `previous` is the value its editor showed. */
+  setField: [payload: { recordId: string, field: RecordsFieldSetting, value: unknown, previous: unknown }]
   dragstart: []
   dragend: []
 }>()
@@ -67,6 +69,7 @@ onMounted(() => {
 const cardFields = computed(() => props.records.card.fields)
 const cardConnections = computed(() => props.records.card.connections)
 const coverKey = computed(() => props.records.card.cover ?? null)
+const showEmpty = computed(() => props.records.card.showEmpty ?? [])
 
 // Tag columns added from the board this session; they become real columns
 // the moment a card carries the tag, and vanish on reload otherwise.
@@ -217,6 +220,9 @@ const columnModalOpen = computed({
       :card-fields="cardFields"
       :card-connections="cardConnections"
       :cover-key="coverKey"
+      :show-empty="showEmpty"
+      :can-edit-view-fields="canEditDefinition"
+      :type-key="view.recordTypeKey"
       :group-field-key="groupField?.key ?? null"
       :can-quick-add="canCreate"
       :can-manage="isCustom && canEditDefinition && column.key !== VIEWS_NO_VALUE_COLUMN"
@@ -236,6 +242,7 @@ const columnModalOpen = computed({
       @rename="openRename(column.key)"
       @remove="removeColumn(column.key)"
       @remove-card="emit('removeCard', $event)"
+      @set-field="emit('setField', $event)"
     />
 
     <UButton

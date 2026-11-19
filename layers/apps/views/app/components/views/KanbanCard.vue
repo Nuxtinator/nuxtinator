@@ -8,8 +8,11 @@
 // connection fields as names, a count, or done-progress, per the layout. A
 // cover field's first image tops the card. Clicking the card opens its
 // details; clicking its subtasks value opens the board of those subtasks.
+// Fields the tab keeps on its cards when empty show as "Add <field>" until
+// set, and clicking one, set or not, opens its editor on the card.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsBoardItem, ViewsConnectionDisplay } from '../../utils/views-types'
+import CardFieldPopover from './CardFieldPopover.vue'
 
 const props = defineProps<{
   item: ViewsBoardItem
@@ -21,12 +24,20 @@ const props = defineProps<{
   groupFieldKey: string | null
   /** An attachments field whose first image tops the card. */
   coverKey?: string | null
+  /** Card fields kept on the card when empty, and set from it. */
+  showEmpty?: string[]
+  /** The caller can change the view's own fields. */
+  canEditViewFields?: boolean
+  /** The record type, for the tags editor's suggestions. */
+  typeKey?: string
 }>()
 
 const emit = defineEmits<{
   open: [recordId: string]
   dragstart: [event: DragEvent]
   dragend: []
+  /** A field was set from the card; `previous` is the value its editor showed. */
+  setField: [payload: { field: RecordsFieldSetting, value: unknown, previous: unknown }]
 }>()
 
 const { byId, ensureUsers } = useRecordsUsers()
@@ -58,6 +69,13 @@ function onDrill(event: MouseEvent) {
   event.stopPropagation()
   openBoard(props.item.id)
 }
+
+function editorProps(edit: { field: RecordsFieldSetting, value: unknown }) {
+  const suggestUrl = edit.field.kind === 'tags' && props.typeKey && !viewsIsViewField(edit.field)
+    ? `/api/records/entries/${props.typeKey}/tags?field=${edit.field.key}`
+    : undefined
+  return { field: edit.field, value: edit.value, suggestUrl }
+}
 </script>
 
 <template>
@@ -83,13 +101,16 @@ function onDrill(event: MouseEvent) {
       v-if="values.length > 0"
       class="space-y-0.5"
     >
-      <div
+      <component
+        :is="value.edit ? CardFieldPopover : 'div'"
         v-for="value in values"
         :key="value.key"
+        v-bind="value.edit ? editorProps(value.edit) : {}"
         class="flex items-center gap-1.5 text-xs"
-        :class="value.drill ? '-mx-1 px-1 rounded cursor-pointer hover:bg-(--ui-bg-elevated)' : ''"
+        :class="value.drill || value.edit ? '-mx-1 px-1 rounded cursor-pointer hover:bg-(--ui-bg-elevated)' : ''"
         :title="value.drill ? `Open the ${value.label.toLowerCase()} board` : undefined"
         @click="value.drill && onDrill($event)"
+        @commit="(next: unknown, previous: unknown) => value.edit && emit('setField', { field: value.edit.field, value: next, previous })"
       >
         <dt
           class="flex shrink-0 text-(--ui-text-dimmed)"
@@ -102,7 +123,13 @@ function onDrill(event: MouseEvent) {
           <span class="sr-only">{{ value.label }}</span>
         </dt>
         <dd
-          v-if="value.userIds"
+          v-if="value.empty"
+          class="text-(--ui-text-dimmed) truncate"
+        >
+          Add {{ value.label }}
+        </dd>
+        <dd
+          v-else-if="value.userIds"
           class="flex items-center gap-1 min-w-0"
         >
           <UAvatar
@@ -145,7 +172,7 @@ function onDrill(event: MouseEvent) {
         >
           {{ value.text }}
         </dd>
-      </div>
+      </component>
     </dl>
   </button>
 </template>

@@ -83,6 +83,8 @@ export interface ViewTabDefinition {
   cardFields?: string[]
   /** Per connection card field: names, a count, or done-progress. Only with cardFields. */
   cardConnections?: Record<string, 'names' | 'count' | 'progress'>
+  /** Card fields that stay on the card when empty, so they can be set from it. Only with cardFields. */
+  cardShowEmpty?: string[]
   /** This tab's filter, ANDed with the view's base filter. */
   filter?: RecordsFilterGroup
   sort?: { field: string, dir: 'asc' | 'desc' }
@@ -125,6 +127,7 @@ export const viewsTabDefinitionSchema = z.object({
   columns: z.array(columnSchema).max(50).optional(),
   cardFields: z.array(z.string().min(1).max(80)).max(20).optional(),
   cardConnections: z.record(z.string(), z.enum(['names', 'count', 'progress'])).optional(),
+  cardShowEmpty: z.array(z.string().min(1).max(80)).max(20).optional(),
   filter: z.unknown().optional(),
   sort: z.object({
     field: z.string().min(1).max(80),
@@ -240,6 +243,13 @@ export async function sanitizeTabDefinition(
     for (const key of Object.keys(def.cardConnections)) {
       if (byKey.get(key)?.kind !== 'connection') badDefinition(`"${key}" is not a connection field`)
     }
+  }
+  if (def.cardShowEmpty) {
+    if (!def.cardFields) badDefinition('cardShowEmpty only applies with cardFields')
+    for (const key of def.cardShowEmpty) {
+      if (!def.cardFields.includes(key)) badDefinition(`"${key}" is not one of the card fields`)
+    }
+    if (def.cardShowEmpty.length === 0) delete def.cardShowEmpty
   }
   if (def.sort && !known(def.sort.field)) badDefinition(`unknown sort field "${def.sort.field}"`)
   if (def.sort && !isSortableField(fields, def.sort.field)) badDefinition(`records cannot be sorted by "${def.sort.field}"`)
@@ -556,6 +566,8 @@ export function toViewDetail(
     builtIn: !!builtIn,
     /** The record a built-in view stands for (a task's subtasks board), else null. */
     recordId: builtIn?.recordId ?? null,
+    /** That record's type, which can differ from the type the view shows. */
+    recordType: builtIn?.recordType ?? null,
     /** The views above a built-in that stands for a record, outermost first. */
     trail: builtIn?.trail ?? [],
     name: view.name,

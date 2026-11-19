@@ -52,7 +52,7 @@ describe('subtasks board', () => {
     await createTask(me, { name: 'test-views Unrelated' })
 
     const top = await $fetch<Detail>(`/api/views/builtin.subtasks.${project.id}`, me)
-    expect(top).toMatchObject({ name: 'test-views Rewrite', builtIn: true, recordId: project.id, trail: [] })
+    expect(top).toMatchObject({ name: 'test-views Rewrite', builtIn: true, recordId: project.id, recordType: 'task', trail: [] })
     const [board, all] = top.tabs
     expect(board).toMatchObject({ name: 'Board', layout: 'kanban' })
     expect(await feed(me, top.id, board!.id)).toEqual(['test-views API', 'test-views Docs'])
@@ -165,7 +165,7 @@ describe('subtasks board', () => {
     await createTask(me, { name: 'test-views Endpoints', parent: [api.id], status: 'done' })
 
     const top = await $fetch<Detail & { recordTypeKey: string }>(`/api/views/builtin.subtasks.${big.id}`, me)
-    expect(top).toMatchObject({ name: 'test-views Big deliverable', recordTypeKey: 'task', recordId: big.id, trail: [] })
+    expect(top).toMatchObject({ name: 'test-views Big deliverable', recordTypeKey: 'task', recordId: big.id, recordType: 'test_deliverable', trail: [] })
     expect(await feed(me, top.id, top.tabs[0]!.id)).toEqual(['test-views API'])
     expect(await feed(me, top.id, top.tabs[1]!.id)).toEqual(['test-views API', 'test-views Endpoints'])
 

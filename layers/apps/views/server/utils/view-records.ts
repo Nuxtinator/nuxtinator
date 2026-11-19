@@ -76,6 +76,8 @@ export interface ViewsCardLayout {
   custom: boolean
   /** The type's cover field: its first image tops each board card. */
   cover?: string
+  /** Card fields that stay on the card when empty, so they can be set from it. */
+  showEmpty?: string[]
 }
 
 // What a tab shows when neither it nor its type names card fields.
@@ -91,7 +93,8 @@ export async function effectiveCardLayout(tx: Tx, view: ViewRow, tab: ViewTabRow
   const type = await getRecordType(tx, view.record_type_key)
   const cover = type?.card?.cover ? { cover: type.card.cover } : {}
   if (def.cardFields) {
-    return { fields: def.cardFields, connections: def.cardConnections ?? {}, custom: true, ...cover }
+    const showEmpty = def.cardShowEmpty?.length ? { showEmpty: def.cardShowEmpty } : {}
+    return { fields: def.cardFields, connections: def.cardConnections ?? {}, custom: true, ...cover, ...showEmpty }
   }
   return {
     fields: type?.card?.fields ?? DEFAULT_CARD_FIELDS[tab.layout],

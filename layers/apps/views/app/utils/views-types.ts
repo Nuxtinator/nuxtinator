@@ -17,6 +17,8 @@ export interface ViewsCardLayout {
   custom: boolean
   /** The type's cover field: its first image tops each board card. */
   cover?: string
+  /** Card fields that stay on the card when empty, so they can be set from it. */
+  showEmpty?: string[]
 }
 
 export interface ViewsColumnDef {
@@ -61,6 +63,8 @@ export interface ViewsDefinition {
   cardFields?: string[]
   /** Per connection card field: names, a count, or done-progress. Only with cardFields. */
   cardConnections?: Record<string, ViewsConnectionDisplay>
+  /** Card fields that stay on the card when empty, so they can be set from it. Only with cardFields. */
+  cardShowEmpty?: string[]
   /** This tab's filter, ANDed with the view's base filter. */
   filter?: RecordsFilterGroup
   sort?: { field: string, dir: 'asc' | 'desc' }
@@ -111,6 +115,8 @@ export interface ViewDetail extends Omit<ViewSummary, 'layout' | 'tabCount' | 't
   ownCardCount: number
   /** The record a built-in view stands for (a task's subtasks board), else null. */
   recordId: string | null
+  /** That record's type, which can differ from the type the view shows (a deliverable's tasks). */
+  recordType: string | null
   /** The views above a built-in that stands for a record, outermost first. */
   trail: Array<{ id: string, name: string }>
 }

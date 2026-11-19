@@ -83,6 +83,8 @@ const shareInput = z.boolean().optional()
 const layoutInput = z.enum(VIEWS_LAYOUTS).describe('kanban = a board of columns, list = rows with a done checkbox, table = a sortable grid, calendar = records on the days of a date field (pass dateField).')
 const cardConnectionsInput = z.record(z.string().max(80), z.enum(['names', 'count', 'progress']))
   .describe('How connection fields among the card fields show: names (the default), count, or progress (how many of the linked records are done; on the field listing what sits under a record, it opens their board). Needs card fields: the tab\'s own, or cardFields passed here.')
+const cardShowEmptyInput = z.array(z.string().max(80)).max(20)
+  .describe('Boards: card fields that stay on the card when a record has no value, as a button that sets it from the card. Other card fields are left off a card while empty. Each must be one of the card fields: the tab\'s own, or cardFields passed here.')
 const dateFieldInput = z.string().max(80).describe('Calendars only: the date field that places each record on a day (a date field, or created_at / updated_at).')
 const endFieldInput = z.string().max(80).describe('Calendars only: a second date field; each record spans from dateField to it.')
 
@@ -247,6 +249,7 @@ export const createViewTool = defineMcpTool({
     columns: z.array(z.string().trim().min(1).max(80)).min(1).max(50).optional().describe('Boards only: column names for a board with its own columns.'),
     cardFields: z.array(z.string().max(80)).max(20).optional().describe('Fields shown on each card, list row or as table columns; defaults to the type\'s card layout.'),
     cardConnections: cardConnectionsInput.optional(),
+    cardShowEmpty: cardShowEmptyInput.optional(),
     dateField: dateFieldInput.optional(),
     endField: endFieldInput.optional(),
     filter: filterInput.optional(),
@@ -259,6 +262,7 @@ export const createViewTool = defineMcpTool({
       if (input.columns) tabDefinition.columns = columnsFrom(input.columns)
       if (input.cardFields) tabDefinition.cardFields = input.cardFields
       if (input.cardConnections) tabDefinition.cardConnections = input.cardConnections
+      if (input.cardShowEmpty) tabDefinition.cardShowEmpty = input.cardShowEmpty
       if (input.dateField) tabDefinition.dateField = input.dateField
       if (input.endField) tabDefinition.endField = input.endField
       const definition: Record<string, unknown> = {}
@@ -293,6 +297,7 @@ export const addTabTool = defineMcpTool({
     columns: z.array(z.string().trim().min(1).max(80)).max(50).optional().describe('Boards only, instead of groupField: the board\'s own columns. Moving a card between them never changes the record. In a view that shows every matching record, cards start in a "No column" lane (key ""), and [] gives a board with just that lane; a view of hand-picked records needs at least one column.'),
     cardFields: z.array(z.string().max(80)).max(20).optional(),
     cardConnections: cardConnectionsInput.optional(),
+    cardShowEmpty: cardShowEmptyInput.optional(),
     dateField: dateFieldInput.optional(),
     endField: endFieldInput.optional(),
     sort: z.object({ field: z.string().max(80), dir: z.enum(['asc', 'desc']) }).strict().optional(),
@@ -306,6 +311,7 @@ export const addTabTool = defineMcpTool({
       if (input.columns) definition.columns = columnsFrom(input.columns)
       if (input.cardFields) definition.cardFields = input.cardFields
       if (input.cardConnections) definition.cardConnections = input.cardConnections
+      if (input.cardShowEmpty) definition.cardShowEmpty = input.cardShowEmpty
       if (input.dateField) definition.dateField = input.dateField
       if (input.endField) definition.endField = input.endField
       if (input.sort) definition.sort = input.sort
@@ -320,7 +326,7 @@ export const addTabTool = defineMcpTool({
 export const updateTabTool = defineMcpTool({
   name: 'views_update_tab',
   title: 'Update Tab',
-  description: 'Rename a tab, switch its layout, or change its grouping, date fields, card fields, how connection card fields show, or sort. Only the fields you pass change. Use views_set_filter for filters. Needs edit access to the view.',
+  description: 'Rename a tab, switch its layout, or change its grouping, date fields, card fields, how connection card fields show, which card fields stay on the card when empty, or sort. Only the fields you pass change. Use views_set_filter for filters. Needs edit access to the view.',
   appId: 'views',
   scope: 'views.use',
   input: z.object({
@@ -332,6 +338,7 @@ export const updateTabTool = defineMcpTool({
     groupField: z.string().max(80).nullable().optional().describe('null removes the grouping (lists only).'),
     cardFields: z.array(z.string().max(80)).max(20).nullable().optional().describe('null goes back to the type\'s card layout.'),
     cardConnections: cardConnectionsInput.nullable().optional().describe('How connection fields among the card fields show: names (the default), count, or progress (how many of the linked records are done; on the field listing what sits under a record, it opens their board). Needs card fields: the tab\'s own, or cardFields passed here. null shows them all as names.'),
+    cardShowEmpty: cardShowEmptyInput.nullable().optional().describe('Boards: card fields that stay on the card when a record has no value, as a button that sets it from the card. Each must be one of the card fields: the tab\'s own, or cardFields passed here. null leaves every empty field off the cards.'),
     dateField: dateFieldInput.optional(),
     endField: endFieldInput.nullable().optional().describe('null removes the end date (calendars only).'),
     sort: z.object({ field: z.string().max(80), dir: z.enum(['asc', 'desc']) }).strict().nullable().optional()
@@ -361,10 +368,17 @@ export const updateTabTool = defineMcpTool({
         delete definition.cardConnections
         if (input.cardFields === null) delete definition.cardFields
         else definition.cardFields = input.cardFields
+        const kept = (definition.cardShowEmpty ?? []).filter(key => definition.cardFields?.includes(key))
+        if (kept.length > 0) definition.cardShowEmpty = kept
+        else delete definition.cardShowEmpty
       }
       if (input.cardConnections !== undefined) {
         if (input.cardConnections === null) delete definition.cardConnections
         else definition.cardConnections = input.cardConnections
+      }
+      if (input.cardShowEmpty !== undefined) {
+        if (input.cardShowEmpty === null) delete definition.cardShowEmpty
+        else definition.cardShowEmpty = input.cardShowEmpty
       }
       if (input.sort !== undefined) {
         if (input.sort === null) delete definition.sort

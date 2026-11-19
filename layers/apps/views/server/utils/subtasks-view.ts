@@ -48,6 +48,7 @@ async function resolveRecord(tx: Tx, ctx: TenantContext, param: string): Promise
   return {
     name: record.name,
     recordId: record.id,
+    recordType: record.record_type,
     trail: shown.map(id => ({ param: id, name: nameOf.get(id) ?? '' })),
     recordTypeKey: link.target,
     filter: { match: 'all', rules: [{ field: link.parentKey, op: 'under', value: param }] },

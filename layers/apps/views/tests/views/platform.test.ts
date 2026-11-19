@@ -279,4 +279,25 @@ describe('card layouts', () => {
     res = await feed(opts, view.id)
     expect(res.card.fields).toEqual(['due_date'])
   })
+
+  it('keeps the card fields a tab picks on its cards when empty', async () => {
+    const { org, auth } = await createViewsOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    const view = await createView(opts, {
+      recordTypeKey: 'task',
+      definition: { groupField: 'status', cardFields: ['due_date', 'priority'], cardShowEmpty: ['priority'] }
+    })
+    expect((await feed(opts, view.id)).card).toMatchObject({ fields: ['due_date', 'priority'], showEmpty: ['priority'], custom: true })
+
+    const patch = (definition: Record<string, unknown>) => $fetch(`/api/views/${view.id}/tabs/${view.tabs[0]!.id}`, {
+      method: 'PATCH',
+      body: { definition },
+      ...opts
+    })
+    await expect(patch({ groupField: 'status', cardShowEmpty: ['priority'] })).rejects.toMatchObject({ statusCode: 400 })
+    await expect(patch({ groupField: 'status', cardFields: ['due_date'], cardShowEmpty: ['priority'] })).rejects.toMatchObject({ statusCode: 400 })
+
+    await patch({ groupField: 'status', cardFields: ['due_date'], cardShowEmpty: [] })
+    expect((await feed(opts, view.id)).card).not.toHaveProperty('showEmpty')
+  })
 })

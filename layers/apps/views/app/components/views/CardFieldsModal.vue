@@ -5,7 +5,8 @@
 // lists (by its raw key) so it can be removed. A view starts from its record
 // type's default layout; saving here gives it its own, and resetting returns
 // it to the type's. Connection fields choose how they show: names, a count,
-// or done-progress.
+// or done-progress. On a board, a field the card can set may stay on cards
+// while empty, as a button that sets it.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsTabView, ViewsCardLayout, ViewsConnectionDisplay } from '../../utils/views-types'
 
@@ -20,11 +21,12 @@ const open = defineModel<boolean>('open', { default: false })
 
 const emit = defineEmits<{
   /** null resets the view to its type's default layout. */
-  save: [layout: { cardFields: string[], cardConnections: Record<string, ViewsConnectionDisplay> } | null]
+  save: [layout: { cardFields: string[], cardConnections: Record<string, ViewsConnectionDisplay>, cardShowEmpty: string[] } | null]
 }>()
 
 const selected = ref<string[]>([])
 const displays = ref<Record<string, ViewsConnectionDisplay>>({})
+const showEmpty = ref<string[]>([])
 
 const DISPLAY_ITEMS: Array<{ label: string, value: ViewsConnectionDisplay }> = [
   { label: 'Names', value: 'names' },
@@ -46,6 +48,18 @@ function setDisplay(key: string, value: ViewsConnectionDisplay) {
 const choices = computed(() => viewsCardFieldChoices(props.fields))
 
 const isTable = computed(() => props.view.viewType === 'table')
+const isBoard = computed(() => props.view.viewType === 'kanban')
+
+function canShowEmpty(key: string): boolean {
+  const field = fieldByKey.value.get(key)
+  return isBoard.value && !!field && viewsCardSettable(field)
+}
+
+function setShowEmpty(key: string, on: boolean) {
+  showEmpty.value = on
+    ? [...showEmpty.value.filter(k => k !== key), key]
+    : showEmpty.value.filter(k => k !== key)
+}
 
 function labelOf(key: string): string {
   return choices.value.find(c => c.key === key)?.label ?? key
@@ -55,6 +69,7 @@ watch(open, (v) => {
   if (!v) return
   selected.value = [...props.layout.fields]
   displays.value = { ...props.layout.connections }
+  showEmpty.value = [...(props.layout.showEmpty ?? [])]
 })
 
 const available = computed(() =>
@@ -80,7 +95,8 @@ function moveBy(index: number, delta: number) {
 function submit() {
   const cardConnections = Object.fromEntries(
     Object.entries(displays.value).filter(([key, d]) => selected.value.includes(key) && isConnection(key) && d !== 'names'))
-  emit('save', { cardFields: [...selected.value], cardConnections })
+  const cardShowEmpty = showEmpty.value.filter(key => selected.value.includes(key))
+  emit('save', { cardFields: [...selected.value], cardConnections, cardShowEmpty })
   open.value = false
 }
 
@@ -100,6 +116,10 @@ function resetToDefault() {
         <div>
           <h2 class="text-lg font-semibold">
             {{ isTable ? 'Table columns' : view.viewType === 'list' ? 'Row fields' : 'Card fields' }}
+            <InfoTip
+              v-if="isBoard"
+              text="A field set to show when empty stays on cards with no value for it, as an Add button. Clicking it, or its value once set, sets the field from the card."
+            />
           </h2>
           <p class="text-sm text-(--ui-text-muted)">
             {{ isTable
@@ -146,6 +166,15 @@ function resetToDefault() {
             class="flex items-center gap-1 px-3 py-1.5"
           >
             <span class="flex-1 text-sm truncate">{{ labelOf(key) }}</span>
+            <USwitch
+              v-if="canShowEmpty(key)"
+              :model-value="showEmpty.includes(key)"
+              label="Show when empty"
+              size="xs"
+              class="shrink-0 me-1"
+              :ui="{ label: 'text-xs text-(--ui-text-muted) font-normal' }"
+              @update:model-value="setShowEmpty(key, $event)"
+            />
             <USelect
               v-if="isConnection(key)"
               :model-value="displayOf(key)"

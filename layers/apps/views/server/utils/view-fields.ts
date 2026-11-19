@@ -495,6 +495,10 @@ export async function deleteViewField(tx: Tx, view: ViewRow, key: string): Promi
     if (tabFilter) def.filter = tabFilter
     else delete def.filter
     if (def.cardFields) def.cardFields = def.cardFields.filter(f => f !== key)
+    if (def.cardShowEmpty) {
+      def.cardShowEmpty = def.cardShowEmpty.filter(f => f !== key)
+      if (def.cardShowEmpty.length === 0) delete def.cardShowEmpty
+    }
     if (def.sort?.field === key) delete def.sort
     if (tab.layout === 'list' && def.groupField === key) delete def.groupField
     if (def.endField === key) delete def.endField

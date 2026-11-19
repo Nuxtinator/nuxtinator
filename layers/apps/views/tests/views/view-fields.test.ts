@@ -237,6 +237,7 @@ describe('view fields', () => {
       body: {
         definition: {
           cardFields: ['status', temp.key],
+          cardShowEmpty: [temp.key],
           filter: { match: 'all', rules: [{ field: temp.key, op: 'gt', value: 100 }] }
         }
       },
