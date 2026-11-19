@@ -79,7 +79,20 @@ function toggleSortDir() {
         placeholder="Search…"
         size="sm"
         class="w-56"
-      />
+        :ui="{ trailing: 'pe-1' }"
+        @keydown.esc="q = ''"
+      >
+        <template v-if="q" #trailing>
+          <UButton
+            icon="i-lucide-x"
+            variant="link"
+            color="neutral"
+            size="xs"
+            aria-label="Clear search"
+            @click="q = ''"
+          />
+        </template>
+      </UInput>
       <UButton
         icon="i-lucide-list-filter"
         :variant="filterCount > 0 ? 'soft' : 'ghost'"
