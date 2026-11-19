@@ -1,75 +1,15 @@
-# UI decisions
+# UX feature decisions
 
-Styling and UI choices for the nuxtinator layers, with the reasoning behind each. Check this before changing colors, tokens, surfaces or chrome; add an entry when a new decision is made.
+How particular features look and behave (the launcher, teams, views, records, email admin), with the reasoning behind each and what was rejected. Add an entry when a feature's UX decision is made or reversed.
 
-The rules themselves, as developers in this repo and in consumer projects should follow them, live in [layers/core/DESIGN.md](../layers/core/DESIGN.md), which ships with core. This file keeps the reasoning and the rejected alternatives. When a decision is made or reversed, update both.
+Style choices that hold on any page (colors, tokens, surfaces, containers, chrome, help text, settings-page patterns) go in [ui-style-decisions.md](ui-style-decisions.md).
 
-Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/assets/css/main.css) and [layers/core/app/app.config.ts](../layers/core/app/app.config.ts).
+These entries are also the rules for their feature, with the components it's built from; [layers/core/DESIGN.md](../layers/core/DESIGN.md) doesn't repeat them. A decision here that other pages should follow also gets a rule in DESIGN.md.
 
-## Color palette
+## Launcher, rail and admin shell
 
-- **Light mode uses slate grays; dark mode uses neutral (charcoal) grays.** `app.config` sets `neutral: 'slate'`; the `.dark` block in `main.css` remaps `--ui-color-neutral-*` to Tailwind's neutral scale (`var(--color-old-neutral-*)`).
-  - Pure neutral in light mode was tried and rejected: slate reads better in light mode. Slate-blue in dark mode was rejected in favor of charcoal.
-  - Consequence: a host's `ui.colors.neutral` choice only takes effect in light mode.
-- **First-paint background matches `--ui-bg`**: `#fff` / `#171717` in the inline head style in [layers/core/nuxt.config.ts](../layers/core/nuxt.config.ts). Update it whenever the dark background changes, or dark-mode loads flash the old color.
-
-## Text
-
-- **Text tokens are one step stronger than Nuxt UI's defaults, evenly in both modes**, so readability improves without collapsing the hierarchy.
-
-  | Token | Light | Dark |
-  |---|---|---|
-  | `--ui-text-highlighted` | neutral-950 | `#fff` |
-  | `--ui-text` | neutral-800 | neutral-100 |
-  | `--ui-text-toned` | neutral-700 | neutral-200 |
-  | `--ui-text-muted` | neutral-600 | neutral-300 |
-  | `--ui-text-dimmed` | neutral-500 | neutral-400 |
-
-  Darkening light-mode text two steps (body neutral-900) was rejected: body text became indistinguishable from headings.
-
-## Overridability
-
-- **Core's token overrides are unlayered and use plain `:root` / `.dark` selectors.** A host overrides any of them with an ordinary `:root { … }` or `.dark { … }` rule in its own CSS (host CSS loads after layer CSS). Don't use higher-specificity selectors like `:root:not(.dark)` — they silently beat host overrides.
-- **`--ui-primary` and `--ui-text-inverted` are overridden as a pair, per mode.** Solid buttons, switches and `bg-inverted` surfaces draw `--ui-text-inverted` on them. A host that lightened its brand color for dark mode but set the text color once (white, for the light-mode brand) shipped dark-mode buttons at about 3:1; setting both tokens in `:root` and `.dark` fixed it.
-- **Prefer a named variable over editing a shared Nuxt UI token** when only some surfaces should change (see `--chrome-bg`). Shared tokens like `--ui-bg-elevated` and `--ui-border` are used by many Nuxt UI components.
-
-## Surfaces
-
-- **Cards have a subtle fill.** `UCard` defaults to Nuxt UI's `subtle` variant (`bg-elevated/50` + ring) via `app.config`. Card-like tiles built by hand use `bg-(--ui-bg-elevated)/50 hover:bg-(--ui-bg-elevated)`. Transparent cards with only a border blended into the page.
-- **Card outlines are brighter in dark mode only** (neutral-700, i.e. `--ui-border-accented`): `dark:ring-accented` on `UCard`, `dark:border-(--ui-border-accented)` on hand-built tiles.
-- **Content sits in cards, not loose on the page background.** Each list, form section or group of controls is a `UCard` with its title in `#header`, rows or fields in the body, and its main action ("Add …") in `#footer`.
-  - Sections separated only by headings, whitespace and divider lines were rejected: on a wide screen the inputs and text read as floating in the middle of the page, with nothing showing what belonged together.
-- **A row shows one action button; the rest go in a ⋯ menu.** The value comes first (a time, a name), then usually Change; pause, export and the like sit in a `UDropdownMenu`, destructive items last in their own group in the error color.
-  - Four outline buttons per row (Change, Pause, Remove, Add to calendar) were rejected: every row looked like a toolbar, and Remove sat next to everyday actions.
-  - A ⋯ menu on the card header directly above a row's ⋯ menu was rejected: two identical buttons stacked, with no way to tell which acted on what. A card-level action goes in the footer instead.
-- **Finished items sort last**, with a neutral badge and a muted title, so active work leads.
-- **Labelled dividers use `<USeparator label="…">`**, never a label `<span>` painted with a background over a line. A painted span only matches one surface, so it shows as a box on filled cards.
-- **The global border stays at Nuxt UI's default** (neutral-800 in dark). Brightening `--ui-border` globally was tried and rejected: header, sidebar and divider lines became too prominent.
-
-## Chrome (headers, sidebars, rail)
-
-- **Headers and sidebars use `bg-(--chrome-bg)`**: `--ui-bg-elevated` in light mode; in dark mode a midpoint between neutral-800 and neutral-900, one tone darker than elevated and slightly lighter than the page. Applies to the top bars in `layouts/default.vue` and `layouts/admin.vue`, `AppSidebar` and `SidebarPanel`.
-- **The app rail** stays `bg-neutral-200 dark:bg-neutral-950`. Collapsed it is `w-14` with names on hover; expanded it is `w-56` with names next to the icons, and it pushes the content over rather than covering it. Icons keep the same x position in both states.
 - **Personal apps sit after org apps.** The collapsed rail separates them with the same plain divider it uses under the home icon (it's too narrow for a label); the expanded rail uses `<USeparator label="Personal">`; the launcher popover uses `<USeparator label="Personal">`; dashboards use a "Personal" heading. On a personal app's pages the rail and org switcher keep showing the last active org, so leaving the app returns to it.
 - **Leaving admin**: the admin sidebar (desktop and mobile drawer) opens with a "Back to apps" link above the sections, and the admin header's top-right is a plain × button to the launcher.
-- **The theme toggle sits in the top bar** between the notification bell and the profile icon, in both the desktop and mobile headers (`<ThemeToggle size="sm" />`).
-
-## Help text
-
-- **Explanations go behind an (i) icon, not on the page.** Put `<InfoTip text="…" />` (core) next to the label or heading; it opens the text in a click popover, so it works on touch. For longer help, put `<p>` paragraphs in its default slot. On a `UFormField`, use the `#label` slot: `<template #label>Label <InfoTip text="…" /></template>`.
-  - Full-sentence `description`s under every field, and intro paragraphs under page and section headings, were rejected: the page turned into a wall of text and the controls got lost.
-- **Keep on the page only what the user needs right now**: a short note explaining why a control is disabled (e.g. `help="Set by the platform operator."`), validation errors, and labels. Keep labels short; move the detail into the InfoTip.
-- **Don't add a subtitle that repeats the page title.**
-- InfoTip sits at `vertical-align: -0.2em`, which centres the icon on the label's capital letters; `align-middle` made it sit low.
-
-## Settings pages
-
-- **Settings are rows grouped into a few cards, not one card per setting.** Each row shows a label, the current value and an action (see `SettingsGroup` / `SettingsRow`). A card holding a single button or field read as sparse and made the page long.
-- **Forms stay closed until the user acts.** A row's Change button opens its form under the row, with Save and Cancel; one row is open at a time. The open panel sits on `bg-(--ui-bg-elevated)` with rounded corners, so it reads as revealed content rather than part of the card. Destructive actions (delete account) open the same way, behind an outlined error button.
-- **A page or tab whose settings are edited together may be one open form with a save bar instead of rows.** `SaveBar` sits at the end of the form and sticks to the bottom of the screen, so Save is always in reach on a long page; Save is disabled until something changes and Discard appears beside it. `useUnsavedGuard` confirms before a tab switch, a navigation or closing the browser tab drops unsaved edits.
-  - Rows alone were rejected for these pages: settings that belong together (a site's details, a form's questions with a live preview) had to be opened, saved and closed one at a time, and a preview can't show several unsaved changes at once.
-  - Per-section Save buttons on an open form were rejected: saving one section reloaded the page's data and dropped unsaved edits in the others, and it wasn't clear which button saved what.
-  - The guard's dialog offers Discard or Cancel (stay) only; saving stays on the bar, so there is one way to save. Tabs on a guarded page use `activation-mode="manual"`: closing the dialog returns focus to the clicked tab, and automatic activation reselected it and reopened the dialog.
 
 ## Teams
 
@@ -82,9 +22,8 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
 - **A group has an avatar: an uploaded image, else an icon, else its initials** (`GroupAvatar`). Every list or picker that shows a group shows its avatar beside the name, so a group reads the same everywhere; menu and select items take `avatar: groupAvatarProps(group)` instead of a generic team icon. The image and icon are set in the same modal as the name: Add group opens it empty, the row's Edit opens it filled. An inline rename on the row was replaced by that modal so the avatar and name are edited together.
 - **A group's avatar in that modal is the control for its icon and image.** Clicking it opens a popover with an Icon tab (the icon grid) and an Image tab (a drop zone that also opens the file browser, and Remove); an image file dropped anywhere on the form sets the image too. Picking an icon drops the image, so the avatar always shows what was last chosen. Separate "Icon" and "Image" fields under the name were rejected: they sat apart from the preview they changed, and an icon picked while an image was set changed nothing on screen.
 - **A person's avatar is changed by clicking it** (`UserAvatarPicker`), on `/admin/users` and an org's Members page: the same popover as a group's Image tab, without the Icon tab, and saved at once since those slideovers have no form to save it with. "Upload avatar" and "Remove avatar" buttons under the name were rejected: they took a row of the header for something rarely changed, and groups and people would have set their picture in two different ways.
-- **An icon is picked from a square button showing the icon** (`IconPicker`), which opens a searchable grid. A full-width select-style trigger showing the icon's name was rejected: it read as a text field, and the name (`i-lucide-mail`) means nothing to the person picking.
 
-## Views
+## Views and records
 
 - **A view holds tabs, shown in the header row next to its name.** The view keeps the record type, sharing, a base filter and any hand-picked records; each tab picks its own layout (board, list, table or calendar), grouping, card fields, sort and an extra filter ANDed with the view's. "My tasks" is one view with "My open tasks", "By status" and so on as tabs, so one share covers all of them.
   - A separate container object with its own name ("collection", "workspace", "tracker", "page") was rejected: none fit every record type and layout, and people already make views, so tabs inside a view add no new thing to learn.
@@ -116,7 +55,7 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
   - Showing every view's values on the record page was left out for now: a popular record on a dozen lenses would stack a dozen sections of other people's fields.
   - Letting editors manage fields was left out for now; it's one rule change if teams ask for it.
 - **A card's cover is the first image on its type's cover field** (items: Attachments), shown across the top of board cards. Other files show as a count.
-- **Every record type has a Tags field that can't be hidden, and it suggests the tags already in use as you type**: the tags on that type's records the person can see, most used first. Create appears only when what's typed matches none of them in any case, so "mvp" picks the existing "MVP" rather than adding a second spelling. Free-text chips were rejected because, with nothing suggested, spellings drift and filters miss cards. A fixed multi-select was rejected because only admins could add a tag. Suggestions from every type were rejected because contact tags ("donor") crowded deliverables, and suggestions from records the person can't open were rejected because they would leak a private card's tags.
+- **Every record type has a Tags field (`<RecordsFieldsTagsField>`) that can't be hidden, and it suggests the tags already in use as you type**: the tags on that type's records the person can see, most used first. Create appears only when what's typed matches none of them in any case, so "mvp" picks the existing "MVP" rather than adding a second spelling. Free-text chips were rejected because, with nothing suggested, spellings drift and filters miss cards. A fixed multi-select was rejected because only admins could add a tag. Suggestions from every type were rejected because contact tags ("donor") crowded deliverables, and suggestions from records the person can't open were rejected because they would leak a private card's tags.
 - **Assigning someone who can't see a record asks first**, in a confirm dialog naming them ("Assign and share"), wherever the assignment happens: the record page, a card's details, a board drag, a new card from a view's filters. Only fields that hand a record over (an assignee) share it; other people fields never do, so mentioning someone on a private card can't leak it.
 - **A board or list grouped by status has no "No status" column.** Every record type has a status and a record without a stored one reads as the default, so the column could only ever be empty; dropping a card there is refused. New boards start grouped by status.
 - **Built-in views (declared in code, such as My tasks) sit in their own "Built-in" row above the Teams and Mine columns**, with a "Built-in" badge in the view's header. They open read-only for everyone: no tab, filter, sharing or rename controls. Cards still move between status columns, the list's checkbox still works, and quick-add still creates cards, since those change records, not the view. "Copy view" is how someone makes their own version.
@@ -137,16 +76,16 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
 - **Moving an existing task under one other people can see asks first** ("Move and share"), in the same dialog as assigning: the task and everything under it become visible to everyone who sees the parent. Creating a subtask there doesn't ask, and neither does a move that puts nothing new above the task. A move between branches of one tree asks when the new branch is shared: the first version skipped every move inside a tree, which let a private subtask slide under a shared sibling unannounced.
 - **A record's Share list also shows the access that comes down the tree**: under the direct shares, each task above it that is shared or assigned (with who), and the views holding those tasks ("Through <task>"). Listing only the record's own shares made a subtask under an org-wide card read as private, and made removing a share look like a revoke when the person still saw it from above.
 - **On a board grouped by parent task, a drag moves the card**: it leaves the column it came from, since a task has one parent. Adding the new parent beside the old one, as other connection fields do, showed the card in both columns.
-- **A board card shows each field as an icon and its value, with the label as the icon's tooltip.** A field without an icon of its own takes its kind's (a calendar for dates, people for people fields), and the status, parent and subtasks fields have theirs. A text label before every value ("Status To do", "Assignee Alice") made a six-field card read as a block of text, half of it words that are the same on every card.
+- **A board card shows each field as an icon and its value, with the label as the icon's tooltip.** A field without an icon of its own takes its kind's (`recordsFieldIcon`: a calendar for dates, people for people fields), and the status, parent and subtasks fields have theirs. A text label before every value ("Status To do", "Assignee Alice") made a six-field card read as a block of text, half of it words that are the same on every card.
 - **A record's details show every field's icon before its label**, the same icon its card row has, so a field reads the same on the card and in its details. Showing an icon only on fields that set one left Priority and the dates with icons and Status and Assignees without, which read as a mistake.
-- **A record's details fill the screen in two columns: the long text (a task's description) with connections and activity in the main part, every other field in a sidebar.** A card on a view opens them as a full-screen dialog over the board, and the record page is the same component, so there is one details UI. On a narrow screen the sidebar sits between the description and the activity. The dialog's header has Close where the page has its back link, plus "Open as a page".
+- **A record's details fill the screen in two columns: the long text (a task's description) with connections and activity in the main part, every other field in a sidebar.** A card on a view opens them as a full-screen dialog over the board, and the record page is the same component (`<RecordsDetailView>`, with `embedded` in the dialog), so there is one details UI. On a narrow screen the sidebar sits between the description and the activity. The dialog's header has Close where the page has its back link, plus "Open as a page".
   - The open card is in the view's URL (`?card=`), so going to a record its description links to and pressing Back returns to the card, and the card's address can be shared. It replaces the history entry instead of adding one, so Back never just closes a card.
   - The records under a record (a task's subtasks) are a list in the main part, under the description: a tick box, the name, who it's assigned to, a line to add another, and how many are done in the heading. Done ones are left out until "Show N done" is pressed, and the list stops at 15 rows with "Show N more", so a long or mostly finished breakdown doesn't push the activity off the screen; the count in the heading still covers all of them. They are work to do, not a property of the task, so they left the sidebar; the parent stays there as a field.
   - A separate "Connections" section that listed every connection field again as chips was removed: each connection field already shows its chips in its own row.
   - A field holding people or linked records is its chips plus a ghost "+", with no select box: the chips are the value, × on a chip removes it, and "+" opens the search. A select box above the chips showed every name twice, and one saying "3 linked" or "1 assignee" above the chips told the reader nothing the chips didn't. Putting the chips inside the select box was rejected because a chip couldn't be removed without opening the menu, and an avatar stack with no names because the sidebar has room for the names. A single person is a ghost button showing them, which opens the search to change them.
   - The narrow slideover it replaces showed every field as a row, so the description was a three-line box squeezed beside its label, and comments were only on the record page.
   - A second, slideover-sized layout kept beside the page was rejected: two UIs for one record had already drifted (only the page asked for a closing reason).
-- **An empty field in a record's details is an add button, not a row.** Each sidebar section ends with a strip of small buttons, one per empty field, in the fields' order; pressing one opens the field as a row with its editor ready (the date picker showing, the people search open, the cursor in the box). A new task showed ten rows with one value among them; now it shows Status and a few lines of buttons. It applies to every record type, in the dialog and on the record's page, and to a view's own fields.
+- **An empty field in a record's details is an add button, not a row** (`<RecordsFieldGroup>`). Each sidebar section ends with a wrapping strip of small outline buttons (a plus, the field's icon, its label), one per empty field, in the fields' order; pressing one opens the field as a row with its editor ready (the date picker showing, the people search open, the cursor in the box). A new task showed ten rows with one value among them; now it shows Status and a few lines of buttons. It applies to every record type, in the dialog and on the record's page, and to a view's own fields.
   - Empty means no value, blank text or an empty list. Zero is a value, and so is a "No" someone chose: a yes/no field is a button only until it's first set, and its button sets it to Yes.
   - A row opened from its button and left empty goes back to a button. A row that had a value and was cleared stays until the details are opened again, so replacing a value doesn't send the person down to the strip to find the field.
   - A required field keeps its row while empty, asterisk and all: a missing required value is the one empty field that has to stand out.
@@ -155,7 +94,7 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
   - The strip sits at the end of its own section, so a field appears where its button was. Putting the buttons under the title across the main part (where Trello has them) was rejected because the row then appears in the other column; one strip for the whole sidebar was rejected for the same reason.
   - A single "+ Add field" button with a menu was rejected: every add took two clicks and the available fields couldn't be seen without opening it. Capping the strip at a few buttons with "more" was left out for now; all of them wrap.
   - Letting a type pin fields as always shown was rejected as one more setting to explain. Collapsing only some kinds (tags, people, files) was rejected because a new task still showed five or six empty rows.
-- **A task's description is rich text**: headings, bulleted and numbered lists, quotes, bold, italic, strikethrough, inline code, links, and links to other cards. The toolbar sits above the text; typing Markdown ("# ", "- ", "**bold**") formats as you go; "#" (or the toolbar's # button) searches every record type the person can read and inserts the pick as a chip that opens that card. Clicking a link opens it, in the editor too. It saves when focus leaves the field, like every other field, and the timeline says only "changed Description".
+- **A task's description is rich text** (a `rich_text` field, edited with `<RecordsFieldsRichTextField>`): headings, bulleted and numbered lists, quotes, bold, italic, strikethrough, inline code, links, and links to other cards. The toolbar sits above the text; typing Markdown ("# ", "- ", "**bold**") formats as you go; "#" (or the toolbar's # button) searches every record type the person can read and inserts the pick as a chip that opens that card. Clicking a link opens it, in the editor too; the toolbar's link button takes the URL in a small popover, not `prompt()`. It saves when focus leaves the field, like every other field, and the timeline says only "changed Description".
   - It also has checkbox lists (the toolbar's checklist button, or "[ ] " at the start of a line), "@" to mention a person, and images: paste, drop or pick one and it uploads to the card's Attachments and shows in the text.
   - A mention tells the person, in the app and by email, only if they can already open the card. Sharing the card with whoever is mentioned was rejected: only assigning hands a card over, so a name typed in a private card can't leak it. The person writing isn't told who wasn't notified; that is the gap to close next.
   - While an image uploads, the text shows the local file dimmed and pulsing and a line under the text says "Uploading image…"; a failed upload takes the preview out and says why. With no sign of the upload, a paste looked like it had done nothing.
@@ -165,8 +104,6 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
   - A chip shows the card's name of the moment. The name saved in the text is only what agents and exports read; a reader who can't open the linked card sees that saved name.
   - A card lists the cards that link to it under "Mentioned in", below its connections, showing only the ones the reader can open. It is left out when there are none.
   - A floating toolbar that appears on selection was rejected for the first version: nobody finds headings or lists that way.
-- **People on cards and list rows are avatars without names**: the image, else two initials (first and last name, or the first two letters of a single name), the same initials a member's own avatar shows. The name is the avatar's tooltip. Avatar plus full name was rejected as the widest thing on the card, more so once a task can have several assignees. One-letter initials were rejected: without the name beside them they can't tell Alice from Adam.
-- **A person without an avatar image gets their initials on a color of their own**, one of twelve soft hues (`USER_AVATAR_COLORS` in core, shown on `/kitchen`), so avatars that carry no name still differ at a glance. An uploaded image replaces it. The color is worked out from the user's id, the same everywhere, and nothing is stored. Saving a random color on each user was rejected: it would put a default in the database, and changing the palette would need a backfill. Saturated fills with white initials were rejected as too loud beside the app's subtle badges.
 - **A task can be assigned to several people.** Everyone named sees the task and is told about it. On a board grouped by assignee the card sits in each assignee's column, and dragging it swaps the person it was dragged from for the one it lands on.
 - **Another app shows a view inside its own page as an embedded panel** (meetings' Tasks tab shows the meeting's tasks through a parameterized built-in view). The panel drops the back button and title, keeps its active tab to itself rather than in the page's URL, and has an "Open in Views" link. Building a separate task list inside each app was rejected: two UIs for the same tasks would drift apart.
 

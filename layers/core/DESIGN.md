@@ -2,7 +2,9 @@
 
 For anyone building pages in a nuxtinator host or layer. Read this before any UI work and follow it. In a consumer project it sits at `_layers/core/DESIGN.md`.
 
-The reasoning behind each rule, and what was tried and rejected, is in `documentation/ui-decisions.md` in the nuxtinator repo. Change a rule there and here together.
+These rules hold on any page. How one feature works (a record's details, a view's board) and the components it's built from are in `documentation/ux-feature-decisions.md` in the nuxtinator repo, not here.
+
+The reasoning behind each rule, and what was tried and rejected, is in the nuxtinator repo: `documentation/ui-style-decisions.md`, or `documentation/ux-feature-decisions.md` for a rule that came out of one feature. Change a rule there and here together.
 
 ## Use the core components
 
@@ -62,12 +64,6 @@ Either way, destructive actions open behind an outlined error button and confirm
 - Creating something starts from an "Add …" button that opens a modal with its fields. No input field sitting next to the create button on the page.
 - A list page split into columns by who an item is for (Teams / Mine) puts a ghost "+" in each column's header instead of one page-level button; it opens the create modal already set to that column's audience.
 - Items declared in code that nobody can change (a built-in view) sit in their own "Built-in" row above those columns and carry a "Built-in" badge in their header. They show no rename, sharing or settings controls; a "Copy" action makes an editable one.
-- A record with records under it (a task's subtasks) keeps them off its card: the card shows their progress, and that progress opens the record's own board. Clicking the rest of the card opens its details as usual. The board's header shows what leads to it as a trail (the view the person came from, then each record above) instead of a "Built-in" badge, and its back arrow goes up one level.
-- A record's details are two columns (`<RecordsDetailView>`): its long text, connections and activity in the main part, every other field as a row in a sidebar. Records under it (a task's subtasks, a deliverable's tasks) are a tick-off list in the main part, not a sidebar row. Opened from a list or board they fill the screen as a dialog (`embedded`); don't build a second, smaller details panel. Show a value once: a field holding people or linked records shows them as chips, each with an × to remove it, followed by a ghost "+" that opens the search; there's no select box. A field holding one person is a ghost button showing that person, which opens the search.
-- In a record's details an empty field is an add button, not a row (`<RecordsFieldGroup>`). Each sidebar section ends with a wrapping strip of small outline buttons, one per empty field: a plus, the field's icon, its label. Pressing one opens the field as a row with its editor ready; left empty, the row goes back to a button. Only people who can edit see the buttons; everyone else sees just the fields with a value. A required field keeps its row while empty. Don't render an empty field as a row with "—".
-- A record's tags field (`<RecordsFieldsTagsField>`) suggests the tags already used on that type's records as you type, most used first, and offers Create only when what's typed matches none of them in any case.
-- Formatted long text is a `rich_text` record field, edited with `<RecordsFieldsRichTextField>`: a toolbar above the text, Markdown shortcuts as you type, checkbox lists, "/" for a menu of everything that can be inserted, "@" to mention a person, "#" to link another record, and images by paste, drop or the toolbar. It saves when focus leaves it. Don't use `prompt()` for a link's URL; the toolbar's link button opens a small popover.
-- A board card shows each field as its icon, then the value; the label is the icon's tooltip. A record's details show the same icon before each field's label. A field with no icon of its own gets its kind's (`recordsFieldIcon`).
 - People on a card or list row are avatars only, never names (`userAvatarProps`), with the name as the tooltip.
 - To show another app's content inside your page (a meeting's tasks), embed that app's own panel without its back button and title, with an "Open in <App>" link. Don't build a second UI for the same data.
 - A modal with a form uses `UModal`'s `title`, `#body` and `#footer`: the title in the header, fields in the body with `space-y-5`, Cancel and the main action at the end of the footer (the submit button points at the form with `form="<id>"`).

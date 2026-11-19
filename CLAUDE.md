@@ -333,7 +333,10 @@ Database is Postgres via Kysely + `kysely-postgres-js`. Schema composed: core ta
 
 ## User instruction reminders
 
-- Before any UI work, read [layers/core/DESIGN.md](layers/core/DESIGN.md) and follow it. When a UI decision is made or reversed, update DESIGN.md (the rule) and [documentation/ui-decisions.md](documentation/ui-decisions.md) (the reasoning and what was rejected).
+- Before any UI work, read [layers/core/DESIGN.md](layers/core/DESIGN.md) and follow it; when working on a feature, also read its entries in [documentation/ux-feature-decisions.md](documentation/ux-feature-decisions.md). When a UI decision is made or reversed, record it, with the reasoning and what was rejected, in one of two files:
+  - [documentation/ui-style-decisions.md](documentation/ui-style-decisions.md) for style that holds on any page: colors, tokens, surfaces, containers, chrome, help text, settings-page patterns, core controls. Update its rule in DESIGN.md too.
+  - [documentation/ux-feature-decisions.md](documentation/ux-feature-decisions.md) for how one feature works (views, records, teams, email admin, …), naming the components it's built from. DESIGN.md gets a rule only when other pages should follow it.
+  The test: if the decision would hold on a page unrelated to the feature where it came up, it's style.
 - App-layer pages live at `app/pages/<appId>/...`. Don't write them with org-slug prefixes — the tenancy layer adds those automatically when loaded.
 - Layer code that touches the database imports `db` from `#core/server/utils/database`. Only the tenancy layer imports `adminDb` (via `#tenant/admin-db`); doing so from outside that layer is a tenancy contract violation.
 - Server route handlers that need user identity / permissions use `defineTenantHandler` from `#tenant/server`. In single mode it's just `requireAuth` + a transaction; in multi mode it adds the org context.
