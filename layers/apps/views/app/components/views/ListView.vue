@@ -68,9 +68,12 @@ function onDragStart(event: DragEvent, recordId: string, fromColumn: string) {
   emit('dragstart')
 }
 
+// A drag ends once: on its drop, or on dragend when it was cancelled. A row
+// dropped in another section is unmounted before its dragend could arrive.
 function onDragEnd() {
-  dragging.value = null
   dropTarget.value = null
+  if (!dragging.value) return
+  dragging.value = null
   emit('dragend')
 }
 
@@ -83,8 +86,7 @@ function onDragOver(event: DragEvent, section: string, before: string | null) {
 function onDrop(section: string) {
   const drag = dragging.value
   const target = dropTarget.value
-  dragging.value = null
-  dropTarget.value = null
+  onDragEnd()
   if (!drag || !target || target.section !== section) return
   if (drag.recordId === target.before) return
   const column = sections.value.find(s => s.key === section)

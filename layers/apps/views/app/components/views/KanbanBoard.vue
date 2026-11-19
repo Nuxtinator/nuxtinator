@@ -92,13 +92,16 @@ function onDragStart(payload: { recordId: string }) {
   emit('dragstart')
 }
 
+// A drag ends once: on its drop, or on dragend when it was cancelled. A card
+// dropped in another column is unmounted before its dragend could arrive.
 function onDragEnd() {
+  if (draggingId.value === null) return
   draggingId.value = null
   emit('dragend')
 }
 
 function onDrop(columnKey: string, payload: { recordId: string, fromColumn: string | null, beforeRecordId: string | null }) {
-  draggingId.value = null
+  onDragEnd()
   if (payload.recordId === payload.beforeRecordId) return
   const column = columns.value.find(c => c.key === columnKey)
   if (!column) return

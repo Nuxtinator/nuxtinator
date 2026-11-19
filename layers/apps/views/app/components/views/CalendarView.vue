@@ -99,9 +99,12 @@ function onDragStart(event: DragEvent, item: ViewsBoardItem, fromDay: string | n
   emit('dragstart')
 }
 
+// A drag ends once: on its drop, or on dragend when it was cancelled. A
+// record dropped on another day is unmounted before its dragend could arrive.
 function onDragEnd() {
-  dragging.value = null
   dropDay.value = null
+  if (!dragging.value) return
+  dragging.value = null
   emit('dragend')
 }
 
@@ -115,8 +118,7 @@ function onDragOver(event: DragEvent, day: string) {
 // third day of a span keeps it the third day); its end moves with it.
 function onDrop(day: string) {
   const drag = dragging.value
-  dragging.value = null
-  dropDay.value = null
+  onDragEnd()
   if (!drag) return
   const startRaw = viewsItemValue(drag.item, dateKey.value)
   const start = viewsValueDay(startRaw)
