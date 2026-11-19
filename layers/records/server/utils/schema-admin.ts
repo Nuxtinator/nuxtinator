@@ -21,7 +21,7 @@ import { sql } from 'kysely'
 import type { Selectable, Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
-import { RECORDS_RESERVED_TYPE_KEYS, storageOf } from '#records'
+import { RECORDS_RESERVED_TYPE_KEYS, isRecordsTagsField, storageOf } from '#records'
 import type { RecordsCardConnectionDisplay, RecordsCardLayout, RecordsFieldDef, RecordsFieldKind, RecordsFieldOption } from '#records'
 import {
   getRecordType,
@@ -51,8 +51,8 @@ export const RECORDS_OPTION_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/
 // pair two code manifests, except a nesting connection, which is created as
 // a pair; and communication_channel, whose channel type is
 // admin-suppliable and whose storage driver handles the rest; attachments,
-// whose files live in records_attachments. user_select
-// carries code-owned semantics (the assignment summary) and stays code-only.
+// whose files live in records_attachments; and user_select, a people field
+// that hands the record to the people it names, like a task's assignees.
 // Kinds whose storage has no registered driver are refused.
 export const RECORDS_ADMIN_FIELD_KINDS = [
   'text',
@@ -68,7 +68,8 @@ export const RECORDS_ADMIN_FIELD_KINDS = [
   'link',
   'attachments',
   'connection',
-  'communication_channel'
+  'communication_channel',
+  'user_select'
 ] as const
 export type RecordsAdminFieldKind = typeof RECORDS_ADMIN_FIELD_KINDS[number]
 
@@ -628,9 +629,10 @@ export async function createField(
   }
   // Belt and braces: the whitelist above already guarantees this, but the
   // storage contract (custom fields live in jsonb, entries, connection
-  // edges, or a storage driver) is what actually matters downstream.
+  // edges, attachment rows, user refs, or a storage driver) is what actually
+  // matters downstream.
   const storage = storageOf({ kind: input.kind })
-  if (storage !== 'jsonb' && storage !== 'entries' && storage !== 'connections' && storage !== 'channels') {
+  if (storage !== 'jsonb' && storage !== 'entries' && storage !== 'connections' && storage !== 'channels' && storage !== 'attachments' && storage !== 'user_refs') {
     bad(`Unsupported field kind: ${input.kind}`)
   }
 
@@ -931,6 +933,7 @@ export async function updateField(
     }
     if (patch.hidden !== undefined) {
       if (def.column === 'status' && patch.hidden) bad('The status field is always shown')
+      if (isRecordsTagsField({ key: fieldKey, kind: def.kind }) && patch.hidden) bad('The tags field is always shown')
       hidden = patch.hidden
     }
     if (patch.options !== undefined) {

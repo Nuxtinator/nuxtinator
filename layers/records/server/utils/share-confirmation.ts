@@ -113,7 +113,7 @@ export async function recordsUnsharedAssignees(
   recordId: string,
   before: Record<string, unknown> | null
 ): Promise<RecordsShareConfirmationUser[]> {
-  const grantKeys = recordsAccessGrantingKeys(typeKey)
+  const grantKeys = await recordsAccessGrantingKeys(tx, typeKey)
   if (grantKeys.length === 0) return []
   const previous = new Set<string>()
   for (const key of grantKeys) {
@@ -183,7 +183,7 @@ async function sharedBeyondCaller(tx: Tx, ctx: TenantContext, ids: string[]): Pr
   // The records may be of several types, each with its own rules.
   for (const typeKey of new Set(rows.map(r => r.record_type))) {
     const typeIds = rows.filter(r => r.record_type === typeKey).map(r => r.id)
-    const grantKeys = recordsAccessGrantingKeys(typeKey)
+    const grantKeys = await recordsAccessGrantingKeys(tx, typeKey)
     if (grantKeys.length > 0) {
       const named = await tx
         .selectFrom('records_user_refs')
@@ -206,11 +206,24 @@ async function sharedBeyondCaller(tx: Tx, ctx: TenantContext, ids: string[]): Pr
   return false
 }
 
+// Whether everyone in the org already sees every `typeKey` record (view_all),
+// and with it everything under them, so a move shows such a record to nobody new.
+async function everyoneSeesType(tx: Tx, ctx: TenantContext, typeKey: string): Promise<boolean> {
+  const userIds = ctx.orgId
+    ? (await sql<{ user_id: string }>`select user_id from memberships where org_id = ${ctx.orgId}::uuid`.execute(tx)).rows.map(r => r.user_id)
+    : (await tx.selectFrom('users').select('id').execute()).map(r => r.id)
+  for (const userId of userIds) {
+    if (!(await resolveTypePermission(tx, await memberContext(tx, ctx, userId), typeKey, 'view_all'))) return false
+  }
+  return true
+}
+
 /**
  * Refuses (409, `RECORDS_SHARE_CONFIRMATION`) a write that moved an existing
  * record under a record other people can see, unless it was confirmed:
  * everyone who sees the new parent then sees the record and everything under
- * it. A move that puts nothing new above the record doesn't ask.
+ * it. A move that puts nothing new above the record doesn't ask, and neither
+ * does one of a record everyone already sees.
  */
 export async function requireMoveConfirmation(
   tx: Tx,
@@ -224,12 +237,13 @@ export async function requireMoveConfirmation(
     if (!(await sharedBeyondCaller(tx, ctx, move.gained))) continue
     const rows = await tx
       .selectFrom('records_entries')
-      .select(['id', 'name'])
+      .select(['id', 'name', 'record_type'])
       .where('id', 'in', [move.recordId, move.parentId])
       .execute()
     const parent = rows.find(r => r.id === move.parentId)
     const record = rows.find(r => r.id === move.recordId)
     if (!parent || !record) continue
+    if (await everyoneSeesType(tx, ctx, record.record_type)) continue
     throw createError({
       statusCode: 409,
       statusMessage: `Everyone who can see "${parent.name}" will see "${record.name}" and everything under it.`,

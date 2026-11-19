@@ -73,19 +73,12 @@ export const RECORDS_ADMIN_KIND_OPTIONS: Array<{ value: string, label: string }>
   { value: 'attachments', label: 'Files' },
   { value: 'connection', label: 'Connection' },
   // Offered only when a layer registers kind settings for it (crm).
-  { value: 'communication_channel', label: 'Channel' }
+  { value: 'communication_channel', label: 'Channel' },
+  { value: 'user_select', label: 'People' }
 ]
 
-// Display labels for the code-only kinds (not creatable by admins, but they
-// appear in manifest field lists).
-const EXTRA_KIND_LABELS: Record<string, string> = {
-  user_select: 'Users'
-}
-
 export function recordsKindLabel(kind: string): string {
-  return RECORDS_ADMIN_KIND_OPTIONS.find(k => k.value === kind)?.label
-    ?? EXTRA_KIND_LABELS[kind]
-    ?? kind
+  return RECORDS_ADMIN_KIND_OPTIONS.find(k => k.value === kind)?.label ?? kind
 }
 
 /** Field kinds that carry an options vocabulary. */

@@ -166,6 +166,16 @@ describe('a type nested under another', () => {
     expect(await canSee(sam, 'task', loose.id)).toBe(true)
   })
 
+  it('a move doesn\'t ask when everyone already sees every record of its type', async () => {
+    const { admin, owner, samId } = await setup()
+    await $fetch('/api/records/schema/types/task/role-grants', { method: 'PUT', body: { grants: { member: { view_all: true } } }, ...admin })
+    const big = await create(owner, TYPE, { name: 'test-records Shared deliverable' })
+    await $fetch(`/api/records/entries/${TYPE}/${big.id}/shares`, { method: 'POST', body: { userId: samId }, ...owner })
+    const loose = await create(owner, 'task', { name: 'test-records Loose task' })
+    const moved = await patch(owner, 'task', loose.id, { [PARENT]: [big.id] })
+    expect(ids(moved.fields[PARENT])).toEqual([big.id])
+  })
+
   it('deleting the nesting field takes its pair and the links, and the access with them', async () => {
     const { admin, owner, sam, samId } = await setup()
     const big = await create(owner, TYPE, { name: 'test-records Going flat' })

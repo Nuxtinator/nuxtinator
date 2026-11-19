@@ -729,14 +729,14 @@ export async function recordsVisibilityScope(tx: Tx, typeKey: string, ctx?: Tena
     above.push({
       key,
       boardsGrantVisibility: boards(key),
-      grantKeys: recordsAccessGrantingKeys(key),
+      grantKeys: await recordsAccessGrantingKeys(tx, key),
       viewAll: !!ctx && key !== typeKey && await resolveTypePermission(tx, ctx, key, 'view_all')
     })
   }
   return {
     key: typeKey,
     boardsGrantVisibility: boards(typeKey),
-    grantKeys: recordsAccessGrantingKeys(typeKey),
+    grantKeys: await recordsAccessGrantingKeys(tx, typeKey),
     above
   }
 }
@@ -954,6 +954,44 @@ export async function visibleRecordIds(tx: Tx, ctx: TenantContext, ids: string[]
     for (const r of seen) visible.add(r.id)
   }
   return visible
+}
+
+/**
+ * The values of a `typeKey` tags field on the records the caller can see, most
+ * used first: what the field suggests as someone types. `q` keeps the values
+ * containing it.
+ */
+export async function listRecordsTagValues(
+  tx: Tx,
+  ctx: TenantContext,
+  typeKey: string,
+  fieldKey: string,
+  opts: { q?: string, limit?: number } = {}
+): Promise<string[]> {
+  const def = (await getRecordTypeFields(tx, typeKey)).find(d => d.key === fieldKey && !d.orphan)
+  if (!def || def.kind !== 'tags') {
+    throw createError({ statusCode: 400, statusMessage: `'${fieldKey}' is not a tags field` })
+  }
+  let records = tx.selectFrom('records_entries').select('records_entries.id').where('records_entries.record_type', '=', typeKey)
+  if (!(await resolveTypePermission(tx, ctx, typeKey, 'view_all'))) {
+    const scope = await recordsVisibilityScope(tx, typeKey, ctx)
+    records = records.where(eb => visibilityPredicate(eb, ctx.userId, scope))
+  }
+  let qb = tx
+    .selectFrom('records_field_entries')
+    .select(eb => ['normalized_value', eb.fn.countAll<number>().as('uses')])
+    .where('field_key', '=', fieldKey)
+    .where('normalized_value', 'is not', null)
+    .where('record_id', 'in', records)
+  const q = opts.q?.trim()
+  if (q) qb = qb.where('normalized_value', 'ilike', likePattern(q))
+  const rows = await qb
+    .groupBy('normalized_value')
+    .orderBy('uses', 'desc')
+    .orderBy('normalized_value', 'asc')
+    .limit(Math.min(Math.max(opts.limit ?? 20, 1), 50))
+    .execute()
+  return rows.map(r => r.normalized_value!)
 }
 
 /** Id, type and name of those of `ids` the caller may open, latest change first. */

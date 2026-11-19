@@ -1078,7 +1078,7 @@ export async function applyFieldPatch(
   }
 
   // Only a write to an access-granting people field can share the record.
-  const grantKeys = recordsAccessGrantingKeys(typeKey)
+  const grantKeys = await recordsAccessGrantingKeys(tx, typeKey)
   if (opts.sharing && [...listOps.keys()].some(key => grantKeys.includes(key))) {
     await requireShareConfirmation(tx, ctx, typeKey, id, oldRecord?.fields ?? null, opts.sharing)
   }

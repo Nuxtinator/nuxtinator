@@ -13,7 +13,7 @@
 import type { Selectable } from 'kysely'
 import { defineSettings, type DbClient } from '#core/server/utils/settings'
 import type { Database } from '#core/server/database/schema'
-import { RECORDS_REMINDER_FIELD, RECORDS_REMINDER_KEY, RECORDS_REPEAT_FIELD, RECORDS_REPEAT_KEY, storageOf } from '#records'
+import { RECORDS_DEFAULT_TAGS_FIELD, RECORDS_REMINDER_FIELD, RECORDS_REMINDER_KEY, RECORDS_REPEAT_FIELD, RECORDS_REPEAT_KEY, RECORDS_TAGS_KEY, isRecordsTagsField, storageOf } from '#records'
 import type {
   RecordsCardConnectionDisplay,
   RecordsCardLayout,
@@ -212,7 +212,7 @@ export interface RecordsFieldSetting {
   /** Merged options: manifest options ⊳ config overrides + custom options. */
   options?: Record<string, RecordsFieldOption>
   multiple?: boolean
-  /** user_select: naming someone lets them see the record (code-declared only). */
+  /** user_select: naming someone lets them see the record (always, on admin-created people fields). */
   grantsAccess?: boolean
   target?: string
   reverseKey?: string
@@ -280,8 +280,8 @@ function mergeManifestField(key: string, def: RecordsFieldDef, row: RecordFieldR
     required: row?.required_override ?? def.required ?? false,
     // `hidden` is NOT NULL on the row, so it can't express "no override" —
     // when a row exists its value is authoritative (the schema builder
-    // writes the desired state). The status field is always shown.
-    hidden: def.column === 'status' ? false : row ? row.hidden : (def.hidden ?? false),
+    // writes the desired state). The status and tags fields are always shown.
+    hidden: def.column === 'status' || isRecordsTagsField({ key, kind: def.kind }) ? false : row ? row.hidden : (def.hidden ?? false),
     order: row?.order_override ?? def.order ?? 0,
     default: statusDefaultOf(def, options),
     options,
@@ -301,17 +301,18 @@ function mergeManifestField(key: string, def: RecordsFieldDef, row: RecordFieldR
 function mergeOrphanField(row: RecordFieldRow): RecordsFieldSetting {
   const custom = row.kind !== null
   const kind = (row.kind ?? 'text') as RecordsFieldKind
-  // Custom fields never promote to record columns and can't join the
-  // user_refs storage class (it carries code-owned semantics), so storage is
-  // clamped to entries or jsonb — except connection, whose target type is
+  // Custom fields never promote to record columns, so storage is clamped to
+  // entries or jsonb — except connection, whose target type is
   // kept in config and whose edges are forward-only unless it is one side of
   // a hierarchy pair (config.hierarchy with config.reverseKey), attachments, whose files
-  // live in their own table, and communication_channel, whose one definition
-  // input (the channel type, kept in config by the schema builder) is
-  // admin-suppliable, so it routes to the channel storage driver like a
-  // manifest channel field.
+  // live in their own table, user_select, a multi-person field in user refs
+  // that lets the people it names see the record, and communication_channel,
+  // whose one definition input (the channel type, kept in config by the
+  // schema builder) is admin-suppliable, so it routes to the channel storage
+  // driver like a manifest channel field.
   const natural = storageOf({ kind })
-  const storage = natural === 'channels' || natural === 'entries' || natural === 'connections' || natural === 'attachments' ? natural : 'jsonb'
+  const storage = natural === 'channels' || natural === 'entries' || natural === 'connections' || natural === 'attachments' || natural === 'user_refs' ? natural : 'jsonb'
+  const people = custom && kind === 'user_select'
   return {
     key: row.field_key,
     kind,
@@ -326,7 +327,8 @@ function mergeOrphanField(row: RecordFieldRow): RecordsFieldSetting {
     channelType: typeof row.config.channelType === 'string' ? row.config.channelType : undefined,
     target: typeof row.config.target === 'string' ? row.config.target : undefined,
     ...(kind === 'connection' ? customHierarchyOf(row.config) : {}),
-    multiple: kind === 'connection' ? true : undefined,
+    multiple: kind === 'connection' || people ? true : undefined,
+    grantsAccess: people ? true : undefined,
     custom,
     orphan: !custom
   }
@@ -372,14 +374,16 @@ export const RECORDS_DEFAULT_STATUS_FIELD: RecordsFieldDef = {
 /**
  * The code-owned field defs of a type: its manifest's fields (extensions
  * included), or the intrinsic name field for a type without a manifest, plus
- * the default status field when none of them is the status column, and the
- * reminder and repeat fields unless it declares its own (they show only on a
- * type with a due date; see getRecordTypeFields).
+ * the default status field when none of them is the status column, the
+ * default tags field unless it declares its own, and the reminder and repeat
+ * fields unless it declares its own (they show only on a type with a due
+ * date; see getRecordTypeFields).
  */
 export function recordTypeCodeFields(manifest: RecordTypeManifest | undefined): Record<string, RecordsFieldDef> {
   const fields: Record<string, RecordsFieldDef> = manifest ? { ...manifest.fields } : { name: RECORDS_INTRINSIC_NAME_FIELD }
   const hasStatus = Object.values(fields).some(def => def.column === 'status')
   if (!hasStatus && !('status' in fields)) fields.status = RECORDS_DEFAULT_STATUS_FIELD
+  if (!(RECORDS_TAGS_KEY in fields)) fields[RECORDS_TAGS_KEY] = RECORDS_DEFAULT_TAGS_FIELD
   if (!(RECORDS_REMINDER_KEY in fields)) fields[RECORDS_REMINDER_KEY] = RECORDS_REMINDER_FIELD
   if (!(RECORDS_REPEAT_KEY in fields)) fields[RECORDS_REPEAT_KEY] = RECORDS_REPEAT_FIELD
   return fields
@@ -418,13 +422,13 @@ export async function getRecordTypeFields(tx: DbClient, typeKey: string): Promis
 
 /**
  * Keys of the type's people fields that let the people they name see the
- * record. The flag is code-only (admins can't create people fields or change
- * it), so this reads the registry, never the database.
+ * record: code fields declared with `grantsAccess`, and every people field an
+ * admin created.
  */
-export function recordsAccessGrantingKeys(typeKey: string): string[] {
-  return Object.entries(recordTypeCodeFields(getRegisteredRecordType(typeKey)))
-    .filter(([, def]) => def.kind === 'user_select' && def.grantsAccess === true && !def.column)
-    .map(([key]) => key)
+export async function recordsAccessGrantingKeys(tx: DbClient, typeKey: string): Promise<string[]> {
+  return (await getRecordTypeFields(tx, typeKey))
+    .filter(def => !def.orphan && def.kind === 'user_select' && def.grantsAccess === true && !def.column)
+    .map(def => def.key)
 }
 
 /**

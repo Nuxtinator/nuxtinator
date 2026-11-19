@@ -428,6 +428,7 @@ async function removeRecord() {
                 :value="fieldValue(field)"
                 :editable="canEdit && fieldEditable(field)"
                 :upload-url="field.kind === 'attachments' ? `/api/records/entries/${typeKey}/${recordId}/attachments?field=${field.key}` : undefined"
+                :suggest-url="field.kind === 'tags' ? `/api/records/entries/${typeKey}/tags?field=${field.key}` : undefined"
                 @commit="commitField(field, $event)"
                 @uploaded="onWidgetChanged"
               />

@@ -25,7 +25,7 @@ A member creates a board such as "ways to bake a pizza" from generic `item` card
 
 - `item` (the freeform card: notes, tags, link, date, people, priority, files with a cover image) and `task` (one or more assignees, priority, start and due dates, tags, subtasks, files, To do / In progress / Done) ship as built-in types that orgs can hide, field by field or whole. A generic item covers most needs.
 - Members don't hold `view_all` on items or tasks, so they're personal by default. A member sees what they created, what was shared with them, the tasks assigned to them, and the cards on hand-picked views they can open.
-- Access only comes from sharing. Naming someone in a people field doesn't share a card with them; the exceptions are a task's assignee and a contact's Assigned to, which hand the record over. Assigning someone who can't see the record yet asks first, everywhere: the record page, a view, a board drag, a new card and MCP (which needs `share: true`).
+- Access only comes from sharing. Naming someone in a people field doesn't share a card with them; the exceptions are a task's assignee, a contact's Assigned to and any people field an admin adds to a type, which hand the record over. Assigning someone who can't see the record yet asks first, everywhere: the record page, a view, a board drag, a new card and MCP (which needs `share: true`).
 - Status: built.
 
 ### 1a. Tracking anything, with fields of its own
@@ -93,7 +93,7 @@ The team tracks deliverables through more stages than a task has (Ideas, Waiting
 - The overview is a view of deliverables grouped by their status. Each card shows its tasks' progress, which opens a board of those tasks; a task's subtasks open the same way one level down, and the header's trail leads back up through the deliverable.
 - A top-level task belongs to a deliverable, a subtask to its parent task. Whoever can see a deliverable sees everything under it.
 - Tasks keep their three statuses, and deliverables never show up in My tasks.
-- A deliverable can't have a people field (admins can't create those), so "who owns it" is shown by sharing it or by who its tasks are assigned to.
+- An admin adds an Assignees people field to deliverables. Naming someone there hands them the deliverable and everything under it, after the same confirmation as a task's assignee, and tells them.
 - Status: built. A task can't be turned into a deliverable; it would have to be created again as one.
 
 ### 5. A window onto shared data

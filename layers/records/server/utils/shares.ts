@@ -193,7 +193,7 @@ export const RECORDS_ANCESTOR_SHARE_SOURCE = 'records:ancestor'
 async function recordAudience(tx: Tx, typeKey: string, recordId: string): Promise<RecordsShareVia['audience']> {
   const audience: RecordsShareVia['audience'] = (await listShares(tx, recordId))
     .map(s => ({ kind: 'user', name: s.name, level: s.level }))
-  const grantKeys = recordsAccessGrantingKeys(typeKey)
+  const grantKeys = await recordsAccessGrantingKeys(tx, typeKey)
   if (grantKeys.length === 0) return audience
   const named = await tx
     .selectFrom('records_user_refs')

@@ -36,11 +36,14 @@ const props = withDefaults(defineProps<{
   images?: RecordsAttachmentValue[]
   /** Rich text fields: where a new image uploads. */
   imageUploadUrl?: string
+  /** Tags fields: where the editor gets its suggestions. */
+  suggestUrl?: string
   layout?: 'row' | 'compact' | 'stacked'
 }>(), {
   uploadUrl: undefined,
   images: undefined,
   imageUploadUrl: undefined,
+  suggestUrl: undefined,
   layout: 'row'
 })
 
@@ -91,6 +94,7 @@ const formatted = computed(() => renderer.value.format(props.value, props.field,
 
 const editorProps = computed(() => {
   if (props.field.kind === 'attachments') return { uploadUrl: props.uploadUrl }
+  if (props.field.kind === 'tags') return { suggestUrl: props.suggestUrl }
   if (props.field.kind === 'rich_text') return { images: props.images, imageUploadUrl: props.imageUploadUrl }
   if (props.field.kind === 'textarea' && props.layout === 'stacked') return { rows: 6 }
   return {}

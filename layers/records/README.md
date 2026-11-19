@@ -22,6 +22,10 @@ An `attachments` field holds uploaded files. They arrive through `POST /api/reco
 
 Every record type has a status field, so every record can be closed. A type whose code declares no status column (items, admin-created types) gets the default one, Open / Done with Done closed ([definition-settings.ts](server/utils/definition-settings.ts) → `RECORDS_DEFAULT_STATUS_FIELD`). Admins rename it and add, relabel, recolor or remove options in the schema builder; the field can't be hidden, and a status always keeps at least one open and one closed option. A record with no stored status reads, filters and sorts as the field's default.
 
+## Tags
+
+Every record type has a tags field under the key `tags`, always shown. A type whose code declares no `tags` field gets the default one (`RECORDS_DEFAULT_TAGS_FIELD`); a manifest that declares its own places it. Admins can rename it but not hide it, and no other field can take the key. As someone types a tag, the field suggests the tags already on that type's records they can see, most used first, and offers Create only when what's typed matches none of them in any case (`GET /api/records/entries/:type/tags?field=&q=`, `listRecordsTagValues`).
+
 ## Due dates
 
 A type names its due-date field with `dueField` (a manifest key, or picked in the schema builder; tasks use `due_date`). A type with one also has a `reminder` field and a `repeat` field; other types have neither. Both count from the due date, so setting either without one is refused, and clearing the due date clears them ([due-date.ts](server/utils/due-date.ts)).
@@ -51,7 +55,7 @@ An org can also nest one type under another in the schema builder: a connection 
 - A record has one parent, of its own type or another. Writing either field of a pair sets it, a record with two kinds of parent field (a task's parent task and its deliverable) leaves one when put under the other, and a record can't be put under itself or under anything below it.
 - Access comes down across types: whoever sees a deliverable sees its tasks, by the deliverable type's own rules (its shares, its views, and `view_all` on it). The type's read permission still applies to each record.
 - Whoever can see or edit a record can see or edit everything under it. Sharing a big task, assigning it, or putting it on a hand-picked view shares its whole breakdown; a task with no shared ancestor stays as private as before.
-- Moving an existing record under one other people can see asks first, like assigning someone does (`records.share_confirmation`, with a `title` and `confirmLabel` and no `users`). It asks when any record the move puts above it is shared, assigned or on a shared view, so a move from a private branch to a shared branch of the same tree asks too. Creating a record under a parent doesn't ask, and neither does a move that puts nothing new above the record.
+- Moving an existing record under one other people can see asks first, like assigning someone does (`records.share_confirmation`, with a `title` and `confirmLabel` and no `users`). It asks when any record the move puts above it is shared, assigned or on a shared view, so a move from a private branch to a shared branch of the same tree asks too. It doesn't ask when everyone in the org holds `view_all` on the moved record's type, since they already see it and everything under it. Creating a record under a parent doesn't ask, and neither does a move that puts nothing new above the record.
 - Moves in an org run one at a time (`lockRecordsHierarchy`), so two at once can't make a loop or leave a record with two parents.
 - A record's share list (`GET …/shares`, `via`) also lists what shares each record above it that the caller can see: the people it's shared with or assigned to (`sourceId: 'records:ancestor'`) and the views holding it (`through` names the record).
 - Linking a record from its parent's side takes the right to see and edit that record.
@@ -64,7 +68,7 @@ Orgs hide the fields they don't want from the schema builder, and can hide eithe
 
 Server, from a Nitro plugin, via `#records/server`:
 
-- `registerRecordType(manifest)` — a code-declared type. A manifest may name `permissionPrefix` (its own slug namespace; contacts use `crm.contacts`), `app` (the app whose per-org switch gates its records), `boardsGrantVisibility: false` (opt out of board-granted visibility), and a default `card` layout (with an optional `cover` attachments field). A `user_select` field with `grantsAccess: true` lets the people it names see the record. A connection to the type itself with `hierarchy: 'parent'` makes it a tree (see Hierarchies).
+- `registerRecordType(manifest)` — a code-declared type. A manifest may name `permissionPrefix` (its own slug namespace; contacts use `crm.contacts`), `app` (the app whose per-org switch gates its records), `boardsGrantVisibility: false` (opt out of board-granted visibility), and a default `card` layout (with an optional `cover` attachments field). A `user_select` field with `grantsAccess: true` lets the people it names see the record; every people field an admin adds in the schema builder does. A connection to the type itself with `hierarchy: 'parent'` makes it a tree (see Hierarchies).
 - `registerRecordFieldExtension(typeKey, owner, fields)` — add fields to a type another layer owns.
 - `registerRecordsStorageDriver(driver)` — implement a storage class (hydrate, filter, search, validate, write).
 - `registerRecordsClosingHook(fn)` — run when a record closes.
@@ -78,7 +82,7 @@ Client, from a Nuxt app plugin, via `#records`: `registerRecordsDetailPanel`, `r
 
 ## Visibility
 
-Without `<type>.view_all`, a caller sees records they created, records shared with them, records naming them in an access-granting people field (`grantsAccess`: task's assignee, contacts' assigned to), and whatever registered visibility sources grant — the views layer grants the cards of hand-picked views the caller can open, and edit on them at 'edit' — for types whose `boardsGrantVisibility` isn't false. On a type with a hierarchy, seeing a record by any of those also shows everything under it. Other people fields only record who's involved. Anyone who holds the type's read and can see a record can comment on it.
+Without `<type>.view_all`, a caller sees records they created, records shared with them, records naming them in an access-granting people field (`grantsAccess`: task's assignee, contacts' assigned to, any people field an admin added), and whatever registered visibility sources grant — the views layer grants the cards of hand-picked views the caller can open, and edit on them at 'edit' — for types whose `boardsGrantVisibility` isn't false. On a type with a hierarchy, seeing a record by any of those also shows everything under it. Other people fields only record who's involved. Anyone who holds the type's read and can see a record can comment on it.
 
 Naming someone in an access-granting field who can't otherwise see the record shares it with them, so writes a person makes ask first: the record routes refuse such a write with a 409 whose `data.code` is `records.share_confirmation` (with the people it names) until it's resent with `confirmShare: true`, and the MCP write tools want `share: true`. `applyFieldPatch(…, { sharing: 'ask' | 'confirmed' })` and `requireShareConfirmation` do the check for other layers; system writes leave it out. In the UI, `useRecordsShareConfirm()` asks and resends.
 

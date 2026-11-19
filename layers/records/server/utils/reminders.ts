@@ -102,7 +102,7 @@ interface DueRow {
 // Who a reminder goes to: the record's assignees, else whoever set it (else
 // its creator), limited to those who can open it.
 async function recipientsOf(tx: Tx, org: OrgScope | null, row: DueRow): Promise<string[]> {
-  const grantKeys = recordsAccessGrantingKeys(row.record_type)
+  const grantKeys = await recordsAccessGrantingKeys(tx, row.record_type)
   let userIds: string[] = []
   if (grantKeys.length > 0) {
     const refs = await tx

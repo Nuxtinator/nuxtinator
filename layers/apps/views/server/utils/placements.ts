@@ -352,7 +352,7 @@ export async function createViewsCard(
     .execute()
   // Counted once the card is on the view, so people the view already shows
   // its cards to aren't asked about.
-  const grantKeys = recordsAccessGrantingKeys(view.record_type_key)
+  const grantKeys = await recordsAccessGrantingKeys(tx, view.record_type_key)
   if (opts.sharing && Object.keys(fields).some(key => grantKeys.includes(key))) {
     await requireShareConfirmation(tx, ctx, view.record_type_key, record.id, null, opts.sharing)
   }

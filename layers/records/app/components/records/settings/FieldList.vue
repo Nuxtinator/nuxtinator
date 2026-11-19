@@ -3,6 +3,7 @@
 // up/down buttons reorder (the page persists order overrides); the switch
 // toggles visibility in place. Custom fields (admin-created) and stale
 // orphan rows are badged so managers can tell code schema from DB schema.
+import { isRecordsTagsField } from '#records'
 import type { RecordsFieldSetting, RecordsTypeSections } from '../../../utils/field-kinds'
 
 const props = defineProps<{
@@ -105,8 +106,8 @@ function sectionLabel(field: RecordsFieldSetting): string | null {
       >
         <USwitch
           :model-value="!field.hidden"
-          :disabled="busy || field.column === 'status'"
-          :title="field.column === 'status' ? 'The status field is always shown' : undefined"
+          :disabled="busy || field.column === 'status' || isRecordsTagsField(field)"
+          :title="field.column === 'status' ? 'The status field is always shown' : isRecordsTagsField(field) ? 'The tags field is always shown' : undefined"
           :aria-label="`Toggle visibility of ${field.label}`"
           @update:model-value="emit('toggleHidden', field, !$event)"
         />

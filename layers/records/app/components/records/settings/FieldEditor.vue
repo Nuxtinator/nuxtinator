@@ -262,9 +262,15 @@ const deleteLabel = computed(() => {
           </UFormField>
 
           <UFormField
-            label="Kind"
             :help="isEdit ? undefined : 'Locked after the field is created.'"
           >
+            <template #label>
+              Kind
+              <InfoTip
+                v-if="kind === 'user_select'"
+                text="The people named here can see the record and everything under it, and are told when they're added."
+              />
+            </template>
             <USelectMenu
               v-if="!isEdit"
               v-model="kind"

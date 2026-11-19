@@ -222,6 +222,21 @@ export const RECORDS_REPEAT_FIELD = {
   }
 } as const satisfies RecordsFieldDef
 
+// Every type has tags, always shown. A manifest places them by declaring a
+// tags field under this key.
+export const RECORDS_TAGS_KEY = 'tags'
+
+export const RECORDS_DEFAULT_TAGS_FIELD = {
+  kind: 'tags',
+  label: 'Tags',
+  order: 2
+} as const satisfies RecordsFieldDef
+
+/** Whether `field` is a type's always-shown tags field. */
+export function isRecordsTagsField(field: { key: string, kind: string }): boolean {
+  return field.key === RECORDS_TAGS_KEY && field.kind === 'tags'
+}
+
 /** Identity helper that preserves literal types (option keys stay literal). */
 // Type keys that would collide with the records app's own pages
 // (/records/settings), so no record type can take them.
