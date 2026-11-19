@@ -22,7 +22,7 @@ import type {
   ViewsTab,
   ViewsTabView
 } from '../../utils/views-types'
-import { VIEWS_LAYOUT_META, viewsDragMode, viewsIsViewId } from '../../utils/views-types'
+import { VIEWS_LAYOUT_META, viewsDragMode, viewsIsViewId, viewsSubtasksViewId } from '../../utils/views-types'
 import type { ViewsMovePayload } from '../../composables/useViewsDetail'
 import type { ViewsTabChoice } from '../../components/views/TabModal.vue'
 
@@ -63,14 +63,19 @@ function selectTab(id: string) {
 // --- drilling into a record's own board ---------------------------------------
 
 // A view that stands for a record (a task's subtasks board) was reached from
-// another view, named in ?from=; every board opened below keeps naming it, so
-// the header's trail starts where the person did.
+// another view, named in ?from=, through the boards of the records in ?path=;
+// every board opened below keeps naming the view and adds this record to the
+// path, so the header's trail is the steps the person took.
 const fromViewId = computed(() =>
   !props.embedded && viewsIsViewId(route.query.from) ? route.query.from : null)
 const originId = computed<string | null>(() =>
   view.value?.recordId ? fromViewId.value : view.value?.id ?? null)
+const pathIds = computed(() => fromViewId.value ? viewsParsePath(route.query.path) : [])
+const drillPath = computed<string[]>(() =>
+  view.value?.recordId ? [...pathIds.value, view.value.recordId] : [])
 provide(VIEWS_ORIGIN_KEY, originId)
-const { viewRoute } = useViewsSubtasksBoard(originId)
+provide(VIEWS_PATH_KEY, drillPath)
+const { viewRoute } = useViewsSubtasksBoard(originId, drillPath)
 
 const originView = ref<{ id: string, name: string } | null>(null)
 watch(() => view.value?.recordId ? fromViewId.value : null, async (id) => {
@@ -84,16 +89,22 @@ watch(() => view.value?.recordId ? fromViewId.value : null, async (id) => {
   }
 }, { immediate: true })
 
-/** What leads to this view: the view the person started from, then the records above. */
+/**
+ * What leads to this view: the view the person started from, then the records
+ * whose boards they went through. Opened without a starting view (a shared
+ * link), it's every record above.
+ */
 const trail = computed(() => {
   const v = view.value
   if (!v?.recordId) return []
-  return [...(originView.value ? [originView.value] : []), ...v.trail]
+  const above = v.trail.map(crumb => ({ ...crumb, recordId: crumb.id.slice(viewsSubtasksViewId('').length) }))
+  const records = fromViewId.value ? above.filter(crumb => pathIds.value.includes(crumb.recordId)) : above
+  return [
+    ...(originView.value ? [{ ...originView.value, to: viewRoute(originView.value.id) }] : []),
+    ...records.map((crumb, i) => ({ id: crumb.id, name: crumb.name, to: viewRoute(crumb.id, records.slice(0, i).map(r => r.recordId)) }))
+  ]
 })
-const backTo = computed(() => {
-  const up = trail.value[trail.value.length - 1]
-  return up ? viewRoute(up.id) : viewsPath('')
-})
+const backTo = computed(() => trail.value[trail.value.length - 1]?.to ?? viewsPath(''))
 
 // --- record type fields (renderers + filter vocabulary) ---------------------
 
@@ -902,7 +913,7 @@ const menuItems = computed(() => {
             :key="crumb.id"
           >
             <NuxtLink
-              :to="viewRoute(crumb.id)"
+              :to="crumb.to"
               class="truncate max-w-40 hover:text-(--ui-text) hover:underline"
             >
               {{ crumb.name }}
