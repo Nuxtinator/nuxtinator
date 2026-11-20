@@ -88,8 +88,20 @@ export interface ViewValuesTable {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
+// A built-in board's own choices for the record it stands for (see views_005).
+export interface ViewRecordTabsTable {
+  record_id: string
+  // The built-in tab's stable id; no FK.
+  tab_id: string
+  // Only explicit choices (sort); shape validated by server/utils/record-tabs.ts.
+  definition: Record<string, unknown>
+  updated_by: string | null
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
 declare global {
   interface NuxtinatorDatabaseTables {
+    views_record_tabs: ViewRecordTabsTable
     views_values: ViewValuesTable
     views_definitions: ViewsViewsTable
     views_shares: ViewSharesTable

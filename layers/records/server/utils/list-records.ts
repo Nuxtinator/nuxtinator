@@ -71,7 +71,7 @@ export interface RecordsListOpts {
   q?: string
   /** Leaves out records whose status is one of these (records with no status stay). */
   excludeStatuses?: string[]
-  /** Field key — or created_at / updated_at — to sort by. */
+  /** Field key — or created_at / updated_at, or position (the order under each parent) — to sort by. */
   sort?: string
   dir?: 'asc' | 'desc'
   limit?: number
@@ -81,6 +81,8 @@ export interface RecordsListOpts {
    * filter trees and sort like the type's fields.
    */
   virtualFields?: RecordsVirtualField[]
+  /** Orders by this expression over `records_entries` before the sort, empty values last (a view's hand-set order). */
+  orderFirst?: RawBuilder<unknown>
 }
 
 /**
@@ -109,6 +111,9 @@ export interface RecordsListResult {
 
 const DEFAULT_LIMIT = 25
 const MAX_LIMIT = 100
+
+/** The sort key that lists records in the order set under their parent (child-order.ts). */
+export const RECORDS_POSITION_KEY = 'position'
 
 const uuidSchema = z.string().uuid()
 
@@ -829,9 +834,13 @@ export async function listRecords(
 
   const sortKey = opts.sort ?? 'updated_at'
   let query = base.selectAll()
+  if (opts.orderFirst) query = query.orderBy(sql`${opts.orderFirst} asc nulls last`)
   const sortVirtual = virtual.get(sortKey)
   if (sortKey === 'updated_at' || sortKey === 'created_at') {
     query = query.orderBy(`records_entries.${sortKey}`, dir)
+  } else if (sortKey === RECORDS_POSITION_KEY) {
+    // The order set under each parent runs one way; unplaced records follow, oldest first.
+    query = query.orderBy(sql`records_entries.position asc nulls last`).orderBy('records_entries.created_at', 'asc')
   } else if (sortVirtual) {
     if (!RECORDS_VIRTUAL_SCALAR_KINDS.has(sortVirtual.def.kind)) {
       throw createError({ statusCode: 400, statusMessage: `Cannot sort by field: ${sortKey}` })

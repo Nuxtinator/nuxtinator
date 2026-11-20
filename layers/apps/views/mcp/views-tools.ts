@@ -32,6 +32,7 @@ import {
   type ViewTabRow
 } from '../server/utils/views'
 import { updateTab } from '../server/utils/tabs'
+import { withRecordTab } from '../server/utils/record-tabs'
 import { listBuiltInViews } from '../server/utils/builtin-views'
 import { getViewRecords, requireRecordsReadScope, requireRecordsWriteScope, type ViewRecords } from '../server/utils/view-records'
 import { addViewsCard, assertInView, createViewsCard, dragMode, moveViewsCard } from '../server/utils/placements'
@@ -440,7 +441,7 @@ export const getBoardTool = defineMcpTool({
     return await run(ctx, input.org, async (tx, tenant) => {
       requireRecordsReadScope(tenant)
       const { view } = await requireView(tx, tenant, input.view, 'view')
-      const tab = await requireTab(tx, view, input.tab)
+      const tab = await withRecordTab(tx, view, await requireTab(tx, view, input.tab))
       const def = tab.definition as ViewTabDefinition
       const groupField = await groupFieldOf(tx, view, tab)
       if (tab.layout !== 'table' && def.groupField && !groupField) {
@@ -477,6 +478,14 @@ export const getBoardTool = defineMcpTool({
           tab: tabInfo,
           rows: records.items.map(i => ({ id: i.id, name: i.name, status: i.status, ...(i.viewValues ? { values: i.viewValues } : {}) })),
           total: records.total
+        })
+      }
+      if (records.tooMany) {
+        return text(`This board has ${records.total} cards, more than a board shows. Narrow it with a filter (views_set_filter) or read it as a table.`, {
+          view: { id: input.view, name: view.name },
+          tab: tabInfo,
+          total: records.total,
+          tooMany: true
         })
       }
       const columns = await boardColumns(tx, view, tab, records)

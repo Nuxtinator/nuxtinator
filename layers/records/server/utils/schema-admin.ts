@@ -34,6 +34,7 @@ import {
 } from './definition-settings'
 import { getRecordsStorageDriver, getRegisteredRecordType } from './records-registry'
 import { dropHierarchyLinks, lockRecordsHierarchy } from './hierarchy'
+import { RECORDS_POSITION_KEY } from './list-records'
 import { RECORD_ACTIONS, type RecordAction, type RecordsTypeRoleGrants, type RecordsTypeTeamGrants } from './records-perms'
 
 type Tx = Transaction<Database>
@@ -615,8 +616,9 @@ export async function createField(
     bad('Field key must be a slug: [a-z][a-z0-9_]{1,40}')
   }
   // name/status are intrinsic record columns on every type (the list engine
-  // always resolves them), so a custom field can never claim those keys.
-  if (input.fieldKey === 'name' || input.fieldKey === 'status') {
+  // always resolves them), and position is its order under a parent, so a
+  // custom field can never claim those keys.
+  if (input.fieldKey === 'name' || input.fieldKey === 'status' || input.fieldKey === RECORDS_POSITION_KEY) {
     bad(`'${input.fieldKey}' is a reserved field key`)
   }
   if (input.required && input.kind === 'attachments') bad(FILES_NOT_REQUIRED)

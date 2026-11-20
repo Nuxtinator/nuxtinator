@@ -61,7 +61,8 @@ async function childrenOf(tx: Tx, parentKey: string, id: string): Promise<string
 
 // Puts `childId` under `parent` through one of its type's `parentKeys` (null
 // makes it a root) and rewrites the ancestor chain of the record and of
-// everything under it. Resolves to the ancestors the record gained.
+// everything under it. The record loses its place among its old siblings
+// (child-order.ts). Resolves to the ancestors the record gained.
 async function setParent(
   tx: Tx,
   parentKeys: string[],
@@ -88,7 +89,7 @@ async function setParent(
     SET ancestor_ids = ${chainSql} || ancestor_ids[array_position(ancestor_ids, ${childId}::uuid):]
     WHERE ancestor_ids @> ARRAY[${childId}::uuid]
   `.execute(tx)
-  await sql`UPDATE records_entries SET ancestor_ids = ${chainSql} WHERE id = ${childId}::uuid`.execute(tx)
+  await sql`UPDATE records_entries SET ancestor_ids = ${chainSql}, position = NULL WHERE id = ${childId}::uuid`.execute(tx)
   return chain.filter(id => !before.has(id))
 }
 
@@ -178,7 +179,8 @@ export async function dropHierarchyLinks(tx: Tx, parentKey: string): Promise<voi
         SELECT max(u.ord) FROM unnest(e.ancestor_ids) WITH ORDINALITY AS u(id, ord)
         WHERE u.id IN (SELECT id FROM kids)
       ):]
-    END
+    END,
+    position = CASE WHEN e.id IN (SELECT id FROM kids) THEN NULL ELSE e.position END
     WHERE e.id IN (SELECT id FROM kids) OR e.ancestor_ids && ARRAY(SELECT id FROM kids)
   `.execute(tx)
   await tx.deleteFrom('records_connections').where('field_key', '=', parentKey).execute()

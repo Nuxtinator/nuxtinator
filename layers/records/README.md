@@ -61,6 +61,7 @@ An org can also nest one type under another in the schema builder: a connection 
 - Linking a record from its parent's side takes the right to see and edit that record.
 - Filters: "Parent is empty" keeps a list to the top level, "Subtasks is empty" to the leaves, and the parent field's "is anywhere under" (`op: 'under'`) matches at any depth.
 - Deleting a record leaves what was under it as roots.
+- The records under one parent have one shared order: sort by `position` to list them in it, with the ones nobody placed after, oldest first. `placeRecordUnder(tx, ctx, parentId, recordId, { after, before })` moves one ([child-order.ts](server/utils/child-order.ts)); it takes edit access to the parent (`canOrderRecordsUnder`). A caller that also edits one of those records in the same transaction takes `lockRecordsOrderUnder` first. A record put under another parent loses its place, and `position` is a reserved field key.
 
 Orgs hide the fields they don't want from the schema builder, and can hide either type. Members hold no `view_all`, so items and tasks are personal by default: a caller sees records they created, records shared with them, tasks assigned to them, and records on hand-picked views they can open (see Visibility).
 

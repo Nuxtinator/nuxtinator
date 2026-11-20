@@ -2,16 +2,26 @@
 // The tab toolbar: a quick text search that is never saved, the tab's filter
 // behind a "Filter · N" button that opens the filter builder, and — on boards
 // and lists — the tab's saved sort. Filter and sort edits save to the tab for
-// everyone; people who can only view open the builder read-only.
+// everyone; people who can only view open the builder read-only and see the
+// sort. The board of a record's children keeps its sort for that record,
+// changed by people who can edit the record.
 import { recordsFilterRuleCount } from '#records'
 import type { RecordsFieldSetting, RecordsFilterGroup } from '#records/client'
 import type { ViewsTabView, ViewsViewDefinition } from '../../utils/views-types'
+
+type Sort = { field: string, dir: 'asc' | 'desc' }
 
 const props = defineProps<{
   view: ViewsTabView
   viewDefinition: ViewsViewDefinition
   fields: RecordsFieldSetting[]
   canEditDefinition: boolean
+  /** The sort the board's record keeps in place of the tab's (a card's board). */
+  recordSort?: Sort | null
+  /** The viewer can change that sort. */
+  canSortRecord?: boolean
+  /** On a board in the order set under a record: whether anyone has placed a card in it yet. */
+  manualOrdered?: boolean
   saving?: boolean
 }>()
 
@@ -19,7 +29,8 @@ const q = defineModel<string>('q', { default: '' })
 
 const emit = defineEmits<{
   definitionFilter: [filter: RecordsFilterGroup | null]
-  definitionSort: [sort: { field: string, dir: 'asc' | 'desc' } | null]
+  definitionSort: [sort: Sort | null]
+  recordSort: [sort: Sort | null]
 }>()
 
 const filterOpen = ref(false)
@@ -31,32 +42,60 @@ function onFilterSave(filter: RecordsFilterGroup | null) {
   filterOpen.value = false
 }
 
+defineExpose({ openFilter: () => { filterOpen.value = true } })
+
 // --- saved sort -------------------------------------------------------------
 // Edited through a local draft so the select reflects the click before the
-// PATCH round-trip lands; the definition stays the source of truth. Tables
-// sort from their column headers instead, and calendars order by date.
+// save lands; the saved sort stays the source of truth. Tables sort from
+// their column headers instead, and calendars order by date.
 
 const showSort = computed(() => props.view.viewType !== 'table' && props.view.viewType !== 'calendar')
-const sortDraft = ref(props.view.definition.sort ?? null)
-watch(() => props.view.definition.sort, (v) => {
-  sortDraft.value = v ?? null
+const canSort = computed(() => props.canEditDefinition || !!props.canSortRecord)
+const savedSort = computed(() => props.recordSort ?? props.view.definition.sort ?? null)
+const sortDraft = ref(savedSort.value)
+watch(savedSort, (v) => {
+  sortDraft.value = v
 })
 
+// A tab that shows the order set under a record offers it as "Manual". Until
+// anyone places a card that order is the cards oldest first, so it reads as
+// "Created", and the first drag makes it "Manual".
+const offersManual = computed(() => props.view.definition.sort?.field === VIEWS_MANUAL_SORT)
+const manualStarted = computed(() => props.manualOrdered === true)
+const hasManual = computed(() => offersManual.value && manualStarted.value)
 const sortChoices = computed(() => viewsSortChoices(props.fields))
-const sortItems = computed(() =>
-  sortChoices.value.map(c => ({ label: c.label, value: c.key })))
+const sortItems = computed(() => [
+  ...(hasManual.value ? [{ label: 'Manual', value: VIEWS_MANUAL_SORT }] : []),
+  ...sortChoices.value.map(c => ({ label: c.label, value: c.key }))
+])
 
-const effectiveSort = computed(() => sortDraft.value ?? VIEWS_DEFAULT_SORT)
+function shown(sort: Sort): Sort {
+  return sort.field === VIEWS_MANUAL_SORT && !manualStarted.value ? VIEWS_DEFAULT_SORT : sort
+}
+const effectiveSort = computed(() => shown(sortDraft.value ?? VIEWS_DEFAULT_SORT))
+const isManual = computed(() => effectiveSort.value.field === VIEWS_MANUAL_SORT)
+
+// Picking what the board shows on its own stores nothing for the record.
+function saveSort(next: Sort) {
+  if (props.canEditDefinition) {
+    emit('definitionSort', next)
+    return
+  }
+  const own = props.view.definition.sort ?? VIEWS_DEFAULT_SORT
+  const same = (a: Sort, b: Sort) => a.field === b.field && a.dir === b.dir
+  emit('recordSort', same(next, own) || same(next, shown(own)) ? null : next)
+}
 const sortLabel = computed(() =>
-  sortChoices.value.find(c => c.key === effectiveSort.value.field)?.label
+  sortItems.value.find(i => i.value === effectiveSort.value.field)?.label
   ?? effectiveSort.value.field)
 
 const sortField = computed<string>({
   get: () => effectiveSort.value.field,
+  // A newly picked field starts ascending (oldest, A to Z, soonest first).
   set: (field) => {
-    const next = { field, dir: effectiveSort.value.dir }
+    const next = { field, dir: 'asc' as const }
     sortDraft.value = next
-    emit('definitionSort', next)
+    saveSort(next)
   }
 })
 
@@ -66,7 +105,7 @@ function toggleSortDir() {
     dir: effectiveSort.value.dir === 'asc' ? 'desc' as const : 'asc' as const
   }
   sortDraft.value = next
-  emit('definitionSort', next)
+  saveSort(next)
 }
 </script>
 
@@ -114,8 +153,14 @@ function toggleSortDir() {
       <span class="flex-1" />
 
       <template v-if="showSort">
-        <template v-if="canEditDefinition">
-          <span class="text-xs text-(--ui-text-muted)">Sort</span>
+        <template v-if="canSort">
+          <span class="text-xs text-(--ui-text-muted)">
+            Sort
+            <InfoTip
+              v-if="offersManual"
+              text="Everyone sees this board in this order. Manual is the order set by dragging cards; cards nobody has moved stay oldest first."
+            />
+          </span>
           <USelectMenu
             v-model="sortField"
             :items="sortItems"
@@ -125,6 +170,7 @@ function toggleSortDir() {
             class="w-36"
           />
           <UButton
+            v-if="!isManual"
             :icon="effectiveSort.dir === 'asc' ? 'i-lucide-arrow-up-narrow-wide' : 'i-lucide-arrow-down-wide-narrow'"
             variant="ghost"
             color="neutral"
@@ -137,7 +183,7 @@ function toggleSortDir() {
           v-else
           variant="subtle"
           color="neutral"
-          :icon="effectiveSort.dir === 'asc' ? 'i-lucide-arrow-up-narrow-wide' : 'i-lucide-arrow-down-wide-narrow'"
+          :icon="isManual ? 'i-lucide-grip-vertical' : effectiveSort.dir === 'asc' ? 'i-lucide-arrow-up-narrow-wide' : 'i-lucide-arrow-down-wide-narrow'"
         >
           {{ sortLabel }}
         </UBadge>

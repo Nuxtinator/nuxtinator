@@ -66,11 +66,17 @@ export function viewsCardSettable(field: RecordsFieldSetting): boolean {
     && field.key !== RECORDS_REPEAT_KEY && field.key !== RECORDS_REMINDER_KEY
 }
 
-/** How records order when a view saves no sort — the list engine's own fallback. */
+/** How a board or list orders when its tab saves no sort: oldest first. */
 export const VIEWS_DEFAULT_SORT: { field: string, dir: 'asc' | 'desc' } = {
-  field: 'updated_at',
-  dir: 'desc'
+  field: 'created_at',
+  dir: 'asc'
 }
+
+/** The sort that shows the records under a record in the order set there, which a drag changes. */
+export const VIEWS_MANUAL_SORT = 'position'
+
+/** The most cards a board shows (the server's VIEWS_BOARD_CAP); past it the board asks for a filter. */
+export const VIEWS_BOARD_CAP = 500
 
 export interface ViewsCardFieldChoice {
   key: string

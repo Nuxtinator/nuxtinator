@@ -80,6 +80,8 @@ export interface ViewsTab {
   layout: ViewsLayout
   position: string
   definition: ViewsDefinition
+  /** On a built-in that stands for a record: the sort that record keeps in place of the tab's, or null. */
+  recordSort?: { field: string, dir: 'asc' | 'desc' } | null
 }
 
 export interface ViewSummary {
@@ -119,6 +121,8 @@ export interface ViewDetail extends Omit<ViewSummary, 'layout' | 'tabCount' | 't
   recordType: string | null
   /** The views above a built-in that stands for a record, outermost first. */
   trail: Array<{ id: string, name: string }>
+  /** The caller can change the sort and the order set by dragging on the board of the record a built-in stands for. */
+  canOrder?: boolean
 }
 
 /** The built-in view that shows one task's subtasks as a board. */
@@ -200,6 +204,10 @@ export interface ViewRecords {
   dateFieldMissing?: boolean
   /** Calendars: the first records with no date, and how many there are. */
   unscheduled?: { items: ViewsBoardItem[], total: number }
+  /** A board in the order set under a record: whether anyone has placed a card in it yet. */
+  ordered?: boolean
+  /** A board with more records than it shows: no cards are sent, and a filter narrows it. */
+  tooMany?: boolean
 }
 
 export interface ViewsShareEntry {

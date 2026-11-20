@@ -9,6 +9,9 @@
     "./schema": "./server/database/schema.d.ts",
     "./test-helpers": "./tests/helpers/index.ts"
   },
+  "dependencies": {
+    "fractional-indexing": "^3.2.0"
+  },
   "optionalDependencies": {
     "@nuxtinator/core": "*"
   },

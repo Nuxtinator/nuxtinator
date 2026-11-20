@@ -52,7 +52,7 @@ const calendarRange = computed(() => ({ from: calendarDays.value[0]!, to: calend
 const {
   view, tab, records, pending, error,
   q, sort, dir, page, pageSize,
-  refresh, refreshRecords, beginDrag, endDrag, move
+  refresh, refreshRecords, loadMore, beginDrag, endDrag, move
 } = useViewsDetail(viewId, requestedTab, calendarRange)
 
 function selectTab(id: string) {
@@ -277,10 +277,22 @@ function applyOptimisticMove(payload: ViewsMovePayload) {
   }
 }
 
+// A board of the records under one record, sorted Manually, shows their
+// shared order, which people who can edit that record change by dragging.
+// A board with too many cards opens the tab's filter from its message.
+const filterBar = ref<{ openFilter: () => void } | null>(null)
+
+const reordersShared = computed(() => {
+  const t = tab.value
+  if (!view.value?.canOrder || !t) return false
+  const field = t.recordSort?.field ?? t.definition.sort?.field
+  return field === VIEWS_MANUAL_SORT
+})
+
 async function onMove(payload: ViewsMovePayload) {
   // Reordering within a column and moving between columns of one of the
   // view's own fields are view state, which view-only access can't change.
-  if (!canEditDefinition.value && payload.fromColumn === payload.toColumn) return
+  if (!canEditDefinition.value && !reordersShared.value && payload.fromColumn === payload.toColumn) return
   if (!canEditDefinition.value && groupFieldDef.value && viewsIsViewField(groupFieldDef.value)) return
   beginDrag()
   try {
@@ -600,6 +612,22 @@ function onTabSort(next: { field: string, dir: 'asc' | 'desc' } | null) {
     if (next) d.sort = next
     else delete d.sort
   }, 'Failed to save the sort order')
+}
+
+// The board of a record's children keeps its sort for that record.
+async function onRecordSort(next: { field: string, dir: 'asc' | 'desc' } | null) {
+  const v = view.value
+  const t = tab.value
+  if (!v || !t) return
+  saving.value = true
+  try {
+    await $fetch(`/api/views/${v.id}/tabs/${t.id}/record-sort`, { method: 'PUT', body: { sort: next } })
+    await refresh()
+  } catch (err) {
+    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to save the sort order') })
+  } finally {
+    saving.value = false
+  }
 }
 
 function onTabFilter(filter: RecordsFilterGroup | null) {
@@ -1028,14 +1056,19 @@ const menuItems = computed(() => {
 
     <ViewsFilterBar
       v-if="view && tabView"
+      ref="filterBar"
       v-model:q="q"
       :view="tabView"
       :view-definition="view.definition"
       :fields="allFields"
       :can-edit-definition="canEditDefinition"
+      :record-sort="tab?.recordSort"
+      :can-sort-record="!!view.canOrder"
+      :manual-ordered="view.recordId ? tabRecords?.ordered : true"
       :saving="saving"
       @definition-filter="onTabFilter"
       @definition-sort="onTabSort"
+      @record-sort="onRecordSort"
     />
 
     <UAlert
@@ -1100,7 +1133,7 @@ const menuItems = computed(() => {
       class="flex-1 min-h-0 p-4"
     >
       <UAlert
-        v-if="tabRecords?.truncated"
+        v-if="layout === 'calendar' && tabRecords?.truncated"
         color="warning"
         variant="subtle"
         icon="i-lucide-triangle-alert"
@@ -1108,8 +1141,34 @@ const menuItems = computed(() => {
         class="mb-3"
       />
 
+      <div
+        v-if="layout === 'kanban' && tabRecords?.tooMany"
+        class="grid place-items-center h-full text-(--ui-text-muted)"
+      >
+        <div class="text-center max-w-sm space-y-3">
+          <UIcon
+            name="i-lucide-list-filter"
+            class="size-10 opacity-50"
+          />
+          <p class="text-base font-medium text-(--ui-text-highlighted)">
+            {{ tabRecords.total.toLocaleString() }} cards is too many for a board
+          </p>
+          <p class="text-sm">
+            A board shows up to {{ VIEWS_BOARD_CAP }} cards.
+            {{ canEditDefinition ? 'Add a filter to narrow it down.' : 'Search to narrow it down.' }}
+          </p>
+          <UButton
+            v-if="canEditDefinition"
+            icon="i-lucide-list-filter"
+            @click="filterBar?.openFilter()"
+          >
+            Add a filter
+          </UButton>
+        </div>
+      </div>
+
       <ViewsKanbanBoard
-        v-if="layout === 'kanban' && tabView && tabRecords"
+        v-else-if="layout === 'kanban' && tabView && tabRecords"
         :view="tabView"
         :records="tabRecords"
         :fields="allFields"
@@ -1153,11 +1212,13 @@ const menuItems = computed(() => {
           :can-create="canCreate"
           :can-remove="canEditDefinition"
           :done-status="doneStatus"
+          :has-more="tabRecords.truncated"
           @move="onMove"
           @open="openRecordId = $event"
           @quick-add="onQuickAdd"
           @toggle-done="onToggleDone"
           @remove-card="onRemoveCard"
+          @load-more="loadMore"
           @dragstart="beginDrag"
           @dragend="endDrag"
         />

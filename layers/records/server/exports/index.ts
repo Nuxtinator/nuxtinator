@@ -94,7 +94,8 @@ export type {
 export { requireGrantTarget, assertRecordsPermissionSlug, listRecordsUserGrants } from '../utils/user-grants'
 export type { RecordsUserGrantEntry } from '../utils/user-grants'
 
-export { listRecords, listRecordsTagValues, requireRecordType, requireAnyRecordTypeRead, assertRecordVisible, parseRecordsFilterGroup, visibleRecordIds, recordsNamesOf, recordsVisibilityScope, RECORDS_VIRTUAL_SCALAR_KINDS } from '../utils/list-records'
+export { listRecords, listRecordsTagValues, requireRecordType, requireAnyRecordTypeRead, assertRecordVisible, parseRecordsFilterGroup, visibleRecordIds, recordsNamesOf, recordsVisibilityScope, RECORDS_VIRTUAL_SCALAR_KINDS, RECORDS_POSITION_KEY } from '../utils/list-records'
+export { canOrderRecordsUnder, lockRecordsOrderUnder, placeRecordUnder, recordsOrderedUnder } from '../utils/child-order'
 export type { RecordsListOpts, RecordListItem, RecordsListResult, RecordsVisibilityScope, RecordsVirtualField } from '../utils/list-records'
 export { RECORDS_FILTER_ME, recordsFilterRuleCount } from '../../client/filters'
 export type { RecordsFilterGroup, RecordsFilterNode, RecordsFilterRule, RecordsFilterOp } from '../../client/filters'

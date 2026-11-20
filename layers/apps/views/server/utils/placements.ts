@@ -18,6 +18,9 @@
 //   sit in its first column on a hand-picked view, and in a leading
 //   "No column" lane ('') on a view that shows every matching record.
 // - An ungrouped list: the drag only reorders.
+// - A built-in board of the records under one record, sorted by the order set
+//   under it: the order within a column is that shared order (the records
+//   kernel's child order), which only people who can edit the record change.
 //
 // Ranks are fractional indexes (lexicographic, via the fractional-indexing
 // package). The client sends the target column's record ids in visual order
@@ -30,10 +33,12 @@ import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
-import { applyFieldPatch, assertRecordVisible, deleteRecord, getRecordType, recordsAccessGrantingKeys, requireRecordType, requireRecordUpdate, requireShareConfirmation, requireTypePermission, resolveTypePermission } from '#records/server'
+import { applyFieldPatch, assertRecordVisible, canOrderRecordsUnder, deleteRecord, getRecordType, lockRecordsOrderUnder, placeRecordUnder, RECORDS_POSITION_KEY, recordsAccessGrantingKeys, requireRecordType, requireRecordUpdate, requireShareConfirmation, requireTypePermission, resolveTypePermission } from '#records/server'
 import type { RecordsFieldSetting, RecordsSharingMode } from '#records/server'
 import { clearViewValues, isViewFieldKey, setViewValues, viewFieldsWithType } from './view-fields'
 import { getViewsGroupValues, requireRecordsWriteScope } from './view-records'
+import { builtInOf } from './builtin-views'
+import { withRecordTab } from './record-tabs'
 import type { ViewDefinition, ViewRow, ViewsAccessLevel, ViewTabDefinition, ViewTabRow } from './views'
 
 type Tx = Transaction<Database>
@@ -197,11 +202,26 @@ export async function assertInView(tx: Tx, ctx: TenantContext, view: ViewRow, re
   }
 }
 
+// The record whose children the tab shows in their shared order: a built-in
+// that stands for a record, sorted for that record in that order.
+async function sharedOrderParent(tx: Tx, view: ViewRow, tab: ViewTabRow): Promise<string | null> {
+  const parentId = builtInOf(view)?.recordId
+  if (!parentId) return null
+  const seen = await withRecordTab(tx, view, tab)
+  return (seen.definition as ViewTabDefinition).sort?.field === RECORDS_POSITION_KEY ? parentId : null
+}
+
+function neighboursIn(order: string[], recordId: string): { after: string | null, before: string | null } {
+  const i = order.indexOf(recordId)
+  return { after: order[i - 1] ?? null, before: order[i + 1] ?? null }
+}
+
 /**
  * `access` is the caller's level on the view. On field-grouped tabs a drag to
  * another column edits the record, so 'view' is enough and the records
  * kernel's update check decides; the order within a column, own columns and
- * an ungrouped list's order are view state and need 'edit'.
+ * an ungrouped list's order are view state and need 'edit', except where the
+ * tab shows the shared order under a record (sharedOrderParent).
  */
 export async function moveViewsCard(
   tx: Tx,
@@ -244,7 +264,13 @@ export async function moveViewsCard(
     return
   }
 
-  if (input.fromColumn === input.toColumn) requireViewEdit(access)
+  const orderParent = await sharedOrderParent(tx, view, tab)
+  if (input.fromColumn === input.toColumn && !orderParent) requireViewEdit(access)
+  if (orderParent) {
+    // Placing the card writes records, and the order lock comes before any record edit.
+    requireRecordsWriteScope(ctx)
+    await lockRecordsOrderUnder(tx, orderParent)
+  }
   const field = await resolveGroupField(tx, view, def.groupField)
   if (!isValidColumn(field, input.toColumn)) badMove(`Unknown column "${input.toColumn}"`)
 
@@ -278,7 +304,15 @@ export async function moveViewsCard(
     await assertInView(tx, ctx, view, input.recordId)
   }
 
-  if (access !== 'view') await writeRank(tx, view, tab, input)
+  if (orderParent) {
+    if (!input.columnOrder.includes(input.recordId)) badMove('columnOrder must include the moved record')
+    // A card moved to another column by someone who can't reorder keeps its place.
+    if (input.fromColumn === input.toColumn || await canOrderRecordsUnder(tx, ctx, orderParent)) {
+      await placeRecordUnder(tx, ctx, orderParent, input.recordId, neighboursIn(input.columnOrder, input.recordId))
+    }
+  } else if (access !== 'view') {
+    await writeRank(tx, view, tab, input)
+  }
 
   // Sweep the stale source-column rank row when the card left that column.
   const leftSource = dragMode(field) === 'move' || input.toColumn === ''

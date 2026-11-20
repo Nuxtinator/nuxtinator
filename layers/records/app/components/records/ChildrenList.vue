@@ -7,7 +7,8 @@
 // and a long list shows its first rows with a control for the rest. The tick box needs a type with exactly one closed
 // status and no closing reason; other types show each record's status
 // instead. The children may be of another type than the record (a
-// deliverable's tasks). Lists what the caller may see, oldest first.
+// deliverable's tasks). Lists what the caller may see in the order set under
+// the record, the ones nobody placed after them, oldest first.
 import { getRecordsChildrenActions } from '#records'
 import type { RecordListItem } from '../../composables/useRecordsList'
 import type { RecordsFieldSetting } from '../../utils/field-kinds'
@@ -76,7 +77,7 @@ async function refresh() {
   try {
     const url: string = `/api/records/entries/${childType.value}`
     const res = await $fetch<{ items: RecordListItem[] }>(url, {
-      query: { filters: JSON.stringify({ [props.parentKey]: props.recordId }), sort: 'created_at', dir: 'asc', limit: 100 }
+      query: { filters: JSON.stringify({ [props.parentKey]: props.recordId }), sort: 'position', limit: 100 }
     })
     items.value = res.items
     ensureUserIds(res.items.flatMap(item => item.assignedTo)).catch(() => {

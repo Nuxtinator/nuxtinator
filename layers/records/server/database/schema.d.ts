@@ -24,6 +24,8 @@ export interface RecordsEntriesTable {
   // The record's ancestors through its type's hierarchy field, root first;
   // empty for a record with no parent (see records_004).
   ancestor_ids: Generated<string[]>
+  // Its place among the records under the same parent; null until placed (see records_007).
+  position: ColumnType<string | null, string | null | undefined, string | null>
 }
 
 export interface RecordFieldEntriesTable {

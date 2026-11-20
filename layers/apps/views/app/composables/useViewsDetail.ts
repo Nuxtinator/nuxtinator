@@ -12,6 +12,9 @@ import type {
 } from '../utils/views-types'
 
 const POLL_INTERVAL_MS = 15_000
+const LIST_PAGE = 100
+// The server's per-request ceiling for a list.
+const LIST_REQUEST_MAX = VIEWS_BOARD_CAP
 
 export interface ViewsMovePayload {
   recordId: string
@@ -46,6 +49,9 @@ export function useViewsDetail(
   // Table mode pages; boards always load the whole (capped) set.
   const page = ref(1)
   const pageSize = 25
+  // A list loads a page at a time as it scrolls, and each refresh refetches
+  // every row loaded so far, in requests of at most LIST_REQUEST_MAX.
+  const listRows = ref(LIST_PAGE)
 
   let requestId = 0
   let dragDepth = 0
@@ -56,6 +62,21 @@ export function useViewsDetail(
     view.value = await $fetch<ViewDetail>(`/api/views/${id}`)
   }
 
+  async function fetchList(url: string, query: Record<string, unknown>): Promise<ViewRecords> {
+    let first: ViewRecords | null = null
+    const byId = new Map<string, ViewRecords['items'][number]>()
+    for (let offset = 0; offset < listRows.value; offset += LIST_REQUEST_MAX) {
+      const chunk = await $fetch<ViewRecords>(url, {
+        query: { ...query, limit: Math.min(LIST_REQUEST_MAX, listRows.value - offset), offset }
+      })
+      first ??= chunk
+      for (const item of chunk.items) byId.set(item.id, item)
+      if (!chunk.truncated) break
+    }
+    const items = [...byId.values()]
+    return { ...first!, items, truncated: items.length < first!.total }
+  }
+
   async function refreshRecords(): Promise<void> {
     const id = toValue(viewId)
     if (!id || dragDepth > 0) return
@@ -64,18 +85,20 @@ export function useViewsDetail(
     try {
       const isTable = tab.value?.layout === 'table'
       const range = tab.value?.layout === 'calendar' ? toValue(calendarRange) : null
-      const res = await $fetch<ViewRecords>(`/api/views/${id}/records`, {
-        query: {
-          tab: tab.value?.id,
-          q: q.value || undefined,
-          sort: isTable ? sort.value || undefined : undefined,
-          dir: isTable ? dir.value || undefined : undefined,
-          limit: isTable ? pageSize : undefined,
-          offset: isTable ? (page.value - 1) * pageSize : undefined,
-          from: range?.from,
-          to: range?.to
-        }
-      })
+      const url = `/api/views/${id}/records`
+      const query = {
+        tab: tab.value?.id,
+        q: q.value || undefined,
+        sort: isTable ? sort.value || undefined : undefined,
+        dir: isTable ? dir.value || undefined : undefined,
+        limit: isTable ? pageSize : undefined,
+        offset: isTable ? (page.value - 1) * pageSize : undefined,
+        from: range?.from,
+        to: range?.to
+      }
+      const res = tab.value?.layout === 'list'
+        ? await fetchList(url, query)
+        : await $fetch<ViewRecords>(url, { query })
       if (reqId !== requestId) return
       records.value = res
       error.value = null
@@ -137,11 +160,23 @@ export function useViewsDetail(
     await $fetch(`/api/views/${id}/move`, { method: 'POST', body: { ...payload, tabId: tab.value?.id } })
   }
 
+  /** A list's next page, once the rows loaded so far have arrived. */
+  async function loadMore(): Promise<void> {
+    if (pending.value || tab.value?.layout !== 'list' || !records.value?.truncated) return
+    listRows.value += LIST_PAGE
+    await refreshRecords()
+  }
+
   watch(() => toValue(viewId), () => {
     view.value = null
     records.value = null
+    listRows.value = LIST_PAGE
     refresh()
   }, { immediate: true })
+
+  watch(q, () => {
+    listRows.value = LIST_PAGE
+  })
 
   watch([q, sort, dir, page], () => {
     refreshRecords()
@@ -161,6 +196,7 @@ export function useViewsDetail(
     sort.value = null
     dir.value = null
     page.value = 1
+    listRows.value = LIST_PAGE
     refreshRecords()
   })
 
@@ -177,6 +213,7 @@ export function useViewsDetail(
     pageSize,
     refresh,
     refreshRecords,
+    loadMore,
     beginDrag,
     endDrag,
     move

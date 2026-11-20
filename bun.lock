@@ -264,7 +264,7 @@
     },
     "layers/apps/views": {
       "name": "@nuxtinator/views",
-      "version": "0.2.0",
+      "version": "0.4.0",
       "dependencies": {
         "fractional-indexing": "^3.2.0",
       },
@@ -282,7 +282,7 @@
     },
     "layers/core": {
       "name": "@nuxtinator/core",
-      "version": "4.0.0",
+      "version": "4.0.1",
       "dependencies": {
         "@bradenmacdonald/s3-lite-client": "^1.0.0",
         "@nuxtjs/i18n": "^10.6.0",
@@ -330,7 +330,7 @@
     },
     "layers/mail": {
       "name": "@nuxtinator/mail",
-      "version": "1.0.0",
+      "version": "1.0.2",
       "dependencies": {
         "nodemailer": "^10.1.0",
         "postal-mime": "^4.2.1",
@@ -382,7 +382,10 @@
     },
     "layers/records": {
       "name": "@nuxtinator/records",
-      "version": "0.2.0",
+      "version": "0.5.0",
+      "dependencies": {
+        "fractional-indexing": "^3.2.0",
+      },
       "optionalDependencies": {
         "@nuxtinator/core": "*",
       },

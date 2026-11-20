@@ -6,6 +6,7 @@
 // per record, the columns a connection-grouped board shows, values and
 // progress for card fields the list rows don't carry, placement/rank rows).
 
+import { sql } from 'kysely'
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
@@ -27,15 +28,16 @@ import { isViewFieldKey, readViewValues, viewFieldGroupValues, viewFieldsOf, vie
 
 type Tx = Transaction<Database>
 
-// A board loads every card at once (columns need the full set); this is the
-// safety ceiling. Views past it truncate and say so — the fix is filters.
+// A board loads every card at once (columns need the full set); past this
+// it shows none and asks for a filter. It also caps a list's page and a
+// calendar's records.
 export const VIEWS_BOARD_CAP = 500
 
 export interface ViewsRecordsOverlay {
   q?: string
   sort?: string
   dir?: 'asc' | 'desc'
-  /** Table mode only — boards always load the whole (capped) set. */
+  /** Tables and lists page; boards always load the whole (capped) set. A list with no limit loads the cap. */
   limit?: number
   offset?: number
   /** Calendar only: the first and last day on screen (YYYY-MM-DD). */
@@ -208,16 +210,23 @@ async function attachConnectionProgress(
   }
 }
 
+// How a board or list orders when its tab saves no sort: oldest first, so
+// new cards land at the bottom. Other layouts keep the list engine's order.
+export function viewsDefaultSort(tab: Pick<ViewTabRow, 'layout'>): ViewTabDefinition['sort'] {
+  return tab.layout === 'kanban' || tab.layout === 'list' ? { field: 'created_at', dir: 'asc' } : undefined
+}
+
 // The tab narrows the view: both filters apply. The caller's sort overrides
 // the tab's saved one for this request only.
 function mergedListOpts(view: ViewRow, tab: ViewTabRow, overlay: ViewsRecordsOverlay) {
   const viewDef = view.definition as ViewDefinition
   const tabDef = tab.definition as ViewTabDefinition
+  const saved = tabDef.sort ?? viewsDefaultSort(tab)
   return {
     where: [viewDef.filter, tabDef.filter].filter(f => !!f && f.rules.length > 0) as NonNullable<ViewDefinition['filter']>[],
     q: overlay.q,
-    sort: overlay.sort ?? tabDef.sort?.field,
-    dir: overlay.dir ?? tabDef.sort?.dir,
+    sort: overlay.sort ?? saved?.field,
+    dir: overlay.dir ?? saved?.dir,
     virtualFields: viewVirtualFields(view)
   }
 }
@@ -362,8 +371,10 @@ async function loadBoardRecords(
 export interface ViewRecords {
   items: ViewsBoardItem[]
   total: number
-  /** True when a board or list hit VIEWS_BOARD_CAP — some records are not shown. */
+  /** Not every matching record is in this response: a list's later pages, or a board or calendar past VIEWS_BOARD_CAP. */
   truncated: boolean
+  /** A board with more matching records than VIEWS_BOARD_CAP: none are sent, since part of a board would mislead; a filter narrows it. */
+  tooMany?: boolean
   /** The tab's placement/rank rows (boards and lists; [] for tables). */
   placements: ViewsPlacement[]
   /** Connection-grouped tabs: the target records that make the columns. */
@@ -407,8 +418,8 @@ export async function getViewRecords(
   // A saved sort on a field that has since gone falls back to the default order.
   const savedSort = (tab.definition as ViewTabDefinition).sort
   if (!overlay.sort && savedSort && !isSortableField(await viewFieldsWithType(tx, view), savedSort.field)) {
-    opts.sort = undefined
-    opts.dir = undefined
+    opts.sort = viewsDefaultSort(tab)?.field
+    opts.dir = viewsDefaultSort(tab)?.dir
   }
   const card = await effectiveCardLayout(tx, view, tab)
   if (viewDef.picked) {
@@ -444,7 +455,19 @@ export async function getViewRecords(
     rank: row.rank
   }))
 
-  const { items: rows, total } = await loadBoardRecords(tx, ctx, view.record_type_key, opts)
+  // A list pages in the order it shows: rows placed by hand on the tab first.
+  const offset = tab.layout === 'list' ? overlay.offset ?? 0 : 0
+  const { items: rows, total } = tab.layout === 'list'
+    ? await listRecords(tx, ctx, view.record_type_key, {
+        ...opts,
+        orderFirst: sql`(select min(vc.rank) from views_cards vc where vc.tab_id = ${tab.id}::uuid and vc.record_id = records_entries.id)`,
+        limit: overlay.limit ?? VIEWS_BOARD_CAP,
+        offset
+      }, { maxLimit: VIEWS_BOARD_CAP })
+    : await loadBoardRecords(tx, ctx, view.record_type_key, opts)
+  if (tab.layout === 'kanban' && total > VIEWS_BOARD_CAP) {
+    return { items: [], total, truncated: true, tooMany: true, placements: [], card }
+  }
   const items = withTimestamps(rows)
 
   let groupColumns: ViewsGroupColumn[] | undefined
@@ -457,7 +480,7 @@ export async function getViewRecords(
   await attachViewValues(tx, view, items)
   await markOwnCards(tx, view, items)
 
-  return { items, total, truncated: items.length < total, placements, groupColumns, card }
+  return { items, total, truncated: offset + items.length < total, placements, groupColumns, card }
 }
 
 // How many records with no date a calendar's Unscheduled tray lists.

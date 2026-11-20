@@ -3,7 +3,8 @@
 // collapsible sections by a field. Dragging a row reorders it, or moves it
 // into another section with the board's rules (single values move, tags and
 // multi-values add). The checkbox closes or reopens a record on types with a
-// single closed status; each section ends with a quick-add row.
+// single closed status; each section ends with a quick-add row. Rows load a
+// page at a time: scrolling near the end asks for the next.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsTabView, ViewRecords } from '../../utils/views-types'
 
@@ -16,6 +17,8 @@ const props = defineProps<{
   canRemove: boolean
   /** The type's closed status and the status a reopened record takes; null = no checkbox. */
   doneStatus: { done: string, reopen: string } | null
+  /** More rows than are loaded match the tab. */
+  hasMore?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -24,9 +27,20 @@ const emit = defineEmits<{
   quickAdd: [payload: { columnKey: string, name: string }]
   toggleDone: [payload: { recordId: string, done: boolean }]
   removeCard: [recordId: string]
+  loadMore: []
   dragstart: []
   dragend: []
 }>()
+
+const scroller = ref<HTMLElement | null>(null)
+function nearEnd() {
+  const el = scroller.value
+  if (!el || !props.hasMore) return
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 400) emit('loadMore')
+}
+// A page that doesn't fill the list asks for the next one straight away.
+watch(() => [props.records.items.length, props.hasMore], () => nextTick(nearEnd))
+onMounted(nearEnd)
 
 const grouped = computed(() => !!props.view.definition.groupField)
 const groupField = computed(() =>
@@ -110,7 +124,11 @@ function submitQuickAdd(section: string) {
 </script>
 
 <template>
-  <div class="h-full overflow-y-auto rounded-lg border border-(--ui-border)">
+  <div
+    ref="scroller"
+    class="h-full overflow-y-auto rounded-lg border border-(--ui-border)"
+    @scroll.passive="nearEnd"
+  >
     <section
       v-for="section in visibleSections"
       :key="section.key"
@@ -128,7 +146,10 @@ function submitQuickAdd(section: string) {
           class="size-3.5"
         />
         <span>{{ section.label }}</span>
-        <span class="text-(--ui-text-dimmed) tabular-nums">{{ section.cards.length }}</span>
+        <span
+          v-if="!hasMore"
+          class="text-(--ui-text-dimmed) tabular-nums"
+        >{{ section.cards.length }}</span>
       </button>
 
       <template v-if="!collapsed.has(section.key)">
@@ -176,5 +197,16 @@ function submitQuickAdd(section: string) {
     >
       Nothing here yet.
     </p>
+
+    <div
+      v-if="hasMore"
+      class="flex items-center justify-center gap-2 p-4 text-sm text-(--ui-text-muted)"
+    >
+      <UIcon
+        name="i-lucide-loader-circle"
+        class="size-4 animate-spin"
+      />
+      Loading more…
+    </div>
   </div>
 </template>

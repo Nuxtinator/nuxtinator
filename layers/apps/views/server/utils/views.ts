@@ -24,6 +24,7 @@ import { isActiveOrgMember, type TenantContext } from '#tenant/server'
 import {
   getRecordType,
   parseRecordsFilterGroup,
+  RECORDS_POSITION_KEY,
   requireRecordType,
   requireTypePermission,
   type RecordsFieldSetting,
@@ -168,9 +169,12 @@ export async function sanitizeViewDefinition(tx: Tx, typeKey: string, raw: unkno
   return out
 }
 
-/** Whether listRecords can sort by `key`: the record row's own columns and jsonb fields. */
+/**
+ * Whether listRecords can sort by `key`: the record row's own columns, jsonb
+ * fields, and the order set under each parent.
+ */
 export function isSortableField(fields: RecordsFieldSetting[], key: string): boolean {
-  if (INTRINSIC_KEYS.has(key)) return true
+  if (INTRINSIC_KEYS.has(key) || key === RECORDS_POSITION_KEY) return true
   const field = fields.find(f => f.key === key && !f.orphan)
   return !!field && (field.storage === 'promoted' || field.storage === 'jsonb')
 }
@@ -251,6 +255,8 @@ export async function sanitizeTabDefinition(
     }
     if (def.cardShowEmpty.length === 0) delete def.cardShowEmpty
   }
+  // The order set under a record only shows on the built-in board of that record.
+  if (def.sort?.field === RECORDS_POSITION_KEY) badDefinition('only the board of a record sorts by its order')
   if (def.sort && !known(def.sort.field)) badDefinition(`unknown sort field "${def.sort.field}"`)
   if (def.sort && !isSortableField(fields, def.sort.field)) badDefinition(`records cannot be sorted by "${def.sort.field}"`)
 
@@ -742,9 +748,17 @@ export async function createView(tx: Tx, ctx: TenantContext, input: CreateViewIn
  * A copy of a view's structure, owned by the caller and private: its record
  * type, base filter, whether it holds hand-picked records, its own fields,
  * and its tabs (layouts, columns, card fields, filters, sorts). No cards,
- * values, placements or sharing come along.
+ * values, placements or sharing come along. `tabs` are the tabs to copy
+ * when they aren't the source's own (a card's board, sorted for the card).
+ * The order set under a record doesn't carry over: a copy holds its own.
  */
-export async function copyView(tx: Tx, ctx: TenantContext, source: ViewRow, name: string): Promise<ViewDetail> {
+export async function copyView(
+  tx: Tx,
+  ctx: TenantContext,
+  source: ViewRow,
+  name: string,
+  tabs?: ViewTabRow[]
+): Promise<ViewDetail> {
   await requireTypePermission(tx, ctx, source.record_type_key, 'read')
   await requireRecordType(tx, source.record_type_key, ctx)
   const definition = await sanitizeViewDefinition(tx, source.record_type_key, source.definition)
@@ -760,7 +774,9 @@ export async function copyView(tx: Tx, ctx: TenantContext, source: ViewRow, name
     })
     .returningAll()
     .executeTakeFirstOrThrow()
-  for (const tab of builtInOf(source)?.tabs ?? await listTabs(tx, source.id)) {
+  for (const tab of tabs ?? builtInOf(source)?.tabs ?? await listTabs(tx, source.id)) {
+    const { sort, ...rest } = tab.definition as ViewTabDefinition
+    const definition: ViewTabDefinition = sort && sort.field !== RECORDS_POSITION_KEY ? { ...rest, sort } : rest
     await tx
       .insertInto('views_tabs')
       .values({
@@ -768,7 +784,7 @@ export async function copyView(tx: Tx, ctx: TenantContext, source: ViewRow, name
         name: tab.name,
         layout: tab.layout,
         position: tab.position,
-        definition: sql`${JSON.stringify(tab.definition)}::text::jsonb`
+        definition: sql`${JSON.stringify(definition)}::text::jsonb`
       })
       .execute()
   }

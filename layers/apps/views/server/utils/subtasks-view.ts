@@ -1,11 +1,13 @@
 // The built-in view of what sits under one record (`builtin.subtasks.<id>`:
 // a task's subtasks, a deliverable's tasks), open to anyone who can open it.
+// Its board shows them in the order set under the record, which people who
+// can edit the record change by dragging (placements.ts).
 
 import { z } from 'zod'
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
-import { getRecordTypeFields, recordsHierarchyOf, visibleRecordIds } from '#records/server'
+import { getRecordTypeFields, RECORDS_POSITION_KEY, recordsHierarchyOf, visibleRecordIds } from '#records/server'
 import type { ViewsBuiltInTarget, ViewsBuiltInView } from './builtin-views'
 import type { ViewTabDefinition } from './views'
 
@@ -66,7 +68,7 @@ export const subtasksBuiltInView: ViewsBuiltInView = {
   recordTypeKey: 'task',
   param: { resolve: resolveRecord },
   tabs: [
-    { key: 'board', name: 'Board', layout: 'kanban', definition: { groupField: 'status' } },
+    { key: 'board', name: 'Board', layout: 'kanban', definition: { groupField: 'status', sort: { field: RECORDS_POSITION_KEY, dir: 'asc' } } },
     { key: 'all', name: 'All levels', layout: 'list', definition: {} }
   ]
 }
