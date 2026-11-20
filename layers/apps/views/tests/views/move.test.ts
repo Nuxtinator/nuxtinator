@@ -242,6 +242,33 @@ describe('field-grouped moves', () => {
     expect((await recordFields(owner, rec.id)).status).toBe('active')
   })
 
+  it('moves several cards in one MCP call, in order, reporting a stale one', async () => {
+    const { org, auth, user } = await createViewsOrgWith(sql, ['admin'])
+    const owner = withOrgHeader(auth, org.slug)
+    const view = await createView(owner, { groupField: 'status' })
+    const a = await createContact(owner, { name: 'test-views Bulk A', status: 'new' })
+    const b = await createContact(owner, { name: 'test-views Bulk B', status: 'new' })
+    const stale = await createContact(owner, { name: 'test-views Bulk Stale', status: 'active' })
+    const { token } = await issueMcpBearer(sql, user.id, ['views.use', 'records.read', 'records.write'])
+
+    const res = await callMcpTool(token, 'views_move_cards', {
+      org: org.slug,
+      view: view.id,
+      toColumn: 'active',
+      cards: [{ record: b.id, fromColumn: 'new' }, { record: stale.id, fromColumn: 'new' }, { record: a.id, fromColumn: 'new' }]
+    })
+    expect(res.isError).toBeFalsy()
+    const results = res.structuredContent!.results as Array<{ record: string, status: string, error?: string }>
+    expect(results.map(r => r.status)).toEqual(['moved', 'error', 'moved'])
+    expect(results[1]!.error).toMatch(/moved since/)
+    expect((await recordFields(owner, a.id)).status).toBe('active')
+    expect((await recordFields(owner, b.id)).status).toBe('active')
+
+    const board = await callMcpTool(token, 'views_get_board', { org: org.slug, view: view.id })
+    const columns = board.structuredContent!.columns as Array<{ key: string, cards: Array<{ id: string }> }>
+    expect(columns.find(c => c.key === 'active')!.cards.map(c => c.id).slice(0, 2)).toEqual([b.id, a.id])
+  })
+
   it('view access is not record access: a views-only caller cannot move', async () => {
     const { org, auth } = await createViewsOrgWith(sql, ['admin'])
     const owner = withOrgHeader(auth, org.slug)

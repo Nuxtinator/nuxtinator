@@ -13,9 +13,10 @@ import { z } from 'zod'
 import { createError } from 'h3'
 import { sql } from 'kysely'
 import type { Transaction } from 'kysely'
-import { defineMcpTool, type McpToolContext } from '#mcp-layer'
+import { defineMcpTool, mcpError, type McpToolContext } from '#mcp-layer'
 import { withOrgPermission, type TenantContext } from '#tenant/server'
 import type { Database } from '#core/server/database/schema'
+import { RECORDS_SHARE_CONFIRMATION } from '#records/server'
 import {
   createView,
   insertTab,
@@ -551,6 +552,93 @@ export const moveCardTool = defineMcpTool({
   }
 })
 
+const MOVE_MAX = 100
+
+type Outcome<R> = { ok: true, value: R } | { ok: false, error: unknown }
+
+// Each item runs in its own savepoint, so one that fails rolls back alone.
+async function eachInSavepoint<I, R>(tx: Tx, items: I[], fn: (item: I) => Promise<R>): Promise<Outcome<R>[]> {
+  const out: Outcome<R>[] = []
+  for (const item of items) {
+    await sql`savepoint views_bulk_item`.execute(tx)
+    try {
+      const value = await fn(item)
+      await sql`release savepoint views_bulk_item`.execute(tx)
+      out.push({ ok: true, value })
+    } catch (error) {
+      await sql`rollback to savepoint views_bulk_item`.execute(tx)
+      out.push({ ok: false, error })
+    }
+  }
+  return out
+}
+
+function errorText(error: unknown): string {
+  return mcpError(error).content.map(c => c.text).join(' ')
+}
+
+export const moveCardsTool = defineMcpTool({
+  name: 'views_move_cards',
+  title: 'Move Cards',
+  description: `Move several cards to one column of a board (or section of a list), at the end, in the order given. Use it instead of repeated views_move_card calls; the rules are the same. Each card is { record, fromColumn }. Cards move in order and are reported one by one: one that fails comes back with status "error" and the rest still move. If any move would share a record with someone who can't see it yet, nothing moves and the call says who; confirm with the user, then resend with share: true. Up to ${MOVE_MAX} cards per call.`,
+  appId: 'views',
+  scope: 'views.use',
+  input: z.object({
+    org: orgInput,
+    view: viewIdInput,
+    tab: tabIdInput,
+    toColumn: z.string().max(80).describe('The column to move them to ("" for "No value" or "No column").'),
+    cards: z.array(z.object({
+      record: z.string().uuid(),
+      fromColumn: z.string().max(80).describe('The column the card is in now ("" for "No value" or "No column").')
+    }).strict()).min(1).max(MOVE_MAX),
+    share: shareInput
+  }).strict(),
+  handler: async (input, ctx) => {
+    return await run(ctx, input.org, async (tx, tenant) => {
+      const { view, access } = await requireView(tx, tenant, input.view, 'view')
+      const tab = await requireTab(tx, view, input.tab)
+      const groupField = await groupFieldOf(tx, view, tab)
+      const records = await getViewRecords(tx, tenant, view, tab, groupField, {})
+      const target = (await boardColumns(tx, view, tab, records)).find(c => c.key === input.toColumn)
+      const cards = input.cards.filter((c, i, all) => all.findIndex(o => o.record === c.record) === i)
+      const moving = new Set(cards.map(c => c.record))
+      const order = (target?.cards.map(c => c.id) ?? []).filter(id => !moving.has(id))
+
+      const outcomes = await eachInSavepoint(tx, cards, async (card) => {
+        await moveViewsCard(tx, tenant, view, access, tab, {
+          recordId: card.record,
+          fromColumn: card.fromColumn,
+          toColumn: input.toColumn,
+          columnOrder: [...order, card.record],
+          confirmShare: input.share
+        })
+        order.push(card.record)
+      })
+
+      const refused = outcomes.flatMap((o, i) =>
+        !o.ok && (o.error as { data?: { code?: string } } | null)?.data?.code === RECORDS_SHARE_CONFIRMATION
+          ? [`${cards[i]!.record}: ${errorText(o.error)}`]
+          : [])
+      if (refused.length > 0) {
+        throw createError({
+          statusCode: 409,
+          statusMessage: `Nothing was moved: ${refused.length} of these would share a record with people who can't see it yet. Confirm with the user, then resend with share: true. ${refused.join(' ')}`
+        })
+      }
+
+      const results = outcomes.map((o, i) => o.ok
+        ? { record: cards[i]!.record, status: 'moved' as const }
+        : { record: cards[i]!.record, status: 'error' as const, error: errorText(o.error) })
+      const failures = results.flatMap(r => r.status === 'error' ? [`${r.record}: ${r.error}`] : [])
+      const into = target ? ` to ${target.label}` : ''
+      const summary = `Moved ${results.length - failures.length} of ${results.length}${into}.`
+        + (failures.length > 0 ? ` ${failures.length} failed: ${failures.join('; ')}` : '')
+      return text(summary, { view: input.view, tab: tab.id, toColumn: input.toColumn, results })
+    })
+  }
+})
+
 export const createCardTool = defineMcpTool({
   name: 'views_create_card',
   title: 'Create Card',
@@ -718,6 +806,7 @@ export const viewsMcpTools = [
   addCardTool,
   createCardTool,
   moveCardTool,
+  moveCardsTool,
   listFieldsTool,
   addFieldTool,
   updateFieldTool,

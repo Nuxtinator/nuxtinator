@@ -15,8 +15,9 @@
 // with the layer that stores addresses (crm).
 import { z } from 'zod'
 import { createError } from 'h3'
+import { sql } from 'kysely'
 import type { Transaction } from 'kysely'
-import { defineMcpTool, type McpToolContext } from '#mcp-layer'
+import { defineMcpTool, mcpError, type McpToolContext } from '#mcp-layer'
 import { withOrgPermission, type TenantContext } from '#tenant/server'
 import type { Database } from '#core/server/database/schema'
 import type { Permission } from '#core/app/utils/permissions'
@@ -46,6 +47,7 @@ import {
   updateField,
   updateRecordType,
   RECORDS_OPTION_KEY_RE,
+  RECORDS_SHARE_CONFIRMATION,
   RECORDS_SCHEMA_SLUG_RE,
   type RecordsAdminFieldKind,
   type RecordsFieldSetting,
@@ -372,7 +374,7 @@ const shareInput = z.boolean().optional().describe('Set true to assign someone (
 export const createRecordTool = defineMcpTool({
   name: 'records_create',
   title: 'Create Record',
-  description: 'Create a record, e.g. a task from a meeting or a contact from a business card. `fields.name` is required. Email and phone fields take an array of addresses. Adding an address never opts the person in to anything; record consent separately with crm_set_consent.',
+  description: 'Create a record, e.g. a task from a meeting or a contact from a business card. `fields.name` is required. Email and phone fields take an array of addresses. Adding an address never opts the person in to anything; record consent separately with crm_set_consent. To create several records, use records_create_many.',
   appId: 'records',
   scope: 'records.write',
   input: z.object({ org: orgInput, type: typeInput, fields: fieldsInput, share: shareInput }).strict(),
@@ -392,24 +394,36 @@ export const createRecordTool = defineMcpTool({
   }
 })
 
+async function updateOne(
+  tx: Tx,
+  tenant: TenantContext,
+  typeKey: string,
+  defs: RecordsFieldSetting[],
+  id: string,
+  fields: Record<string, unknown>,
+  share: boolean | undefined
+) {
+  await assertRecordVisible(tx, tenant, typeKey, id)
+  await requireRecordUpdate(tx, tenant, typeKey, id)
+  await runRecordsPatchGuards(tx, { typeKey, recordId: id, fields })
+  const before = await getRecord(tx, tenant, typeKey, id)
+  const record = await applyFieldPatch(tx, tenant, typeKey, id, fields, {
+    sharing: share ? 'confirmed' : 'ask'
+  })
+  return { record, changes: diffFields(defs, before.fields, record.fields) }
+}
+
 export const updateRecordTool = defineMcpTool({
   name: 'records_update',
   title: 'Update Record',
-  description: 'Change fields on a record. Only the fields you pass change. Returns each changed field\'s value before and after, so the change can be shown and undone. To close a record use records_close; to change consent use crm_set_consent.',
+  description: 'Change fields on a record. Only the fields you pass change. Returns each changed field\'s value before and after, so the change can be shown and undone. To close a record use records_close; to change consent use crm_set_consent. To change several records, use records_update_many.',
   appId: 'records',
   scope: 'records.write',
   input: z.object({ org: orgInput, type: typeInput, id: idInput, fields: fieldsInput, share: shareInput }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
       const { defs, rules } = await typeContext(tx, tenant, input.type)
-      await assertRecordVisible(tx, tenant, input.type, input.id)
-      await requireRecordUpdate(tx, tenant, input.type, input.id)
-      await runRecordsPatchGuards(tx, { typeKey: input.type, recordId: input.id, fields: input.fields })
-      const before = await getRecord(tx, tenant, input.type, input.id)
-      const record = await applyFieldPatch(tx, tenant, input.type, input.id, input.fields, {
-        sharing: input.share ? 'confirmed' : 'ask'
-      })
-      const changes = diffFields(defs, before.fields, record.fields)
+      const { record, changes } = await updateOne(tx, tenant, input.type, defs, input.id, input.fields, input.share)
       return text(`Updated ${record.name}. ${changeSummary(changes)}`, {
         record: recordOut(record, rules),
         changes
@@ -418,41 +432,70 @@ export const updateRecordTool = defineMcpTool({
   }
 })
 
+const closeReasonInput = z.string().max(41).optional().describe('Reason option key, from the type\'s closedReasonField options.')
+const closeStatusInput = z.string().max(41).optional().describe('Which closed status to use when the type has several. Defaults to the first.')
+
+// The status (and reason) a close writes, checked against the type's closing rules.
+function closePatch(
+  typeKey: string,
+  rules: ReturnType<typeof closingRulesOf>,
+  status: string | undefined,
+  reason: string | undefined
+): Record<string, unknown> {
+  if (!rules.statusKey || rules.closedStatuses.length === 0) {
+    throw createError({ statusCode: 400, statusMessage: `${typeKey} records can't be closed: no status counts as closed.` })
+  }
+  const closed = status ?? rules.closedStatuses[0]!
+  if (!rules.closedStatuses.includes(closed)) {
+    throw createError({ statusCode: 400, statusMessage: `${closed} is not a closed status. Closed statuses: ${rules.closedStatuses.join(', ')}` })
+  }
+  if (reason && !rules.reasonKey) {
+    throw createError({ statusCode: 400, statusMessage: `${typeKey} records have no reason field; close without a reason.` })
+  }
+  const patch: Record<string, unknown> = { [rules.statusKey]: closed }
+  if (rules.reasonKey && reason !== undefined) patch[rules.reasonKey] = reason
+  return patch
+}
+
+async function closeOne(
+  tx: Tx,
+  tenant: TenantContext,
+  typeKey: string,
+  defs: RecordsFieldSetting[],
+  id: string,
+  patch: Record<string, unknown>
+) {
+  await assertRecordVisible(tx, tenant, typeKey, id)
+  await requireRecordUpdate(tx, tenant, typeKey, id)
+  const before = await getRecord(tx, tenant, typeKey, id)
+  const record = await applyFieldPatch(tx, tenant, typeKey, id, patch)
+  return { record, changes: diffFields(defs, before.fields, record.fields) }
+}
+
+function revokesConsent(defs: RecordsFieldSetting[], rules: ReturnType<typeof closingRulesOf>, reason: string | undefined): boolean {
+  const reasonDef = rules.reasonKey ? defs.find(d => d.key === rules.reasonKey) : undefined
+  return !!reason && !!reasonDef?.options?.[reason]?.revokesConsent
+}
+
 export const closeRecordTool = defineMcpTool({
   name: 'records_close',
   title: 'Close Record',
-  description: 'Close (archive) a record by setting a closed status — for a task, mark it done. When the type has a reason field, a reason is required (see closedReasonField in records_list_types). A reason marked revokesConsent (e.g. "asked to be removed") also turns off every consent on the record\'s addresses, including for other records that share them. Reopen a record by setting an open status with records_update.',
+  description: 'Close (archive) a record by setting a closed status — for a task, mark it done. When the type has a reason field, a reason is required (see closedReasonField in records_list_types). A reason marked revokesConsent (e.g. "asked to be removed") also turns off every consent on the record\'s addresses, including for other records that share them. Reopen a record by setting an open status with records_update. To close several records, use records_close_many.',
   appId: 'records',
   scope: 'records.write',
   input: z.object({
     org: orgInput,
     type: typeInput,
     id: idInput,
-    reason: z.string().max(41).optional().describe('Reason option key, from the type\'s closedReasonField options.'),
-    status: z.string().max(41).optional().describe('Which closed status to use when the type has several. Defaults to the first.')
+    reason: closeReasonInput,
+    status: closeStatusInput
   }).strict(),
   handler: async (input, ctx) => {
     return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
       const { defs, rules } = await typeContext(tx, tenant, input.type)
-      if (!rules.statusKey || rules.closedStatuses.length === 0) {
-        throw createError({ statusCode: 400, statusMessage: `${input.type} records can't be closed: no status counts as closed.` })
-      }
-      const status = input.status ?? rules.closedStatuses[0]!
-      if (!rules.closedStatuses.includes(status)) {
-        throw createError({ statusCode: 400, statusMessage: `${status} is not a closed status. Closed statuses: ${rules.closedStatuses.join(', ')}` })
-      }
-      if (input.reason && !rules.reasonKey) {
-        throw createError({ statusCode: 400, statusMessage: `${input.type} records have no reason field; close without a reason.` })
-      }
-      await assertRecordVisible(tx, tenant, input.type, input.id)
-      await requireRecordUpdate(tx, tenant, input.type, input.id)
-      const before = await getRecord(tx, tenant, input.type, input.id)
-      const patch: Record<string, unknown> = { [rules.statusKey]: status }
-      if (rules.reasonKey && input.reason !== undefined) patch[rules.reasonKey] = input.reason
-      const record = await applyFieldPatch(tx, tenant, input.type, input.id, patch)
-      const changes = diffFields(defs, before.fields, record.fields)
-      const reasonDef = rules.reasonKey ? defs.find(d => d.key === rules.reasonKey) : undefined
-      const revoked = !!input.reason && !!reasonDef?.options?.[input.reason]?.revokesConsent
+      const patch = closePatch(input.type, rules, input.status, input.reason)
+      const { record, changes } = await closeOne(tx, tenant, input.type, defs, input.id, patch)
+      const revoked = revokesConsent(defs, rules, input.reason)
       return text(
         `Closed ${record.name}.${revoked ? ' Consent on its addresses was revoked.' : ''} ${changeSummary(changes)}`,
         { record: recordOut(record, rules), changes, consentRevoked: revoked }
@@ -482,6 +525,156 @@ export const addCommentTool = defineMcpTool({
       return text('Comment added.', {
         comment: { id: comment.id, body: comment.body, createdAt: comment.createdAt.toISOString() }
       })
+    })
+  }
+})
+
+// ─── Bulk write tools ───────────────────────────────────────────────────────
+// Each item runs in its own savepoint, so one that fails rolls back alone. A
+// share refusal on any item refuses the whole call, so every share is confirmed at once.
+
+const BULK_MAX = 100
+
+type Outcome<R> = { ok: true, value: R } | { ok: false, error: unknown }
+
+async function eachInSavepoint<I, R>(tx: Tx, items: I[], fn: (item: I) => Promise<R>): Promise<Outcome<R>[]> {
+  const out: Outcome<R>[] = []
+  for (const item of items) {
+    await sql`savepoint records_bulk_item`.execute(tx)
+    try {
+      const value = await fn(item)
+      await sql`release savepoint records_bulk_item`.execute(tx)
+      out.push({ ok: true, value })
+    } catch (error) {
+      await sql`rollback to savepoint records_bulk_item`.execute(tx)
+      out.push({ ok: false, error })
+    }
+  }
+  return out
+}
+
+function errorText(error: unknown): string {
+  return mcpError(error).content.map(c => c.text).join(' ')
+}
+
+function refuseUnconfirmedShares(outcomes: Outcome<unknown>[], labels: string[]): void {
+  const refused = outcomes.flatMap((o, i) =>
+    !o.ok && (o.error as { data?: { code?: string } } | null)?.data?.code === RECORDS_SHARE_CONFIRMATION
+      ? [`${labels[i]}: ${errorText(o.error)}`]
+      : [])
+  if (refused.length === 0) return
+  throw createError({
+    statusCode: 409,
+    statusMessage: `Nothing was saved: ${refused.length} of these would share a record with people who can't see it yet. Confirm with the user, then resend with share: true. ${refused.join(' ')}`
+  })
+}
+
+function bulkSummary(verb: string, done: number, total: number, unchanged: number, failures: string[]): string {
+  const parts = [`${verb} ${done} of ${total}.`]
+  if (unchanged > 0) parts.push(`${unchanged} had nothing to change.`)
+  if (failures.length > 0) parts.push(`${failures.length} failed: ${failures.join('; ')}`)
+  return parts.join(' ')
+}
+
+export const createRecordsTool = defineMcpTool({
+  name: 'records_create_many',
+  title: 'Create Records',
+  description: `Create several records of one type in one call, e.g. the tasks from a meeting or the rows of a list. Use it instead of repeated records_create calls. Each entry is { fields }, as records_create takes them; fields.name is required. Records are created in order and reported one by one with their new ids: one that fails comes back with status "error" and the rest are still created. If any would share a record with someone who can't see it yet, nothing is created and the call says who; confirm with the user, then resend with share: true. Up to ${BULK_MAX} records per call.`,
+  appId: 'records',
+  scope: 'records.write',
+  input: z.object({
+    org: orgInput,
+    type: typeInput,
+    records: z.array(z.object({ fields: fieldsInput }).strict()).min(1).max(BULK_MAX),
+    share: shareInput
+  }).strict(),
+  handler: async (input, ctx) => {
+    return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
+      await requireTypePermission(tx, tenant, input.type, 'create')
+      await requireRecordType(tx, input.type, tenant)
+      const outcomes = await eachInSavepoint(tx, input.records, r => applyFieldPatch(tx, tenant, input.type, null, r.fields, {
+        sharing: input.share ? 'confirmed' : 'ask'
+      }))
+      const labels = input.records.map((r, i) => typeof r.fields.name === 'string' && r.fields.name ? `"${r.fields.name}"` : `#${i + 1}`)
+      refuseUnconfirmedShares(outcomes, labels)
+      const results = outcomes.map((o, i) => o.ok
+        ? { index: i, id: o.value.id, name: o.value.name, status: 'created' as const }
+        : { index: i, status: 'error' as const, error: errorText(o.error) })
+      const failures = results.flatMap((r, i) => r.status === 'error' ? [`${labels[i]}: ${r.error}`] : [])
+      return text(bulkSummary('Created', results.length - failures.length, results.length, 0, failures), { results })
+    })
+  }
+})
+
+export const updateRecordsTool = defineMcpTool({
+  name: 'records_update_many',
+  title: 'Update Records',
+  description: `Change fields on several records of one type in one call. Use it instead of repeated records_update calls whenever more than a couple of records change. Each update is { id, fields }; only the fields passed change, and every update may pass the same fields. Updates apply in order and are reported one by one: one that fails (not found, no edit access, a bad value) comes back with status "error" and the rest still save. Returns each record's changed fields before and after. If any update would share a record with someone who can't see it yet, nothing is saved and the call says who; confirm with the user, then resend with share: true. Up to ${BULK_MAX} updates per call. To close records use records_close_many.`,
+  appId: 'records',
+  scope: 'records.write',
+  input: z.object({
+    org: orgInput,
+    type: typeInput,
+    updates: z.array(z.object({ id: idInput, fields: fieldsInput }).strict()).min(1).max(BULK_MAX),
+    share: shareInput
+  }).strict(),
+  handler: async (input, ctx) => {
+    return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
+      const { defs } = await typeContext(tx, tenant, input.type)
+      const outcomes = await eachInSavepoint(tx, input.updates, u =>
+        updateOne(tx, tenant, input.type, defs, u.id, u.fields, input.share))
+      refuseUnconfirmedShares(outcomes, input.updates.map(u => u.id))
+      const results = outcomes.map((o, i) => o.ok
+        ? {
+            id: o.value.record.id,
+            name: o.value.record.name,
+            status: o.value.changes.length > 0 ? 'updated' as const : 'unchanged' as const,
+            changes: o.value.changes
+          }
+        : { id: input.updates[i]!.id, status: 'error' as const, error: errorText(o.error) })
+      const updated = results.filter(r => r.status === 'updated').length
+      const unchanged = results.filter(r => r.status === 'unchanged').length
+      const failures = results.flatMap(r => r.status === 'error' ? [`${r.id}: ${r.error}`] : [])
+      return text(bulkSummary('Updated', updated, results.length, unchanged, failures), { results })
+    })
+  }
+})
+
+export const closeRecordsTool = defineMcpTool({
+  name: 'records_close_many',
+  title: 'Close Records',
+  description: `Close several records of one type in one call, all with the same closed status and reason: for tasks, mark them done. Use it instead of repeated records_close calls. The rules are records_close's: when the type has a reason field, a reason is required, and a reason marked revokesConsent turns off every consent on each record's addresses. Records close in order and are reported one by one: one that fails comes back with status "error" and the rest still close. Up to ${BULK_MAX} ids per call.`,
+  appId: 'records',
+  scope: 'records.write',
+  input: z.object({
+    org: orgInput,
+    type: typeInput,
+    ids: z.array(idInput).min(1).max(BULK_MAX),
+    reason: closeReasonInput,
+    status: closeStatusInput
+  }).strict(),
+  handler: async (input, ctx) => {
+    return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
+      const { defs, rules } = await typeContext(tx, tenant, input.type)
+      const patch = closePatch(input.type, rules, input.status, input.reason)
+      const ids = [...new Set(input.ids)]
+      const outcomes = await eachInSavepoint(tx, ids, id => closeOne(tx, tenant, input.type, defs, id, patch))
+      const results = outcomes.map((o, i) => o.ok
+        ? {
+            id: ids[i]!,
+            name: o.value.record.name,
+            status: o.value.changes.length > 0 ? 'closed' as const : 'unchanged' as const,
+            changes: o.value.changes
+          }
+        : { id: ids[i]!, status: 'error' as const, error: errorText(o.error) })
+      const closed = results.filter(r => r.status === 'closed').length
+      const unchanged = results.filter(r => r.status === 'unchanged').length
+      const failures = results.flatMap(r => r.status === 'error' ? [`${r.id}: ${r.error}`] : [])
+      const revoked = closed > 0 && revokesConsent(defs, rules, input.reason)
+      return text(
+        `${bulkSummary('Closed', closed, results.length, unchanged, failures)}${revoked ? ' Consent on the closed records\' addresses was revoked.' : ''}`,
+        { results, consentRevoked: revoked }
+      )
     })
   }
 })
@@ -660,6 +853,9 @@ export const recordsMcpTools = [
   createRecordTool,
   updateRecordTool,
   closeRecordTool,
+  createRecordsTool,
+  updateRecordsTool,
+  closeRecordsTool,
   addCommentTool,
   createRecordTypeTool,
   addFieldTool,

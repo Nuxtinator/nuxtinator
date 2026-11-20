@@ -211,6 +211,100 @@ describe('records MCP writes', () => {
   })
 })
 
+describe('records MCP bulk writes', () => {
+  interface BulkResult { id?: string, status: string, error?: string, changes?: unknown[] }
+
+  async function createTask(opts: Opts, name: string): Promise<{ id: string }> {
+    return await $fetch<{ id: string }>('/api/records/entries/task', { method: 'POST', body: { fields: { name } }, ...opts })
+  }
+
+  async function fieldsOf(opts: Opts, type: string, id: string): Promise<Record<string, unknown>> {
+    return (await $fetch<{ fields: Record<string, unknown> }>(`/api/records/entries/${type}/${id}`, opts)).fields
+  }
+
+  it('updates several records, reporting each, and saves the rest when one fails', async () => {
+    const { org, user, auth } = await createRecordsOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    const a = await createContact(opts, { name: 'test-records Bulk A', nickname: 'A' })
+    const b = await createContact(opts, { name: 'test-records Bulk B', nickname: 'B' })
+    const missing = randomUUID()
+    const { token } = await issueMcpBearer(sql, user.id, ALL_SCOPES)
+
+    const res = data(await callMcpTool(token, 'records_update_many', {
+      org: org.slug,
+      type: 'contacts',
+      updates: [
+        { id: a.id, fields: { nickname: 'Ay' } },
+        { id: missing, fields: { nickname: 'Ghost' } },
+        { id: b.id, fields: { nickname: 'B' } }
+      ]
+    }))
+    const results = res.results as BulkResult[]
+    expect(results.map(r => [r.id, r.status])).toEqual([[a.id, 'updated'], [missing, 'error'], [b.id, 'unchanged']])
+    expect(results[0]!.changes).toEqual([{ field: 'nickname', label: 'Nickname', before: 'A', after: 'Ay' }])
+    expect(results[1]!.error).toMatch(/not found/i)
+    expect((await fieldsOf(opts, 'contacts', a.id)).nickname).toBe('Ay')
+  })
+
+  it('saves nothing when any update would share a record, until resent with share: true', async () => {
+    const { org, user, auth } = await createRecordsOrgWith(sql, ['member'])
+    const opts = withOrgHeader(auth, org.slug)
+    const sam = await addRecordsMember(sql, org.id)
+    const one = await createTask(opts, 'test-records Bulk one')
+    const two = await createTask(opts, 'test-records Bulk two')
+    const { token } = await issueMcpBearer(sql, user.id, ALL_SCOPES)
+    const updates = [
+      { id: one.id, fields: { name: 'test-records Bulk one renamed' } },
+      { id: two.id, fields: { assignee: sam.user.id } }
+    ]
+
+    const refused = await callMcpTool(token, 'records_update_many', { org: org.slug, type: 'task', updates })
+    expect(refused.isError).toBe(true)
+    expect(refused.content[0]!.text).toMatch(/^Nothing was saved/)
+    expect(refused.content[0]!.text).toContain(two.id)
+    expect((await fieldsOf(opts, 'task', one.id)).name).toBe('test-records Bulk one')
+
+    const saved = data(await callMcpTool(token, 'records_update_many', { org: org.slug, type: 'task', updates, share: true }))
+    expect((saved.results as BulkResult[]).map(r => r.status)).toEqual(['updated', 'updated'])
+    expect((await fieldsOf(opts, 'task', two.id)).assignee).toEqual([sam.user.id])
+  })
+
+  it('creates several records and reports the one that fails', async () => {
+    const { org, user, auth } = await createRecordsOrgWith(sql, ['admin'])
+    const { token } = await issueMcpBearer(sql, user.id, ALL_SCOPES)
+
+    const res = data(await callMcpTool(token, 'records_create_many', {
+      org: org.slug,
+      type: 'task',
+      records: [
+        { fields: { name: 'test-records Made one' } },
+        { fields: {} },
+        { fields: { name: 'test-records Made three' } }
+      ]
+    }))
+    const results = res.results as Array<BulkResult & { name?: string }>
+    expect(results.map(r => r.status)).toEqual(['created', 'error', 'created'])
+    expect(results[0]!.name).toBe('test-records Made one')
+    expect((await fieldsOf(withOrgHeader(auth, org.slug), 'task', results[2]!.id!)).name).toBe('test-records Made three')
+  })
+
+  it('closes several records once each, and leaves closed ones unchanged', async () => {
+    const { org, user, auth } = await createRecordsOrgWith(sql, ['admin'])
+    const opts = withOrgHeader(auth, org.slug)
+    const one = await createTask(opts, 'test-records Close one')
+    const two = await createTask(opts, 'test-records Close two')
+    const missing = randomUUID()
+    const { token } = await issueMcpBearer(sql, user.id, ALL_SCOPES)
+
+    const res = data(await callMcpTool(token, 'records_close_many', { org: org.slug, type: 'task', ids: [one.id, missing, two.id, one.id] }))
+    expect((res.results as BulkResult[]).map(r => [r.id, r.status])).toEqual([[one.id, 'closed'], [missing, 'error'], [two.id, 'closed']])
+    expect((await fieldsOf(opts, 'task', two.id)).status).toBe('done')
+
+    const again = data(await callMcpTool(token, 'records_close_many', { org: org.slug, type: 'task', ids: [one.id] }))
+    expect((again.results as BulkResult[])[0]!.status).toBe('unchanged')
+  })
+})
+
 describe('closing records', () => {
   it('applies the same rules to the record route', async () => {
     const { org, auth } = await createRecordsOrgWith(sql, ['admin'])
