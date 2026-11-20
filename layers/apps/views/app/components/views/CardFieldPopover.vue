@@ -28,7 +28,8 @@ watch(() => props.value, () => {
 const current = computed(() => draft.value ? draft.value.value : props.value)
 
 const holdsList = computed(() =>
-  props.field.kind === 'multi_select' || props.field.kind === 'tags' || props.field.kind === 'connection'
+  props.field.kind === 'multi_select' || props.field.kind === 'tags'
+  || (props.field.kind === 'connection' && props.field.hierarchy !== 'parent')
   || (props.field.kind === 'user_select' && !!props.field.multiple))
 
 function onCommit(value: unknown) {
@@ -43,6 +44,7 @@ function toggle() {
 }
 
 // Puts the cursor in the editor's input, or opens its picker when it has none.
+// Only the picker's own trigger is clicked: other buttons remove a chip or flip a switch.
 const body = ref<HTMLElement | null>(null)
 watch(body, async (el) => {
   if (!el) return
@@ -50,7 +52,7 @@ watch(body, async (el) => {
   const input = el.querySelector<HTMLElement>(
     'input:not([type="hidden"]):not([type="file"]):not([disabled]), textarea:not([disabled])')
   if (!input) {
-    el.querySelector<HTMLElement>('button:not([disabled])')?.click()
+    el.querySelector<HTMLElement>('[aria-haspopup]:not([disabled])')?.click()
     return
   }
   input.focus()

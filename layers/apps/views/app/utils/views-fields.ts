@@ -57,12 +57,12 @@ const CARD_SETTABLE_KINDS = new Set([
 
 /**
  * Whether a board card can set `field` itself. Status always has a value,
- * parent and subtask links move cards between boards, and repeat and
- * reminder wait for a due date, so those are set from the details.
+ * what sits under a record is added from its details or its own board, and
+ * repeat and reminder wait for a due date, so those are set from the details.
  */
 export function viewsCardSettable(field: RecordsFieldSetting): boolean {
   return CARD_SETTABLE_KINDS.has(field.kind)
-    && !field.column && !field.hidden && !field.orphan && !field.hierarchy
+    && !field.column && !field.hidden && !field.orphan && field.hierarchy !== 'children'
     && field.key !== RECORDS_REPEAT_KEY && field.key !== RECORDS_REMINDER_KEY
 }
 

@@ -407,7 +407,8 @@ async function onToggleDone({ recordId, done }: { recordId: string, done: boolea
 
 // A field set from a card: the record's own fields go to the record, the
 // view's own to the view. A connection changes by the links added and
-// removed, so links the viewer can't see on the card stay.
+// removed, so links the viewer can't see on the card stay; a parent is
+// replaced, since a record has one.
 function connectionChanges(previous: unknown, next: unknown) {
   const ids = (list: unknown) => new Set(Array.isArray(list)
     ? list.map(v => String(v && typeof v === 'object' ? (v as { id: unknown }).id : v))
@@ -429,7 +430,8 @@ async function onSetField({ recordId, field, value, previous }: { recordId: stri
     if (viewsIsViewField(field)) {
       await $fetch(`/api/views/${v.id}/values/${recordId}`, { method: 'PATCH', body: { values: { [field.key]: value } } })
     } else {
-      const fields = { [field.key]: field.kind === 'connection' ? connectionChanges(previous, value) : value }
+      const linkChanges = field.kind === 'connection' && field.hierarchy !== 'parent'
+      const fields = { [field.key]: linkChanges ? connectionChanges(previous, value) : value }
       await shareConfirm(confirmShare => $fetch(`/api/records/entries/${v.recordTypeKey}/${recordId}`, {
         method: 'PATCH',
         body: { fields, ...(confirmShare ? { confirmShare: true } : {}) }
