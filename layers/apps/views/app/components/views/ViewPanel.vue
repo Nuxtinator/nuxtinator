@@ -1,21 +1,25 @@
 <script setup lang="ts">
 // One open view: header (name, its tabs, share, view menu), the active
-// tab's toolbar and renderer, and the interaction plumbing — optimistic moves
-// (and calendar reschedules) with the poll loop suspended while a drag
-// settles, quick-add (through the
+// tab's toolbar and renderer, and the interaction plumbing — moves, calendar
+// reschedules, quick-add (through the
 // records create route, or as one of a hand-picked view's own cards), the
-// list's done checkbox, tab and definition updates, and the view's own
-// fields (managed by its owner, filled in by its editors). The active tab
+// list's done checkbox, fields set from a card, removing cards, tab and
+// definition updates, and the view's own
+// fields (managed by its owner, filled in by its editors). Changes made on
+// the board show at once and go back only if their save fails
+// (useViewsDetail's optimistic); a quick-added card is pending, dimmed and
+// inert, until the server has created it. The active tab
 // rides in ?tab= so a tab can be linked to. Writes that would hand a card to
 // someone who can't see it ask first (useRecordsShareConfirm). A view that
 // stands for a record (a task's subtasks board) shows what leads to it as a
 // trail in place of the Built-in badge, and its name opens the record. Embedded in
 // another app's page, it takes the height its parent gives it, keeps the
 // active tab to itself and links out to the full view.
-import { generateNKeysBetween } from 'fractional-indexing'
+import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
 import { recordsFilterRuleCount } from '#records'
 import type { RecordsFieldSetting, RecordsFilterGroup } from '#records/client'
 import type {
+  ViewsBoardItem,
   ViewsColumnDef,
   ViewsConnectionDisplay,
   ViewsDefinition,
@@ -52,7 +56,7 @@ const calendarRange = computed(() => ({ from: calendarDays.value[0]!, to: calend
 const {
   view, tab, records, pending, error,
   q, sort, dir, page, pageSize,
-  refresh, refreshRecords, loadMore, beginDrag, endDrag, move
+  refresh, refreshRecords, loadMore, beginDrag, endDrag, optimistic, move
 } = useViewsDetail(viewId, requestedTab, calendarRange)
 
 function selectTab(id: string) {
@@ -226,6 +230,22 @@ watch(viewId, () => {
   embeddedRecordId.value = null
 })
 
+// A card added on screen carries a local id until the server creates it.
+const PENDING_ID_PREFIX = 'pending-'
+let pendingSeq = 0
+const isPendingId = (id: string) => id.startsWith(PENDING_ID_PREFIX)
+
+function openCard(id: string) {
+  if (!isPendingId(id)) openRecordId.value = id
+}
+
+// Writes a value onto a card as the feed will bring it back, moving the card
+// to its new column when the field is the tab's grouping.
+function setCardValue(item: ViewsBoardItem, field: RecordsFieldSetting, value: unknown) {
+  viewsSetItemValue(item, field, value)
+  if (!isCustom.value && groupFieldDef.value?.key === field.key) item.groupValues = viewsGroupKeys(value)
+}
+
 // --- moves ------------------------------------------------------------------
 
 const groupFieldDef = computed(() =>
@@ -244,19 +264,22 @@ function applyOptimisticMove(payload: ViewsMovePayload) {
 
   const field = groupFieldDef.value
   const leavesSource = isCustom.value || !field || viewsDragMode(field) === 'move' || toColumn === ''
+  const keepsOrder = dropKeepsOrder(payload)
   const keys = generateNKeysBetween(null, null, columnOrder.length)
   const inOrder = new Set(columnOrder)
   const placements = recs.placements.filter((p) => {
-    if (p.columnKey === toColumn && inOrder.has(p.recordId)) return false
+    if (keepsOrder && p.columnKey === toColumn && inOrder.has(p.recordId)) return false
     if (p.recordId !== recordId) return true
     // The moved card sheds its source placement (own-column boards shed
     // all); an add-mode drag keeps it in the column it came from.
     if (isCustom.value) return false
     return !leavesSource || p.columnKey !== fromColumn
   })
-  columnOrder.forEach((id, i) => {
-    placements.push({ recordId: id, columnKey: toColumn, rank: keys[i]! })
-  })
+  if (keepsOrder) {
+    columnOrder.forEach((id, i) => {
+      placements.push({ recordId: id, columnKey: toColumn, rank: keys[i]! })
+    })
+  }
   recs.placements = placements
 
   if (!isCustom.value && field) {
@@ -289,20 +312,34 @@ const reordersShared = computed(() => {
   return field === VIEWS_MANUAL_SORT
 })
 
+// Whether the server keeps the order a drop shows: own columns and an
+// ungrouped list always do; the order set under a record when the caller
+// can change it or the card stays in its column; any other grouped tab's
+// order only for its editors. Otherwise the card takes its place by the
+// tab's sort.
+function dropKeepsOrder(payload: ViewsMovePayload): boolean {
+  if (isCustom.value || !groupFieldDef.value) return true
+  const t = tab.value
+  const sharedOrder = !!view.value?.recordId && (t?.recordSort?.field ?? t?.definition.sort?.field) === VIEWS_MANUAL_SORT
+  if (sharedOrder) return reordersShared.value || payload.fromColumn === payload.toColumn
+  return canEditDefinition.value
+}
+
 async function onMove(payload: ViewsMovePayload) {
+  if (isPendingId(payload.recordId)) return
   // Reordering within a column and moving between columns of one of the
   // view's own fields are view state, which view-only access can't change.
   if (!canEditDefinition.value && !reordersShared.value && payload.fromColumn === payload.toColumn) return
   if (!canEditDefinition.value && groupFieldDef.value && viewsIsViewField(groupFieldDef.value)) return
-  beginDrag()
+  // Cards not created yet hold their place on screen but aren't the server's to order.
+  const columnOrder = payload.columnOrder.filter(id => !isPendingId(id))
   try {
-    applyOptimisticMove(payload)
-    await shareConfirm(confirmShare => move({ ...payload, confirmShare }))
+    await optimistic(
+      () => applyOptimisticMove(payload),
+      async () => (await shareConfirm(confirmShare => move({ ...payload, columnOrder, confirmShare }))) !== undefined
+    )
   } catch (err) {
     toast.add({ color: 'error', title: recordsErrorMessage(err, 'Move failed') })
-  } finally {
-    endDrag()
-    refreshRecords()
   }
 }
 
@@ -341,40 +378,118 @@ async function onQuickAdd({ columnKey, name, values }: { columnKey: string, name
         recordFields[key] = value
       }
     }
-    if (picked.value) {
-      await shareConfirm(confirmShare => $fetch(`/api/views/${v.id}/cards`, {
-        method: 'POST',
-        body: {
-          fields: recordFields,
-          viewValues,
-          confirmShare,
-          tabId: t.id,
-          columnKey: isCustom.value ? columnKey : undefined
-        }
-      }))
-      await refreshRecords()
-      return
-    }
-    const created = await shareConfirm(confirmShare => $fetch<{ id: string }>(`/api/records/entries/${v.recordTypeKey}`, {
-      method: 'POST',
-      body: { fields: recordFields, confirmShare }
-    }))
-    if (!created) return
-    if (Object.keys(viewValues).length > 0 && canEditDefinition.value) {
-      await $fetch(`/api/views/${v.id}/values/${created.id}`, { method: 'PATCH', body: { values: viewValues } })
-    }
-    if (isCustom.value && columnKey !== '') {
-      // Own columns on a view of every matching record: the new card's
-      // column is its placement, at the end of the column it was added from.
-      const inColumn = (tabRecords.value?.placements ?? [])
-        .filter(p => p.columnKey === columnKey && p.recordId !== created.id)
-        .sort((a, b) => (a.rank ?? '') < (b.rank ?? '') ? -1 : (a.rank ?? '') > (b.rank ?? '') ? 1 : 0)
-        .map(p => p.recordId)
-      await move({ recordId: created.id, fromColumn: null, toColumn: columnKey, columnOrder: [...inColumn, created.id] })
-    }
-    await refreshRecords()
+    const pendingId = `${PENDING_ID_PREFIX}${++pendingSeq}`
+    await optimistic(
+      () => addPendingCard(pendingId, columnKey, recordFields, viewValues),
+      async () => {
+        const id = await createCard(columnKey, recordFields, viewValues)
+        if (!id) return false
+        settlePendingCard(pendingId, id)
+        return true
+      }
+    )
   } catch (err) {
     toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to create the record') })
+  }
+}
+
+// Creates the record a quick-add names; resolves to its id, or null when
+// the person declined to share it.
+async function createCard(columnKey: string, recordFields: Record<string, unknown>, viewValues: Record<string, unknown>): Promise<string | null> {
+  const v = view.value
+  const t = tab.value
+  if (!v || !t) return null
+  if (picked.value) {
+    const created = await shareConfirm(confirmShare => $fetch<{ id: string }>(`/api/views/${v.id}/cards`, {
+      method: 'POST',
+      body: {
+        fields: recordFields,
+        viewValues,
+        confirmShare,
+        tabId: t.id,
+        columnKey: isCustom.value ? columnKey : undefined
+      }
+    }))
+    return created?.id ?? null
+  }
+  const created = await shareConfirm(confirmShare => $fetch<{ id: string }>(`/api/records/entries/${v.recordTypeKey}`, {
+    method: 'POST',
+    body: { fields: recordFields, confirmShare }
+  }))
+  if (!created) return null
+  if (Object.keys(viewValues).length > 0 && canEditDefinition.value) {
+    await $fetch(`/api/views/${v.id}/values/${created.id}`, { method: 'PATCH', body: { values: viewValues } })
+  }
+  if (isCustom.value && columnKey !== '') {
+    // Own columns on a view of every matching record: the new card's
+    // column is its placement, at the end of the column it was added from.
+    const inColumn = (tabRecords.value?.placements ?? [])
+      .filter(p => p.columnKey === columnKey && p.recordId !== created.id && !isPendingId(p.recordId))
+      .sort((a, b) => (a.rank ?? '') < (b.rank ?? '') ? -1 : (a.rank ?? '') > (b.rank ?? '') ? 1 : 0)
+      .map(p => p.recordId)
+    await move({ recordId: created.id, fromColumn: null, toColumn: columnKey, columnOrder: [...inColumn, created.id] })
+  }
+  return created.id
+}
+
+// A quick-added card shows where the server will put it: under its grouping
+// value, or at the end of its own column (or of a hand-picked list), with
+// the values it's created with. Links show once the feed brings their names.
+function addPendingCard(id: string, columnKey: string, recordFields: Record<string, unknown>, viewValues: Record<string, unknown>) {
+  const recs = tabRecords.value
+  const t = tab.value
+  if (!recs || !t) return
+  const now = new Date().toISOString()
+  const status = fields.value.find(f => f.column === 'status')
+  const item: ViewsBoardItem = {
+    id,
+    name: '',
+    status: typeof status?.default === 'string' ? status.default : null,
+    createdAt: now,
+    updatedAt: now,
+    assignedTo: [],
+    data: {},
+    fields: {},
+    viewValues: { ...viewValues },
+    pending: true
+  }
+  for (const field of allFields.value) {
+    if (field.key in recordFields && field.kind !== 'connection') viewsSetItemValue(item, field, recordFields[field.key])
+  }
+  item.name = String(recordFields.name ?? '')
+  const group = groupFieldDef.value
+  if (!isCustom.value && group) {
+    item.groupValues = viewsGroupKeys(viewsIsViewField(group) ? viewValues[group.key] : recordFields[group.key])
+  }
+  recs.items.push(item)
+  recs.total += 1
+
+  const ownColumn = isCustom.value && columnKey !== ''
+  const pickedList = picked.value && t.layout === 'list' && !t.definition.groupField
+  if (ownColumn || pickedList) {
+    const ranks = recs.placements.filter(p => p.columnKey === columnKey && p.rank).map(p => p.rank!).sort()
+    let rank: string | null = null
+    try {
+      rank = generateKeyBetween(ranks[ranks.length - 1] ?? null, null)
+    } catch {
+      // Unranked, it still sits after every ranked card in the column.
+    }
+    recs.placements.push({ recordId: id, columnKey, rank })
+  }
+}
+
+// The created record takes over the pending card, so it can be opened and
+// dragged before the feed comes back.
+function settlePendingCard(pendingId: string, id: string) {
+  const recs = tabRecords.value
+  if (!recs) return
+  const item = recs.items.find(i => i.id === pendingId)
+  if (item) {
+    item.id = id
+    delete item.pending
+  }
+  for (const p of recs.placements) {
+    if (p.recordId === pendingId) p.recordId = id
   }
 }
 
@@ -399,21 +514,22 @@ const doneStatus = computed(() => {
 async function onToggleDone({ recordId, done }: { recordId: string, done: boolean }) {
   const v = view.value
   const statuses = doneStatus.value
-  if (!v || !statuses) return
+  const statusField = fields.value.find(f => f.column === 'status')
+  if (!v || !statuses || !statusField || isPendingId(recordId)) return
   const value = done ? statuses.done : statuses.reopen
-  const item = tabRecords.value?.items.find(i => i.id === recordId)
-  const previous = item?.status ?? null
-  if (item) item.status = value
   try {
-    await $fetch(`/api/records/entries/${v.recordTypeKey}/${recordId}`, {
-      method: 'PATCH',
-      body: { fields: { status: value } }
+    await optimistic(() => {
+      const item = tabRecords.value?.items.find(i => i.id === recordId)
+      if (item) setCardValue(item, statusField, value)
+    }, async () => {
+      await $fetch(`/api/records/entries/${v.recordTypeKey}/${recordId}`, {
+        method: 'PATCH',
+        body: { fields: { status: value } }
+      })
+      return true
     })
   } catch (err) {
-    if (item) item.status = previous
     toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to update the record') })
-  } finally {
-    refreshRecords()
   }
 }
 
@@ -437,22 +553,26 @@ function connectionChanges(previous: unknown, next: unknown) {
 
 async function onSetField({ recordId, field, value, previous }: { recordId: string, field: RecordsFieldSetting, value: unknown, previous: unknown }) {
   const v = view.value
-  if (!v) return
+  if (!v || isPendingId(recordId)) return
   try {
-    if (viewsIsViewField(field)) {
-      await $fetch(`/api/views/${v.id}/values/${recordId}`, { method: 'PATCH', body: { values: { [field.key]: value } } })
-    } else {
+    await optimistic(() => {
+      const item = tabRecords.value?.items.find(i => i.id === recordId)
+      if (item) setCardValue(item, field, value)
+    }, async () => {
+      if (viewsIsViewField(field)) {
+        await $fetch(`/api/views/${v.id}/values/${recordId}`, { method: 'PATCH', body: { values: { [field.key]: value } } })
+        return true
+      }
       const linkChanges = field.kind === 'connection' && field.hierarchy !== 'parent'
       const fields = { [field.key]: linkChanges ? connectionChanges(previous, value) : value }
-      await shareConfirm(confirmShare => $fetch(`/api/records/entries/${v.recordTypeKey}/${recordId}`, {
+      const saved = await shareConfirm(confirmShare => $fetch(`/api/records/entries/${v.recordTypeKey}/${recordId}`, {
         method: 'PATCH',
         body: { fields, ...(confirmShare ? { confirmShare: true } : {}) }
       }))
-    }
+      return saved !== undefined
+    })
   } catch (err) {
     toast.add({ color: 'error', title: recordsErrorMessage(err, `Failed to update ${field.label}`) })
-  } finally {
-    refreshRecords()
   }
 }
 
@@ -464,7 +584,7 @@ async function onSetField({ recordId, field, value, previous }: { recordId: stri
 async function onReschedule({ recordId, values }: { recordId: string, values: Record<string, unknown> }) {
   const v = view.value
   const recs = tabRecords.value
-  if (!v || !recs) return
+  if (!v || !recs || isPendingId(recordId)) return
   const recordFields: Record<string, unknown> = {}
   const viewValues: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(values)) {
@@ -475,30 +595,30 @@ async function onReschedule({ recordId, values }: { recordId: string, values: Re
     toast.add({ color: 'error', title: 'You can\'t change this view\'s own fields' })
     return
   }
-  const fromTray = recs.unscheduled?.items.find(i => i.id === recordId)
-  const item = recs.items.find(i => i.id === recordId) ?? fromTray
-  if (item) {
-    item.data = { ...item.data, ...recordFields }
-    if (Object.keys(viewValues).length > 0) item.viewValues = { ...item.viewValues, ...viewValues }
-  }
-  if (fromTray && recs.unscheduled) {
-    recs.unscheduled.items = recs.unscheduled.items.filter(i => i.id !== recordId)
-    recs.unscheduled.total = Math.max(0, recs.unscheduled.total - 1)
-    recs.items.push(fromTray)
-  }
-  beginDrag()
   try {
-    if (Object.keys(recordFields).length > 0) {
-      await $fetch(`/api/records/entries/${v.recordTypeKey}/${recordId}`, { method: 'PATCH', body: { fields: recordFields } })
-    }
-    if (Object.keys(viewValues).length > 0) {
-      await $fetch(`/api/views/${v.id}/values/${recordId}`, { method: 'PATCH', body: { values: viewValues } })
-    }
+    await optimistic(() => {
+      const fromTray = recs.unscheduled?.items.find(i => i.id === recordId)
+      const item = recs.items.find(i => i.id === recordId) ?? fromTray
+      if (item) {
+        item.data = { ...item.data, ...recordFields }
+        if (Object.keys(viewValues).length > 0) item.viewValues = { ...item.viewValues, ...viewValues }
+      }
+      if (fromTray && recs.unscheduled) {
+        recs.unscheduled.items = recs.unscheduled.items.filter(i => i.id !== recordId)
+        recs.unscheduled.total = Math.max(0, recs.unscheduled.total - 1)
+        recs.items.push(fromTray)
+      }
+    }, async () => {
+      if (Object.keys(recordFields).length > 0) {
+        await $fetch(`/api/records/entries/${v.recordTypeKey}/${recordId}`, { method: 'PATCH', body: { fields: recordFields } })
+      }
+      if (Object.keys(viewValues).length > 0) {
+        await $fetch(`/api/views/${v.id}/values/${recordId}`, { method: 'PATCH', body: { values: viewValues } })
+      }
+      return true
+    })
   } catch (err) {
     toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to change the date') })
-  } finally {
-    endDrag()
-    refreshRecords()
   }
 }
 
@@ -526,17 +646,25 @@ const addCardColumn = ref<string | null>(null)
 // any other card only comes off the view.
 async function onRemoveCard(recordId: string) {
   const v = view.value
-  if (!v) return
+  if (!v || isPendingId(recordId)) return
   const card = tabRecords.value?.items.find(i => i.id === recordId)
   if (card?.ownCard) {
     if (!await confirmAction({ title: `Delete "${card.name}"?`, confirmLabel: 'Delete', color: 'error' })) return
   }
   try {
-    await $fetch(`/api/views/${v.id}/cards/${recordId}`, {
-      method: 'DELETE',
-      query: card?.ownCard ? { record: 'delete' } : undefined
+    await optimistic(() => {
+      const recs = tabRecords.value
+      if (!recs) return
+      recs.items = recs.items.filter(i => i.id !== recordId)
+      recs.placements = recs.placements.filter(p => p.recordId !== recordId)
+      recs.total = Math.max(0, recs.total - 1)
+    }, async () => {
+      await $fetch(`/api/views/${v.id}/cards/${recordId}`, {
+        method: 'DELETE',
+        query: card?.ownCard ? { record: 'delete' } : undefined
+      })
+      return true
     })
-    await refreshRecords()
   } catch (err) {
     toast.add({ color: 'error', title: recordsErrorMessage(err, card?.ownCard ? 'Failed to delete the card' : 'Failed to remove the record') })
   }
@@ -578,12 +706,24 @@ async function patchTab(body: Record<string, unknown>, failure: string, tabId = 
   }
 }
 
-function patchTabDefinition(change: (definition: ViewsDefinition) => void, failure: string) {
+// The tab shows its new definition (columns, card fields, sort, filter) at
+// once; the cards a new filter or sort brings come with the refetch.
+async function patchTabDefinition(change: (definition: ViewsDefinition) => void, failure: string) {
+  const v = view.value
   const t = tab.value
-  if (!t) return
+  if (!v || !t) return
   const definition: ViewsDefinition = structuredClone(toRaw(t.definition))
   change(definition)
-  patchTab({ definition }, failure)
+  try {
+    await optimistic(() => {
+      t.definition = definition
+    }, async () => {
+      await $fetch(`/api/views/${v.id}/tabs/${t.id}`, { method: 'PATCH', body: { definition } })
+      return true
+    }, { view: true })
+  } catch (err) {
+    toast.add({ color: 'error', title: recordsErrorMessage(err, failure) })
+  }
 }
 
 function onColumnsChange(columns: ViewsColumnDef[]) {
@@ -747,9 +887,14 @@ async function shiftTab(t: ViewsTab, by: -1 | 1) {
   if (from < 0 || to < 0 || to >= ids.length) return
   ids.splice(from, 1)
   ids.splice(to, 0, t.id)
+  const tabs = ids.map(id => v.tabs.find(x => x.id === id)!)
   try {
-    await $fetch(`/api/views/${v.id}/tab-order`, { method: 'PUT', body: { tabIds: ids } })
-    await refresh()
+    await optimistic(() => {
+      v.tabs = tabs
+    }, async () => {
+      await $fetch(`/api/views/${v.id}/tab-order`, { method: 'PUT', body: { tabIds: ids } })
+      return true
+    }, { view: true })
   } catch (err) {
     toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to move the tab') })
   }
@@ -1175,7 +1320,7 @@ const menuItems = computed(() => {
         :can-edit-definition="canEditDefinition"
         :can-create="canCreate"
         @move="onMove"
-        @open="openRecordId = $event"
+        @open="openCard"
         @quick-add="onQuickAdd"
         @add-existing="addCardColumn = $event"
         @columns-change="onColumnsChange"
@@ -1214,7 +1359,7 @@ const menuItems = computed(() => {
           :done-status="doneStatus"
           :has-more="tabRecords.truncated"
           @move="onMove"
-          @open="openRecordId = $event"
+          @open="openCard"
           @quick-add="onQuickAdd"
           @toggle-done="onToggleDone"
           @remove-card="onRemoveCard"
@@ -1239,7 +1384,7 @@ const menuItems = computed(() => {
           if (sort === field) dir = dir === 'asc' ? 'desc' : 'asc'
           else { sort = field; dir = 'asc' }
         }"
-        @open="openRecordId = $event"
+        @open="openCard"
         @quick-add="onQuickAdd({ columnKey: '', name: $event })"
       />
 
@@ -1252,7 +1397,7 @@ const menuItems = computed(() => {
         :days="calendarDays"
         :can-create="canCreate"
         :done-status="doneStatus"
-        @open="openRecordId = $event"
+        @open="openCard"
         @quick-add="onQuickAdd({ columnKey: '', ...$event })"
         @reschedule="onReschedule"
         @dragstart="beginDrag"

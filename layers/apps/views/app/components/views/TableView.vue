@@ -159,6 +159,7 @@ function submitQuickAdd() {
             v-for="item in records.items"
             :key="item.id"
             class="hover:bg-(--ui-bg-elevated) cursor-pointer"
+            :class="item.pending ? 'opacity-60 pointer-events-none' : ''"
             @click="emit('open', item.id)"
           >
             <td class="px-3 py-2 font-medium">

@@ -55,6 +55,7 @@ const menuItems = computed(() => props.removable
   <div
     draggable="true"
     class="group relative flex items-center gap-3 px-3 py-2 border-b border-(--ui-border) bg-(--ui-bg) hover:bg-(--ui-bg-elevated)/50 cursor-grab active:cursor-grabbing"
+    :class="item.pending ? 'opacity-60 pointer-events-none' : ''"
     @dragstart="emit('dragstart', $event)"
     @dragend="emit('dragend')"
   >

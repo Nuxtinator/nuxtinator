@@ -83,6 +83,7 @@ function editorProps(edit: { field: RecordsFieldSetting, value: unknown }) {
     type="button"
     draggable="true"
     class="w-full text-left rounded-lg border border-(--ui-border) bg-(--ui-bg) px-3 py-2 space-y-1 shadow-xs hover:border-(--ui-border-accented) cursor-grab active:cursor-grabbing transition-colors"
+    :class="item.pending ? 'opacity-60 pointer-events-none' : ''"
     @click="emit('open', item.id)"
     @dragstart="onDragStart"
     @dragend="emit('dragend')"

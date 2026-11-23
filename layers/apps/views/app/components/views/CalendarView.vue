@@ -266,7 +266,8 @@ const unscheduledCount = computed(() => props.records.unscheduled?.total ?? 0)
                 placed.fromBefore ? '-ml-1 rounded-l-none' : 'rounded-l',
                 placed.toAfter ? '-mr-1 rounded-r-none' : 'rounded-r',
                 movable ? 'cursor-grab active:cursor-grabbing' : '',
-                isDone(placed.item) ? 'line-through text-(--ui-text-muted)' : ''
+                isDone(placed.item) ? 'line-through text-(--ui-text-muted)' : '',
+                placed.item.pending ? 'opacity-60 pointer-events-none' : ''
               ]"
               :title="placed.item.name"
               @click="emit('open', placed.item.id)"
@@ -300,7 +301,10 @@ const unscheduledCount = computed(() => props.records.unscheduled?.total ?? 0)
                     :key="placed.item.id"
                     type="button"
                     class="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-sm text-left hover:bg-(--ui-bg-elevated)"
-                    :class="isDone(placed.item) ? 'line-through text-(--ui-text-muted)' : ''"
+                    :class="[
+                      isDone(placed.item) ? 'line-through text-(--ui-text-muted)' : '',
+                      placed.item.pending ? 'opacity-60 pointer-events-none' : ''
+                    ]"
                     @click="emit('open', placed.item.id)"
                   >
                     <span

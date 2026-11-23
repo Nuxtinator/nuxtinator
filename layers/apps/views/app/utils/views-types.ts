@@ -188,6 +188,8 @@ export interface ViewsBoardItem {
   ownCard?: true
   /** Values of the view's own fields, keyed by field key (views with fields only). */
   viewValues?: Record<string, unknown>
+  /** Added on screen and not saved yet: shown dimmed, and not opened, dragged or edited until it is. */
+  pending?: true
 }
 
 export interface ViewRecords {

@@ -6,7 +6,7 @@ import { isRecordsFilterGroup, RECORDS_REMINDER_KEY, RECORDS_REPEAT_KEY, storage
 import type { RecordsStorage } from '#records'
 import type { RecordsFieldSetting, RecordsFilterGroup } from '#records/client'
 import { VIEWS_GROUPABLE_KINDS } from './views-types'
-import type { ViewsDefinition, ViewsFieldDef, ViewsLayout } from './views-types'
+import type { ViewsBoardItem, ViewsDefinition, ViewsFieldDef, ViewsLayout } from './views-types'
 
 /** Keys of a view's own fields start with this; type fields can't. */
 export const VIEWS_FIELD_KEY_PREFIX = 'vf_'
@@ -38,6 +38,22 @@ export function viewsFieldSettings(defs: ViewsFieldDef[] | undefined): RecordsFi
 
 export function viewsFieldStorage(field: Pick<RecordsFieldSetting, 'kind' | 'column'>): RecordsStorage {
   return storageOf({ kind: field.kind, column: field.column ?? undefined })
+}
+
+/** Puts a field's value on a feed item where cards, rows and the calendar read it. */
+export function viewsSetItemValue(item: ViewsBoardItem, field: RecordsFieldSetting, value: unknown): void {
+  const storage = viewsFieldStorage(field)
+  if (viewsIsViewField(field)) item.viewValues = { ...item.viewValues, [field.key]: value }
+  else if (field.column === 'status') item.status = typeof value === 'string' ? value : null
+  else if (field.key === 'name') item.name = typeof value === 'string' ? value : ''
+  else if (storage === 'jsonb' || storage === 'promoted') item.data = { ...item.data, [field.key]: value }
+  else item.fields = { ...item.fields, [field.key]: value }
+}
+
+/** The grouping keys a field value puts a card under: option keys, user ids or linked record ids. */
+export function viewsGroupKeys(value: unknown): string[] {
+  const list = Array.isArray(value) ? value : value === null || value === undefined || value === '' ? [] : [value]
+  return list.map(v => v && typeof v === 'object' ? String((v as { id: unknown }).id) : String(v))
 }
 
 /** What a tab shows when neither it nor its type names card fields. */
