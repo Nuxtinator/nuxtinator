@@ -13,14 +13,17 @@ export interface RailLink {
 }
 
 // One rail section's links: each app's rail items, or a single link for an app
-// that registers none, sorted together by `order` then title. An app's badge
-// goes on its item at the app's own path, else on its first item.
-export function buildRailLinks(apps: AppEntry[]): RailLink[] {
-  const links: Array<RailLink & { order: number }> = []
+// that registers none. Apps the org placed (`position`) come first in its
+// order, each with its items together; the rest sort together by `order` then
+// title. An app's badge goes on its item at the app's own path, else on its
+// first item.
+export function buildRailLinks(apps: Array<AppEntry & { position?: number | null }>): RailLink[] {
+  const links: Array<RailLink & { order: number, rank: number }> = []
   for (const app of apps) {
     const scope = app.scope ?? 'org'
+    const rank = app.position ?? Number.MAX_SAFE_INTEGER
     if (!app.rail) {
-      links.push({ key: app.id, appId: app.id, title: app.title, path: app.path, icon: app.icon, scope, badge: true, order: app.order ?? 100 })
+      links.push({ key: app.id, appId: app.id, title: app.title, path: app.path, icon: app.icon, scope, badge: true, order: app.order ?? 100, rank })
       continue
     }
     const home = stripOrgPrefix(app.path)
@@ -34,11 +37,12 @@ export function buildRailLinks(apps: AppEntry[]): RailLink[] {
         icon: item.icon,
         scope,
         badge: i === badgeIndex,
-        order: item.order ?? 100
+        order: item.order ?? 100,
+        rank
       })
     })
   }
   return links
-    .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title))
-    .map(({ order: _order, ...link }) => link)
+    .sort((a, b) => a.rank - b.rank || a.order - b.order || a.title.localeCompare(b.title))
+    .map(({ order: _order, rank: _rank, ...link }) => link)
 }

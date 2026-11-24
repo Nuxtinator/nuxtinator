@@ -26,6 +26,9 @@ export interface AppEntry {
   // for everyone.
   requiredPermission?: string
   order?: number
+  // Where the app is grouped in the rail, the launcher and the dashboard
+  // (see app-categories.ts). Unknown or omitted: More.
+  category?: AppCategoryId
   // Effective status when the host admin hasn't set one (`apps.status` is
   // NULL). Omitted = 'disabled': a newly installed app stays off until the
   // host admin enables it.
@@ -66,8 +69,12 @@ export interface AppPresentation {
   title?: string
   icon?: string
   order?: number
+  category?: AppCategoryId
   defaultStatus?: AppEntry['defaultStatus']
 }
+
+// Core's categories, plus any a host registers with `registerAppCategory`.
+export type AppCategoryId = 'people' | 'work' | 'tools' | 'more' | (string & {})
 
 const _apps = new Map<string, AppEntry>()
 const _presentation = new Map<string, AppPresentation>()

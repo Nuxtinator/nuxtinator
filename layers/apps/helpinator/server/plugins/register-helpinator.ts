@@ -40,7 +40,7 @@ export default defineNitroPlugin(() => {
     path: '/helpinator',
     icon: 'i-lucide-message-circle-question',
     requiredPermission: 'helpinator.access',
-    order: 45
+    category: 'tools'
   })
 
   registerNavItem({

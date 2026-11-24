@@ -11,6 +11,7 @@
 // still shows that org's apps.
 
 import { useActiveOrg } from '#tenant'
+import { arrangeApps, parseAppLayout, type AppCategoryInfo, type AppLayout, type ArrangedApp } from '../utils/app-layout'
 
 export interface RailItemEntry {
   id: string
@@ -28,6 +29,7 @@ export interface AppEntry {
   description?: string
   requiredPermission?: string
   order?: number
+  category?: string
   scope?: 'org' | 'user'
   // Present when the app registers rail items; the rail shows these instead of
   // the app's own entry.
@@ -36,10 +38,21 @@ export interface AppEntry {
 
 interface AppsResponse {
   apps: AppEntry[]
+  categories?: AppCategoryInfo[]
+  layout?: AppLayout
+}
+
+// One heading's apps, in order. `title` is empty when the apps aren't split
+// into categories.
+export interface AppGroup {
+  id: string
+  title: string
+  apps: ArrangedApp<AppEntry>[]
 }
 
 export async function useApps() {
   const tenancyOn = !!useRuntimeConfig().public.tenancy
+  const byCategory = useAppConfig().rail?.categories !== false
   const { user } = useAuth()
   const { slug } = useActiveOrg()
   const chromeOrg = useChromeOrgSlug()
@@ -90,9 +103,18 @@ export async function useApps() {
   const personalApps = computed<AppEntry[]>(() => (personalData.value?.apps ?? []).map(a => ({ ...a, scope: 'user' as const })))
   const apps = computed<AppEntry[]>(() => [...orgApps.value, ...personalApps.value])
 
+  // Org apps by category in the org's arrangement. One untitled group when
+  // the host turned categories off or every app is in one category.
+  const orgGroups = computed<AppGroup[]>(() => {
+    if (!byCategory) return [{ id: 'all', title: '', apps: orgApps.value.map(a => ({ ...a, position: null })) }]
+    const arranged = arrangeApps(orgApps.value, data.value?.categories ?? [], parseAppLayout(data.value?.layout))
+    if (arranged.length > 1) return arranged.map(c => ({ id: c.id, title: c.title, apps: c.apps }))
+    return [{ id: 'all', title: '', apps: arranged[0]?.apps ?? [] }]
+  })
+
   const refresh = async () => {
     await Promise.all([refreshOrg(), refreshPersonal()])
   }
 
-  return { apps, orgApps, personalApps, refresh, pending, error }
+  return { apps, orgApps, orgGroups, personalApps, refresh, pending, error }
 }

@@ -19,7 +19,7 @@ export default defineNitroPlugin(() => {
     icon: 'i-lucide-folder',
     requiredPermission: 'files.access',
     defaultStatus: 'available',
-    order: 25
+    category: 'tools'
   })
 
   registerNavItem({

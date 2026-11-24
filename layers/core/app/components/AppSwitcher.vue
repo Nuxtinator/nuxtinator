@@ -1,9 +1,9 @@
 <script setup lang="ts">
-const { apps, orgApps, personalApps, pending } = await useApps()
+const { apps, orgGroups, personalApps, pending } = await useApps()
 const open = ref(false)
-// Org apps first, then personal apps under their own label.
+// Org apps by category, then personal apps under their own label.
 const sections = computed(() => [
-  { key: 'org', label: '', apps: orgApps.value },
+  ...orgGroups.value.map(g => ({ key: `org:${g.id}`, label: g.title, apps: g.apps })),
   { key: 'user', label: 'Personal', apps: personalApps.value }
 ].filter(s => s.apps.length > 0))
 </script>
