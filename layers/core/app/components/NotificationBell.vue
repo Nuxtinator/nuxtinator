@@ -22,15 +22,6 @@ const filtered = computed<Notification[]>(() =>
     : items.value
 )
 
-function timeAgo(iso: string): string {
-  const d = new Date(iso)
-  const diff = Date.now() - d.getTime()
-  if (diff < 60_000) return 'just now'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`
-  return d.toLocaleDateString()
-}
-
 async function openNotification(n: Notification) {
   if (!n.read_at) await markRead([n.id])
   open.value = false
@@ -129,7 +120,7 @@ async function markAllRead() {
                 {{ n.body }}
               </div>
               <div class="text-xs text-(--ui-text-muted) mt-0.5">
-                {{ timeAgo(n.created_at) }}
+                <RelativeTime :value="n.created_at" hover-only />
               </div>
             </div>
             <span v-if="!n.read_at" class="size-2 rounded-full bg-(--ui-primary) shrink-0 mt-1.5" />

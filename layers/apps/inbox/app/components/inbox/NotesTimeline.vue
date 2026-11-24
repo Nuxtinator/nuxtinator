@@ -135,7 +135,7 @@ function canManage(e: InboxTimelineEntry): boolean {
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 text-xs">
               <span class="font-medium text-(--ui-text-highlighted) truncate">{{ entry.note.authorName }}</span>
-              <span class="text-(--ui-text-dimmed)">{{ inboxRelativeTime(entry.note.createdAt) }}</span>
+              <RelativeTime :value="entry.note.createdAt" class="text-(--ui-text-dimmed)" />
               <span v-if="entry.note.editedAt" class="text-(--ui-text-dimmed)">(edited)</span>
               <template v-if="canManage(entry) && editingId !== entry.note.id">
                 <UButton icon="i-lucide-pencil" size="xs" variant="ghost" color="neutral" class="ml-auto" aria-label="Edit note" @click="startEdit(entry.note.id, entry.note.body)" />
@@ -169,7 +169,7 @@ function canManage(e: InboxTimelineEntry): boolean {
           <UIcon :name="activityIcon(entry.activity.eventType)" class="size-3.5 shrink-0 text-(--ui-text-dimmed)" />
           <span class="truncate">{{ entry.activity.message || entry.activity.eventType }}</span>
           <span v-if="entry.activity.actorName" class="text-(--ui-text-dimmed) shrink-0">· {{ entry.activity.actorName }}</span>
-          <span class="text-(--ui-text-dimmed) shrink-0 ml-auto">{{ inboxRelativeTime(typeof entry.activity.at === 'number' ? new Date(entry.activity.at).toISOString() : entry.activity.at) }}</span>
+          <RelativeTime :value="entry.activity.at" class="text-(--ui-text-dimmed) shrink-0 ml-auto" />
         </div>
       </template>
 

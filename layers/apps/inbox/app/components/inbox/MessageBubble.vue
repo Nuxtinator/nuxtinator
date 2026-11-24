@@ -66,7 +66,7 @@ const statusBadge = computed(() => {
         size="sm"
         icon="i-lucide-sparkles"
       />
-      <span class="ml-auto shrink-0">{{ inboxRelativeTime(message.createdAt) }}</span>
+      <RelativeTime :value="message.createdAt" class="ml-auto shrink-0" />
     </div>
 
     <UAlert

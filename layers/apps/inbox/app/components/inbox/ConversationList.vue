@@ -120,7 +120,7 @@ const statusTabs = computed(() => [
             <span class="font-medium text-sm truncate flex-1 text-(--ui-text-highlighted)">
               {{ c.counterpartyName || c.channelValue }}
             </span>
-            <span class="text-xs text-(--ui-text-dimmed) shrink-0">{{ inboxRelativeTime(c.lastMessageAt || c.createdAt) }}</span>
+            <RelativeTime :value="c.lastMessageAt || c.createdAt" hover-only class="text-xs text-(--ui-text-dimmed) shrink-0" />
           </div>
           <div class="text-sm truncate text-(--ui-text)">{{ c.subject || '(no subject)' }}</div>
           <p v-if="c.snippet" class="text-xs text-(--ui-text-dimmed) truncate mt-0.5">{{ c.snippet }}</p>

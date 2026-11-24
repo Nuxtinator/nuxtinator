@@ -119,7 +119,7 @@ function statusMeta(row: InboxRecordConversationRow) {
             {{ row.subject || '(no subject)' }}
           </NuxtLink>
           <UBadge :label="statusMeta(row).label" :color="statusMeta(row).color" size="sm" variant="subtle" />
-          <span class="text-xs text-(--ui-text-dimmed) shrink-0">{{ inboxRelativeTime(row.lastMessageAt || row.createdAt) }}</span>
+          <RelativeTime :value="row.lastMessageAt || row.createdAt" class="text-xs text-(--ui-text-dimmed) shrink-0" />
         </div>
         <p v-if="row.snippet" class="text-xs text-(--ui-text-dimmed) truncate">{{ row.snippet }}</p>
         <div class="flex items-center gap-2 text-xs text-(--ui-text-muted)">

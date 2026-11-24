@@ -13,6 +13,7 @@ Reach for these before writing your own markup. They hold the styling, so a fix 
 | Need | Use |
 |---|---|
 | Help or explanation for a field or section | `<InfoTip text="…" />` |
+| When something happened (a message, a note, an activity row) | `<RelativeTime :value>`: "3h ago", the full date and time on hover, and a tap switches every time on the page to exact times. Inside a clickable row add `hover-only` |
 | Sidebar | `<SidebarPanel>` with `<SidebarNav :items>` inside |
 | Settings page | `<SettingsGroup title>` cards of `<SettingsRow label value>` rows; `useSettingsRow(id)` keeps one row open at a time |
 | Page or tab edited as one form | `<SaveBar :dirty :saving @save @discard>` at the end of the form, with `useUnsavedGuard(dirty, discard)` |
