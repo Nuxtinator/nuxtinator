@@ -31,7 +31,7 @@
     "requires": {
       "@nuxtinator/ai": ">=0.10.0",
       "@nuxtinator/context": ">=1.14.0",
-      "@nuxtinator/core": ">=3.4.0"
+      "@nuxtinator/core": ">=4.1.0"
     }
   },
   "peerDependencies": {

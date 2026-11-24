@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { createReusableTemplate } from '@vueuse/core'
+import type { AppCategoryInfo, AppLayout } from '../../utils/app-layout'
+
 definePageMeta({
   layout: 'admin',
   middleware: ['auth', 'admin']
@@ -14,21 +17,52 @@ interface AdminApp {
   status: AppStatus
   scope: 'org' | 'user'
   installed: boolean
+  launcher: boolean
+  order?: number
+  category?: string
   created_at: string
   updated_at: string
 }
 
 const toast = useToast()
+const confirmAction = useConfirm()
 
 // Multi-tenant exposes three availability tiers per org; single-tenant has no
 // orgs, so an app is simply on or off for this instance.
 const tenancyEnabled = computed(() => useRuntimeConfig().public.tenancy === true)
 
-const { data, pending, refresh } = await useFetch<{ apps: AdminApp[] }>(
+const { data, pending, refresh } = await useFetch<{ apps: AdminApp[], categories?: AppCategoryInfo[], layout?: AppLayout }>(
   '/api/admin/apps',
   { default: () => ({ apps: [] }) }
 )
 const apps = computed(() => data.value?.apps ?? [])
+
+// Single mode: the instance's rail apps are arranged under categories here, with
+// the rest listed after. With tenancy loaded each org arranges its own.
+const arranging = !tenancyEnabled.value && useAppConfig().rail?.categories !== false
+const inRail = (app: AdminApp) => app.installed && app.scope === 'org' && app.launcher
+const railApps = computed(() => arranging ? apps.value.filter(inRail) : [])
+const otherApps = computed(() => arranging ? apps.value.filter(a => !inRail(a)) : apps.value)
+const { refresh: refreshRailApps } = await useApps()
+const arrangement = useAppArrangement({
+  apps: railApps,
+  categories: () => data.value?.categories ?? [],
+  layout: () => data.value?.layout,
+  endpoint: '/api/admin/app-layout',
+  onSaved: () => Promise.all([refresh(), refreshRailApps()])
+})
+const { customized, saving } = arrangement
+
+const onResetOrder = async () => {
+  if (!await confirmAction({
+    title: 'Reset the app order?',
+    description: 'Apps go back to their own categories and order, and the categories added here are removed.',
+    confirmLabel: 'Reset'
+  })) return
+  arrangement.reset()
+}
+
+const [DefineRow, ReuseRow] = createReusableTemplate<{ app: AdminApp }>()
 
 const STATUS_OPTIONS: { value: AppStatus, label: string, description: string, color: 'success' | 'neutral' | 'warning' | 'error', icon: string }[] = [
   { value: 'default', label: 'Enabled for all', description: 'On for every org; an org admin can turn it off.', color: 'success', icon: 'i-lucide-circle-check' },
@@ -270,36 +304,8 @@ const onRemove = async () => {
 
 <template>
   <div class="space-y-4">
-    <header>
-      <h1 class="text-2xl font-bold">
-        Apps
-      </h1>
-      <p class="text-sm text-(--ui-text-muted)">
-        <template v-if="tenancyEnabled">
-          Set the global availability for each app. Each option is described in the dropdown.
-        </template>
-        <template v-else>
-          Enable or disable each app for this instance.
-        </template>
-      </p>
-    </header>
-
-    <div
-      v-if="pending && apps.length === 0"
-      class="text-sm text-(--ui-text-muted)"
-    >
-      Loading...
-    </div>
-
-    <ul
-      v-else
-      class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md"
-    >
-      <li
-        v-for="app in apps"
-        :key="app.id"
-        class="flex items-center justify-between gap-3 p-4"
-      >
+    <DefineRow v-slot="{ app }">
+      <div class="flex items-center justify-between gap-3">
         <div class="flex items-start gap-3 min-w-0">
           <AppIcon
             :name="app.icon"
@@ -473,8 +479,95 @@ const onRemove = async () => {
             </template>
           </USelectMenu>
         </div>
-      </li>
-    </ul>
+      </div>
+    </DefineRow>
+
+    <header>
+      <div class="flex items-center justify-between gap-3">
+        <h1 class="text-2xl font-bold">
+          Apps
+        </h1>
+        <div
+          v-if="arranging"
+          class="flex items-center gap-2"
+        >
+          <UButton
+            v-if="customized"
+            color="error"
+            variant="outline"
+            icon="i-lucide-rotate-ccw"
+            :disabled="saving"
+            @click="onResetOrder"
+          >
+            Reset order
+          </UButton>
+          <UButton
+            icon="i-lucide-plus"
+            :disabled="saving"
+            @click="arrangement.openAdd()"
+          >
+            Add category
+          </UButton>
+        </div>
+      </div>
+      <p class="text-sm text-(--ui-text-muted)">
+        <template v-if="tenancyEnabled">
+          Set the global availability for each app. Each option is described in the dropdown.
+        </template>
+        <template v-else>
+          Enable or disable each app for this instance.
+        </template>
+      </p>
+    </header>
+
+    <div
+      v-if="pending && apps.length === 0"
+      class="text-sm text-(--ui-text-muted)"
+    >
+      Loading...
+    </div>
+
+    <template v-else>
+      <AppCategoryList
+        v-if="arranging"
+        :arrangement="arrangement"
+      >
+        <template #row="{ app }">
+          <ReuseRow :app="app" />
+        </template>
+      </AppCategoryList>
+      <UCard
+        v-if="arranging && otherApps.length > 0"
+        :ui="{ body: 'p-0 sm:p-0' }"
+      >
+        <template #header>
+          <h2 class="font-semibold">
+            Personal and other apps
+          </h2>
+        </template>
+        <ul class="divide-y divide-(--ui-border)">
+          <li
+            v-for="app in otherApps"
+            :key="app.id"
+            class="p-4"
+          >
+            <ReuseRow :app="app" />
+          </li>
+        </ul>
+      </UCard>
+      <ul
+        v-else-if="!arranging"
+        class="divide-y divide-(--ui-border) border border-(--ui-border) rounded-md"
+      >
+        <li
+          v-for="app in otherApps"
+          :key="app.id"
+          class="p-4"
+        >
+          <ReuseRow :app="app" />
+        </li>
+      </ul>
+    </template>
 
     <USlideover
       v-model:open="orgsOpen"

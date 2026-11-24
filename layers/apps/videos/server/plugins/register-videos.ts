@@ -36,7 +36,7 @@ export default defineNitroPlugin(() => {
     icon: 'i-lucide-video',
     requiredPermission: 'videos.access',
     defaultStatus: 'available',
-    order: 30
+    category: 'tools'
   })
 
   registerNavItem({

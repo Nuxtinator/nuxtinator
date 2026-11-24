@@ -134,7 +134,7 @@ export default defineNitroPlugin(() => {
     path: '/inbox',
     icon: 'i-lucide-inbox',
     requiredPermission: 'inbox.access',
-    order: 35
+    category: 'people'
   })
   registerNavItem({
     appId: 'inbox',

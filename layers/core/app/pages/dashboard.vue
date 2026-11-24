@@ -7,7 +7,7 @@ definePageMeta({
 })
 
 const tenancyOn = !!useRuntimeConfig().public.tenancy
-const { orgApps, personalApps, pending } = await useApps()
+const { orgApps, orgGroups, personalApps, pending } = await useApps()
 </script>
 
 <template>
@@ -26,10 +26,21 @@ const { orgApps, personalApps, pending } = await useApps()
         <h1 class="text-lg font-semibold">
           Apps
         </h1>
-        <AppLauncherGrid
-          :apps="orgApps"
-          :empty-text="personalApps.length ? 'No shared apps installed.' : 'No apps installed.'"
-        />
+        <template
+          v-for="group in orgGroups"
+          :key="group.id"
+        >
+          <h3
+            v-if="group.title"
+            class="text-sm font-medium text-(--ui-text-muted)"
+          >
+            {{ group.title }}
+          </h3>
+          <AppLauncherGrid
+            :apps="group.apps"
+            :empty-text="personalApps.length ? 'No shared apps installed.' : 'No apps installed.'"
+          />
+        </template>
       </section>
       <section
         v-if="personalApps.length || tenancyOn"

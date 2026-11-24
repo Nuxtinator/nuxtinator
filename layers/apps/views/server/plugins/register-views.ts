@@ -35,7 +35,7 @@ export default defineNitroPlugin(() => {
     icon: 'i-lucide-kanban',
     requiredPermission: 'views.use',
     defaultStatus: 'default',
-    order: 35,
+    category: 'work',
     requires: ['records']
   })
 

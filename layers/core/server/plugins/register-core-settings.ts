@@ -3,8 +3,19 @@ import { registerSetting } from '../utils/settings-registry'
 import { REGISTRATION_SETTINGS_NAMESPACE, SETTING_SELF_REGISTRATION } from '../utils/registration'
 import { MAIL_SETTINGS_NAMESPACE, SETTING_MAIL_ORG_RECEIVE_ACCOUNT, SETTING_MAIL_ORG_SEND_ACCOUNT, parseAccountId } from '../utils/mail-host'
 import { GROUPS_SETTINGS_NAMESPACE, SETTING_GROUP_MODE, SETTING_ORG_GROUP_MODE, parseGroupMode, type GroupMode } from '../utils/groups'
+import { APP_LAYOUT_NAMESPACE, SETTING_APP_LAYOUT } from '../utils/app-layout'
+import { emptyAppLayout, parseAppLayout, type AppLayout } from '../../app/utils/app-layout'
 
 export default defineNitroPlugin(() => {
+  // An org's arrangement of its apps (an org setting; the deployment's in single mode).
+  registerSetting<AppLayout>({
+    namespace: APP_LAYOUT_NAMESPACE,
+    key: SETTING_APP_LAYOUT,
+    default: emptyAppLayout(),
+    parse: parseAppLayout,
+    label: 'App arrangement'
+  })
+
   registerSetting<boolean>({
     namespace: REGISTRATION_SETTINGS_NAMESPACE,
     key: SETTING_SELF_REGISTRATION,

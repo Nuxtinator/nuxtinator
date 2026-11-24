@@ -18,7 +18,7 @@ export default defineNitroPlugin(() => {
     path: '/messages',
     icon: 'i-lucide-message-square',
     requiredPermission: 'messages.access',
-    order: 20
+    category: 'people'
   })
 
   registerNavItem({

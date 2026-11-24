@@ -32,7 +32,7 @@ The host shell stays thin. App layers feed it through **seven in-process registr
 | Permissions | [permissions-registry.ts](../layers/core/server/utils/permissions-registry.ts) | `registerPermissions(perms, meta?)` |
 | Default grants | [default-grants-registry.ts](../layers/core/server/utils/default-grants-registry.ts) | `registerDefaultGrants(appId, { admin: [...], member: [...] })` |
 | App static roles | [roles-registry.ts](../layers/core/server/utils/roles-registry.ts) | `registerStaticRole({ key, name, description, permissions, source })` |
-| App entries (launcher tiles) | [app-registry.ts](../layers/core/server/utils/app-registry.ts) | `registerApp({ id, title, path, icon, requiredPermission, order })` |
+| App entries (launcher tiles) | [app-registry.ts](../layers/core/server/utils/app-registry.ts) | `registerApp({ id, title, path, icon, requiredPermission, category })` |
 | In-app nav items | [nav-registry.ts](../layers/core/server/utils/nav-registry.ts) | `registerNavItem({ appId, title, path, icon, requiredPermission, order })` |
 | Rail entries | [rail-registry.ts](../layers/core/server/utils/rail-registry.ts) | `registerRailItem({ appId, id, title, path, icon, requiredPermission, order })` |
 | Admin shell sections | [admin-section-registry.ts](../layers/core/server/utils/admin-section-registry.ts) | `registerAdminSection({ appId, title, path, icon, requiredPermission, order })` |
@@ -56,7 +56,7 @@ export default defineNitroPlugin(() => {
 })
 ```
 
-`configureApp` applies wherever the app appears (rail, launcher, `/admin/apps`, MCP), whichever plugin runs first. It also takes `defaultStatus`, which replaces the layer's registry default (a host admin's choice on `/admin/apps` still wins), so a host decides in code which installed apps are on by default.
+`configureApp` applies wherever the app appears (rail, launcher, `/admin/apps`, MCP), whichever plugin runs first. It also takes `category` (see [App categories](#app-categories)) and `defaultStatus`, which replaces the layer's registry default (a host admin's choice on `/admin/apps` still wins), so a host decides in code which installed apps are on by default.
 
 An app registered with `launcher: false` stays installed and on (its routes, API and page guard work as usual) but gets no launcher tile or rail entry; other apps or settings pages link to its pages. The records kernel uses it: members see records through Views, and admins manage record types from org settings.
 
@@ -67,12 +67,29 @@ export default defineAppConfig({
   rail: {
     expanded: true,     // start with names shown (default false)
     launcher: false,    // hide the "All apps" link (default true)
-    orgSettings: false  // hide tenancy's organization settings link (default true)
+    orgSettings: false, // hide tenancy's organization settings link (default true)
+    categories: false   // one list instead of category headings (default true)
   }
 })
 ```
 
 `launcher` also takes `{ title, icon, path }` to point the top link somewhere other than the app launcher, e.g. `{ title: 'Your sites', icon: 'i-lucide-church', path: '/orgs' }`. It shows on every page, inside an org or not, and is highlighted on `path` and the pages under it.
+
+### App categories
+
+The rail, the launcher popover and the dashboard group org apps under category headings. Core ships three, in this order, plus More, which holds apps with no category (or one nobody registered) and sorts last:
+
+| Key | Title | An app belongs here when a member opens it… |
+|---|---|---|
+| `people` | People | about contacts and the conversations with them: contacts, the shared inbox, team chat |
+| `work` | Work | to plan and get work done: projects, tasks, views, meetings, the org's context |
+| `tools` | Tools | as a supporting tool anyone can use alongside the work: files, video, feedback, help chat, connections to outside services |
+
+A layer names its category in `registerApp({ ..., category: 'work' })` and leaves out `order`, so it lists A–Z inside its category; `order` is for a host that wants an app pinned first. Headings show only when the apps a member sees span two or more categories, and personal apps keep their own Personal section.
+
+A host moves an app with `configureApp('helpinator', { category: 'people' })`, adds a category with `registerAppCategory({ id: 'prayer', title: 'Prayer', order: 15 })` and renames or reorders one with `configureAppCategory('people', { title: 'Intercessors', order: 40 })`, both from `#core/server/utils/app-categories` (core's are ordered 10, 20, 30, and More 1000). `rail.categories: false` in `app.config.ts` turns the headings off and lists apps by `order`, as a host whose rail is its whole navigation may want.
+
+An org rearranges on top of that on its Apps settings page (`org.apps.manage`; `/admin/apps` in single mode): it drags apps within and between categories, renames and reorders categories, adds its own, and can reset. Only its changes are stored, as one `core_settings` value (`core:app_layout`), so a layer installed later lands in its own category after the apps the org ordered. [app/utils/app-layout.ts](../layers/core/app/utils/app-layout.ts) holds the merge.
 
 The host itself ships **no** permissions or roles — operator-admin is the `users.is_admin` boolean (no slug), checked via `requireOperatorAdmin(event)` from [tenant-kernel/server.ts](../layers/core/tenant-kernel/server.ts).
 
@@ -261,7 +278,7 @@ export default defineNitroPlugin(() => {
     path: '/tasks',
     icon: 'i-lucide-list-todo',
     requiredPermission: 'tasks.access',
-    order: 30
+    category: 'work' // see "App categories"
   })
 
   registerNavItem({
