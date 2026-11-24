@@ -62,6 +62,15 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
 - **Don't add a subtitle that repeats the page title.**
 - InfoTip sits at `vertical-align: -0.2em`, which centres the icon on the label's capital letters; `align-middle` made it sit low.
 
+## Timestamps
+
+- **Times show as short relative text, with the exact time one step away** (`<RelativeTime>`, core). "3h ago", "2d ago", then the date. Hovering shows the full date and time with seconds and time zone. Tapping or clicking a timestamp switches every timestamp on the page to exact times ("Nov 11, 2:32:07 PM") until the next reload, and tapping again switches back. Inside a clickable row (a conversation list, the notification menu) it is hover-only, so a tap still opens the row.
+  - The date alone, with no way to reach the time, was rejected: an activity feed couldn't show which of two events on the same day came first, or how far apart they were.
+  - A hover tooltip alone was rejected: touch screens never show it.
+  - Always showing the exact time was rejected: it is wider and slower to scan than "3h ago", and the rough age is usually all anyone needs.
+  - Remembering the exact-times switch for each viewer was rejected: it's a diagnostic switch, so it starts off on every page load.
+  - A relative-time helper in each layer was rejected: the copies drift apart ("5m" in one place, "5m ago" in another) and a fix in one never reaches the others.
+
 ## Settings pages
 
 - **Settings are rows grouped into a few cards, not one card per setting.** Each row shows a label, the current value and an action (see `SettingsGroup` / `SettingsRow`). A card holding a single button or field read as sparse and made the page long.

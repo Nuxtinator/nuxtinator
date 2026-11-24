@@ -69,7 +69,7 @@ const menuItems = computed(() => [[
     <div class="min-w-0 flex-1 space-y-1">
       <div class="flex items-center gap-2">
         <span class="text-sm font-medium truncate">{{ comment.authorName }}</span>
-        <span class="text-xs text-(--ui-text-muted) whitespace-nowrap">{{ recordsRelativeTime(comment.createdAt) }}</span>
+        <RelativeTime :value="comment.createdAt" class="text-xs text-(--ui-text-muted)" />
         <span
           v-if="comment.viaClient"
           class="text-xs text-(--ui-text-muted) whitespace-nowrap"

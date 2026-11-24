@@ -107,7 +107,7 @@ const showValues = computed(() => props.activity.action === 'field_changed' && f
           v-if="activity.viaClient"
           class="text-xs whitespace-nowrap"
         > · via {{ activity.viaClient }}</span>
-        <span class="text-xs whitespace-nowrap"> · {{ recordsRelativeTime(activity.createdAt) }}</span>
+        <span class="text-xs whitespace-nowrap"> · <RelativeTime :value="activity.createdAt" /></span>
       </p>
       <p
         v-if="showValues"
