@@ -1,6 +1,6 @@
 # UX feature decisions
 
-How particular features look and behave (the launcher, teams, views, records, email admin), with the reasoning behind each and what was rejected. Add an entry when a feature's UX decision is made or reversed.
+How particular features look and behave (the launcher, teams, views, records, email admin, the feedback widget), with the reasoning behind each and what was rejected. Add an entry when a feature's UX decision is made or reversed.
 
 Style choices that hold on any page (colors, tokens, surfaces, containers, chrome, help text, settings-page patterns) go in [ui-style-decisions.md](ui-style-decisions.md).
 
@@ -155,3 +155,9 @@ These entries are also the rules for their feature, with the components it's bui
 - **`/admin/orgs` marks an org whose mail drew spam complaints in the last 30 days with a warning badge** ("3 complaints"). Org domains on the host's accounts share the host's reputation, so this is where a host admin notices. A count on every row was rejected: almost every row would read 0.
 - **The Streams tab saves as one form with a save bar**, because changing a stream's domain changes which webhook events the domain needs, and an admin usually moves several streams together.
 - **An org sees webhook URLs only for its own provider accounts.** The URLs carry the account's token, so on the host's accounts they stay with the host admin.
+
+## Feedback widget
+
+- **A site being tested shows the widget in testing mode: a labelled "Give feedback" pill set 16px in from the corner, and on a visitor's first visit a dark note above it** ("This site is being tested. Spot a problem or have an idea? Tell us here."). Clicking the note opens the panel; × or opening the panel dismisses it for good in that browser. Elsewhere the widget stays the small unlabelled corner button, which non-technical testers missed.
+  - Opening the panel by itself on page load was rejected: it covers 360px by up to 70% of the screen (nearly all of a phone), and opening it takes a screenshot of the page each time.
+- **Testing mode is a switch in the feedback project's settings, and a site's embed settings can override it** (`mode` in `profile-config`, `NUXT_PUBLIC_FEEDBACK_MODE` on nuxtinator hosts). The switch lets the board owner start and end a round of testing without redeploying the site; the override covers a staging site and its production site sending to one project.

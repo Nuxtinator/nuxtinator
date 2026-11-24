@@ -23,6 +23,10 @@
  *            `?feedback=true` in the URL. That visit persists the opt-in to
  *            localStorage (key `show-feedback-widget`) so subsequent visits
  *            keep showing the widget without the param.
+ *
+ * `mode` ('testing' | 'standard', optional) sets how the widget presents
+ * itself on this site, over the project's Testing mode switch. Left out, the
+ * widget follows the project.
  */
 
 import { computed, provide, defineAsyncComponent } from 'vue'
@@ -70,6 +74,10 @@ const enabled = computed(() => {
 const instanceId = computed(() =>
   config.value?.instanceId || ('fb-' + Math.random().toString(36).slice(2, 9))
 )
+const embedMode = computed(() => {
+  const m = config.value?.mode
+  return m === 'testing' || m === 'standard' ? m : null
+})
 
 const profileModules = import.meta.glob('./app-profiles/*.vue')
 
@@ -91,6 +99,7 @@ provide('projectId', projectId)
 provide('apiBase', apiBase)
 provide('enabled', enabled)
 provide('instanceId', instanceId)
+provide('embedMode', embedMode)
 provide('profileConfig', config)
 </script>
 

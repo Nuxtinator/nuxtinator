@@ -75,6 +75,17 @@ Every submission becomes a card in the Kanban project whose UUID is passed as `p
 
 Embedders can pass `"showByDefault": false` in `profile-config` to keep the widget invisible for ordinary visitors. Anyone who loads the host page with `?feedback` in the URL gets the flag persisted to `localStorage["show-feedback-widget"]` and sees the widget from then on. Useful for internal testers, beta cohorts, or customers you've sent a feedback link to. Full details and examples in [docs/EMBEDDING.md](docs/EMBEDDING.md).
 
+## Testing mode
+
+For sites being tested, the widget can stand out: a labelled "Give feedback" button set in from the corner, and on a visitor's first visit a note above it ("This site is being tested. Spot a problem or have an idea? Tell us here.") that stays dismissed once closed or once the panel is opened. The panel never opens by itself.
+
+Two switches turn it on:
+
+- **Per project:** the Testing mode switch in the project's settings on the Feedback board. `GET /api/v1/project/:id` returns it as `widget_mode` (`standard` or `testing`), so every site embedding that project follows it without a redeploy.
+- **Per site:** `"mode": "testing"` or `"mode": "standard"` in `profile-config` sets the mode for that embed and wins over the project switch, e.g. testing on a staging site and standard on production when both send to one project. Nuxtinator hosts set it with `NUXT_PUBLIC_FEEDBACK_MODE`; leave it empty to follow the project.
+
+The widget remembers the last mode it saw for a project (`localStorage["fw-mode:<projectId>"]`), so the button keeps its shape while the project loads.
+
 ## See also
 
 - **[docs/EMBEDDING.md](docs/EMBEDDING.md)** — how external sites consume the widget via URL

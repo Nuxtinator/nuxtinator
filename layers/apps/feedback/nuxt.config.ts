@@ -20,7 +20,10 @@ export default defineNuxtConfig({
     // NUXT_FEEDBACK_TOKEN_TTL — no rebuild needed.
     feedbackTokenTtl: process.env.FEEDBACK_TOKEN_TTL || '30d',
     public: {
-      feedbackProjectId: process.env.NUXT_PUBLIC_FEEDBACK_PROJECT_ID || process.env.FEEDBACK_PROJECT_ID || ''
+      feedbackProjectId: process.env.NUXT_PUBLIC_FEEDBACK_PROJECT_ID || process.env.FEEDBACK_PROJECT_ID || '',
+      // 'testing' or 'standard' sets the widget's look on this host, over the
+      // project's Testing mode switch. Empty follows the project.
+      feedbackMode: process.env.NUXT_PUBLIC_FEEDBACK_MODE || ''
     }
   }
 })

@@ -32,6 +32,22 @@ describe('public widget endpoints', () => {
     expect(res.name).toBe('test-feedback-pub')
   })
 
+  it('GET /api/v1/project/:id: widget_mode is standard unless the project was switched to testing', async () => {
+    const { org } = await createFeedbackOrgWith(sql, ['admin'])
+    const project = await createTestProject(sql, { org_id: org.id })
+
+    const before = await $fetch<{ widget_mode: string }>(`/api/v1/project/${project.id}`)
+    expect(before.widget_mode).toBe('standard')
+
+    await sql`UPDATE projects SET post_meta = post_meta || '{"widget_mode":"testing"}'::jsonb WHERE id = ${project.id}`
+    const testing = await $fetch<{ widget_mode: string }>(`/api/v1/project/${project.id}`)
+    expect(testing.widget_mode).toBe('testing')
+
+    await sql`UPDATE projects SET post_meta = post_meta || '{"widget_mode":"loud"}'::jsonb WHERE id = ${project.id}`
+    const unknown = await $fetch<{ widget_mode: string }>(`/api/v1/project/${project.id}`)
+    expect(unknown.widget_mode).toBe('standard')
+  })
+
   it('GET /api/v1/project/:id: 404 for non-existent UUID', async () => {
     const err = await $fetch(`/api/v1/project/${randomUUID()}`).catch(e => e)
     expect(err.statusCode).toBe(404)
