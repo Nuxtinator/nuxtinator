@@ -86,6 +86,15 @@ const dropBefore = ref<string | null | undefined>(undefined)
 // Which side of this column a dragged column would be inserted on.
 const columnDropSide = ref<'left' | 'right' | null>(null)
 
+const scroller = ref<HTMLElement | null>(null)
+const autoScroll = useViewsDragAutoScroll(scroller)
+
+// Runs in the capture phase: card and placeholder handlers stop dragover from
+// bubbling, and the stack should scroll whatever the pointer is over.
+function onDragAutoScroll(event: DragEvent) {
+  if (props.draggingId) autoScroll.update(event)
+}
+
 function onCardDragStart(event: DragEvent, card: ViewsBoardItem) {
   if (!event.dataTransfer) return
   event.dataTransfer.setData('application/json', JSON.stringify({
@@ -122,6 +131,7 @@ function clearDropState() {
   dragOver.value = false
   dropBefore.value = undefined
   columnDropSide.value = null
+  autoScroll.stop()
 }
 
 // A drag can end while the pointer still sits over a column that never gets
@@ -261,11 +271,19 @@ async function submitQuickAdd() {
   const value = quickAddName.value.trim()
   if (!value || quickAddBusy.value) return
   quickAddBusy.value = true
+  const shown = new Set(props.column.cards.map(c => c.id))
   try {
     emit('quickAdd', value)
     quickAddName.value = ''
   } finally {
     quickAddBusy.value = false
+  }
+  // The board adds the card during the emit; when it lands last, the stack
+  // scrolls down to it.
+  await nextTick()
+  const last = props.column.cards[props.column.cards.length - 1]
+  if (last && !shown.has(last.id)) {
+    scroller.value?.scrollTo({ top: scroller.value.scrollHeight, behavior: 'smooth' })
   }
 }
 
@@ -287,6 +305,7 @@ const menuItems = computed(() => [[
     class="relative flex flex-col w-64 shrink-0 max-h-full rounded-xl border bg-(--ui-bg-muted)/50 transition-colors"
     :class="dragOver ? 'border-(--ui-primary)' : 'border-(--ui-border)'"
     @dragover="onDragOver"
+    @dragover.capture="onDragAutoScroll"
     @dragleave="onDragLeave"
     @drop="onDropOnColumn"
   >
@@ -336,7 +355,10 @@ const menuItems = computed(() => [[
     <!-- Card spacing is the wrappers' own padding rather than a gap between
          them, so moving down the stack never crosses a strip that belongs to
          no card and the placeholder can't flicker to the end. -->
-    <div class="flex-1 overflow-y-auto px-2 pb-2 min-h-16">
+    <div
+      ref="scroller"
+      class="flex-1 overflow-y-auto px-2 pb-2 min-h-16"
+    >
       <template
         v-for="(card, index) in column.cards"
         :key="card.id"
