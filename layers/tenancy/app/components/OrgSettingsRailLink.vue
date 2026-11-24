@@ -29,8 +29,8 @@ const isActive = computed(() => route.path === settingsPath.value || route.path.
     :class="[
       expanded ? 'h-10 w-full gap-3 px-2.5' : 'size-10 justify-center',
       isActive
-        ? 'bg-(--ui-bg-accented) text-(--ui-text)'
-        : 'text-(--ui-text-muted) hover:bg-(--ui-bg-accented) hover:text-(--ui-text)'
+        ? 'bg-(--ui-bg-elevated) dark:bg-(--ui-bg-accented) text-(--ui-text)'
+        : 'text-(--ui-text-muted) hover:bg-(--ui-bg-elevated)/50 dark:hover:bg-(--ui-bg-accented) hover:text-(--ui-text)'
     ]"
     :title="expanded ? undefined : 'Organization settings'"
     aria-label="Organization settings"

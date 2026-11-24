@@ -51,7 +51,7 @@ Theme tokens live in [layers/core/app/assets/css/main.css](../layers/core/app/as
 ## Chrome (headers, sidebars, rail)
 
 - **Headers and sidebars use `bg-(--chrome-bg)`**: `--ui-bg-elevated` in light mode; in dark mode a midpoint between neutral-800 and neutral-900, one tone darker than elevated and slightly lighter than the page. Applies to the top bars in `layouts/default.vue` and `layouts/admin.vue`, `AppSidebar` and `SidebarPanel`.
-- **The app rail** stays `bg-neutral-200 dark:bg-neutral-950`. Collapsed it is `w-14` with names on hover; expanded it is `w-56` with names next to the icons, and it pushes the content over rather than covering it. Icons keep the same x position in both states.
+- **The app rail** stays `bg-neutral-200 dark:bg-neutral-950`. Collapsed it is `w-14` with names on hover; expanded it is `w-56` with names next to the icons, and it pushes the content over rather than covering it. Icons keep the same x position in both states. Its dividers (plain and labelled) use `border-accented` in light mode and `border-default` in dark, and its current and hovered items are `--ui-bg-elevated` (hover at 50%) in light mode and `--ui-bg-accented` in dark: the light fill is the same gray as the default border and `--ui-bg-accented`, which left both invisible. White was tried for the light highlight and was too glaring. `OrgSettingsRailLink` uses the same highlight.
 - **The theme toggle sits in the top bar** between the notification bell and the profile icon, in both the desktop and mobile headers (`<ThemeToggle size="sm" />`).
 
 ## Help text

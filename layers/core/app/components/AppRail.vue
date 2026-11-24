@@ -48,10 +48,11 @@ onMounted(start)
 onBeforeUnmount(stop)
 
 const shapeClass = computed(() => expanded.value ? 'h-10 w-full gap-3 px-2.5' : 'size-10 justify-center')
+// The light rail's fill matches --ui-bg-accented, so light mode highlights with the lighter elevated surface.
 function stateClass(active: boolean) {
   return active
-    ? 'bg-(--ui-bg-accented) text-(--ui-text)'
-    : 'text-(--ui-text-muted) hover:bg-(--ui-bg-accented) hover:text-(--ui-text)'
+    ? 'bg-(--ui-bg-elevated) dark:bg-(--ui-bg-accented) text-(--ui-text)'
+    : 'text-(--ui-text-muted) hover:bg-(--ui-bg-elevated)/50 dark:hover:bg-(--ui-bg-accented) hover:text-(--ui-text)'
 }
 </script>
 
@@ -81,14 +82,16 @@ function stateClass(active: boolean) {
       v-for="(section, i) in sections"
       :key="section.key"
     >
+      <!-- The light rail's fill matches the default border color, so dividers take the accented one. -->
       <USeparator
         v-if="expanded && section.label"
         :label="section.label"
+        :ui="{ border: 'border-accented dark:border-default' }"
         class="my-1"
       />
       <div
         v-else-if="i > 0 || launcher"
-        class="border-t border-(--ui-border) my-1"
+        class="border-t border-accented dark:border-default my-1"
         :class="expanded ? 'w-full' : 'w-8'"
       />
       <NuxtLink
