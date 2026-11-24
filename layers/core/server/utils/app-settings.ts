@@ -28,6 +28,7 @@ export interface AppCatalogEntry {
   path: string | undefined
   requiredPermission: string | undefined
   order: number | undefined
+  category: string | undefined
   status: AppStatus
   // 'user' for personal apps (see personal-apps.ts); orphans read as 'org'.
   scope: 'org' | 'user'
@@ -71,6 +72,7 @@ export const getApps = defineSettings<AppEntry, AppRow, AppCatalogEntry>({
         path: app.path,
         requiredPermission: app.requiredPermission,
         order: app.order,
+        category: app.category,
         status: row?.status ?? app.defaultStatus ?? 'disabled',
         scope: app.scope ?? 'org',
         permissions: app.permissions ?? [],
@@ -91,6 +93,7 @@ export const getApps = defineSettings<AppEntry, AppRow, AppCatalogEntry>({
       path: undefined,
       requiredPermission: undefined,
       order: undefined,
+      category: undefined,
       status: row!.status ?? 'disabled',
       scope: 'org',
       permissions: [],

@@ -2,6 +2,8 @@ import { withOrgContext } from '#tenant/server'
 import { getRegisteredApps } from '#core/server/utils/app-registry'
 import { railItemsFor } from '#core/server/utils/rail-registry'
 import { appsClosedToUser } from '#core/server/utils/groups'
+import { getAppCategories } from '#core/server/utils/app-categories'
+import { getAppLayout } from '#core/server/utils/app-layout'
 import { getOrgEnabledApps } from '../../../../utils/app-settings'
 
 // Per-org app launcher feed. Filtered by:
@@ -11,6 +13,7 @@ import { getOrgEnabledApps } from '../../../../utils/app-settings'
 //
 // API-level enforcement of the second filter happens in `withOrgContext`'s
 // `appId` opt — this endpoint is the discovery side (Layer 1), not the gate.
+// `categories` and `layout` (the org's arrangement) let the client group the apps.
 export default defineEventHandler(async (event) => {
   return await withOrgContext(event, async (tx, ctx) => {
     const enabled = await getOrgEnabledApps(tx, ctx.orgId)
@@ -31,6 +34,6 @@ export default defineEventHandler(async (event) => {
         rail: railItemsFor(app.id, ctx.perms, ctx.orgSlug)
       }))
 
-    return { apps }
+    return { apps, categories: getAppCategories(), layout: await getAppLayout(tx) }
   })
 })

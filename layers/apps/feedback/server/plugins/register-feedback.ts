@@ -44,7 +44,7 @@ export default defineNitroPlugin(() => {
     path: '/feedback',
     icon: 'i-lucide-bug',
     requiredPermission: 'feedback.access',
-    order: 30
+    category: 'tools'
   })
 
   registerNavItem({

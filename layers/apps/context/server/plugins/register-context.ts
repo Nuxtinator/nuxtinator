@@ -50,7 +50,7 @@ export default defineNitroPlugin(() => {
     icon: 'i-lucide-book-open-text',
     requiredPermission: 'context.access',
     defaultStatus: 'available',
-    order: 25
+    category: 'work'
   })
 
   registerNavItem({

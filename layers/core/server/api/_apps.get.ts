@@ -2,6 +2,8 @@ import { withOrgContext } from '#tenant/server'
 import { getApps } from '#core/server/utils/app-settings'
 import { railItemsFor } from '#core/server/utils/rail-registry'
 import { appsClosedToUser } from '#core/server/utils/groups'
+import { getAppCategories } from '#core/server/utils/app-categories'
+import { getAppLayout } from '#core/server/utils/app-layout'
 
 // Host-level app launcher feed for single-tenant deploys. (Multi-tenant mode
 // uses the org-scoped `/api/o/:slug/_apps` from the tenancy layer; this endpoint
@@ -11,7 +13,8 @@ import { appsClosedToUser } from '#core/server/utils/groups'
 // 'admins', which only personal apps take) — `withOrgContext`
 // resolves to the single-mode kernel, so `ctx.perms` is the user's global set.
 // Apps limited to host groups the user is in none of (the team gate) are left out.
-// Personal apps come from `/api/_personal-apps` in both modes.
+// Personal apps come from `/api/_personal-apps` in both modes. `categories` and
+// `layout` let the client group the apps (app/utils/app-layout.ts).
 export default defineEventHandler(async (event) => {
   return await withOrgContext(event, async (tx, ctx) => {
     const closed = await appsClosedToUser(tx, null, ctx.userId)
@@ -27,9 +30,10 @@ export default defineEventHandler(async (event) => {
         description: a.description,
         requiredPermission: a.requiredPermission,
         order: a.order,
+        category: a.category,
         rail: railItemsFor(a.id, ctx.perms)
       }))
 
-    return { apps }
+    return { apps, categories: getAppCategories(), layout: await getAppLayout(tx) }
   })
 })

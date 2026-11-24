@@ -10,6 +10,13 @@ These entries are also the rules for their feature, with the components it's bui
 
 - **Personal apps sit after org apps.** The collapsed rail separates them with the same plain divider it uses under the home icon (it's too narrow for a label); the expanded rail uses `<USeparator label="Personal">`; the launcher popover uses `<USeparator label="Personal">`; dashboards use a "Personal" heading. On a personal app's pages the rail and org switcher keep showing the last active org, so leaving the app returns to it.
 - **Leaving admin**: the admin sidebar (desktop and mobile drawer) opens with a "Back to apps" link above the sections, and the admin header's top-right is a plain × button to the launcher.
+- **Org apps sit under category headings: People, Work, Tools, then More.** They're shown the way Personal is: `<USeparator label>` in the expanded rail and launcher popover, a plain divider in the collapsed rail, small headings under the dashboard's "Apps". Headings appear only when a member's apps span two or more categories, so a small rail stays one list, and a host can turn them off (`rail.categories: false`).
+  - Folders that collapse a category into one icon, with a flyout when the rail shows icons only, were rejected: every app would take an extra click, for a rail that's only a dozen long.
+  - Layers name the category and the host can move apps in code, but the org has the last word on its Apps settings page, since what belongs together depends on how the org works.
+- **An org rearranges its apps on its Apps settings page, in the same list as the on/off switches** (`AppCategoryList`, with each page's own row content in its `row` slot): one card per category, a grip on each app and each card that drags (or moves with the arrow keys when focused), and Move up / Move down / Move to in the row's ⋯ menu for touch screens. Each card header has a pencil that opens its name in a modal, which also deletes a category the org made. "Add category" and "Reset order" sit beside the page heading. Every change saves at once and rolls back if the save fails.
+  - A separate "Arrange" screen was rejected: the org would manage one list of apps in two places.
+  - A ⋯ menu on the category cards was rejected: it would sit right above the rows' ⋯ menus.
+  - Apps with no rail entry (Records) are listed after the categories under "Opened from other apps", since arranging them would change nothing.
 
 ## Teams
 

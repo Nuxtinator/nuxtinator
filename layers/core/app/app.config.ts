@@ -6,7 +6,10 @@ export default defineAppConfig({
     // points it somewhere else.
     launcher: true,
     // The tenancy layer's organization settings link at the bottom of the rail.
-    orgSettings: true
+    orgSettings: true,
+    // Group org apps under category headings in the rail, the launcher and the
+    // dashboard, arranged on the org's Apps settings page. `false`: one list.
+    categories: true
   },
   ui: {
     colors: {
