@@ -284,7 +284,7 @@ const menuItems = computed(() => [[
 
 <template>
   <section
-    class="relative flex flex-col w-72 shrink-0 max-h-full rounded-xl border bg-(--ui-bg-muted)/50 transition-colors"
+    class="relative flex flex-col w-64 shrink-0 max-h-full rounded-xl border bg-(--ui-bg-muted)/50 transition-colors"
     :class="dragOver ? 'border-(--ui-primary)' : 'border-(--ui-border)'"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
