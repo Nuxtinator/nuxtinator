@@ -21,6 +21,8 @@ const noteBody = ref('')
 const posting = ref(false)
 
 const mentionItems = computed(() => props.users.map(u => ({ id: u.id, label: u.displayName })))
+// The editors scroll inside a capped height, so the mention menu mounts on body to overlay instead of being clipped.
+const mentionMenuParent = () => document.body
 
 function hasContent(html: string): boolean {
   return !!html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim()
@@ -102,11 +104,12 @@ function canManage(e: InboxTimelineEntry): boolean {
         content-type="html"
         :image="false"
         placeholder="Add an internal note… (only staff see this, @ mentions a teammate)"
-        class="min-h-16 max-h-48 overflow-y-auto rounded-md border border-(--ui-border) text-sm"
+        :ui="{ base: 'min-h-28' }"
+        class="max-h-64 overflow-y-auto rounded-md border border-(--ui-border) text-sm"
         @keydown.meta.enter="submitNote"
         @keydown.ctrl.enter="submitNote"
       >
-        <UEditorMentionMenu :editor="editor" :items="mentionItems" />
+        <UEditorMentionMenu :editor="editor" :items="mentionItems" :append-to="mentionMenuParent" />
       </UEditor>
       <div class="flex justify-end">
         <UButton
@@ -153,7 +156,7 @@ function canManage(e: InboxTimelineEntry): boolean {
                 @keydown.ctrl.enter="saveEdit"
                 @keydown.esc="editingId = null"
               >
-                <UEditorMentionMenu :editor="editor" :items="mentionItems" />
+                <UEditorMentionMenu :editor="editor" :items="mentionItems" :append-to="mentionMenuParent" />
               </UEditor>
               <div class="flex justify-end gap-2 mt-1">
                 <UButton label="Cancel" size="xs" variant="ghost" color="neutral" @click="editingId = null" />
