@@ -7,9 +7,11 @@
 // long as a card hovers the column, computed the same way as the drop, so
 // the card lands where the gap showed.
 //
-// Custom boards also drag the column itself by its header. The two drags
+// The column itself drags by its header, to reorder the board. The two drags
 // share the same drop targets, so they're told apart by the payload type the
-// drag carries — the only thing readable while a drag is in flight.
+// drag carries — the only thing readable while a drag is in flight. A pinned
+// column (the leading "No value" or "No column" lane) stays first: a column
+// dropped on it lands right after it.
 import type { RecordsFieldSetting, RecordsBadgeColor } from '#records/client'
 import type { ViewsBoardItem, ViewsConnectionDisplay } from '../../utils/views-types'
 
@@ -38,6 +40,10 @@ const props = defineProps<{
   canQuickAdd: boolean
   /** Custom board + edit access: rename/remove column, add existing cards. */
   canManage: boolean
+  /** The column drags by its header to another place on the board. */
+  canMove: boolean
+  /** The column stays first: nothing lands before it. */
+  pinned?: boolean
   isCustom: boolean
   /** The view holds hand-picked records: cards are added to it and taken off it. */
   picked: boolean
@@ -136,6 +142,7 @@ function onColumnDragEnd() {
 
 /** Which side of this column the pointer sits on, relative to its middle. */
 function sideOf(event: DragEvent): 'left' | 'right' {
+  if (props.pinned) return 'right'
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   return event.clientX <= rect.left + rect.width / 2 ? 'left' : 'right'
 }
@@ -293,13 +300,13 @@ const menuItems = computed(() => [[
 
     <header
       class="flex items-center gap-2 px-3 py-2"
-      :class="canManage ? 'cursor-grab active:cursor-grabbing' : ''"
-      :draggable="canManage"
+      :class="canMove ? 'cursor-grab active:cursor-grabbing' : ''"
+      :draggable="canMove"
       @dragstart="onColumnDragStart"
       @dragend="onColumnDragEnd"
     >
       <UIcon
-        v-if="canManage"
+        v-if="canMove"
         name="i-lucide-grip-vertical"
         class="size-4 shrink-0 text-(--ui-text-dimmed)"
       />

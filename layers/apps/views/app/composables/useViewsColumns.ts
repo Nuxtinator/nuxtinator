@@ -9,11 +9,13 @@
 // - Grouped by a field: the field's options (selects), the users or tags
 //   present on records (plus tag columns added this session), or the target
 //   type's records (connections), after a leading "No value" column (status
-//   has none). A record with several values appears in each matching column.
+//   has none). The view's column order puts the columns someone placed
+//   first. A record with several values appears in each matching column.
 // - An ungrouped list: one unnamed section.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsBoardItem, ViewsDefinition, ViewRecords } from '../utils/views-types'
 import { VIEWS_NO_VALUE_COLUMN } from '../utils/views-types'
+import { viewsOrderColumns, type ViewsColumnPositions } from '../utils/views-column-order'
 
 export interface ViewsColumn {
   key: string
@@ -30,6 +32,8 @@ export interface ViewsColumnsSource {
   fields: RecordsFieldSetting[]
   /** Tag columns added this session, shown before any card carries them. */
   pendingTagColumns?: string[]
+  /** The view's column order for the grouping field. */
+  columnOrder?: ViewsColumnPositions
 }
 
 export function useViewsColumns(source: () => ViewsColumnsSource) {
@@ -143,7 +147,7 @@ export function useViewsColumns(source: () => ViewsColumnsSource) {
       }
     }
 
-    return defs.map(d => ({
+    return viewsOrderColumns(defs, src.columnOrder).map(d => ({
       key: d.key,
       label: d.label,
       color: d.color,

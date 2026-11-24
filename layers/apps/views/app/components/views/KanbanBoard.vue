@@ -9,7 +9,8 @@
 //   the target type's records (connections), with a leading "No value"
 //   column. A card with several values appears in each matching column.
 //   Adding a column mints a tag (local until a card lands in it) or creates a
-//   record of the connection's target type.
+//   record of the connection's target type. Dragging a column by its header
+//   changes the view's column order for that field.
 // - Custom: columns come from the tab definition; membership from
 //   placements. A card with no placement, or one pointing at a removed
 //   column, renders in the first column of a hand-picked view, or in a
@@ -23,6 +24,7 @@ import type {
   ViewRecords
 } from '../../utils/views-types'
 import { VIEWS_NO_VALUE_COLUMN } from '../../utils/views-types'
+import { viewsMoveColumnKey, type ViewsColumnPositions } from '../../utils/views-column-order'
 
 const props = defineProps<{
   view: ViewsTabView
@@ -32,6 +34,10 @@ const props = defineProps<{
   canEditDefinition: boolean
   /** The caller may create records of this type (server re-enforces). */
   canCreate: boolean
+  /** The view's column order for the grouping field. */
+  columnOrder?: ViewsColumnPositions
+  /** The caller can change that order (field-grouped boards). */
+  canOrderColumns?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -40,6 +46,8 @@ const emit = defineEmits<{
   quickAdd: [payload: { columnKey: string, name: string }]
   addExisting: [columnKey: string]
   columnsChange: [columns: ViewsColumnDef[]]
+  /** Field-grouped boards: column `key` was dragged to where it sits in `order` ("No value" left out). */
+  placeColumn: [payload: { key: string, order: string[] }]
   /** Connection-grouped boards: create a target record named `label` as a new column. */
   addTargetColumn: [label: string]
   removeCard: [recordId: string]
@@ -83,7 +91,8 @@ const columns = useViewsColumns(() => ({
   picked: props.view.picked,
   records: props.records,
   fields: props.fields,
-  pendingTagColumns: pendingTagColumns.value
+  pendingTagColumns: pendingTagColumns.value,
+  columnOrder: props.columnOrder
 }))
 
 // The dragged card's id, shared with every column so each can place its drop
@@ -181,25 +190,24 @@ function removeColumn(key: string) {
   emit('columnsChange', existing.filter(c => c.key !== key))
 }
 
-// Column order is the definition array's order; moving one entry is the
-// whole operation. Cards stay put — placements key off the column, not its
-// position.
+// On a board with its own columns, column order is the definition array's
+// order; elsewhere it's the view's column order for the grouping field.
+// Cards stay put — placements key off the column, not its position.
 const draggingColumnKey = ref<string | null>(null)
+
+const canMoveColumns = computed(() => isCustom.value ? props.canEditDefinition : !!props.canOrderColumns)
 
 function onColumnDrop({ fromKey, toKey, after }: { fromKey: string, toKey: string, after: boolean }) {
   draggingColumnKey.value = null
-  const existing = definition.value.columns ?? []
-  if (fromKey === toKey) return
-  const from = existing.findIndex(c => c.key === fromKey)
-  if (from < 0) return
-  const next = [...existing]
-  const [moved] = next.splice(from, 1)
-  // The anchor is located after the removal, so its index already accounts
-  // for the gap the dragged column left behind.
-  const anchor = next.findIndex(c => c.key === toKey)
-  if (anchor < 0) return
-  next.splice(after ? anchor + 1 : anchor, 0, moved!)
-  emit('columnsChange', next)
+  if (isCustom.value) {
+    const existing = definition.value.columns ?? []
+    const keys = viewsMoveColumnKey(existing.map(c => c.key), fromKey, toKey, after)
+    if (keys) emit('columnsChange', keys.map(k => existing.find(c => c.key === k)!))
+    return
+  }
+  const order = viewsMoveColumnKey(
+    columns.value.map(c => c.key).filter(k => k !== VIEWS_NO_VALUE_COLUMN), fromKey, toKey, after)
+  if (order) emit('placeColumn', { key: fromKey, order })
 }
 
 const columnModalOpen = computed({
@@ -211,7 +219,9 @@ const columnModalOpen = computed({
 </script>
 
 <template>
-  <div class="flex gap-3 items-start h-full overflow-x-auto pb-2">
+  <!-- The side padding, offset by the negative margin, keeps the insertion
+       line beside the first and last column inside the scroll area. -->
+  <div class="flex gap-3 items-start h-full overflow-x-auto pb-2 -mx-2 px-2">
     <ViewsKanbanColumn
       v-for="column in columns"
       :key="column.key"
@@ -226,6 +236,8 @@ const columnModalOpen = computed({
       :group-field-key="groupField?.key ?? null"
       :can-quick-add="canCreate"
       :can-manage="isCustom && canEditDefinition && column.key !== VIEWS_NO_VALUE_COLUMN"
+      :can-move="canMoveColumns && column.key !== VIEWS_NO_VALUE_COLUMN"
+      :pinned="column.key === VIEWS_NO_VALUE_COLUMN"
       :is-custom="isCustom"
       :picked="view.picked"
       :dragging-id="draggingId"

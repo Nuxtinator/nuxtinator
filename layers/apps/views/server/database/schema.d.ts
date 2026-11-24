@@ -99,8 +99,23 @@ export interface ViewRecordTabsTable {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
+// A placed column of the boards and lists grouped by `field_key` (see views_006).
+export interface ViewColumnOrderTable {
+  // The stored view it orders; null on a record's built-in board.
+  view_id: string | null
+  // The record whose built-in board it orders; null on a stored view.
+  record_id: string | null
+  field_key: string
+  column_key: string
+  // Fractional index; placed columns order by it.
+  position: string
+  updated_by: string | null
+  updated_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
 declare global {
   interface NuxtinatorDatabaseTables {
+    views_column_order: ViewColumnOrderTable
     views_record_tabs: ViewRecordTabsTable
     views_values: ViewValuesTable
     views_definitions: ViewsViewsTable

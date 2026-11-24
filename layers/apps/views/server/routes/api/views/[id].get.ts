@@ -1,8 +1,9 @@
-// GET /api/views/:id — view meta, its definition, its tabs in order, and the
-// caller's access level. On a built-in that stands for a record, each tab
-// carries the sort that record keeps (`recordSort`), and `canOrder` says
-// whether the caller can change it and the order set by dragging. 404 for
-// views the caller cannot reach (existence is not disclosed).
+// GET /api/views/:id — view meta, its definition, its tabs in order, the
+// order of its field-grouped columns (`columnOrder`), and the caller's access
+// level. On a built-in that stands for a record, each tab carries the sort
+// that record keeps (`recordSort`), `columnOrder` is the record's, and
+// `canOrder` says whether the caller can change those and the order set by
+// dragging. 404 for views the caller cannot reach (existence is not disclosed).
 import { withOrgPermission } from '#tenant/server'
 import { canOrderRecordsUnder } from '#records/server'
 import { loadViewDetail, requireView } from '../../../utils/views'

@@ -1,8 +1,8 @@
 // MCP tools for views: list and create views, add and change their tabs
 // (board, table or list), set the view's or a tab's filter, read a tab by
-// column, add or create records on a hand-picked view, move cards, and manage
-// and fill in the view's own fields. Registered by modules/views-mcp.ts only
-// when the MCP layer is loaded.
+// column, order the columns of field-grouped tabs, add or create records on a
+// hand-picked view, move cards, and manage and fill in the view's own fields.
+// Registered by modules/views-mcp.ts only when the MCP layer is loaded.
 //
 // Every tool takes an optional `org` slug and runs inside
 // `withOrgPermission` under the `views.use` scope. View access is the same
@@ -33,9 +33,11 @@ import {
 } from '../server/utils/views'
 import { updateTab } from '../server/utils/tabs'
 import { withRecordTab } from '../server/utils/record-tabs'
-import { listBuiltInViews } from '../server/utils/builtin-views'
+import { builtInOf, listBuiltInViews } from '../server/utils/builtin-views'
 import { getViewRecords, requireRecordsReadScope, requireRecordsWriteScope, type ViewRecords } from '../server/utils/view-records'
 import { addViewsCard, assertInView, createViewsCard, dragMode, moveViewsCard } from '../server/utils/placements'
+import { readColumnOrder, setViewColumnOrder, VIEWS_COLUMN_ORDER_MAX } from '../server/utils/column-order'
+import { viewsOrderColumns } from '../app/utils/views-column-order'
 import {
   addViewField,
   deleteViewField,
@@ -121,8 +123,9 @@ interface BoardColumn {
 // The tab's columns (board) or sections (list) with their cards, in the same
 // shape the UI shows: custom columns from the definition (after a leading
 // "No column" lane when the view isn't hand-picked), one column per grouping
-// value with a leading "No value" column, or a single unnamed section for an
-// ungrouped list. Manual ranks order cards within a column.
+// value with a leading "No value" column, in the view's column order, or a
+// single unnamed section for an ungrouped list. Manual ranks order cards
+// within a column.
 async function boardColumns(tx: Tx, view: ViewRow, tab: ViewTabRow, records: ViewRecords): Promise<BoardColumn[]> {
   const def = tab.definition as ViewTabDefinition
   const rank = new Map(records.placements.filter(p => p.rank).map(p => [`${p.recordId}:${p.columnKey}`, p.rank!]))
@@ -176,7 +179,9 @@ async function boardColumns(tx: Tx, view: ViewRow, tab: ViewTabRow, records: Vie
   for (const key of members.keys()) {
     if (!labels.some(l => l.key === key)) labels.push({ key, label: key })
   }
-  return labels.map(l => ({ key: l.key, label: l.label, cards: ordered(l.key, members.get(l.key) ?? []) }))
+  const positions = (await readColumnOrder(tx, view))[def.groupField]
+  return viewsOrderColumns(labels, positions)
+    .map(l => ({ key: l.key, label: l.label, cards: ordered(l.key, members.get(l.key) ?? []) }))
 }
 
 async function groupFieldOf(tx: Tx, view: ViewRow, tab: ViewTabRow) {
@@ -500,6 +505,34 @@ export const getBoardTool = defineMcpTool({
   }
 })
 
+export const setColumnOrderTool = defineMcpTool({
+  name: 'views_set_column_order',
+  title: 'Set Column Order',
+  description: 'Set the order of the columns of a board, or the sections of a list, grouped by a field. The order belongs to the view: every tab of it grouped by the same field follows it, and other views keep their own. Pass the column keys from views_get_board in the order wanted; columns left out follow them in their usual order, and the "No value" column stays first. Needs edit access to the view; on the board of what sits under a record, edit access to that record.',
+  appId: 'views',
+  scope: 'views.use',
+  input: z.object({
+    org: orgInput,
+    view: viewIdInput,
+    tab: z.string().uuid().describe('A tab grouped by the field whose columns to order, from views_list or views_get_board.'),
+    columns: z.array(z.string().max(80)).max(VIEWS_COLUMN_ORDER_MAX).describe('Column keys in the order wanted. [] goes back to the usual order.')
+  }).strict(),
+  handler: async (input, ctx) => {
+    return await run(ctx, input.org, async (tx, tenant) => {
+      const { view, access } = await requireView(tx, tenant, input.view, 'view')
+      const tab = await requireTab(tx, view, input.tab)
+      const groupField = await groupFieldOf(tx, view, tab)
+      if (!groupField) {
+        throw createError({ statusCode: 400, statusMessage: 'This tab isn\'t grouped by a field.' })
+      }
+      const positions = await setViewColumnOrder(tx, tenant, view, access, groupField.key, input.columns)
+      if (!builtInOf(view)) await touchView(tx, view.id)
+      const order = Object.entries(positions).sort(([, a], [, b]) => a < b ? -1 : a > b ? 1 : 0).map(([key]) => key)
+      return text(`Set the column order for ${groupField.label}.`, { view: input.view, field: groupField.key, columns: order })
+    })
+  }
+})
+
 export const addCardTool = defineMcpTool({
   name: 'views_add_card',
   title: 'Add Card',
@@ -812,6 +845,7 @@ export const viewsMcpTools = [
   updateTabTool,
   setFilterTool,
   getBoardTool,
+  setColumnOrderTool,
   addCardTool,
   createCardTool,
   moveCardTool,

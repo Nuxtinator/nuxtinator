@@ -4,14 +4,22 @@
 // into another section with the board's rules (single values move, tags and
 // multi-values add). The checkbox closes or reopens a record on types with a
 // single closed status; each section ends with a quick-add row. Rows load a
-// page at a time: scrolling near the end asks for the next.
+// page at a time: scrolling near the end asks for the next. A section drags
+// by the grip in its header to change the view's column order for the
+// grouping field, the order its boards show too.
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsTabView, ViewRecords } from '../../utils/views-types'
+import { VIEWS_NO_VALUE_COLUMN } from '../../utils/views-types'
+import { viewsMoveColumnKey, type ViewsColumnPositions } from '../../utils/views-column-order'
 
 const props = defineProps<{
   view: ViewsTabView
   records: ViewRecords
   fields: RecordsFieldSetting[]
+  /** The view's column order for the grouping field. */
+  columnOrder?: ViewsColumnPositions
+  /** The caller can change that order. */
+  canOrderSections?: boolean
   canCreate: boolean
   /** Rows of a hand-picked view can come off it (or, for its own cards, be deleted). */
   canRemove: boolean
@@ -23,6 +31,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   move: [payload: { recordId: string, fromColumn: string | null, toColumn: string, columnOrder: string[] }]
+  /** Section `key` was dragged to where it sits in `order` ("No value" left out). */
+  placeColumn: [payload: { key: string, order: string[] }]
   open: [recordId: string]
   quickAdd: [payload: { columnKey: string, name: string }]
   toggleDone: [payload: { recordId: string, done: boolean }]
@@ -49,7 +59,8 @@ const groupField = computed(() =>
 const sections = useViewsColumns(() => ({
   definition: props.view.definition,
   records: props.records,
-  fields: props.fields
+  fields: props.fields,
+  columnOrder: props.columnOrder
 }))
 
 // Empty sections of a grouped list stay hidden unless they're option values
@@ -92,12 +103,14 @@ function onDragEnd() {
 }
 
 function onDragOver(event: DragEvent, section: string, before: string | null) {
+  if (draggingSection.value !== null) return onSectionDragOver(event, section)
   if (!dragging.value) return
   event.preventDefault()
   dropTarget.value = { section, before }
 }
 
 function onDrop(section: string) {
+  if (draggingSection.value !== null) return onSectionDrop()
   const drag = dragging.value
   const target = dropTarget.value
   onDragEnd()
@@ -110,6 +123,50 @@ function onDrop(section: string) {
   if (at >= 0) ids.splice(at, 0, drag.recordId)
   else ids.push(drag.recordId)
   emit('move', { recordId: drag.recordId, fromColumn: drag.fromColumn, toColumn: section, columnOrder: ids })
+}
+
+// --- section order -------------------------------------------------------------
+
+const draggingSection = ref<string | null>(null)
+// The section a dragged one would land next to, and on which side.
+const sectionDrop = ref<{ key: string, after: boolean } | null>(null)
+
+function onSectionDragStart(event: DragEvent, key: string) {
+  draggingSection.value = key
+  event.dataTransfer?.setData('text/plain', key)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+  emit('dragstart')
+}
+
+function onSectionDragEnd() {
+  sectionDrop.value = null
+  if (draggingSection.value === null) return
+  draggingSection.value = null
+  emit('dragend')
+}
+
+// Above or below the section the pointer is over, by its half; nothing goes
+// above the "No value" section.
+function onSectionDragOver(event: DragEvent, key: string) {
+  event.preventDefault()
+  if (key === draggingSection.value) {
+    sectionDrop.value = null
+    return
+  }
+  const target = event.currentTarget as HTMLElement
+  const rect = (target.closest('section') ?? target).getBoundingClientRect()
+  const after = key === VIEWS_NO_VALUE_COLUMN || event.clientY > rect.top + rect.height / 2
+  sectionDrop.value = { key, after }
+}
+
+function onSectionDrop() {
+  const from = draggingSection.value
+  const target = sectionDrop.value
+  onSectionDragEnd()
+  if (!from || !target) return
+  const keys = sections.value.map(s => s.key).filter(k => k !== VIEWS_NO_VALUE_COLUMN)
+  const order = viewsMoveColumnKey(keys, from, target.key, target.after)
+  if (order) emit('placeColumn', { key: from, order })
 }
 
 // --- quick add -----------------------------------------------------------------
@@ -132,25 +189,49 @@ function submitQuickAdd(section: string) {
     <section
       v-for="section in visibleSections"
       :key="section.key"
+      class="relative"
       @dragover="onDragOver($event, section.key, null)"
       @drop.prevent="onDrop(section.key)"
     >
-      <button
+      <div
+        v-if="sectionDrop?.key === section.key"
+        class="absolute inset-x-0 z-20 h-0.5 bg-(--ui-primary)"
+        :class="sectionDrop.after ? 'bottom-0' : 'top-0'"
+      />
+      <div
         v-if="grouped"
-        type="button"
-        class="sticky top-0 z-10 flex w-full items-center gap-2 px-3 py-1.5 text-xs font-medium bg-(--ui-bg-elevated) border-b border-(--ui-border)"
-        @click="toggleSection(section.key)"
+        class="sticky top-0 z-10 flex w-full items-center gap-1 px-3 py-1.5 text-xs font-medium bg-(--ui-bg-elevated) border-b border-(--ui-border)"
       >
-        <UIcon
-          :name="collapsed.has(section.key) ? 'i-lucide-chevron-right' : 'i-lucide-chevron-down'"
-          class="size-3.5"
-        />
-        <span>{{ section.label }}</span>
+        <!-- The pinned "No value" section keeps the grip's space so the labels line up. -->
         <span
-          v-if="!hasMore"
-          class="text-(--ui-text-dimmed) tabular-nums"
-        >{{ section.cards.length }}</span>
-      </button>
+          v-if="canOrderSections"
+          :draggable="section.key !== VIEWS_NO_VALUE_COLUMN"
+          class="-ml-1 shrink-0 cursor-grab active:cursor-grabbing text-(--ui-text-dimmed)"
+          :class="{ invisible: section.key === VIEWS_NO_VALUE_COLUMN }"
+          @dragstart="onSectionDragStart($event, section.key)"
+          @dragend="onSectionDragEnd"
+        >
+          <UIcon
+            name="i-lucide-grip-vertical"
+            class="size-3.5 block"
+          />
+        </span>
+        <button
+          type="button"
+          class="flex flex-1 items-center gap-2 text-left"
+          @click="toggleSection(section.key)"
+        >
+          <UIcon
+            :name="collapsed.has(section.key) ? 'i-lucide-chevron-right' : 'i-lucide-chevron-down'"
+            class="size-3.5"
+          />
+          <span>{{ section.label }}</span>
+          <span
+            v-if="!hasMore"
+            class="text-(--ui-text-dimmed) tabular-nums"
+          >{{ section.cards.length }}</span>
+        </button>
+      </div>
 
       <template v-if="!collapsed.has(section.key)">
         <ViewsListRow

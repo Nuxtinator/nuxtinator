@@ -106,6 +106,8 @@ export interface ViewSummary {
 
 export interface ViewDetail extends Omit<ViewSummary, 'layout' | 'tabCount' | 'teams'> {
   definition: ViewsViewDefinition
+  /** Per grouping field: the positions of the columns someone placed (a card's board: that card's). */
+  columnOrder: Record<string, Record<string, string>>
   tabs: ViewsTab[]
   /** The view reached the caller through a share row of their own. */
   sharedWithMe: boolean
@@ -121,7 +123,7 @@ export interface ViewDetail extends Omit<ViewSummary, 'layout' | 'tabCount' | 't
   recordType: string | null
   /** The views above a built-in that stands for a record, outermost first. */
   trail: Array<{ id: string, name: string }>
-  /** The caller can change the sort and the order set by dragging on the board of the record a built-in stands for. */
+  /** The caller can change the sort, the column order and the order set by dragging on the board of the record a built-in stands for. */
   canOrder?: boolean
 }
 

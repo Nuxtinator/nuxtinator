@@ -4,7 +4,7 @@
 // reschedules, quick-add (through the
 // records create route, or as one of a hand-picked view's own cards), the
 // list's done checkbox, fields set from a card, removing cards, tab and
-// definition updates, and the view's own
+// definition updates, the column order of field-grouped tabs, and the view's own
 // fields (managed by its owner, filled in by its editors). Changes made on
 // the board show at once and go back only if their save fails
 // (useViewsDetail's optimistic); a quick-added card is pending, dimmed and
@@ -27,6 +27,7 @@ import type {
   ViewsTabView
 } from '../../utils/views-types'
 import { VIEWS_LAYOUT_META, viewsDragMode, viewsIsViewId, viewsSubtasksViewId } from '../../utils/views-types'
+import { viewsPlaceColumn } from '../../utils/views-column-order'
 import type { ViewsMovePayload } from '../../composables/useViewsDetail'
 import type { ViewsTabChoice } from '../../components/views/TabModal.vue'
 
@@ -732,6 +733,36 @@ function onColumnsChange(columns: ViewsColumnDef[]) {
   }, 'Failed to update columns')
 }
 
+// The columns of field-grouped tabs keep one order per view and field, so
+// every tab grouped by the field shows it; a card's board keeps the card's.
+const canOrderColumns = computed(() => {
+  const v = view.value
+  if (!v) return false
+  if (v.recordId) return !!v.canOrder
+  return !v.builtIn && canEditDefinition.value
+})
+const columnPositions = computed(() => {
+  const field = tab.value?.definition.groupField
+  return field ? view.value?.columnOrder?.[field] : undefined
+})
+
+async function onPlaceColumn({ key, order }: { key: string, order: string[] }) {
+  const v = view.value
+  const field = tab.value?.definition.groupField
+  if (!v || !field) return
+  const { positions } = viewsPlaceColumn(v.columnOrder?.[field] ?? {}, order, key)
+  try {
+    await optimistic(() => {
+      v.columnOrder = { ...v.columnOrder, [field]: positions }
+    }, async () => {
+      await $fetch(`/api/views/${v.id}/column-order`, { method: 'PUT', body: { field, key, order } })
+      return true
+    }, { view: true })
+  } catch (err) {
+    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to move the column') })
+  }
+}
+
 const cardFieldsOpen = ref(false)
 
 function onCardFieldsChange(layout: { cardFields: string[], cardConnections: Record<string, ViewsConnectionDisplay>, cardShowEmpty: string[] } | null) {
@@ -1319,11 +1350,14 @@ const menuItems = computed(() => {
         :fields="allFields"
         :can-edit-definition="canEditDefinition"
         :can-create="canCreate"
+        :column-order="columnPositions"
+        :can-order-columns="canOrderColumns"
         @move="onMove"
         @open="openCard"
         @quick-add="onQuickAdd"
         @add-existing="addCardColumn = $event"
         @columns-change="onColumnsChange"
+        @place-column="onPlaceColumn"
         @add-target-column="onAddTargetColumn"
         @remove-card="onRemoveCard"
         @set-field="onSetField"
@@ -1358,7 +1392,10 @@ const menuItems = computed(() => {
           :can-remove="canEditDefinition"
           :done-status="doneStatus"
           :has-more="tabRecords.truncated"
+          :column-order="columnPositions"
+          :can-order-sections="canOrderColumns"
           @move="onMove"
+          @place-column="onPlaceColumn"
           @open="openCard"
           @quick-add="onQuickAdd"
           @toggle-done="onToggleDone"

@@ -34,6 +34,7 @@ import { getContainerTeams, type ContainerTeam } from '#core/server/utils/team-a
 import type { ViewsLayout, ViewsShareLevel, ViewsVisibility } from '../database/schema'
 import { clearViewFiles, sanitizeViewFields, viewFieldsWithType, type ViewFieldDef } from './view-fields'
 import { builtInOf, isBuiltInViewId, listBuiltInViews, resolveBuiltInView } from './builtin-views'
+import { copyColumnOrder, readColumnOrder, type ViewsColumnOrder } from './column-order'
 
 type Tx = Transaction<Database>
 
@@ -564,7 +565,9 @@ export function toViewDetail(
   sharedWithMe = false,
   teams: Array<ContainerTeam & { level: ViewsShareLevel }> = [],
   /** Records created on this hand-picked view and on no other — what deleting it deletes. */
-  ownCardCount = 0
+  ownCardCount = 0,
+  /** Where the columns of its field-grouped tabs sit, per grouping field (column-order.ts). */
+  columnOrder: ViewsColumnOrder = {}
 ) {
   const builtIn = builtInOf(view)
   return {
@@ -588,6 +591,7 @@ export function toViewDetail(
     sharedWithMe,
     teams,
     definition: view.definition as ViewDefinition,
+    columnOrder,
     tabs: tabs.map(toTabDetail),
     createdAt: view.created_at,
     updatedAt: view.updated_at
@@ -604,7 +608,8 @@ export async function loadViewDetail(
   viaShare: boolean
 ): Promise<ViewDetail> {
   const builtIn = builtInOf(view)
-  if (builtIn) return toViewDetail(view, builtIn.tabs, access, '', false)
+  const columnOrder = await readColumnOrder(tx, view)
+  if (builtIn) return toViewDetail(view, builtIn.tabs, access, '', false, [], 0, columnOrder)
   const owner = await tx
     .selectFrom('users')
     .select('display_name')
@@ -618,7 +623,7 @@ export async function loadViewDetail(
   const teams = ((await getContainerTeams(tx, 'views_definitions', [view.id])).get(view.id) ?? [])
     .map(t => ({ ...t, level: levels.get(t.id) ?? 'view' as ViewsShareLevel }))
   const ownCardCount = await ownsItsCards(tx, view) ? await countOwnCards(tx, view.id) : 0
-  return toViewDetail(view, await listTabs(tx, view.id), access, owner.display_name, viaShare, teams, ownCardCount)
+  return toViewDetail(view, await listTabs(tx, view.id), access, owner.display_name, viaShare, teams, ownCardCount, columnOrder)
 }
 
 /**
@@ -747,7 +752,8 @@ export async function createView(tx: Tx, ctx: TenantContext, input: CreateViewIn
 /**
  * A copy of a view's structure, owned by the caller and private: its record
  * type, base filter, whether it holds hand-picked records, its own fields,
- * and its tabs (layouts, columns, card fields, filters, sorts). No cards,
+ * its tabs (layouts, columns, card fields, filters, sorts) and the order of
+ * its field-grouped columns (a card's board gives the card's). No cards,
  * values, placements or sharing come along. `tabs` are the tabs to copy
  * when they aren't the source's own (a card's board, sorted for the card).
  * The order set under a record doesn't carry over: a copy holds its own.
@@ -788,5 +794,6 @@ export async function copyView(
       })
       .execute()
   }
+  await copyColumnOrder(tx, ctx, source, view.id)
   return await loadViewDetail(tx, view, 'owner', false)
 }
