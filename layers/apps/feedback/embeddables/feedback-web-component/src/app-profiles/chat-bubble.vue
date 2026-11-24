@@ -42,6 +42,43 @@ const submitOk = ref(false)
 const userMenuOpen = ref(false)
 const signingIn = ref(false)
 
+// Testing mode: a labelled button plus a first-visit note, for sites being
+// tested. The embed's `mode` wins over the project's switch. Until the project
+// loads, the mode last seen for it is used so the button doesn't change shape
+// after the page appears.
+const embedModeRef = inject('embedMode', null)
+const MODE_CACHE_PREFIX = 'fw-mode:'
+function readCachedMode(id) {
+  if (!id) return null
+  try { return localStorage.getItem(MODE_CACHE_PREFIX + id) } catch { return null }
+}
+const cachedMode = ref(readCachedMode(projectIdRef?.value))
+watch(() => projectIdRef?.value, (id) => { cachedMode.value = readCachedMode(id) })
+watch(() => project.value?.widget_mode, (m) => {
+  const id = projectIdRef?.value
+  if (!m || !id) return
+  cachedMode.value = m
+  try {
+    if (m === 'testing') localStorage.setItem(MODE_CACHE_PREFIX + id, m)
+    else localStorage.removeItem(MODE_CACHE_PREFIX + id)
+  } catch { /* ignore */ }
+})
+const testing = computed(() =>
+  (embedModeRef?.value || project.value?.widget_mode || cachedMode.value) === 'testing'
+)
+
+const INTRO_KEY = 'fw-testing-intro-dismissed'
+function readIntroDismissed() {
+  try { return localStorage.getItem(INTRO_KEY) === '1' } catch { return false }
+}
+const introDismissed = ref(readIntroDismissed())
+const showIntro = computed(() => testing.value && !introDismissed.value && !open.value)
+function dismissIntro() {
+  introDismissed.value = true
+  try { localStorage.setItem(INTRO_KEY, '1') } catch { /* ignore */ }
+}
+watch(open, (v) => { if (v && testing.value) dismissIntro() })
+
 // Persisted across the sign-in full-page redirect so we can reopen the panel on
 // the user's return and drop them on the "My Submissions" tab.
 const REOPEN_KEY = 'fw-reopen'
@@ -350,7 +387,11 @@ watch(open, (v) => {
 </script>
 
 <template>
-  <div class="fw-root" :data-project="projectIdRef">
+  <div
+    class="fw-root"
+    :class="{ 'fw-testing': testing }"
+    :data-project="projectIdRef"
+  >
     <transition name="fw-panel">
       <div v-if="open" class="fw-panel" role="dialog" aria-label="Feedback">
         <header class="fw-header">
@@ -679,11 +720,34 @@ watch(open, (v) => {
       </div>
     </transition>
 
+    <div
+      v-if="showIntro"
+      class="fw-intro"
+      role="note"
+    >
+      <button
+        type="button"
+        class="fw-intro-body"
+        @click="open = true"
+      >
+        <strong>This site is being tested.</strong>
+        Spot a problem or have an idea? Tell us here.
+      </button>
+      <button
+        type="button"
+        class="fw-intro-dismiss"
+        aria-label="Dismiss"
+        @click="dismissIntro"
+      >
+        ×
+      </button>
+    </div>
+
     <button
       class="fw-bubble"
       :class="{ open }"
       :aria-expanded="open"
-      aria-label="Open feedback"
+      :aria-label="testing ? undefined : 'Open feedback'"
       @click="open = !open"
     >
       <svg v-if="!open" xmlns="http://www.w3.org/2000/svg" height="16" viewBox="0 -960 960 960" width="16" fill="#1f1f1f" style="display:block;margin:auto;">
@@ -692,6 +756,10 @@ watch(open, (v) => {
       <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none">
         <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
       </svg>
+      <span
+        v-if="testing"
+        class="fw-bubble-label"
+      >{{ open ? 'Close' : 'Give feedback' }}</span>
     </button>
   </div>
 </template>
@@ -1172,4 +1240,85 @@ watch(open, (v) => {
 .fw-panel-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
 .fw-panel-enter-from,
 .fw-panel-leave-to { opacity: 0; transform: translateY(8px); }
+
+/* Testing mode: labelled pill set in from the corner, plus the first-visit note. */
+.fw-testing { padding: 0 16px 16px 0; }
+.fw-testing .fw-panel { margin-right: 0; }
+.fw-testing .fw-bubble {
+  width: auto;
+  height: 40px;
+  padding: 0 16px 0 12px;
+  gap: 8px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+  filter: none;
+}
+.fw-testing .fw-bubble:not(.open) svg { fill: currentColor; width: 18px; height: 18px; }
+.fw-testing .fw-bubble:hover { background: #1d4ed8; filter: none; transform: translateY(-1px); }
+.fw-testing .fw-bubble.open { background: #111827; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25); filter: none; }
+.fw-testing .fw-bubble:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+
+.fw-intro {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  width: 264px;
+  max-width: calc(100vw - 32px);
+  background: #111827;
+  color: #fff;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
+  animation: fw-intro-in 0.25s ease 0.6s both;
+}
+.fw-intro::after {
+  content: '';
+  position: absolute;
+  bottom: -5px;
+  right: 28px;
+  width: 10px;
+  height: 10px;
+  background: #111827;
+  transform: rotate(45deg);
+  border-radius: 2px;
+}
+.fw-intro-body {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 0 12px 14px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+.fw-intro-body strong { display: block; font-weight: 600; margin-bottom: 2px; }
+.fw-intro-dismiss {
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  opacity: 0.7;
+  cursor: pointer;
+}
+.fw-intro-dismiss:hover { opacity: 1; }
+.fw-intro button:focus-visible { outline: 2px solid #93c5fd; outline-offset: -2px; border-radius: 8px; }
+@keyframes fw-intro-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fw-intro { animation: none; }
+}
 </style>

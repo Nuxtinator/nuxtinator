@@ -6,6 +6,7 @@
 export default defineNuxtPlugin(() => {
   const config = useRuntimeConfig()
   const projectId = (config.public.feedbackProjectId as string | undefined) ?? ''
+  const mode = (config.public.feedbackMode as string | undefined) ?? ''
   if (!projectId) return
   if (typeof window === 'undefined') return
 
@@ -39,7 +40,8 @@ export default defineNuxtPlugin(() => {
     profile: 'chat-bubble',
     projectId,
     apiBase: window.location.origin,
-    enabled: true
+    enabled: true,
+    ...(mode ? { mode } : {})
   }))
   slot.appendChild(el)
   document.body.appendChild(slot)

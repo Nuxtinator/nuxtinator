@@ -192,6 +192,7 @@ const projectForm = ref({
   description: '',
   allowedOrigins: '',
   notifyUserIds: [] as string[],
+  testingMode: false,
   visibility: 'org',
   teamIds: [] as string[],
   currentTeams: [] as Project['teams'],
@@ -232,6 +233,7 @@ function openCreateProject() {
     description: '',
     allowedOrigins: '',
     notifyUserIds: [],
+    testingMode: false,
     visibility: 'org',
     teamIds: [],
     currentTeams: [],
@@ -248,6 +250,7 @@ function openRenameProject(p: Project) {
     description: p.description ?? '',
     allowedOrigins: (p.allowed_origins ?? []).join('\n'),
     notifyUserIds: Array.isArray(notify) ? notify.filter((v): v is string => typeof v === 'string') : [],
+    testingMode: p.post_meta?.widget_mode === 'testing',
     visibility: p.visibility ?? 'org',
     teamIds: (p.teams ?? []).map(t => t.id),
     currentTeams: p.teams ?? [],
@@ -294,7 +297,10 @@ async function submitProject() {
       // alongside other keys (e.g. sort_order) — the PATCH replaces post_meta
       // wholesale, so sending a partial bag would drop them.
       const existing = projects.value.find(x => x.id === projectForm.value.id)
-      const post_meta = { ...(existing?.post_meta ?? {}), notify_user_ids: projectForm.value.notifyUserIds }
+      const post_meta: Record<string, unknown> = { ...(existing?.post_meta ?? {}), notify_user_ids: projectForm.value.notifyUserIds }
+      // Only testing is stored; the standard widget is the default.
+      if (projectForm.value.testingMode) post_meta.widget_mode = 'testing'
+      else delete post_meta.widget_mode
       const updated = await $fetch<Project>(`/api/feedback/projects/${projectForm.value.id}`, {
         method: 'PATCH',
         body: {
@@ -942,6 +948,16 @@ async function onReorderProjects(payload: { orderedIds: string[] }) {
               :rows="3"
               placeholder="https://app.example.com&#10;https://docs.example.com"
               class="w-full"
+            />
+          </UFormField>
+          <UFormField v-if="projectForm.mode === 'edit'">
+            <template #label>
+              Testing mode
+              <InfoTip text="For sites being tested: the widget shows a labelled &quot;Give feedback&quot; button and, on a visitor's first visit, a note inviting them to report what they find. A site can also turn it on or off for itself in its embed settings, which wins over this switch." />
+            </template>
+            <USwitch
+              v-model="projectForm.testingMode"
+              label="Make the feedback button stand out"
             />
           </UFormField>
           <UFormField
