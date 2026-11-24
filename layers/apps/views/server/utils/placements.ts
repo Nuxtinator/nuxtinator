@@ -30,12 +30,13 @@
 // first drag.
 
 import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
+import { sql } from 'kysely'
 import type { Transaction } from 'kysely'
 import type { Database } from '#core/server/database/schema'
 import type { TenantContext } from '#tenant/server'
-import { applyFieldPatch, assertRecordVisible, canOrderRecordsUnder, deleteRecord, getRecordType, lockRecordsOrderUnder, placeRecordUnder, RECORDS_POSITION_KEY, recordsAccessGrantingKeys, requireRecordType, requireRecordUpdate, requireShareConfirmation, requireTypePermission, resolveTypePermission } from '#records/server'
+import { applyFieldPatch, assertRecordVisible, canOrderRecordsUnder, copyRecordAttachments, deleteRecord, duplicateRecord, getRecordType, lockRecordsOrderUnder, placeRecordUnder, RECORDS_POSITION_KEY, recordsAccessGrantingKeys, requireRecordType, requireRecordUpdate, requireShareConfirmation, requireTypePermission, resolveTypePermission } from '#records/server'
 import type { RecordsFieldSetting, RecordsSharingMode } from '#records/server'
-import { clearViewValues, isViewFieldKey, setViewValues, viewFieldsWithType } from './view-fields'
+import { clearViewValues, isViewFieldKey, setViewValues, viewAttachmentKey, viewFieldsWithType } from './view-fields'
 import { getViewsGroupValues, requireRecordsWriteScope } from './view-records'
 import { builtInOf } from './builtin-views'
 import { withRecordTab } from './record-tabs'
@@ -395,6 +396,73 @@ export async function createViewsCard(
   }
   if (placement) await placeAtEnd(tx, view, record.id, placement)
   return { id: record.id }
+}
+
+/**
+ * Duplicates a card's record (records' duplicateRecord), which takes the
+ * type's create permission. On a hand-picked view the copy is one of the
+ * view's own cards, which takes 'edit'. With 'edit' the copy also takes the
+ * original's values and files of this view's own fields, and sits right
+ * after it wherever someone placed the original on the view's tabs.
+ */
+export async function duplicateViewsCard(
+  tx: Tx,
+  ctx: TenantContext,
+  view: ViewRow,
+  access: ViewsAccessLevel,
+  recordId: string
+): Promise<{ id: string }> {
+  const picked = !!(view.definition as ViewDefinition).picked
+  if (picked) requireViewEdit(access)
+  requireRecordsWriteScope(ctx)
+  await requireRecordType(tx, view.record_type_key, ctx)
+  await requireTypePermission(tx, ctx, view.record_type_key, 'create')
+  await assertInView(tx, ctx, view, recordId)
+  const copy = await duplicateRecord(tx, ctx, view.record_type_key, recordId)
+  if (picked) {
+    await tx
+      .insertInto('views_items')
+      .values({ view_id: view.id, record_id: copy.id, created_here: true })
+      .execute()
+  }
+  if (access === 'view') return { id: copy.id }
+
+  await sql`
+    INSERT INTO views_values (view_id, record_id, field_key, value, updated_by)
+    SELECT view_id, ${copy.id}::uuid, field_key, value, ${ctx.userId}::uuid FROM views_values
+    WHERE view_id = ${view.id}::uuid AND record_id = ${recordId}::uuid
+  `.execute(tx)
+  await copyRecordAttachments(tx, ctx, recordId, copy.id, { fieldKeyPrefix: viewAttachmentKey(view.id, '') })
+  const placed = await tx
+    .selectFrom('views_cards')
+    .select(['tab_id', 'column_key', 'rank'])
+    .where('view_id', '=', view.id)
+    .where('record_id', '=', recordId)
+    .execute()
+  for (const p of placed) {
+    const next = p.rank === null
+      ? null
+      : await tx
+        .selectFrom('views_cards')
+        .select('rank')
+        .where('tab_id', '=', p.tab_id)
+        .where('column_key', '=', p.column_key)
+        .where('rank', '>', p.rank)
+        .orderBy('rank', 'asc')
+        .limit(1)
+        .executeTakeFirst()
+    await tx
+      .insertInto('views_cards')
+      .values({
+        view_id: view.id,
+        tab_id: p.tab_id,
+        record_id: copy.id,
+        column_key: p.column_key,
+        rank: p.rank === null ? null : generateKeyBetween(p.rank, next?.rank ?? null)
+      })
+      .execute()
+  }
+  return { id: copy.id }
 }
 
 /**

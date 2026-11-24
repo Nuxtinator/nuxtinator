@@ -10,9 +10,13 @@
 // details; clicking its subtasks value opens the board of those subtasks.
 // Fields the tab keeps on its cards when empty show as "Add <field>" until
 // set, and clicking one, set or not, opens its editor on the card.
+// Right-clicking the card opens its actions (useViewsCardMenu).
 import type { RecordsFieldSetting } from '#records/client'
 import type { ViewsBoardItem, ViewsConnectionDisplay } from '../../utils/views-types'
 import CardFieldPopover from './CardFieldPopover.vue'
+
+// The root is the menu, which renders no element; attributes go to the card.
+defineOptions({ inheritAttrs: false })
 
 const props = defineProps<{
   item: ViewsBoardItem
@@ -70,6 +74,9 @@ function onDrill(event: MouseEvent) {
   openBoard(props.item.id)
 }
 
+const cardMenu = useViewsCardMenu()
+const menuItems = computed(() => props.item.pending ? [] : cardMenu(props.item))
+
 function editorProps(edit: { field: RecordsFieldSetting, value: unknown }) {
   const suggestUrl = edit.field.kind === 'tags' && props.typeKey && !viewsIsViewField(edit.field)
     ? `/api/records/entries/${props.typeKey}/tags?field=${edit.field.key}`
@@ -79,101 +86,109 @@ function editorProps(edit: { field: RecordsFieldSetting, value: unknown }) {
 </script>
 
 <template>
-  <button
-    type="button"
-    draggable="true"
-    class="w-full text-left rounded-lg border border-(--ui-border) bg-(--ui-bg) px-3 py-2 space-y-1 shadow-xs hover:border-(--ui-border-accented) cursor-grab active:cursor-grabbing transition-colors"
-    :class="item.pending ? 'opacity-60 pointer-events-none' : ''"
-    @click="emit('open', item.id)"
-    @dragstart="onDragStart"
-    @dragend="emit('dragend')"
+  <UContextMenu
+    :items="menuItems"
+    :disabled="menuItems.length === 0"
   >
-    <img
-      v-if="cover"
-      :src="cover.url"
-      :alt="cover.name"
-      loading="lazy"
-      class="-mx-3 -mt-2 mb-2 w-[calc(100%+1.5rem)] max-w-none h-32 object-cover rounded-t-lg"
+    <!-- pointer-events is inline: the menu's trigger sets it there too. -->
+    <button
+      v-bind="$attrs"
+      type="button"
+      draggable="true"
+      class="w-full text-left rounded-lg border border-(--ui-border) bg-(--ui-bg) px-3 py-2 space-y-1 shadow-xs hover:border-(--ui-border-accented) cursor-grab active:cursor-grabbing transition-colors"
+      :class="item.pending ? 'opacity-60' : ''"
+      :style="item.pending ? { pointerEvents: 'none' } : undefined"
+      @click="emit('open', item.id)"
+      @dragstart="onDragStart"
+      @dragend="emit('dragend')"
     >
-    <p class="text-sm font-medium leading-snug">
-      {{ item.name }}
-    </p>
-    <dl
-      v-if="values.length > 0"
-      class="space-y-0.5"
-    >
-      <component
-        :is="value.edit ? CardFieldPopover : 'div'"
-        v-for="value in values"
-        :key="value.key"
-        v-bind="value.edit ? editorProps(value.edit) : {}"
-        class="flex items-center gap-1.5 text-xs"
-        :class="value.drill || value.edit ? '-mx-1 px-1 rounded cursor-pointer hover:bg-(--ui-bg-elevated)' : ''"
-        :title="value.drill ? `Open the ${value.label.toLowerCase()} board` : undefined"
-        @click="value.drill && onDrill($event)"
-        @commit="(next: unknown, previous: unknown) => value.edit && emit('setField', { field: value.edit.field, value: next, previous })"
+      <img
+        v-if="cover"
+        :src="cover.url"
+        :alt="cover.name"
+        loading="lazy"
+        class="-mx-3 -mt-2 mb-2 w-[calc(100%+1.5rem)] max-w-none h-32 object-cover rounded-t-lg"
       >
-        <dt
-          class="flex shrink-0 text-(--ui-text-dimmed)"
-          :title="value.label"
+      <p class="text-sm font-medium leading-snug">
+        {{ item.name }}
+      </p>
+      <dl
+        v-if="values.length > 0"
+        class="space-y-0.5"
+      >
+        <component
+          :is="value.edit ? CardFieldPopover : 'div'"
+          v-for="value in values"
+          :key="value.key"
+          v-bind="value.edit ? editorProps(value.edit) : {}"
+          class="flex items-center gap-1.5 text-xs"
+          :class="value.drill || value.edit ? '-mx-1 px-1 rounded cursor-pointer hover:bg-(--ui-bg-elevated)' : ''"
+          :title="value.drill ? `Open the ${value.label.toLowerCase()} board` : undefined"
+          @click="value.drill && onDrill($event)"
+          @commit="(next: unknown, previous: unknown) => value.edit && emit('setField', { field: value.edit.field, value: next, previous })"
         >
-          <UIcon
-            :name="value.icon"
-            class="size-3.5"
-          />
-          <span class="sr-only">{{ value.label }}</span>
-        </dt>
-        <dd
-          v-if="value.empty"
-          class="text-(--ui-text-dimmed) truncate"
-        >
-          Add {{ value.label }}
-        </dd>
-        <dd
-          v-else-if="value.userIds"
-          class="flex items-center gap-1 min-w-0"
-        >
-          <UAvatar
-            v-for="id in value.userIds.slice(0, USER_CAP)"
-            :key="id"
-            v-bind="userAvatarProps({ id, name: byId.get(id)?.name, image: byId.get(id)?.avatarUrl })"
-            :alt="displayName(id)"
-            :title="displayName(id)"
-            size="2xs"
-          />
-          <span
-            v-if="value.userIds.length > USER_CAP"
-            class="text-(--ui-text-dimmed)"
-            :title="value.userIds.slice(USER_CAP).map(displayName).join(', ')"
+          <dt
+            class="flex shrink-0 text-(--ui-text-dimmed)"
+            :title="value.label"
           >
-            +{{ value.userIds.length - USER_CAP }}
-          </span>
-        </dd>
-        <dd
-          v-else-if="value.progress"
-          class="flex items-center gap-1.5 min-w-0 flex-1"
-        >
-          <UProgress
-            :model-value="value.progress.done"
-            :max="value.progress.total"
-            size="xs"
-            class="flex-1 max-w-24"
-          />
-          <span class="text-(--ui-text-muted) tabular-nums">{{ value.text }}</span>
-          <UIcon
-            v-if="value.drill"
-            name="i-lucide-chevron-right"
-            class="size-3.5 text-(--ui-text-dimmed) ml-auto shrink-0"
-          />
-        </dd>
-        <dd
-          v-else
-          class="truncate"
-          :class="value.tone === 'error' ? 'text-(--ui-error) font-medium' : value.tone === 'warning' ? 'text-(--ui-warning) font-medium' : 'text-(--ui-text-muted)'"
-        >
-          {{ value.text }}
-        </dd>
-      </component>
-    </dl>
-  </button>
+            <UIcon
+              :name="value.icon"
+              class="size-3.5"
+            />
+            <span class="sr-only">{{ value.label }}</span>
+          </dt>
+          <dd
+            v-if="value.empty"
+            class="text-(--ui-text-dimmed) truncate"
+          >
+            Add {{ value.label }}
+          </dd>
+          <dd
+            v-else-if="value.userIds"
+            class="flex items-center gap-1 min-w-0"
+          >
+            <UAvatar
+              v-for="id in value.userIds.slice(0, USER_CAP)"
+              :key="id"
+              v-bind="userAvatarProps({ id, name: byId.get(id)?.name, image: byId.get(id)?.avatarUrl })"
+              :alt="displayName(id)"
+              :title="displayName(id)"
+              size="2xs"
+            />
+            <span
+              v-if="value.userIds.length > USER_CAP"
+              class="text-(--ui-text-dimmed)"
+              :title="value.userIds.slice(USER_CAP).map(displayName).join(', ')"
+            >
+              +{{ value.userIds.length - USER_CAP }}
+            </span>
+          </dd>
+          <dd
+            v-else-if="value.progress"
+            class="flex items-center gap-1.5 min-w-0 flex-1"
+          >
+            <UProgress
+              :model-value="value.progress.done"
+              :max="value.progress.total"
+              size="xs"
+              class="flex-1 max-w-24"
+            />
+            <span class="text-(--ui-text-muted) tabular-nums">{{ value.text }}</span>
+            <UIcon
+              v-if="value.drill"
+              name="i-lucide-chevron-right"
+              class="size-3.5 text-(--ui-text-dimmed) ml-auto shrink-0"
+            />
+          </dd>
+          <dd
+            v-else
+            class="truncate"
+            :class="value.tone === 'error' ? 'text-(--ui-error) font-medium' : value.tone === 'warning' ? 'text-(--ui-warning) font-medium' : 'text-(--ui-text-muted)'"
+          >
+            {{ value.text }}
+          </dd>
+        </component>
+      </dl>
+    </button>
+  </UContextMenu>
 </template>

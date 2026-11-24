@@ -3,7 +3,8 @@
 // tab's toolbar and renderer, and the interaction plumbing — moves, calendar
 // reschedules, quick-add (through the
 // records create route, or as one of a hand-picked view's own cards), the
-// list's done checkbox, fields set from a card, removing cards, tab and
+// list's done checkbox, fields set from a card, removing cards, a card's
+// right-click menu (copy link, duplicate, delete), tab and
 // definition updates, the column order of field-grouped tabs, and the view's own
 // fields (managed by its owner, filled in by its editors). Changes made on
 // the board show at once and go back only if their save fails
@@ -29,6 +30,7 @@ import type {
 import { VIEWS_LAYOUT_META, viewsDragMode, viewsIsViewId, viewsSubtasksViewId } from '../../utils/views-types'
 import { viewsPlaceColumn } from '../../utils/views-column-order'
 import type { ViewsMovePayload } from '../../composables/useViewsDetail'
+import { VIEWS_CARD_MENU_KEY, type ViewsCardMenuItem } from '../../composables/useViewsCardMenu'
 import type { ViewsTabChoice } from '../../components/views/TabModal.vue'
 
 const props = defineProps<{
@@ -653,13 +655,7 @@ async function onRemoveCard(recordId: string) {
     if (!await confirmAction({ title: `Delete "${card.name}"?`, confirmLabel: 'Delete', color: 'error' })) return
   }
   try {
-    await optimistic(() => {
-      const recs = tabRecords.value
-      if (!recs) return
-      recs.items = recs.items.filter(i => i.id !== recordId)
-      recs.placements = recs.placements.filter(p => p.recordId !== recordId)
-      recs.total = Math.max(0, recs.total - 1)
-    }, async () => {
+    await optimistic(() => takeCardOff(recordId), async () => {
       await $fetch(`/api/views/${v.id}/cards/${recordId}`, {
         method: 'DELETE',
         query: card?.ownCard ? { record: 'delete' } : undefined
@@ -668,6 +664,140 @@ async function onRemoveCard(recordId: string) {
     })
   } catch (err) {
     toast.add({ color: 'error', title: recordsErrorMessage(err, card?.ownCard ? 'Failed to delete the card' : 'Failed to remove the record') })
+  }
+}
+
+function takeCardOff(recordId: string) {
+  const recs = tabRecords.value
+  if (!recs) return
+  recs.items = recs.items.filter(i => i.id !== recordId)
+  recs.placements = recs.placements.filter(p => p.recordId !== recordId)
+  recs.total = Math.max(0, recs.total - 1)
+}
+
+// --- card menu ----------------------------------------------------------------
+
+// A card's right-click actions: copy its link, duplicate it (for people who
+// can add cards here), and delete it. On a hand-picked view the last is its
+// remove button's action; elsewhere it deletes the record, which takes the
+// type's delete permission.
+function cardMenu(item: ViewsBoardItem): ViewsCardMenuItem[][] {
+  if (isPendingId(item.id)) return []
+  const actions: ViewsCardMenuItem[] = [{ label: 'Copy link', icon: 'i-lucide-link', onSelect: () => copyCardLink(item.id) }]
+  if (canCreate.value) actions.push({ label: 'Duplicate', icon: 'i-lucide-copy', onSelect: () => duplicateCard(item) })
+  let remove: ViewsCardMenuItem | null = null
+  if (picked.value) {
+    if (canEditDefinition.value) {
+      remove = item.ownCard
+        ? { label: 'Delete card', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => onRemoveCard(item.id) }
+        : { label: 'Remove from view', icon: 'i-lucide-x', onSelect: () => onRemoveCard(item.id) }
+    }
+  } else if (typeInfo.value?.canDelete) {
+    remove = { label: 'Delete card', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => deleteCard(item) }
+  }
+  return remove ? [actions, [remove]] : [actions]
+}
+provide(VIEWS_CARD_MENU_KEY, cardMenu)
+
+// The address opening the card gives; an embedded panel links to the full view.
+async function copyCardLink(id: string) {
+  const v = view.value
+  if (!v) return
+  const to = props.embedded
+    ? { path: viewsPath(`/${v.id}`), query: { tab: tab.value?.id, card: id } }
+    : { path: route.path, query: { ...route.query, card: id } }
+  try {
+    await navigator.clipboard.writeText(new URL(router.resolve(to).href, window.location.origin).href)
+    toast.add({ title: 'Link copied', color: 'success' })
+  } catch {
+    toast.add({ title: 'Copy failed — open the card and copy its address', color: 'warning' })
+  }
+}
+
+// The copy shows at once, dimmed, where the server puts it: right after the
+// card wherever someone placed the card by hand, else with the newest cards.
+async function duplicateCard(item: ViewsBoardItem) {
+  const v = view.value
+  if (!v || isPendingId(item.id)) return
+  const pendingId = `${PENDING_ID_PREFIX}${++pendingSeq}`
+  let copyId = null as string | null
+  try {
+    await optimistic(
+      () => addPendingCopy(pendingId, item),
+      async () => {
+        const res = await $fetch<{ id: string }>(`/api/views/${v.id}/cards/${item.id}/duplicate`, { method: 'POST' })
+        settlePendingCard(pendingId, res.id)
+        copyId = res.id
+        return true
+      }
+    )
+  } catch (err) {
+    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to duplicate the card') })
+    return
+  }
+  if (copyId) {
+    const id = copyId
+    toast.add({ title: `Duplicated "${item.name}"`, color: 'success', actions: [{ label: 'Open', onClick: () => openCard(id) }] })
+  }
+}
+
+// The copy as the server makes it: a closed status goes back to the
+// default, and only the view's editors carry over its own values and places.
+function addPendingCopy(id: string, item: ViewsBoardItem) {
+  const recs = tabRecords.value
+  if (!recs) return
+  const now = new Date().toISOString()
+  const copy: ViewsBoardItem = { ...JSON.parse(JSON.stringify(item)) as ViewsBoardItem, id, createdAt: now, updatedAt: now, pending: true }
+  if (picked.value) copy.ownCard = true
+  if (!canEditDefinition.value) delete copy.viewValues
+  const status = fields.value.find(f => f.column === 'status')
+  if (status && copy.status && status.options?.[copy.status]?.closed) {
+    setCardValue(copy, status, typeof status.default === 'string' ? status.default : null)
+  }
+  const at = reordersShared.value ? recs.items.findIndex(i => i.id === item.id) + 1 : recs.items.length
+  recs.items.splice(at > 0 ? at : recs.items.length, 0, copy)
+  recs.total += 1
+  if (!canEditDefinition.value) return
+  for (const p of recs.placements.filter(p => p.recordId === item.id)) {
+    let rank: string | null = null
+    if (p.rank !== null) {
+      const after = p.rank
+      const next = recs.placements
+        .filter(q => q.columnKey === p.columnKey && q.rank !== null && q.rank > after)
+        .map(q => q.rank!)
+        .sort()[0] ?? null
+      try {
+        rank = generateKeyBetween(after, next)
+      } catch {
+        // Unranked, it sits after the column's ranked cards until the feed returns.
+      }
+    }
+    recs.placements.push({ recordId: id, columnKey: p.columnKey, rank })
+  }
+}
+
+// On a view of every matching record a card is its record: deleting it
+// deletes the record, after the confirm its details' Delete asks.
+async function deleteCard(item: ViewsBoardItem) {
+  const v = view.value
+  if (!v || isPendingId(item.id)) return
+  const confirmed = await confirmAction({
+    title: `Delete "${item.name}"?`,
+    description: 'This permanently deletes the record and its timeline. It can\'t be undone.',
+    confirmLabel: 'Delete',
+    color: 'error'
+  })
+  if (!confirmed) return
+  try {
+    await optimistic(() => takeCardOff(item.id), async () => {
+      // Widened to string: the typed-route template for this path unions in
+      // GET-only siblings and rejects DELETE.
+      const url: string = `/api/records/entries/${v.recordTypeKey}/${item.id}`
+      await $fetch(url, { method: 'DELETE' })
+      return true
+    })
+  } catch (err) {
+    toast.add({ color: 'error', title: recordsErrorMessage(err, 'Failed to delete the card') })
   }
 }
 
@@ -1389,7 +1519,6 @@ const menuItems = computed(() => {
           :records="tabRecords"
           :fields="allFields"
           :can-create="canCreate"
-          :can-remove="canEditDefinition"
           :done-status="doneStatus"
           :has-more="tabRecords.truncated"
           :column-order="columnPositions"
@@ -1399,7 +1528,6 @@ const menuItems = computed(() => {
           @open="openCard"
           @quick-add="onQuickAdd"
           @toggle-done="onToggleDone"
-          @remove-card="onRemoveCard"
           @load-more="loadMore"
           @dragstart="beginDrag"
           @dragend="endDrag"

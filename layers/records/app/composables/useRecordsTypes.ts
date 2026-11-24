@@ -29,6 +29,7 @@ export interface RecordsTypeSummary {
   /** The caller's type-evaluator answers — the server is the only truthful source. */
   canRead: boolean
   canCreate: boolean
+  canDelete: boolean
   canViewAll: boolean
 }
 

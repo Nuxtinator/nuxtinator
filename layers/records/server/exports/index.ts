@@ -103,7 +103,7 @@ export type { RecordsFilterGroup, RecordsFilterNode, RecordsFilterRule, RecordsF
 export { closingRulesOf, isClosedStatus } from '../utils/closing'
 
 export { sendDueRecordsReminders } from '../utils/reminders'
-export { recordsRepeatShift } from '../utils/repeat'
+export { recordsRepeatShift, duplicateRecord } from '../utils/repeat'
 export type { RecordsClosingRules } from '../utils/closing'
 
 export { recordRecordsActivity } from '../utils/records-activity'

@@ -40,6 +40,10 @@ The `repeat` field (`RECORDS_REPEAT_FIELD`) is every week, month, 3 months or ye
 
 Closing a record that repeats makes the next one ([repeat.ts](server/utils/repeat.ts)): a copy with the type's default status, its due date moved forward by whole intervals from the old one until it isn't past (a report due 15 Jan comes back 15 Apr, 15 Jul, …), and its other dates moved by the same amount. Its reminder counts from the new due date. The copy keeps the creator, field values, assignees, links, tags, parent and shares, takes copies of the files (rich text images point at the copies), and its subtasks are copied the same way, back to their default status. Comments and activity start fresh. The closed record stops repeating, and both records note the other in their activity. `registerRecordsRepeatHook` lets other layers carry their own per-record state over (the views layer puts the copy on the same hand-picked views).
 
+## Duplicate
+
+`duplicateRecord` (in [repeat.ts](server/utils/repeat.ts)) copies a record as new work of the caller's, who becomes its creator. The copy carries the same things a repeat's does, with its dates unchanged and its repeat and reminder kept. An open status carries over, and a closed record's copy starts at the type's default status without its closing reason. Its subtasks are copied in their order, by the same rules. The copy keeps its parent, and sits right after the original when the order under that parent is set and the caller can change it. Its activity says what it was copied from. Repeat hooks don't run: the caller decides what of its own state the copy takes (the views layer's duplicate route). The caller checks the type's create permission and that the original is visible.
+
 ## Built-in types
 
 `item` — a freeform card: name, notes, tags, link, date, people, priority (low / medium / high), attachments (its first image is the card cover) and the default Open / Done status. People only records who's involved: naming someone doesn't share the item.
