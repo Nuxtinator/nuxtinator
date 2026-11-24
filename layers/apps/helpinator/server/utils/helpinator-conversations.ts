@@ -129,7 +129,7 @@ function escapeHtml(s: string): string {
 }
 
 function label(role: 'user' | 'assistant'): string {
-  return role === 'user' ? 'You' : 'Assistant'
+  return role === 'user' ? 'Visitor' : 'Assistant'
 }
 
 export function helpinatorTranscriptText(messages: HelpinatorMessageRow[]): string {

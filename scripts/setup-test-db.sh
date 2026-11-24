@@ -59,6 +59,15 @@ GRANT USAGE ON SCHEMA public TO app_user;
 ALTER SCHEMA public OWNER TO host_admin;
 SQL
 
+# pgvector, created here because host_admin isn't a superuser. Optional: without
+# it the vector-index migrations are held back and the context/helpinator tests fail.
+if ${PSQL} -d "${DB_NAME}" -c "CREATE EXTENSION IF NOT EXISTS vector" >/dev/null 2>&1; then
+  echo "==> pgvector enabled in ${DB_NAME}"
+else
+  echo "==> WARNING: could not enable pgvector (install it, e.g. 'brew install pgvector', then re-run)."
+  echo "    The context and helpinator tests need it."
+fi
+
 echo ""
 echo "==> Done. Add these to dev/.env:"
 echo ""

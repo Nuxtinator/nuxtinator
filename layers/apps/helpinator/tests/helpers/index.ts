@@ -37,7 +37,7 @@ export async function createHelpinatorOrgWith(
   const org = await createTestOrg(sql, { slug: `test-helpinator-${randomUUID().slice(0, 8)}`, name: 'Test Helpinator Org' })
   await addTestMembership(sql, { user_id: user.id, org_id: org.id, roles })
   for (const app of ['helpinator', 'context', 'inbox', 'crm']) {
-    await sql`INSERT INTO apps (id, status) VALUES (${app}, 'available') ON CONFLICT (id) DO NOTHING`
+    await sql`INSERT INTO apps (id, status) VALUES (${app}, 'available') ON CONFLICT (id) DO UPDATE SET status = coalesce(apps.status, 'available')`
     await sql`
       INSERT INTO org_apps (org_id, app_id, enabled, source)
       VALUES (${org.id}, ${app}, true, 'org_admin')

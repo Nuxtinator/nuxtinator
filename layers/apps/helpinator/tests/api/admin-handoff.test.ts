@@ -164,8 +164,9 @@ describe('admin + handoff', () => {
     expect(inbox!.subject).not.toContain('refund')
     expect(inbox!.subject).toMatch(/^Help chat: /)
     const [msg] = await sql`SELECT body_text FROM inbox_messages WHERE conversation_id = ${conv!.inbox_conversation_id}`
-    expect(msg!.body_text).toContain('Can I get a refund?')
-    expect(msg!.body_text).toContain('I am not sure.')
+    expect(msg!.body_text).toContain('Visitor:\nCan I get a refund?')
+    expect(msg!.body_text).toContain('Assistant:\nI am not sure.')
+    expect(msg!.body_text).not.toContain('You:')
 
     const again = await $fetch<{ status: string }>(`/api/v1/helpinator/widgets/${widget.id}/handoff`, {
       method: 'POST', headers: widgetHeaders(turn.token), body: { email: 'visitor@example.com' }
