@@ -22,12 +22,15 @@ import { withOrgPermission, type TenantContext } from '#tenant/server'
 import type { Database } from '#core/server/database/schema'
 import type { Permission } from '#core/app/utils/permissions'
 import {
+  activityValue,
   addComment,
   applyFieldPatch,
   assertRecordVisible,
   availableAdminFieldKinds,
+  beginRecordAttachmentUpload,
   canUpdateRecord,
   closingRulesOf,
+  completeRecordAttachmentUpload,
   createField,
   createRecordType,
   getRecord,
@@ -39,6 +42,7 @@ import {
   listActivity,
   listComments,
   listRecords,
+  recordRecordsActivity,
   requireRecordType,
   requireRecordUpdate,
   requireTypePermission,
@@ -46,6 +50,7 @@ import {
   runRecordsPatchGuards,
   updateField,
   updateRecordType,
+  RECORDS_ATTACHMENT_MAX_MB,
   RECORDS_OPTION_KEY_RE,
   RECORDS_SHARE_CONFIRMATION,
   RECORDS_SCHEMA_SLUG_RE,
@@ -69,7 +74,7 @@ const typeInput = z.string().min(1).max(41)
 const idInput = z.string().uuid().describe('Record id, from records_search.')
 
 const fieldsInput = z.record(z.string(), z.unknown())
-  .describe('Field values keyed by field key (see records_list_types). Single-value fields take a value (null clears). Multi-value fields (including email/phone) take an array, which replaces every current value, or { "values": [{ "value": "…" }, { "value": "…", "delete": true }] } to add or remove values and keep the rest.')
+  .describe('Field values keyed by field key (see records_list_types). Single-value fields take a value (null clears). Multi-value fields (including email/phone) take an array, which replaces every current value, or { "values": [{ "value": "…" }, { "value": "…", "delete": true }] } to add or remove values and keep the rest. An attachments field takes ids of files already on it, to reorder or remove them; add files with records_begin_attachment_upload.')
 
 function run<T>(
   ctx: McpToolContext,
@@ -529,6 +534,97 @@ export const addCommentTool = defineMcpTool({
   }
 })
 
+// ─── Attachment uploads ─────────────────────────────────────────────────────
+// Two steps, so the bytes go straight to storage: begin hands out a presigned
+// PUT URL, complete puts the stored file on the field. Both check what the
+// attachments route checks.
+
+const attachmentFieldInput = z.string().min(1).max(64)
+  .describe('Key of an attachments (files) field on the type, from records_list_types.')
+
+async function attachmentsFieldOf(tx: Tx, tenant: TenantContext, typeKey: string, id: string, fieldKey: string) {
+  const context = await typeContext(tx, tenant, typeKey)
+  await assertRecordVisible(tx, tenant, typeKey, id)
+  await requireRecordUpdate(tx, tenant, typeKey, id)
+  const def = context.defs.find(d => d.key === fieldKey)
+  if (!def || def.kind !== 'attachments') {
+    throw createError({ statusCode: 400, statusMessage: `${fieldKey}: not an attachments field of ${typeKey}` })
+  }
+  return { ...context, def }
+}
+
+export const beginAttachmentUploadTool = defineMcpTool({
+  name: 'records_begin_attachment_upload',
+  title: 'Start File Upload',
+  description: `Start adding a file (max ${RECORDS_ATTACHMENT_MAX_MB} MB) to a record's attachments field. Returns a presigned uploadUrl. Next: PUT the raw bytes to uploadUrl with the file's Content-Type within the hour (e.g. \`curl -X PUT -H 'Content-Type: <mime>' -T <path> "<uploadUrl>"\`), then call records_complete_attachment_upload with the returned key.`,
+  appId: 'records',
+  scope: 'records.write',
+  input: z.object({
+    org: orgInput,
+    type: typeInput,
+    id: idInput,
+    field: attachmentFieldInput,
+    filename: z.string().trim().min(1).max(255),
+    mime: z.string().min(1).max(255).describe('The file\'s type, e.g. "image/png" or "application/pdf".'),
+    size: z.number().int().min(0).describe('File size in bytes.')
+  }).strict(),
+  handler: async (input, ctx) => {
+    return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
+      await attachmentsFieldOf(tx, tenant, input.type, input.id, input.field)
+      const upload = await beginRecordAttachmentUpload(tx, input.id, input.field, {
+        filename: input.filename,
+        mime: input.mime,
+        size: input.size
+      })
+      return text(`PUT the file to uploadUrl, then call records_complete_attachment_upload with key ${upload.key}.`, {
+        uploadUrl: upload.uploadUrl,
+        key: upload.key,
+        expiresAt: upload.expiresAt.toISOString(),
+        method: 'PUT',
+        headers: { 'Content-Type': input.mime }
+      })
+    })
+  }
+})
+
+export const completeAttachmentUploadTool = defineMcpTool({
+  name: 'records_complete_attachment_upload',
+  title: 'Finish File Upload',
+  description: 'Finish a file started with records_begin_attachment_upload, after its bytes were PUT to uploadUrl: puts it last on the record\'s attachments field and notes the change on the timeline. Pass the same type, id and field as the begin call. A key works once.',
+  appId: 'records',
+  scope: 'records.write',
+  input: z.object({
+    org: orgInput,
+    type: typeInput,
+    id: idInput,
+    field: attachmentFieldInput,
+    key: z.string().min(1).max(512).describe('The key records_begin_attachment_upload returned.'),
+    filename: z.string().trim().min(1).max(255).describe('The name the file shows under.')
+  }).strict(),
+  handler: async (input, ctx) => {
+    return await run(ctx, input.org, 'records.write', async (tx, tenant) => {
+      const { defs, rules, def } = await attachmentsFieldOf(tx, tenant, input.type, input.id, input.field)
+      const before = await getRecord(tx, tenant, input.type, input.id)
+      const file = await completeRecordAttachmentUpload(tx, tenant, input.id, def.key, {
+        key: input.key,
+        filename: input.filename
+      })
+      await tx.updateTable('records_entries').set({ updated_at: new Date() }).where('id', '=', input.id).execute()
+      const record = await getRecord(tx, tenant, input.type, input.id)
+      await recordRecordsActivity(tx, tenant, input.id, 'field_changed', {
+        fieldKey: def.key,
+        old: activityValue(def, before.fields[def.key] ?? []),
+        new: activityValue(def, record.fields[def.key] ?? [])
+      })
+      return text(`Added ${file.name} to ${def.label} on ${record.name}.`, {
+        file,
+        record: recordOut(record, rules),
+        changes: diffFields(defs, before.fields, record.fields)
+      })
+    })
+  }
+})
+
 // ─── Bulk write tools ───────────────────────────────────────────────────────
 // Each item runs in its own savepoint, so one that fails rolls back alone. A
 // share refusal on any item refuses the whole call, so every share is confirmed at once.
@@ -857,6 +953,8 @@ export const recordsMcpTools = [
   updateRecordsTool,
   closeRecordsTool,
   addCommentTool,
+  beginAttachmentUploadTool,
+  completeAttachmentUploadTool,
   createRecordTypeTool,
   addFieldTool,
   updateFieldTool,

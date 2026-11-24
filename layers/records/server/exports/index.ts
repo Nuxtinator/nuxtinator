@@ -60,13 +60,16 @@ export type { RecordsRefValue } from '#records'
 export {
   addRecordAttachment,
   applyAttachmentsPatch,
+  beginRecordAttachmentUpload,
+  completeRecordAttachmentUpload,
   copyRecordAttachments,
   deleteRecordAttachments,
   listRecordAttachments,
   RECORDS_ATTACHMENT_MAX_MB,
-  RECORDS_ATTACHMENTS_PER_FIELD
+  RECORDS_ATTACHMENTS_PER_FIELD,
+  RECORDS_UPLOAD_URL_TTL_SECONDS
 } from '../utils/attachments'
-export type { RecordsAttachmentFile } from '../utils/attachments'
+export type { RecordsAttachmentFile, RecordsAttachmentUpload } from '../utils/attachments'
 
 export { requireShareConfirmation, requireMoveConfirmation, recordsUnsharedAssignees, RECORDS_SHARE_CONFIRMATION } from '../utils/share-confirmation'
 export type { RecordsSharingMode, RecordsShareConfirmationUser } from '../utils/share-confirmation'
