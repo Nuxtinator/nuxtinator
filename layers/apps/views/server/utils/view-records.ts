@@ -98,8 +98,10 @@ export async function effectiveCardLayout(tx: Tx, view: ViewRow, tab: ViewTabRow
     const showEmpty = def.cardShowEmpty?.length ? { showEmpty: def.cardShowEmpty } : {}
     return { fields: def.cardFields, connections: def.cardConnections ?? {}, custom: true, ...cover, ...showEmpty }
   }
+  const fields = type?.card?.fields ?? DEFAULT_CARD_FIELDS[tab.layout]
   return {
-    fields: type?.card?.fields ?? DEFAULT_CARD_FIELDS[tab.layout],
+    // A tab split by status already shows it as the column or section.
+    fields: def.groupField === 'status' ? fields.filter(f => f !== 'status') : fields,
     connections: type?.card?.connections ?? {},
     custom: false,
     ...cover
