@@ -1,6 +1,6 @@
 {
   "name": "@nuxtinator/views",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -24,7 +24,7 @@
   "nuxtinator": {
     "requires": {
       "@nuxtinator/core": ">=4.1.0",
-      "@nuxtinator/records": ">=0.6.0"
+      "@nuxtinator/records": ">=0.7.0"
     }
   }
 }
