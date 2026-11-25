@@ -68,7 +68,7 @@ async function runTurn(tx: Tx, args: TurnArgs, hooks?: TurnHooks) {
     messages: [...history, { role: 'user', content: message }],
     tools: assistant.tools,
     onToolCall: hooks?.onToolCall ?? assistant.onToolCall,
-    maxTokens: 4096,
+    maxTokens: 16_000,
     maxToolRounds: 4,
     onTextDelta: hooks?.onTextDelta,
     onTextDiscard: hooks?.onTextDiscard
