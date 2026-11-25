@@ -7,6 +7,8 @@ import type { ColumnType, Generated } from 'kysely'
 export type ViewsLayout = 'kanban' | 'table' | 'list' | 'calendar'
 export type ViewsVisibility = 'private' | 'org' | 'teams'
 export type ViewsShareLevel = 'view' | 'edit'
+// A favorite card opens the card's details; a favorite board, the board of what sits under it.
+export type ViewsFavoriteKind = 'card' | 'board'
 
 export interface ViewsViewsTable {
   id: Generated<string>
@@ -113,8 +115,19 @@ export interface ViewColumnOrderTable {
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>
 }
 
+// A person's favorite card or card board (see views_007).
+export interface ViewFavoritesTable {
+  user_id: string
+  kind: ViewsFavoriteKind
+  record_id: string
+  // A card: the view it opens on, as the client names it. Null on a board.
+  view_id: string | null
+  created_at: ColumnType<Date, Date | string | undefined, Date | string>
+}
+
 declare global {
   interface NuxtinatorDatabaseTables {
+    views_favorites: ViewFavoritesTable
     views_column_order: ViewColumnOrderTable
     views_record_tabs: ViewRecordTabsTable
     views_values: ViewValuesTable

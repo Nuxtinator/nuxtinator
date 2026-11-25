@@ -1,4 +1,4 @@
-// A card's actions (copy link, duplicate, delete or remove), shown on
+// A card's actions (copy link, favorite, duplicate, delete or remove), shown on
 // right-click on board cards and list rows and in a list row's ⋯ menu. The
 // view panel builds them, since it holds the permissions and the writes.
 import type { InjectionKey } from 'vue'

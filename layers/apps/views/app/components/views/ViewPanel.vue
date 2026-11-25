@@ -4,7 +4,7 @@
 // reschedules, quick-add (through the
 // records create route, or as one of a hand-picked view's own cards), the
 // list's done checkbox, fields set from a card, removing cards, a card's
-// right-click menu (copy link, duplicate, delete), tab and
+// right-click menu (copy link, favorite, duplicate, delete), tab and
 // definition updates, the column order of field-grouped tabs, and the view's own
 // fields (managed by its owner, filled in by its editors). Changes made on
 // the board show at once and go back only if their save fails
@@ -13,7 +13,8 @@
 // rides in ?tab= so a tab can be linked to. Writes that would hand a card to
 // someone who can't see it ask first (useRecordsShareConfirm). A view that
 // stands for a record (a task's subtasks board) shows what leads to it as a
-// trail in place of the Built-in badge, and its name opens the record. Embedded in
+// trail in place of the Built-in badge, its name opens the record, and a star
+// beside it adds the board to the caller's favorites. Embedded in
 // another app's page, it takes the height its parent gives it, keeps the
 // active tab to itself and links out to the full view.
 import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
@@ -232,6 +233,12 @@ const openTypeKey = computed(() => {
 watch(viewId, () => {
   embeddedRecordId.value = null
 })
+
+// --- favorites --------------------------------------------------------------
+
+const { ensure: ensureFavorites, isFavorite, toggle: toggleFavorite } = useViewsFavorites()
+onMounted(ensureFavorites)
+const boardFavorite = computed(() => !!view.value?.recordId && isFavorite('board', view.value.recordId))
 
 // A card added on screen carries a local id until the server creates it.
 const PENDING_ID_PREFIX = 'pending-'
@@ -677,13 +684,22 @@ function takeCardOff(recordId: string) {
 
 // --- card menu ----------------------------------------------------------------
 
-// A card's right-click actions: copy its link, duplicate it (for people who
-// can add cards here), and delete it. On a hand-picked view the last is its
-// remove button's action; elsewhere it deletes the record, which takes the
-// type's delete permission.
+// A card's right-click actions: copy its link, add it to or remove it from
+// the caller's favorites, duplicate it (for people who can add cards here),
+// and delete it. On a hand-picked view the last is its remove button's
+// action; elsewhere it deletes the record, which takes the type's delete
+// permission.
 function cardMenu(item: ViewsBoardItem): ViewsCardMenuItem[][] {
   if (isPendingId(item.id)) return []
   const actions: ViewsCardMenuItem[] = [{ label: 'Copy link', icon: 'i-lucide-link', onSelect: () => copyCardLink(item.id) }]
+  const v = view.value
+  if (v) {
+    actions.push({
+      label: isFavorite('card', item.id) ? 'Remove from favorites' : 'Add to favorites',
+      icon: 'i-lucide-star',
+      onSelect: () => toggleFavorite('card', item.id, v.id)
+    })
+  }
   if (canCreate.value) actions.push({ label: 'Duplicate', icon: 'i-lucide-copy', onSelect: () => duplicateCard(item) })
   let remove: ViewsCardMenuItem | null = null
   if (picked.value) {
@@ -1274,6 +1290,21 @@ const menuItems = computed(() => {
             {{ view?.name ?? '…' }}
           </template>
         </h1>
+        <UTooltip
+          v-if="view?.recordId"
+          :text="boardFavorite ? 'Remove board from favorites' : 'Add board to favorites'"
+        >
+          <UButton
+            icon="i-lucide-star"
+            variant="ghost"
+            :color="boardFavorite ? 'warning' : 'neutral'"
+            size="sm"
+            class="shrink-0"
+            :aria-label="boardFavorite ? 'Remove board from favorites' : 'Add board to favorites'"
+            :aria-pressed="boardFavorite"
+            @click="toggleFavorite('board', view.recordId)"
+          />
+        </UTooltip>
         <UBadge
           v-if="view?.builtIn && !view.recordId"
           variant="subtle"

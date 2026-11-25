@@ -1,16 +1,25 @@
 <script setup lang="ts">
-// Views landing — the built-in views on top, then two columns by audience:
+// Views landing — the caller's favorite cards and boards, the built-in views,
+// then two columns by audience:
 // Teams (views open to a team or everyone, whoever owns them) and Mine (my
 // private views, then private views shared with me by name). Each column's +
 // opens the create modal set to that audience.
 definePageMeta({ middleware: 'auth' })
 
 const { pending, error, refresh, builtIns, teamViews, mine, sharedWithMe } = useViewsList()
+const { items: favorites, refresh: refreshFavorites } = useViewsFavorites()
+const { ensureTypes } = useRecordsTypes()
 const createOpen = ref(false)
 const createAudience = ref<'mine' | 'teams'>('mine')
 
 onMounted(() => {
   refresh()
+  refreshFavorites().catch(() => {
+    // The Favorites row stays as last loaded.
+  })
+  ensureTypes().catch(() => {
+    // Favorite cards fall back to a generic icon.
+  })
 })
 
 function openCreate(audience: 'mine' | 'teams') {
@@ -30,6 +39,24 @@ function openCreate(audience: 'mine' | 'teams') {
       color="error"
       :title="error"
     />
+
+    <section
+      v-if="!error && favorites.length > 0"
+      class="space-y-2"
+    >
+      <h2 class="text-sm font-medium text-(--ui-text-muted)">
+        Favorites
+      </h2>
+      <ul class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <li
+          v-for="favorite in favorites"
+          :key="`${favorite.kind}:${favorite.recordId}`"
+          class="rounded-lg border border-(--ui-border) bg-(--ui-bg) overflow-hidden"
+        >
+          <ViewsFavoriteRow :favorite="favorite" />
+        </li>
+      </ul>
+    </section>
 
     <section
       v-if="!error && builtIns.length > 0"

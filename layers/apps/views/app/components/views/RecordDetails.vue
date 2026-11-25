@@ -2,7 +2,8 @@
 // Card click target: the record's details over the whole screen, rendered by
 // the records layer's own detail view, so fields, comments, sharing,
 // permissions and validation are exactly the record page's. The header adds
-// a link to the record's page. At the end of the fields sidebar, a section named after the
+// a star that makes the card one of the caller's favorites, opening on this
+// view, and a link to the record's page. At the end of the fields sidebar, a section named after the
 // view holds the view's own fields: everyone who opens the view sees the ones
 // with a value, and its editors fill them in and add the empty ones.
 import type { RecordsFieldSetting } from '#records/client'
@@ -34,6 +35,8 @@ const emit = defineEmits<{
 
 const toast = useToast()
 const typePath = useRecordsTypePath()
+const { isFavorite, toggle: toggleFavorite } = useViewsFavorites()
+const favorite = computed(() => !!recordId.value && isFavorite('card', recordId.value))
 
 const open = computed({
   get: () => recordId.value !== null,
@@ -103,6 +106,20 @@ function viewUploadUrl(field: RecordsFieldSetting): string | undefined {
           @close="open = false"
         >
           <template #actions>
+            <UTooltip
+              v-if="viewId"
+              :text="favorite ? 'Remove from favorites' : 'Add to favorites'"
+            >
+              <UButton
+                icon="i-lucide-star"
+                variant="ghost"
+                :color="favorite ? 'warning' : 'neutral'"
+                size="sm"
+                :aria-label="favorite ? 'Remove from favorites' : 'Add to favorites'"
+                :aria-pressed="favorite"
+                @click="toggleFavorite('card', recordId, viewId)"
+              />
+            </UTooltip>
             <UTooltip text="Open as a page">
               <UButton
                 icon="i-lucide-square-arrow-out-up-right"

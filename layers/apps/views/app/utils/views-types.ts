@@ -127,6 +127,20 @@ export interface ViewDetail extends Omit<ViewSummary, 'layout' | 'tabCount' | 't
   canOrder?: boolean
 }
 
+/** A favorite card opens the card's details; a favorite board, the board of what sits under it. */
+export type ViewsFavoriteKind = 'card' | 'board'
+
+/** One of the caller's favorites, as GET /api/views/favorites lists it. */
+export interface ViewsFavorite {
+  kind: ViewsFavoriteKind
+  recordId: string
+  name: string
+  recordType: string
+  /** A card: the view it opens on, null once the caller can't open it (it opens as the record's page). Null on a board. */
+  viewId: string | null
+  viewName: string | null
+}
+
 /** The built-in view that shows one task's subtasks as a board. */
 export const VIEWS_SUBTASKS_KEY = 'subtasks'
 
