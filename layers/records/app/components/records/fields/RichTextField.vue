@@ -15,24 +15,38 @@
 // dimmed, and a line under the text says so. A commit also names the images
 // uploaded here that the text no longer shows, so their files can go; once
 // an image has been saved in the text, the server keeps the two in step.
+//
+// `composer` makes it a comment box: shorter, nothing commits on its own,
+// Cmd/Ctrl+Enter emits `submit`, and the parent reads the text through the
+// exposed `value()` / `changed()` / `empty` / `uploading`.
 import { TaskItem, TaskList } from '@tiptap/extension-list'
+import { Selection } from '@tiptap/pm/state'
 import type { Editor } from '@tiptap/vue-3'
 import type { EditorCustomHandlers, EditorMentionMenuItem, EditorSuggestionMenuItem, EditorToolbarItem } from '@nuxt/ui'
 import type { RecordsAttachmentValue } from '#records'
 import type { RecordsFieldSetting } from '../../../utils/field-kinds'
 
 const props = withDefaults(defineProps<{
-  field: RecordsFieldSetting
+  field?: RecordsFieldSetting
   modelValue: unknown
   readonly?: boolean
   /** The record's files, for the images in the text. */
   images?: RecordsAttachmentValue[]
   /** Where a new image uploads; without it images can't be added. */
   imageUploadUrl?: string
+  /** A comment box rather than a field (see above). */
+  composer?: boolean
+  placeholder?: string
+  /** Puts the cursor at the end of the text once it shows. */
+  autofocus?: boolean
 }>(), {
+  field: undefined,
   readonly: false,
   images: () => [],
-  imageUploadUrl: undefined
+  imageUploadUrl: undefined,
+  composer: false,
+  placeholder: 'Write something, or type / for headings, lists and more…',
+  autofocus: false
 })
 
 const emit = defineEmits<{
@@ -40,6 +54,8 @@ const emit = defineEmits<{
   commit: [value: string | null, discardImages?: string[]]
   /** An image was uploaded onto the record; it should be refetched. */
   uploaded: []
+  /** Cmd/Ctrl+Enter in a comment box. */
+  submit: []
 }>()
 
 const toast = useToast()
@@ -96,7 +112,27 @@ function rebase() {
 onMounted(() => {
   rebase()
   refreshChipNames()
+  if (props.autofocus) nextTick(focusEnd)
 })
+
+// An image has no place for the cursor after it, so it stays selected once it
+// goes in, and typing on would replace it. This puts the cursor after `pos`
+// (just past an image), adding an empty line when nothing follows; the line
+// adds nothing to the stored Markdown.
+function cursorAfter(editor: Editor, pos: number, addToHistory = true) {
+  const tr = editor.state.tr
+  if (pos >= tr.doc.content.size) tr.insert(tr.doc.content.size, editor.schema.nodes.paragraph!.create())
+  tr.setSelection(Selection.near(tr.doc.resolve(pos), 1))
+  if (!addToHistory) tr.setMeta('addToHistory', false)
+  editor.view.dispatch(tr)
+}
+
+function focusEnd() {
+  const editor = editorRef.value?.editor
+  if (!editor || editor.isDestroyed) return
+  if (editor.state.doc.lastChild?.isAtom) cursorAfter(editor, editor.state.doc.content.size, false)
+  editor.commands.focus('end')
+}
 
 watch(current, (value) => {
   if (focused.value || value.trim() === serialize()) return
@@ -109,7 +145,7 @@ watch(current, (value) => {
 const unsaved = new Set<string>()
 
 function commit() {
-  if (props.readonly) return
+  if (props.readonly || props.composer) return
   const next = serialize()
   let discard: string[] = []
   if (uploads.value === 0) {
@@ -159,6 +195,7 @@ async function insertImages(files: File[], pos?: number) {
     pos ?? editor.state.selection.to,
     files.map((file, i) => ({ type: 'image', attrs: { src: previews[i], alt: file.name || 'image' } }))
   ).run()
+  cursorAfter(editor, editor.state.selection.to)
   uploads.value += files.length
   try {
     const body = new FormData()
@@ -243,6 +280,12 @@ const editorProps = {
     if (files.length === 0 || !props.imageUploadUrl) return false
     event.preventDefault()
     insertImages(files, view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos)
+    return true
+  },
+  handleKeyDown(_view: unknown, event: KeyboardEvent) {
+    if (!props.composer || event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return false
+    event.preventDefault()
+    emit('submit')
     return true
   }
 }
@@ -417,6 +460,13 @@ const toolbarItems = computed(() => [
     { kind: 'recordLink', icon: 'i-lucide-hash', ...tip('Link a card (#)') }
   ]
 ] as EditorToolbarItem[][])
+
+defineExpose({
+  value: serialize,
+  changed: () => serialize() !== baseline,
+  empty: computed(() => draft.value.trim() === ''),
+  uploading: computed(() => uploads.value > 0)
+})
 </script>
 
 <template>
@@ -437,8 +487,8 @@ const toolbarItems = computed(() => [
       :extensions="extensions"
       :handlers="handlers"
       :editor-props="editorProps"
-      :placeholder="readonly ? undefined : 'Write something, or type / for headings, lists and more…'"
-      :ui="{ base: ['text-sm *:my-2 [&_p]:leading-6 [&_li]:my-0', readonly ? 'sm:px-0' : 'px-3 py-2.5 sm:px-3 min-h-32'] }"
+      :placeholder="readonly ? undefined : placeholder"
+      :ui="{ base: ['text-sm *:my-2 [&_p]:leading-6 [&_li]:my-0', readonly ? 'sm:px-0' : ['px-3 py-2.5 sm:px-3', composer ? 'min-h-20' : 'min-h-32']] }"
     >
       <template v-if="!readonly">
         <UEditorToolbar

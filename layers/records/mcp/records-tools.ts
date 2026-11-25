@@ -512,7 +512,7 @@ export const closeRecordTool = defineMcpTool({
 export const addCommentTool = defineMcpTool({
   name: 'records_add_comment',
   title: 'Add Comment',
-  description: 'Add a free-text note to a record\'s timeline, e.g. "Met on Sunday, wants to help with the youth group."',
+  description: 'Add a note to a record\'s timeline, e.g. "Met on Sunday, wants to help with the youth group." The body is Markdown, like a rich_text field.',
   appId: 'records',
   scope: 'records.write',
   input: z.object({

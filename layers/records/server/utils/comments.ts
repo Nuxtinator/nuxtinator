@@ -8,13 +8,29 @@
 //
 // Every function takes the caller's tenant transaction — org context (the RLS
 // GUC in multi mode) exists only inside it, so nothing here opens connections.
+//
+// A body is Markdown, written like a rich text field's value: an image is
+// `![name](attachment:<file id>)` and a person is the editor's mention node.
+// A comment's images are files on its record under the key `comment:<id>`.
+// An image uploaded before its comment is posted or saved waits under the
+// uploader's draft key; the write moves the ones its text shows onto the
+// comment and takes any other image out of the text. `sweepCommentDrafts`
+// deletes drafts no comment took within a day.
 
+import { randomUUID } from 'node:crypto'
 import { sql } from 'kysely'
 import type { SqlBool, Transaction } from 'kysely'
 import { z } from 'zod'
 import type { Database } from '#core/server/database/schema'
+import { createNotification } from '#core/server/utils/notifications'
+import { listOrgScopes, withOrgScope } from '#tenant/server'
 import type { TenantContext } from '#tenant/server'
+import type { RecordsAttachmentValue } from '#records'
+import { addRecordAttachment, listRecordAttachments, type RecordsAttachmentFile } from './attachments'
 import { resolveClientNames } from './client-names'
+import { getRecordType } from './definition-settings'
+import { recordsImageFileIds, recordsMentionedUserIds } from './rich-text'
+import { recordsUsersWhoSee } from './share-confirmation'
 
 type Tx = Transaction<Database>
 
@@ -23,6 +39,16 @@ const uuidSchema = z.string().uuid()
 const DEFAULT_LIMIT = 30
 const MAX_LIMIT = 100
 const MAX_BODY_LENGTH = 10000
+
+const IMAGE_RE = /!\[[^\]]*\]\(attachment:([0-9a-f-]{36})\)/gi
+// Only these show as images in the browser (see attachments.ts).
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif'])
+const DRAFT_PREFIX = 'comment-draft:'
+const DRAFT_LIFETIME = sql`interval '1 day'`
+
+/** The field key of a comment's images in records_attachments. */
+export const commentImageKey = (commentId: string) => `comment:${commentId}`
+const commentDraftKey = (userId: string) => `${DRAFT_PREFIX}${userId}`
 
 // ---------------------------------------------------------------------------
 // Keyset cursors — shared by the comment and activity streams
@@ -73,6 +99,8 @@ export interface RecordsComment {
   editedAt: Date | null
   /** Name of the connected app the comment came through; null for the web. */
   viaClient: string | null
+  /** The files the body shows as images, with their current links. */
+  images: RecordsAttachmentValue[]
 }
 
 export interface RecordsCommentPage {
@@ -116,6 +144,7 @@ export async function listComments(
     .execute()
   const page = rows.slice(0, limit)
   const clients = await resolveClientNames(tx, page.map(r => r.client_id))
+  const files = (await listRecordAttachments(tx, [recordId], page.map(r => commentImageKey(r.id)))).get(recordId)
   const items = page.map(r => ({
     id: r.id,
     authorId: r.author_id,
@@ -123,7 +152,8 @@ export async function listComments(
     body: r.body,
     createdAt: r.created_at,
     editedAt: r.edited_at,
-    viaClient: r.client_id ? clients.get(r.client_id) ?? r.client_id : null
+    viaClient: r.client_id ? clients.get(r.client_id) ?? r.client_id : null,
+    images: files?.get(commentImageKey(r.id)) ?? []
   }))
   const last = rows.length > limit ? page[page.length - 1]! : null
   return { items, nextCursor: last ? encodeTimelineCursor(last.created_at, last.id) : null }
@@ -204,6 +234,95 @@ async function loadComment(tx: Tx, commentId: string) {
   return row
 }
 
+async function commentImages(tx: Tx, recordId: string, commentId: string): Promise<RecordsAttachmentValue[]> {
+  const key = commentImageKey(commentId)
+  return (await listRecordAttachments(tx, [recordId], [key])).get(recordId)?.get(key) ?? []
+}
+
+// Fits the comment's files to `body`, its new text: an image already on the
+// comment stays, one of the writer's drafts moves onto it, and any other
+// image is taken out of the text. A file the comment no longer shows is
+// deleted. Returns the text to store.
+async function settleCommentImages(tx: Tx, ctx: TenantContext, recordId: string, commentId: string, body: string): Promise<string> {
+  const own = commentImageKey(commentId)
+  const draft = commentDraftKey(ctx.userId)
+  const shown = new Set(recordsImageFileIds(body))
+  const files = await tx
+    .selectFrom('records_attachments')
+    .select(['id', 'field_key'])
+    .where('record_id', '=', recordId)
+    .where('field_key', 'in', [own, draft])
+    .execute()
+  const kept = new Set(files.filter(f => shown.has(f.id.toLowerCase())).map(f => f.id.toLowerCase()))
+  const claimed = files.filter(f => f.field_key === draft && kept.has(f.id.toLowerCase())).map(f => f.id)
+  if (claimed.length > 0) {
+    await tx.updateTable('records_attachments').set({ field_key: own }).where('id', 'in', claimed).execute()
+  }
+  const dropped = files.filter(f => f.field_key === own && !kept.has(f.id.toLowerCase())).map(f => f.id)
+  if (dropped.length > 0) {
+    await tx.deleteFrom('records_attachments').where('id', 'in', dropped).execute()
+  }
+  return body.replace(IMAGE_RE, (whole, id: string) => kept.has(id.toLowerCase()) ? whole : '')
+}
+
+// Tells the people a comment newly mentions, in the app and by email, if they
+// can open the record, as a mention in a rich text field does.
+async function notifyCommentMentions(tx: Tx, ctx: TenantContext, recordId: string, before: string | null, after: string): Promise<void> {
+  const had = new Set(recordsMentionedUserIds(before))
+  const added = recordsMentionedUserIds(after).filter(id => !had.has(id) && id !== ctx.userId)
+  if (added.length === 0) return
+  const record = await tx
+    .selectFrom('records_entries')
+    .select(['record_type', 'name'])
+    .where('id', '=', recordId)
+    .executeTakeFirst()
+  const type = record ? await getRecordType(tx, record.record_type) : null
+  if (!record || !type) return
+  const recipients = await recordsUsersWhoSee(tx, ctx, type.key, recordId, added)
+  if (recipients.length === 0) return
+  const actor = await tx.selectFrom('users').select('display_name').where('id', '=', ctx.userId).executeTakeFirst()
+  const noun = type.labelSingular.toLowerCase()
+  const article = /^[aeiou]/.test(noun) ? 'an' : 'a'
+  await createNotification(tx, recipients.map(userId => ({
+    userId,
+    appId: type.manifest?.app ?? 'records',
+    title: `${actor?.display_name || 'Someone'} mentioned you in a comment on ${article} ${noun}`,
+    body: record.name,
+    icon: 'i-lucide-at-sign',
+    link: `/records/${type.key}/${recordId}`,
+    actorId: ctx.userId,
+    email: 'immediate' as const
+  })))
+}
+
+/**
+ * Uploads an image for a comment the caller is writing on the record. It
+ * waits as the caller's draft until a comment shows it. The caller has
+ * already checked that the caller may comment on the record.
+ */
+export async function addCommentImage(
+  tx: Tx,
+  ctx: TenantContext,
+  recordId: string,
+  file: RecordsAttachmentFile
+): Promise<RecordsAttachmentValue> {
+  if (!IMAGE_TYPES.has(file.mime)) {
+    throw createError({ statusCode: 400, statusMessage: 'A comment can show PNG, JPEG, GIF, WebP or AVIF images only.' })
+  }
+  return await addRecordAttachment(tx, ctx, recordId, commentDraftKey(ctx.userId), file)
+}
+
+/** Deletes comment images no comment took within a day of upload, one org at a time. */
+export async function sweepCommentDrafts(): Promise<void> {
+  for (const orgId of await listOrgScopes()) {
+    await withOrgScope(orgId, tx => tx
+      .deleteFrom('records_attachments')
+      .where('field_key', 'like', `${DRAFT_PREFIX}%`)
+      .where('created_at', '<', sql<Date>`now() - ${DRAFT_LIFETIME}`)
+      .execute())
+  }
+}
+
 export interface AddCommentOpts {
   body: string
   /** Display name for system/magic-link authors; wins over user-name resolution. */
@@ -219,10 +338,12 @@ export async function addComment(
   if (!uuidSchema.safeParse(recordId).success) {
     throw createError({ statusCode: 404, statusMessage: 'Record not found.' })
   }
-  const body = requireCommentBody(opts.body)
+  const id = randomUUID()
+  const body = requireCommentBody(await settleCommentImages(tx, ctx, recordId, id, requireCommentBody(opts.body)))
   const row = await tx
     .insertInto('records_comments')
     .values({
+      id,
       record_id: recordId,
       author_id: ctx.userId,
       author_label: opts.authorLabel ?? null,
@@ -231,6 +352,7 @@ export async function addComment(
     })
     .returningAll()
     .executeTakeFirstOrThrow()
+  await notifyCommentMentions(tx, ctx, recordId, null, row.body)
   return {
     id: row.id,
     authorId: row.author_id,
@@ -238,7 +360,8 @@ export async function addComment(
     body: row.body,
     createdAt: row.created_at,
     editedAt: row.edited_at,
-    viaClient: await viaClientOf(tx, row.client_id)
+    viaClient: await viaClientOf(tx, row.client_id),
+    images: await commentImages(tx, recordId, row.id)
   }
 }
 
@@ -257,17 +380,19 @@ export async function updateComment(
   body: string,
   opts: CommentModerationOpts
 ): Promise<RecordsComment> {
-  const trimmed = requireCommentBody(body)
+  requireCommentBody(body)
   const existing = await loadComment(tx, commentId)
   if (existing.author_id !== ctx.userId && !opts.canModerate) {
     throw createError({ statusCode: 403, statusMessage: 'You can only edit your own comments.' })
   }
+  const trimmed = requireCommentBody(await settleCommentImages(tx, ctx, existing.record_id, commentId, body.trim()))
   const row = await tx
     .updateTable('records_comments')
     .set({ body: trimmed, edited_at: sql`now()`, updated_at: sql`now()` })
     .where('id', '=', commentId)
     .returningAll()
     .executeTakeFirstOrThrow()
+  await notifyCommentMentions(tx, ctx, row.record_id, existing.body, row.body)
   return {
     id: row.id,
     authorId: row.author_id,
@@ -275,7 +400,8 @@ export async function updateComment(
     body: row.body,
     createdAt: row.created_at,
     editedAt: row.edited_at,
-    viaClient: await viaClientOf(tx, row.client_id)
+    viaClient: await viaClientOf(tx, row.client_id),
+    images: await commentImages(tx, row.record_id, row.id)
   }
 }
 
@@ -289,6 +415,11 @@ export async function deleteComment(
   if (existing.author_id !== ctx.userId && !opts.canModerate) {
     throw createError({ statusCode: 403, statusMessage: 'You can only delete your own comments.' })
   }
+  await tx
+    .deleteFrom('records_attachments')
+    .where('record_id', '=', existing.record_id)
+    .where('field_key', '=', commentImageKey(commentId))
+    .execute()
   await tx
     .deleteFrom('records_comments')
     .where('id', '=', commentId)

@@ -6,17 +6,21 @@
 // holes that later pages would have to backfill mid-list.
 
 import type { MaybeRefOrGetter } from 'vue'
+import type { RecordsAttachmentValue } from '#records'
 
 /** A comment as served by /api/records/entries/:type/:id/comments. */
 export interface RecordsCommentItem {
   id: string
   authorId: string | null
   authorName: string
+  /** Markdown, like a rich text field's value. */
   body: string
   createdAt: string
   editedAt: string | null
   /** Name of the connected app the comment came through; null for the web. */
   viaClient: string | null
+  /** The files the body shows as images. */
+  images: RecordsAttachmentValue[]
 }
 
 /** An activity row as served by /api/records/entries/:type/:id/activity. */

@@ -177,7 +177,15 @@ timeline (full old/new jsonb, no truncation — D.T's 250-char lesson; `actor_la
 record). crm's `crm_consent_events` = compliance proof (channel-keyed, survives record
 deletion). Core's `activity_logs` = host ops log; the kernel never writes it.
 Comments (`records_comments`, nullable `author_id` + `author_label`) are their own
-stream, merged with activity client-side in the Timeline component.
+stream, merged with activity client-side in the Timeline component. A body is Markdown,
+written like a rich text value. Its images are `records_attachments` rows under the
+field key `comment:<comment id>`. An image uploaded for a comment not yet sent
+(`POST …/entries/:type/:id/comment-images`, open to anyone who can comment, images only)
+waits under `comment-draft:<user id>`; adding or editing a comment moves the writer's
+drafts its text shows onto the comment and strips any other image from the text.
+Editing an image out of a comment, or deleting the comment, deletes the file, and the
+attachment sweep deletes drafts older than a day (`sweepCommentDrafts`). A comment that
+newly mentions someone tells them, as a rich text field does.
 
 **The schema builder lives in the org settings shell (`/@<slug>/settings/records`),
 not the host admin shell, in multi mode.** Core's `/admin` is operator-gated and its

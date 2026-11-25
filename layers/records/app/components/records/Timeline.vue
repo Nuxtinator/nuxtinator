@@ -46,6 +46,7 @@ watch(() => props.typeKey, async (key) => {
 }, { immediate: true })
 
 const currentUserId = computed(() => (user.value as { id?: string } | null)?.id ?? null)
+const commentImageUrl = computed(() => `/api/records/entries/${props.typeKey}/${props.recordId}/comment-images`)
 
 async function submitComment(body: string) {
   await post(body)
@@ -85,6 +86,7 @@ async function onRemoveComment(id: string) {
     <RecordsCommentComposer
       v-if="canComment"
       :submit="submitComment"
+      :image-upload-url="commentImageUrl"
     />
 
     <UAlert
@@ -122,6 +124,7 @@ async function onRemoveComment(id: string) {
           v-if="entry.kind === 'comment'"
           :comment="entry.comment"
           :own="entry.comment.authorId !== null && entry.comment.authorId === currentUserId"
+          :image-upload-url="commentImageUrl"
           @save="onEditComment(entry.comment.id, $event)"
           @remove="onRemoveComment(entry.comment.id)"
         />

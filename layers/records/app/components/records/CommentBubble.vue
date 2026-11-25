@@ -1,15 +1,17 @@
 <script setup lang="ts">
-// One comment: author name, relative time, edited marker, plain-text body
-// with preserved line breaks (no markdown/mentions), and an edit/delete menu
-// on the caller's own comments. Editing happens inline; `save` and `remove`
-// report the intent upward — the parent owns the API round-trip, and the
-// body prop self-corrects if the server rejects the edit.
+// One comment: author name, relative time, edited marker, the body as
+// formatted rich text, and an edit/delete menu on the caller's own comments.
+// Editing happens inline in the same editor as a comment box; `save` and
+// `remove` report the intent upward — the parent owns the API round-trip,
+// and the body prop self-corrects if the server rejects the edit.
 import type { RecordsCommentItem } from '../../composables/useRecordsTimeline'
 
 const props = defineProps<{
   comment: RecordsCommentItem
   /** Whether the comment belongs to the current user (shows the menu). */
   own: boolean
+  /** Where an image added while editing uploads. */
+  imageUploadUrl?: string
 }>()
 
 const emit = defineEmits<{
@@ -26,31 +28,30 @@ const initials = computed(() =>
     .toUpperCase()
 )
 
+interface CommentBox {
+  value: () => string
+  changed: () => boolean
+  empty: boolean
+  uploading: boolean
+}
+
 const editing = ref(false)
-const draft = ref('')
+const box = ref<CommentBox | null>(null)
+const canSave = computed(() => !!box.value && !box.value.empty && !box.value.uploading)
 
 function startEdit() {
-  draft.value = props.comment.body
   editing.value = true
 }
 
 function saveEdit() {
-  const body = draft.value.trim()
-  if (!body || body === props.comment.body) {
+  if (!canSave.value) return
+  const body = box.value!.value()
+  if (!body || !box.value!.changed()) {
     editing.value = false
     return
   }
   editing.value = false
   emit('save', body)
-}
-
-function onEditKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-    e.preventDefault()
-    saveEdit()
-  } else if (e.key === 'Escape') {
-    editing.value = false
-  }
 }
 
 const menuItems = computed(() => [[
@@ -94,13 +95,14 @@ const menuItems = computed(() => [[
       </div>
 
       <template v-if="editing">
-        <UTextarea
-          v-model="draft"
-          class="w-full"
-          :rows="2"
-          autoresize
+        <RecordsFieldsRichTextField
+          ref="box"
+          :model-value="comment.body"
+          :images="comment.images"
+          :image-upload-url="imageUploadUrl"
+          composer
           autofocus
-          @keydown="onEditKeydown"
+          @submit="saveEdit"
         />
         <div class="flex justify-end gap-2">
           <UButton
@@ -113,17 +115,20 @@ const menuItems = computed(() => [[
           </UButton>
           <UButton
             size="xs"
-            :disabled="!draft.trim()"
+            :disabled="!canSave"
             @click="saveEdit"
           >
             Save
           </UButton>
         </div>
       </template>
-      <p
+      <RecordsFieldsRichTextField
         v-else
-        class="text-sm whitespace-pre-wrap break-words"
-      >{{ comment.body }}</p>
+        :model-value="comment.body"
+        :images="comment.images"
+        readonly
+        class="break-words"
+      />
     </div>
   </div>
 </template>
