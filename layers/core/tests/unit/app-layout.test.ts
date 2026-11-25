@@ -11,7 +11,7 @@ import {
   parseAppLayout,
   type AppLayout
 } from '../../app/utils/app-layout'
-import { buildRailLinks } from '../../app/utils/rail-links'
+import { buildRailLinks, buildRailSections } from '../../app/utils/rail-links'
 import { registerApp, configureApp, getRegisteredApp, __resetAppRegistryForTests } from '../../server/utils/app-registry'
 import { registerAppCategory, configureAppCategory, getAppCategories, __resetAppCategoriesForTests } from '../../server/utils/app-categories'
 
@@ -183,5 +183,46 @@ describe('buildRailLinks with an arrangement', () => {
       { id: 'a', title: 'A', path: '/a', position: 0 }
     ])
     expect(links.map(l => l.key)).toEqual(['a', 'pt:one', 'pt:two', 'b'])
+  })
+})
+
+describe('buildRailSections', () => {
+  const shapeOf = (sections: ReturnType<typeof buildRailSections>) => sections.map(s => [s.title, s.links.map(l => l.key)])
+
+  it('shows a rail item under the category it names, after the apps the org placed there', () => {
+    const apps = [
+      { id: 'site', title: 'Site', path: '/site', category: 'work', rail: [
+        { id: 'dashboard', title: 'Dashboard', path: '/site', order: 10 },
+        { id: 'contacts', title: 'Contacts', path: '/site/contacts', order: 20, category: 'people' }
+      ] },
+      { id: 'crm', title: 'CRM', path: '/crm', category: 'people', order: 30 }
+    ]
+    const sections = buildRailSections(apps, CATEGORIES, { ...emptyAppLayout(), apps: { people: ['crm'] } })
+    expect(shapeOf(sections)).toEqual([
+      ['People', ['crm', 'site:contacts']],
+      ['Work', ['site:dashboard']]
+    ])
+    expect(sections.flatMap(s => s.links).filter(l => l.badge && l.appId === 'site').map(l => l.key)).toEqual(['site:dashboard'])
+  })
+
+  it('gives a category with no apps a heading for the items that name it, with the org\'s order and title', () => {
+    const apps = [{ id: 'site', title: 'Site', path: '/site', rail: [
+      { id: 'dashboard', title: 'Dashboard', path: '/site' },
+      { id: 'campaigns', title: 'Campaigns', path: '/site/campaigns', category: 'tools' }
+    ] }]
+    const layout = { ...emptyAppLayout(), categories: ['tools'], titles: { tools: 'Prayer' } }
+    expect(shapeOf(buildRailSections(apps, CATEGORIES, layout))).toEqual([
+      ['Prayer', ['site:campaigns']],
+      ['More', ['site:dashboard']]
+    ])
+  })
+
+  it('keeps an item naming an unknown category with its app, in one untitled section', () => {
+    const apps = [{ id: 'site', title: 'Site', path: '/site', category: 'work', rail: [
+      { id: 'dashboard', title: 'Dashboard', path: '/site' },
+      { id: 'odd', title: 'Odd', path: '/site/odd', category: 'nope' }
+    ] }]
+    expect(buildRailSections(apps, CATEGORIES, emptyAppLayout()).map(s => [s.id, s.title, s.links.map(l => l.key)]))
+      .toEqual([['all', '', ['site:dashboard', 'site:odd']]])
   })
 })

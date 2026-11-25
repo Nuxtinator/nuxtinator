@@ -4,10 +4,10 @@ import { useActiveOrg } from '#tenant'
 // `alwaysExpanded`: the mobile drawer shows names and has no toggle.
 const props = defineProps<{ alwaysExpanded?: boolean }>()
 
-const { orgGroups, personalApps } = await useApps()
+const { orgRail, personalApps } = await useApps()
 // Org apps by category, then personal apps after a divider.
 const sections = computed(() => [
-  ...orgGroups.value.map(g => ({ key: `org:${g.id}`, label: g.title, links: buildRailLinks(g.apps) })),
+  ...orgRail.value.map(s => ({ key: `org:${s.id}`, label: s.title, links: s.links })),
   { key: 'user', label: 'Personal', links: buildRailLinks(personalApps.value) }
 ].filter(s => s.links.length > 0))
 const route = useRoute()

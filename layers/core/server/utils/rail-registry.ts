@@ -4,7 +4,8 @@
 // items instead, so one app can contribute several top-level entries. An item
 // shows while its app is on for the org (or user) and the caller holds
 // `requiredPermission`. Items and apps share one `order` scale, so a host's
-// items and an installed app's entry interleave.
+// items and an installed app's entry interleave. An item sits under its app's
+// category heading unless it names its own `category`.
 
 export interface RailItem {
   appId: string
@@ -16,6 +17,9 @@ export interface RailItem {
   icon?: string
   requiredPermission?: string
   order?: number
+  // A category id (see app-categories.ts) to show the item under instead of
+  // its app's. One nobody registered is ignored.
+  category?: string
 }
 
 export interface RailFeedItem {
@@ -24,6 +28,7 @@ export interface RailFeedItem {
   path: string
   icon?: string
   order?: number
+  category?: string
 }
 
 const _items = new Map<string, RailItem>()
@@ -58,7 +63,8 @@ export function railItemsFor(appId: string, perms: ReadonlySet<string>, orgSlug?
       title: i.title,
       path: orgSlug ? i.path.replace(':orgSlug', orgSlug) : i.path,
       icon: i.icon,
-      order: i.order
+      order: i.order,
+      category: i.category
     }))
 }
 
