@@ -41,7 +41,7 @@ Layers feed these at boot from a Nitro plugin. The host bridges each registry to
 
 ### The app rail
 
-The rail on the left of every page lists one entry per app by default. An app that registers rail items shows those instead, so one app can contribute several entries. Each item shows while its app is on for the org and the user holds `requiredPermission`; paths take the single-tenant form or `/@:orgSlug/...`. Items and apps sort together on one `order` scale. The app's unread badge goes on its item at the app's own path, else on its first item.
+The rail on the left of every page lists one entry per app by default. An app that registers rail items shows those instead, so one app can contribute several entries. Each item shows while its app is on for the org and the user holds `requiredPermission`; paths take the single-tenant form or `/@:orgSlug/...`. Items and apps sort together on one `order` scale. The app's unread badge goes on its item at the app's own path, else on its first item. An item sits under its app's [category](#app-categories) heading unless it names its own `category`.
 
 ```ts
 // host server/plugins/rail.ts
@@ -86,6 +86,8 @@ The rail, the launcher popover and the dashboard group org apps under category h
 | `tools` | Tools | as a supporting tool anyone can use alongside the work: files, video, feedback, help chat, connections to outside services |
 
 A layer names its category in `registerApp({ ..., category: 'work' })` and leaves out `order`, so it lists A–Z inside its category; `order` is for a host that wants an app pinned first. Headings show only when the apps a member sees span two or more categories, and personal apps keep their own Personal section.
+
+A rail item can name its own category, `registerRailItem({ ..., category: 'prayer' })`: the rail shows it under that heading, after the apps the org placed there, while the launcher and dashboard keep showing its app as one tile under the app's category. An org's arrangement moves the app's other items; a category nobody registered is ignored.
 
 A host moves an app with `configureApp('helpinator', { category: 'people' })`, adds a category with `registerAppCategory({ id: 'prayer', title: 'Prayer', order: 15 })` and renames or reorders one with `configureAppCategory('people', { title: 'Intercessors', order: 40 })`, both from `#core/server/utils/app-categories` (core's are ordered 10, 20, 30, and More 1000). `rail.categories: false` in `app.config.ts` turns the headings off and lists apps by `order`, as a host whose rail is its whole navigation may want.
 

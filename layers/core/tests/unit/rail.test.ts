@@ -24,6 +24,11 @@ describe('railItemsFor', () => {
     registerRailItem({ appId: 'pt', id: 'stats', title: 'Stats', path: '/pt/stats', requiredPermission: 'pt.stats.read' })
     expect(railItemsFor('pt', new Set())).toEqual([])
   })
+
+  it('passes on an item\'s own category', () => {
+    registerRailItem({ appId: 'pt', id: 'campaigns', title: 'Campaigns', path: '/pt/campaigns', category: 'prayer' })
+    expect(railItemsFor('pt', new Set())![0]!.category).toBe('prayer')
+  })
 })
 
 describe('configureApp', () => {

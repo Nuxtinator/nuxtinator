@@ -12,6 +12,7 @@
 
 import { useActiveOrg } from '#tenant'
 import { arrangeApps, parseAppLayout, type AppCategoryInfo, type AppLayout, type ArrangedApp } from '../utils/app-layout'
+import { buildRailLinks, buildRailSections, type RailSection } from '../utils/rail-links'
 
 export interface RailItemEntry {
   id: string
@@ -19,6 +20,8 @@ export interface RailItemEntry {
   path: string
   icon?: string
   order?: number
+  // Shown under this category's heading instead of the app's.
+  category?: string
 }
 
 export interface AppEntry {
@@ -112,9 +115,16 @@ export async function useApps() {
     return [{ id: 'all', title: '', apps: arranged[0]?.apps ?? [] }]
   })
 
+  // The rail's org sections: orgGroups, except that a rail item naming a
+  // category sits under that heading.
+  const orgRail = computed<RailSection[]>(() => {
+    if (!byCategory) return [{ id: 'all', title: '', links: buildRailLinks(orgApps.value) }]
+    return buildRailSections(orgApps.value, data.value?.categories ?? [], parseAppLayout(data.value?.layout))
+  })
+
   const refresh = async () => {
     await Promise.all([refreshOrg(), refreshPersonal()])
   }
 
-  return { apps, orgApps, orgGroups, personalApps, refresh, pending, error }
+  return { apps, orgApps, orgGroups, orgRail, personalApps, refresh, pending, error }
 }
