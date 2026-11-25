@@ -102,8 +102,7 @@ async function markAllRead() {
           >
             <UAvatar
               v-if="n.actor"
-              :src="n.actor.avatar"
-              :alt="n.actor.display_name"
+              v-bind="userAvatarProps({ id: n.actor.id, name: n.actor.display_name, image: n.actor.avatar })"
               size="xs"
               class="shrink-0 mt-0.5"
             />

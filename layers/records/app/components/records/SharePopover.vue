@@ -11,6 +11,7 @@
 // views that share the record (hand-picked views holding it) are listed with
 // who they reach; that access is changed on the view. So are the records
 // above it whose audience sees it too, and the views holding those.
+import type { AvatarProps } from '@nuxt/ui'
 import type { RecordsUser } from '../../composables/useRecordsUsers'
 import type { RecordsShareLevel } from '../../composables/useRecordsShares'
 
@@ -76,7 +77,7 @@ onBeforeUnmount(() => {
 interface PickerItem {
   label: string
   value: string
-  avatar?: { src?: string, alt: string }
+  avatar?: AvatarProps
 }
 
 // Already-shared users drop out of the picker — changing their access goes
@@ -85,7 +86,7 @@ const sharedIds = computed(() => new Set(shares.value.map(s => s.userId)))
 const items = computed<PickerItem[]>(() =>
   results.value
     .filter(u => !sharedIds.value.has(u.id))
-    .map(u => ({ label: u.name, value: u.id, avatar: { src: u.avatarUrl || undefined, alt: u.name } }))
+    .map(u => ({ label: u.name, value: u.id, avatar: userAvatarProps({ id: u.id, name: u.name, email: u.email, image: u.avatarUrl }) }))
 )
 
 const LEVEL_ITEMS: Array<{ label: string, value: RecordsShareLevel }> = [
@@ -193,8 +194,7 @@ async function onRemove(userId: string) {
             class="flex items-center gap-2"
           >
             <UAvatar
-              :src="share.avatarUrl || undefined"
-              :alt="share.name"
+              v-bind="userAvatarProps({ id: share.userId, name: share.name, email: share.email, image: share.avatarUrl })"
               size="2xs"
             />
             <span class="text-sm truncate flex-1">{{ share.name }}</span>

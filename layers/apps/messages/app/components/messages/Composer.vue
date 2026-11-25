@@ -299,7 +299,7 @@ function onKeydown(event: KeyboardEvent) {
         type="button"
         @mousedown.prevent="pickMention(u)"
       >
-        <UAvatar :src="u.avatar" :alt="u.display_name" size="2xs" />
+        <UAvatar v-bind="userAvatarProps({ id: u.id, name: u.display_name, image: u.avatar })" size="2xs" />
         <span class="text-sm">{{ u.display_name }}</span>
       </button>
       <div v-if="mentionResults.length === 0" class="mention-empty">No users</div>

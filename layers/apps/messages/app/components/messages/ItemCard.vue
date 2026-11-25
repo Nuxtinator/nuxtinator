@@ -72,7 +72,7 @@ watch(() => props.item.body_md, () => {
 <template>
   <article class="item-card group">
     <div class="flex items-start gap-3 mb-2">
-      <UAvatar :src="item.author.avatar" :alt="item.author.display_name" size="sm" />
+      <UAvatar v-bind="userAvatarProps({ id: item.author.id, name: item.author.display_name, image: item.author.avatar })" size="sm" />
       <div class="flex-1 min-w-0">
         <div class="flex items-baseline gap-2 flex-wrap">
           <span class="text-sm font-semibold">{{ item.author.display_name }}</span>

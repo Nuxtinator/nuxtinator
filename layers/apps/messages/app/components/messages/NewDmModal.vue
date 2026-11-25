@@ -100,7 +100,7 @@ async function submit() {
               :class="{ 'bg-(--ui-bg-elevated)': isSelected(u) }"
               @click="toggle(u)"
             >
-              <UAvatar :src="u.avatar" :alt="u.display_name" size="sm" />
+              <UAvatar v-bind="userAvatarProps({ id: u.id, name: u.display_name, image: u.avatar })" size="sm" />
               <span class="text-sm flex-1 truncate">{{ u.display_name }}</span>
               <UIcon
                 v-if="isSelected(u)"

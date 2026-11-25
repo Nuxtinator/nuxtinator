@@ -117,7 +117,7 @@ function timeLabel(iso: string): string {
 <template>
   <article class="bubble" :class="{ resolved }">
     <div class="flex items-start gap-2">
-      <UAvatar :src="comment.author.avatar" :alt="comment.author.display_name" size="xs" />
+      <UAvatar v-bind="userAvatarProps({ id: comment.author.id, name: comment.author.display_name, image: comment.author.avatar })" size="xs" />
       <div class="flex-1 min-w-0">
         <div class="flex items-baseline gap-2">
           <span class="text-sm font-semibold">{{ comment.author.display_name }}</span>
@@ -178,7 +178,7 @@ function timeLabel(iso: string): string {
     <div v-if="replies.length" class="replies">
       <article v-for="r in replies" :key="r.id" class="reply">
         <div class="flex items-start gap-2">
-          <UAvatar :src="r.author.avatar" :alt="r.author.display_name" size="xs" />
+          <UAvatar v-bind="userAvatarProps({ id: r.author.id, name: r.author.display_name, image: r.author.avatar })" size="xs" />
           <div class="flex-1 min-w-0">
             <div class="flex items-baseline gap-2">
               <span class="text-sm font-semibold">{{ r.author.display_name }}</span>

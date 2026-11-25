@@ -195,7 +195,7 @@ watch([() => props.item?.body_md, editing], () => {
       <div v-if="item" class="flex flex-col h-full bg-(--ui-bg)">
         <header class="flex items-center justify-between px-5 py-3 border-b border-(--ui-border)">
           <div class="flex items-center gap-3 min-w-0">
-            <UAvatar :src="item.author.avatar" :alt="item.author.display_name" size="sm" />
+            <UAvatar v-bind="userAvatarProps({ id: item.author.id, name: item.author.display_name, image: item.author.avatar })" size="sm" />
             <div class="min-w-0">
               <div class="text-sm font-semibold truncate">
                 {{ item.author.display_name }}

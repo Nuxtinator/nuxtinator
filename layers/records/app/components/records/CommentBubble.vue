@@ -19,14 +19,11 @@ const emit = defineEmits<{
   remove: []
 }>()
 
-const initials = computed(() =>
-  props.comment.authorName
-    .split(/\s+/)
-    .map(part => part[0] ?? '')
-    .join('')
-    .slice(0, 2)
-    .toUpperCase()
-)
+const avatar = computed(() => userAvatarProps({
+  id: props.comment.authorId,
+  name: props.comment.authorName,
+  image: props.comment.authorAvatarUrl
+}))
 
 interface CommentBox {
   value: () => string
@@ -63,7 +60,7 @@ const menuItems = computed(() => [[
 <template>
   <div class="flex gap-3 px-4 py-3">
     <UAvatar
-      :text="initials"
+      v-bind="avatar"
       size="sm"
       class="shrink-0 mt-0.5"
     />

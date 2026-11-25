@@ -134,7 +134,11 @@ function canManage(e: InboxTimelineEntry): boolean {
 
       <template v-for="entry in entries" :key="entry.id">
         <div v-if="entry.kind === 'note'" class="flex gap-2">
-          <UAvatar :alt="entry.note.authorName" size="xs" class="mt-0.5 shrink-0" />
+          <UAvatar
+            v-bind="userAvatarProps({ id: entry.note.authorId, name: entry.note.authorName, image: entry.note.authorAvatarUrl })"
+            size="xs"
+            class="mt-0.5 shrink-0"
+          />
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 text-xs">
               <span class="font-medium text-(--ui-text-highlighted) truncate">{{ entry.note.authorName }}</span>

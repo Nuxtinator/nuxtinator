@@ -94,6 +94,8 @@ export interface RecordsComment {
   id: string
   authorId: string | null
   authorName: string
+  /** The author's avatar image; null for a labelled author or one without an image. */
+  authorAvatarUrl: string | null
   body: string
   createdAt: Date
   editedAt: Date | null
@@ -129,7 +131,8 @@ export async function listComments(
       'c.edited_at as edited_at',
       'c.client_id as client_id',
       'u.display_name as user_name',
-      'u.email as user_email'
+      'u.email as user_email',
+      'u.avatar as user_avatar'
     ])
     .where('c.record_id', '=', recordId)
   if (opts.before) {
@@ -149,6 +152,7 @@ export async function listComments(
     id: r.id,
     authorId: r.author_id,
     authorName: r.author_label ?? r.user_name ?? r.user_email ?? 'Unknown',
+    authorAvatarUrl: r.author_label ? null : r.user_avatar || null,
     body: r.body,
     createdAt: r.created_at,
     editedAt: r.edited_at,
@@ -204,14 +208,21 @@ function requireCommentBody(body: string): string {
   return trimmed
 }
 
-async function resolveUserName(tx: Tx, userId: string | null): Promise<string> {
-  if (!userId) return 'Unknown'
+async function resolveAuthor(
+  tx: Tx,
+  row: { author_id: string | null, author_label: string | null }
+): Promise<{ authorName: string, authorAvatarUrl: string | null }> {
+  if (row.author_label) return { authorName: row.author_label, authorAvatarUrl: null }
+  if (!row.author_id) return { authorName: 'Unknown', authorAvatarUrl: null }
   const user = await tx
     .selectFrom('users')
-    .select(['display_name', 'email'])
-    .where('id', '=', userId)
+    .select(['display_name', 'email', 'avatar'])
+    .where('id', '=', row.author_id)
     .executeTakeFirst()
-  return user?.display_name ?? user?.email ?? 'Unknown'
+  return {
+    authorName: user?.display_name ?? user?.email ?? 'Unknown',
+    authorAvatarUrl: user?.avatar || null
+  }
 }
 
 async function viaClientOf(tx: Tx, clientId: string | null): Promise<string | null> {
@@ -356,7 +367,7 @@ export async function addComment(
   return {
     id: row.id,
     authorId: row.author_id,
-    authorName: row.author_label ?? await resolveUserName(tx, row.author_id),
+    ...await resolveAuthor(tx, row),
     body: row.body,
     createdAt: row.created_at,
     editedAt: row.edited_at,
@@ -396,7 +407,7 @@ export async function updateComment(
   return {
     id: row.id,
     authorId: row.author_id,
-    authorName: row.author_label ?? await resolveUserName(tx, row.author_id),
+    ...await resolveAuthor(tx, row),
     body: row.body,
     createdAt: row.created_at,
     editedAt: row.edited_at,

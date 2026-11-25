@@ -11,6 +11,8 @@ export interface InboxNote {
   id: string
   authorId: string | null
   authorName: string
+  /** The author's avatar image; null shows their initials. */
+  authorAvatarUrl: string | null
   body: string
   createdAt: string
   editedAt: string | null

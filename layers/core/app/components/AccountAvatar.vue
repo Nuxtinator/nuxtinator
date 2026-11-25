@@ -61,8 +61,7 @@ async function remove() {
   >
     <template #leading>
       <UAvatar
-        :src="user?.avatar || undefined"
-        :alt="user?.display_name"
+        v-bind="userAvatarProps({ id: user?.id, name: user?.display_name, email: user?.email, image: user?.avatar })"
         size="2xl"
       />
     </template>

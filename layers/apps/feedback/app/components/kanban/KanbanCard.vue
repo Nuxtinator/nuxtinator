@@ -78,15 +78,15 @@ const assigneeName = computed(() => {
   return a ? String(a).trim() : ''
 })
 
-// Avatars for the submitter (matched by user id) and assignee (matched by the
-// stored display name); '' when the user is unknown here or has no avatar.
+// The board users behind the submitter (matched by user id) and assignee
+// (matched by the stored display name); null when the person isn't one here.
 const boardUsers = inject(BOARD_USERS_KEY, ref([]))
-const submitterAvatar = computed(() => {
+const submitterUser = computed(() => {
   const id = props.card.post_meta?.submitter_user_id
-  return (id && boardUsers.value.find(u => u.id === id)?.avatar) || ''
+  return (id && boardUsers.value.find(u => u.id === id)) || null
 })
-const assigneeAvatar = computed(() =>
-  (assigneeName.value && boardUsers.value.find(u => u.display_name === assigneeName.value)?.avatar) || ''
+const assigneeUser = computed(() =>
+  (assigneeName.value && boardUsers.value.find(u => u.display_name === assigneeName.value)) || null
 )
 
 function handleClick() {
@@ -152,7 +152,11 @@ function handleDragEnd(event: DragEvent) {
         class="inline-flex items-center gap-1 min-w-0 shrink"
         :title="`Submitted by ${submitterName}`"
       >
-        <UAvatar v-if="submitterAvatar" :src="submitterAvatar" :alt="submitterName" size="2xs" />
+        <UAvatar
+          v-if="submitterUser"
+          v-bind="userAvatarProps({ id: submitterUser.id, name: submitterName, image: submitterUser.avatar })"
+          size="2xs"
+        />
         <template v-else>
           <UIcon name="i-lucide-user" class="w-3 h-3 shrink-0" />
           <span class="truncate">{{ submitterName }}</span>
@@ -229,7 +233,11 @@ function handleDragEnd(event: DragEvent) {
         class="ml-auto inline-flex items-center gap-1 min-w-0 shrink text-[11px] text-(--ui-text-muted)"
         :title="`Assigned to ${assigneeName}`"
       >
-        <UAvatar v-if="assigneeAvatar" :src="assigneeAvatar" :alt="assigneeName" size="2xs" />
+        <UAvatar
+          v-if="assigneeUser"
+          v-bind="userAvatarProps({ id: assigneeUser.id, name: assigneeName, image: assigneeUser.avatar })"
+          size="2xs"
+        />
         <template v-else>
           <UIcon name="i-lucide-user-check" class="w-3 h-3 shrink-0" />
           <span class="truncate">{{ assigneeName }}</span>

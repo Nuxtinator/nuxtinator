@@ -13,6 +13,8 @@ export interface RecordsCommentItem {
   id: string
   authorId: string | null
   authorName: string
+  /** The author's avatar image; null shows their initials. */
+  authorAvatarUrl: string | null
   /** Markdown, like a rich text field's value. */
   body: string
   createdAt: string

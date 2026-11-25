@@ -4,6 +4,7 @@
 // catalog. Extras are slug-level and additive on top of roles — the type
 // matrix can never subtract them. Orphan grants (slug no longer registered,
 // e.g. after a layer uninstall) render flagged and stay revocable.
+import type { AvatarProps } from '@nuxt/ui'
 import type { RecordsUser } from '../../../composables/useRecordsUsers'
 import type { RecordsUserGrant, RecordsPermissionInfo } from '../../../composables/useRecordsPermissionsAdmin'
 
@@ -58,14 +59,14 @@ onBeforeUnmount(() => {
 interface PickerItem {
   label: string
   value: string
-  avatar?: { src?: string, alt: string }
+  avatar?: AvatarProps
 }
 
 const userItems = computed<PickerItem[]>(() =>
   results.value.map(u => ({
     label: u.name,
     value: u.id,
-    avatar: { src: u.avatarUrl || undefined, alt: u.name }
+    avatar: userAvatarProps({ id: u.id, name: u.name, email: u.email, image: u.avatarUrl })
   }))
 )
 
