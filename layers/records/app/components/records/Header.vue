@@ -75,61 +75,64 @@ function blurTarget(event: Event) {
       {{ backLabel }}
     </NuxtLink>
 
-    <div class="flex items-center gap-3 flex-wrap">
-      <h1
-        v-if="!editing"
-        class="text-2xl font-bold rounded px-1 -mx-1"
-        :class="canEdit ? 'cursor-text hover:bg-(--ui-bg-elevated)' : ''"
-        :title="canEdit ? 'Click to rename' : undefined"
-        @click="beginEdit"
-      >
-        {{ record.name || '—' }}
-      </h1>
-      <UInput
-        v-else
-        ref="nameInput"
-        v-model="draft"
-        size="lg"
-        class="w-full max-w-md"
-        @blur="commit"
-        @keydown.enter.prevent="blurTarget"
-        @keydown.esc.prevent="cancel"
-      />
-      <UBadge
-        v-if="statusField && record.status"
-        :color="recordsOptionColor(statusField, record.status)"
-        variant="subtle"
-        size="lg"
-      >
-        {{ recordsOptionLabel(statusField, record.status) }}
-      </UBadge>
-      <div class="ml-auto flex items-center gap-1">
-        <slot name="actions" />
+    <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-start sm:gap-3">
+      <div class="flex-1 min-w-0 flex items-center gap-x-3 gap-y-1 flex-wrap">
+        <h1
+          v-if="!editing"
+          class="min-w-0 break-words text-2xl font-bold rounded px-1 -mx-1"
+          :class="canEdit ? 'cursor-text hover:bg-(--ui-bg-elevated)' : ''"
+          :title="canEdit ? 'Click to rename' : undefined"
+          @click="beginEdit"
+        >
+          {{ record.name || '—' }}
+        </h1>
+        <UInput
+          v-else
+          ref="nameInput"
+          v-model="draft"
+          size="lg"
+          class="w-full max-w-md"
+          @blur="commit"
+          @keydown.enter.prevent="blurTarget"
+          @keydown.esc.prevent="cancel"
+        />
+        <UBadge
+          v-if="statusField && record.status"
+          :color="recordsOptionColor(statusField, record.status)"
+          variant="subtle"
+          size="lg"
+        >
+          {{ recordsOptionLabel(statusField, record.status) }}
+        </UBadge>
       </div>
-      <RecordsSharePopover
-        :record-id="record.id"
-        :type-key="record.typeKey"
-        :can-share="canShare"
-        @changed="emit('shareChanged')"
-      />
-      <UButton
-        v-if="canDelete"
-        icon="i-lucide-trash-2"
-        color="neutral"
-        variant="outline"
-        size="sm"
-        aria-label="Delete record"
-        @click="confirmOpen = true"
-      />
-      <UButton
-        v-if="closable"
-        icon="i-lucide-x"
-        color="neutral"
-        variant="ghost"
-        size="sm"
-        aria-label="Close"
-        @click="emit('close')"
-      />
+      <!-- Above the title on phones so it keeps the full width; from sm up, h-8 keeps them level with its first line. -->
+      <div class="shrink-0 h-8 flex items-center gap-2 self-end sm:self-auto">
+        <slot name="actions" />
+        <RecordsSharePopover
+          :record-id="record.id"
+          :type-key="record.typeKey"
+          :can-share="canShare"
+          @changed="emit('shareChanged')"
+        />
+        <UButton
+          v-if="canDelete"
+          icon="i-lucide-trash-2"
+          color="neutral"
+          variant="outline"
+          size="sm"
+          aria-label="Delete record"
+          @click="confirmOpen = true"
+        />
+        <UButton
+          v-if="closable"
+          icon="i-lucide-x"
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          aria-label="Close"
+          @click="emit('close')"
+        />
+      </div>
     </div>
 
     <UModal
